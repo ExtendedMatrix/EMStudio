@@ -735,6 +735,9 @@ export function renderInspector(
       bar.appendChild(up);
       bar.appendChild(down);
       root.appendChild(bar);
+      // MICRO-SPAZIO-RITOCCHI-2 p.4 · the two buttons greyed said nothing: the
+      // reason is written under them (the tooltip alone is not read)
+      if (!empty) root.appendChild(el("div", "insp-hint", t("insp.epochMoveLocked")));
     }
 
     root.appendChild(el("h3", "insp-sect", "Temporal bounds"));

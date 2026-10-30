@@ -353,6 +353,29 @@ export interface OutlinerActions {
   addMenu?(x: number, y: number): void;
 }
 
+// MICRO-SPAZIO-RITOCCHI-2 p.2 · the head is ONE row at any width: each button
+// carries its icon and its word, and below a width (a container query on the
+// panel, style.css) the words go and the icons stay, the word in the tooltip.
+// Measured on dev.87: «Isolate» and «Frame» wrapped under «+ Shape» and the
+// search, a second row of the head at the panel's usual width.
+const svg = (d: string): string =>
+  `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const ICON_ADD = svg(`<path d="M8 3v10M3 8h10"/>`);
+const ICON_ISOLATE = svg(`<circle cx="8" cy="8" r="5.5" stroke-dasharray="2 2"/><circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>`);
+const ICON_FRAME = svg(`<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>`);
+function iconLabel(b: HTMLButtonElement, icon: string, label: string): void {
+  const i = document.createElement("span");
+  i.className = "sol-ico";
+  i.setAttribute("aria-hidden", "true");
+  i.innerHTML = icon;
+  const l = document.createElement("span");
+  l.className = "sol-lbl";
+  l.textContent = label;
+  b.replaceChildren(i, l);
+  b.title = label;
+  b.setAttribute("aria-label", label);
+}
+
 /** Draw the panel into `el` (emptied first). The search keeps its focus. */
 export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerActions): void {
   const hadFocus = document.activeElement instanceof HTMLInputElement && el.contains(document.activeElement);
@@ -381,14 +404,14 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   iso.type = "button";
   iso.className = "sol-btn";
   iso.dataset.sol = "isolate";
-  iso.textContent = v.texts.isolate;
+  iconLabel(iso, ICON_ISOLATE, v.texts.isolate);
   iso.setAttribute("aria-pressed", String(!!v.isolated));
   iso.addEventListener("click", () => act.isolate());
   const fr = document.createElement("button");
   fr.type = "button";
   fr.className = "sol-btn";
   fr.dataset.sol = "frame";
-  fr.textContent = v.texts.frame;
+  iconLabel(fr, ICON_FRAME, v.texts.frame);
   fr.addEventListener("click", () => act.frame());
   // MICRO-SPAZIO-COMPATTO p.5 · closed by the «‹» of the side panels (the N panel's is «›»)
   const x = document.createElement("button");
@@ -404,7 +427,7 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     add.type = "button";
     add.className = "sol-btn sol-add";
     add.dataset.sol = "add";
-    add.textContent = `${v.texts.addShape ?? "+"} ▾`;
+    iconLabel(add, ICON_ADD, `${v.texts.addShape ?? "+"} ▾`);
     if (v.texts.addShapeTitle) add.title = v.texts.addShapeTitle;
     add.addEventListener("click", (e) => { e.stopPropagation(); const b = add.getBoundingClientRect(); act.addMenu!(b.left, b.bottom + 2); });
     head.append(add);

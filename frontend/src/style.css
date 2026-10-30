@@ -10953,3 +10953,38 @@ body:not(.tt-comfy) .tile-tablebody .mdl-rm .btn.sm { line-height: 16px; font-si
 .blend-check-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .blend-check > button { align-self: flex-end; margin-top: 4px; }
 .storage-blend-open { cursor: pointer; }
+/* MICRO-SPAZIO-RITOCCHI-2 p.1 · the em.json's name in the bar: a click opens its folder */
+#statusbar #info #info-file {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+#statusbar #info #info-file:hover { color: var(--accent, inherit); text-decoration-style: solid; }
+/* MICRO-SPAZIO-RITOCCHI-2 p.2 · the Outliner's head is ONE row at any width:
+   below 340 px the buttons keep their icon only (the word in the tooltip),
+   the search takes what is left (it was a second row at the usual width) */
+.scn-outliner { container: sol / inline-size; }
+.sol-head { flex-wrap: nowrap; }
+.sol-head > .sol-search { flex: 1 1 60px; min-width: 40px; }
+.sol-head > .sol-btn { display: inline-flex; align-items: center; gap: 3px; flex: none; white-space: nowrap; }
+.sol-head .sol-ico { display: none; line-height: 0; }
+@container sol (max-width: 340px) {
+  .sol-head .sol-ico { display: inline-flex; }
+  .sol-head .sol-lbl { display: none; }
+  .sol-head > .sol-btn { padding: 2px 4px; }
+}
+/* the «+ Shape» keeps its «▾» when narrow: it opens a menu */
+@container sol (max-width: 340px) {
+  .sol-head > .sol-add::after { content: "▾"; font-size: 0.7em; margin-left: 1px; }
+}
+/* MICRO-SPAZIO-RITOCCHI-2 p.3 · many epochs: a menu between ← and → */
+.scn-seg.scn-seg-menu { align-items: stretch; }
+.scn-seg-menu .scn-ep-step { padding: 1px 7px; }
+.scn-seg-menu .scn-ep-step:disabled { opacity: 0.4; cursor: default; }
+.scn-seg-menu .scn-ep-pick { border: 0; border-right: 1px solid var(--border); background: var(--accent); color: var(--on-accent); font: inherit; padding: 1px 4px; max-width: 22ch; cursor: pointer; }
+.scn-seg-menu .scn-ep-pick option { background: var(--bg-panel); color: var(--text); }

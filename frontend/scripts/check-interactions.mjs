@@ -11681,6 +11681,101 @@ T.write_glb(sys.argv[1]); T.write_glb(sys.argv[2], copies=5)`, `${pr}/SB/version
   return { pass: Object.values(conds).every(Boolean), detail: { conds, chips, grid, after2, ad: { enough: ad.enough, cards: ad.cards.map((c) => ({ ...c, text: c.text.slice(0, 200), tip: c.tip.slice(0, 200) })) }, errors } };
 });
 
+test("SR2.ritocchi", "MICRO-SPAZIO-RITOCCHI-2 · il nome dell'em.json nella barra e File ▸ «Apri la cartella del progetto» chiedono al bridge di mostrarlo (senza bridge: il percorso detto e copiato); nell'Outliner dello Spazio «+ Forma», ricerca, «Isola», «Inquadra» su UNA riga anche a 200 px (icone col tooltip); con 7 epoche la barra dello Spazio ha il menu con ← →; sul confine fra due corsie un clic nella striscia FUORI dal disco «+» non crea epoche, sul disco ne crea una che la Matrix disegna subito (la corsia c'è) e che un solo «Annulla» toglie del tutto", async () => {
+  const at = "/tmp/emfs-sr2/TempluMare.em.json";
+  const reveals = [];
+  let bridgeUp = true;
+  const { p, ctx, errors } = await open({ doc: null, route: { pattern: "**/file-reveal", handler: (route) => {
+    if (!bridgeUp) return route.abort();
+    reveals.push(JSON.parse(route.request().postData() || "{}"));
+    return route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: '{"ok":true}' });
+  } } });
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => {});
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("TempluMare"), at]);
+  await p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 30000 });
+  await p.waitForTimeout(800);
+  const out = {};
+  const epochs = () => p.evaluate(() => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const gs = d.graphs ? Object.values(d.graphs).map((g) => g.graph ?? g) : [d.graph]; return gs.flatMap((g) => g.nodes.filter((n) => n.node_type === "EpochNode").map((n) => n.name)); });
+  const nodes = () => p.evaluate(() => (document.getElementById("info")?.textContent ?? "").match(/(\d+) nodi/)?.[1] ?? "");
+  const toastNow = () => p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  // p.1
+  out.file = await p.evaluate(() => { const b = document.getElementById("info-file"); return b ? { text: b.textContent, title: b.title } : null; });
+  await p.click("#info-file");
+  await p.waitForTimeout(500);
+  out.toast1 = await toastNow();
+  await p.evaluate(() => document.getElementById("btn-reveal-doc")?.click());
+  await p.waitForTimeout(500);
+  out.reveals = reveals.map((r) => r.path);
+  bridgeUp = false;
+  await p.click("#info-file");
+  await p.waitForTimeout(700);
+  out.toastNoDesktop = await toastNow();
+  out.clip = await p.evaluate(() => navigator.clipboard.readText().catch(() => ""));
+  // p.4 · the boundary under the first lane
+  const win = await winOf(p, "graph");
+  const geo = await p.evaluate((w) => ({ ws: window.__EM_DRAG__.winScene(w), lanes: window.__EM_DRAG__.lanes() }), win);
+  const by = Math.round(geo.ws.rect.y + geo.ws.origin.y + geo.lanes[1].y * geo.ws.scale);
+  out.before = { epochs: (await epochs()).length, lanes: geo.lanes.length, nodes: await nodes() };
+  await p.mouse.move(geo.ws.rect.x + 90, by); await p.mouse.click(geo.ws.rect.x + 90, by); await p.waitForTimeout(700);
+  out.offDisc = (await epochs()).length;
+  await p.mouse.move(geo.ws.rect.x + 18, by); await p.mouse.click(geo.ws.rect.x + 18, by); await p.waitForTimeout(900);
+  out.onDisc = { epochs: (await epochs()).length, lanes: (await p.evaluate(() => window.__EM_DRAG__.lanes().length)), toast: await toastNow(), nodes: await nodes() };
+  await p.screenshot({ path: SHOT("sr2-epoca-inserita") }).catch(() => {});
+  await p.locator("#toast .toast-action").first().click();
+  await p.waitForTimeout(800);
+  out.undone = { epochs: (await epochs()).length, lanes: (await p.evaluate(() => window.__EM_DRAG__.lanes().length)), nodes: await nodes() };
+  // p.2 · the Outliner's head
+  await workspace(p, "space");
+  await p.waitForTimeout(2500);
+  const head = () => p.evaluate(() => { const h = document.querySelector(".sol-head"); if (!h) return null;
+    const kids = [...h.children].map((c) => c.getBoundingClientRect());
+    const mid = kids.map((r) => r.top + r.height / 2);
+    return { oneRow: Math.max(...mid) - Math.min(...mid) < 8, inside: kids.every((r) => r.right <= h.getBoundingClientRect().right + 1),
+      titles: [...h.querySelectorAll(".sol-btn")].map((b) => b.title) }; });
+  out.head = await head();
+  await p.evaluate(() => { document.querySelector(".scn-outliner").style.width = "200px"; });
+  await p.waitForTimeout(300);
+  out.head200 = await head();
+  await p.locator(".sol-head").first().screenshot({ path: SHOT("sr2-outliner-200") }).catch(() => {});
+  out.bar3 = await p.evaluate(() => ({ menu: !!document.querySelector(".scn-seg-menu"), buttons: document.querySelectorAll(".scn-seg button[data-epoch]").length }));
+  // p.3 · seven epochs
+  const d7 = fixture("TempluMare");
+  let y = Math.max(...d7.layout.swimlanes.map((l) => l.y + l.height));
+  [["I A.D.", 1, 99], ["I B.C.", -99, 0], ["Republic", -509, -100], ["Archaic", -800, -510]].forEach(([name, a, b], i) => {
+    const id = `sr2-ep-${i}`;
+    d7.graph.nodes.push({ id, name, node_type: "EpochNode", description: "", data: { start_time: a, end_time: b } });
+    d7.layout.swimlanes.push({ epoch_id: id, y, height: 200, order: 3 + i }); y += 200;
+  });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [d7, "/tmp/emfs-sr2/TempluMare7.em.json"]);
+  await p.waitForTimeout(2500);
+  await workspace(p, "space");
+  await p.waitForTimeout(1500);
+  const menu = () => p.evaluate(() => { const s = document.querySelector(".scn-seg-menu select"); const st = [...document.querySelectorAll(".scn-seg-menu .scn-ep-step")];
+    return s ? { value: s.selectedOptions[0]?.textContent, options: s.options.length, prevDisabled: st[0]?.disabled, next: st[1]?.title } : null; });
+  out.menu = await menu();
+  await p.click(".scn-seg-menu .scn-ep-step >> nth=-1");
+  await p.waitForTimeout(700);
+  out.menuNext = await menu();
+  await p.selectOption(".scn-seg-menu select", { label: "Republic" });
+  await p.waitForTimeout(700);
+  out.menuPick = await menu();
+  await p.locator(".scn-bar").first().screenshot({ path: SHOT("sr2-barra-epoche") }).catch(() => {});
+  await ctx.close();
+  const conds = {
+    p1file: out.file?.text === "TempluMare.em.json" && /emfs-sr2/.test(out.file?.title ?? ""),
+    p1reveal: out.reveals.length === 2 && out.reveals.every((r) => r === at) && /Finder|gestore|Esplora/.test(out.toast1),
+    p1noDesktop: /copiato/.test(out.toastNoDesktop) && (out.clip === at || out.clip === ""),
+    p2: !!out.head?.oneRow && !!out.head200?.oneRow && out.head200.inside && out.head200.titles.includes("Isola") && out.head200.titles.includes("Inquadra"),
+    p3: !out.bar3.menu && out.bar3.buttons === 3 && out.menu?.options === 7 && out.menu.prevDisabled === true
+      && out.menuNext?.value !== out.menu.value && out.menuPick?.value === "Republic",
+    p4off: out.offDisc === out.before.epochs,
+    p4on: out.onDisc.epochs === out.before.epochs + 1 && out.onDisc.lanes === out.before.lanes + 1 && /Annulla/.test(out.onDisc.toast),
+    p4undo: out.undone.epochs === out.before.epochs && out.undone.lanes === out.before.lanes && out.undone.nodes === out.before.nodes,
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, out, errors } };
+});
+
 test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, sperimentale dietro il suo interruttore: acceso, la destinazione «Tileset (3D Tiles)» si aggiunge e si sceglie; il motore Obj2Tiles con il perché (Blender + 3DSC in Blender stesso); Obj2Tiles come componente aggiuntivo (AGPL-3.0, OpenDroneMap, versione e sha256 fissate; sotto Rosetta su Apple Silicon, detto); il giudice (il validatore di Cesium, o il controllo strutturale detto come tale); la riga del file con la sua cartella in RB/versions/‹modello›@tiles, livelli, profondità e memoria; la memoria e il tetto detti prima; il comando; senza Obj2Tiles il pulsante non parte; spento, si torna al web", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab11");

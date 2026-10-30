@@ -114,6 +114,8 @@ export const MENUS: MenuDef[] = [
       cmd("openProject", "fs.openProject", "btn-open-project", { title: "fs.openProjectTitle" }),
       cmd("reorderProject", "fs.reorderItem", "btn-reorder-project", { title: "fs.reorderItemTitle" }),
       cmd("closeProject", "fs.closeProject", "btn-close-project", { title: "fs.closeProjectTitle" }),
+      // MICRO-SPAZIO-RITOCCHI-2 p.1 · the active em.json's folder, the file selected
+      cmd("revealDoc", "fs.revealDoc", "btn-reveal-doc", { title: "fs.revealDocTitle" }),
       cmd("open", "toolbar.open", "btn-open", { title: "menu.openTitle", accel: "CmdOrCtrl+O" }),
       { kind: "sub", id: "openRecent", label: "menu.openRecent", title: "menu.openRecentTitle", dynamic: "recent", rows: [] },
       cmd("openReplace", "toolbar.openReplace", "btn-open-replace", { title: "menu.openReplaceTitle" }),

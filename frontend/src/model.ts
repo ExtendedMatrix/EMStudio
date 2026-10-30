@@ -1073,7 +1073,14 @@ export class DocumentStore {
    *  the existing arrangement is untouched (the layout is recomputed only on the
    *  explicit Layout action). */
   addEpochAt(index: number, name?: string, start?: number, end?: number): EmNode {
-    this.checkpoint();
+    // MICRO-SPAZIO-RITOCCHI-2 p.4 · ONE undo step: the epoch, its lane AND the
+    // paradata of its dates (`ensureEpochTemporalParadata` adds nodes, each its
+    // own checkpoint outside a batch — one «Annulla» left the group and its
+    // properties behind)
+    return this.batch(() => this.addEpochAtInner(index, name, start, end));
+  }
+
+  private addEpochAtInner(index: number, name?: string, start?: number, end?: number): EmNode {
     const id = this.newId();
     const node: EmNode = {
       id,

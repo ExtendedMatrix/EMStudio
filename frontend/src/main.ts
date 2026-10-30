@@ -5248,11 +5248,27 @@ function updateInfo(): void {
   const dates = store.epochDateCounts();
   // MICRO-CONTENTS-3 G9 · the line in the reader's language, with its plurals
   // (it was English with an Italian aside: «30 nodes, … (di cui 12 nodi …)»)
-  info.textContent =
-    `${title} — ${tn("info.nodes", liveNodeCount)}, ${tn("info.edges", liveEdgeCount)}` +
+  const counts =
+    ` — ${tn("info.nodes", liveNodeCount)}, ${tn("info.edges", liveEdgeCount)}` +
     (lanes ? `, ${tn("info.epochs", lanes)}` : "") +
     (dates.nodes ? ` ${t("info.epochDates", { n: dates.nodes, e: dates.edges })}` : "") +
     (buried > 0 ? ` ${tn("info.buried", buried)}` : "");
+  // MICRO-SPAZIO-RITOCCHI-2 p.1 · the em.json's NAME leads the line, and a click
+  // on it opens its folder (`revealActiveDoc`); the graph's title follows when
+  // it says something the file name does not
+  const file = emtree.activeFile();
+  if (file?.path) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "info-file";
+    btn.textContent = file.name;
+    btn.title = t("info.fileTitle", { path: paths.toNative(file.path) });
+    btn.addEventListener("click", () => { void revealActiveDoc(); });
+    const stem = file.name.replace(/\.(em\.json|json)$/i, "");
+    info.replaceChildren(btn, (title && title !== stem ? ` · ${title}` : "") + counts);
+  } else {
+    info.textContent = title + counts;
+  }
   info.dataset.epochDates = dates.nodes ? `${dates.nodes}/${dates.edges}` : "";
   renderNameStrip();
 }
@@ -6404,6 +6420,7 @@ function flushChange(): void {
   // every window, twice for the canvas, the viewer and the annotator.
   duringStoreFlush(() => {
     refreshNameStatus();          // NAME1: label colours follow the graph
+    followNewLanes();             // MICRO-SPAZIO-RITOCCHI-2 p.4 · a new epoch's lane, in the Matrix's view too
     ensureScenes();               // (recomputes the hidden types first)
     followEpochChanges();         // MICRO-CORSIA-GRUPPI p.1 · a new epoch, its lane
     ensureScenes();
@@ -10474,17 +10491,19 @@ function addEpochEmMode(index = 0, start?: number, end?: number, name?: string):
     toast(t("toast.openADocument"));
     return;
   }
-  const node = store.addEpochAt(index, name ?? nextEpochName(), start, end);
+  const st = store;
+  const node = st.addEpochAt(index, name ?? nextEpochName(), start, end);
   // addEpochAt emitted → onChange already rebuilt the scene; just select it.
   select(node.id);
   // date-driven add (top, undated) scrolls to the new lane so the user can date
   // it; a spatial insert happens at a boundary the user is already looking at.
   if (start == null && end == null) centerOn(node.id);
-  toast(
-    start != null || end != null
-      ? t("toast.epochInserted")
-      : t("toast.epochAdded"),
-  );
+  // MICRO-SPAZIO-RITOCCHI-2 p.4 · a new epoch is SAID — its name, its dates —
+  // and can be taken back in one click (addEpochAt is one undo step)
+  if (start != null || end != null)
+    toastUndo(t("toast.epochInsertedNamed", { name: String(node.name),
+      span: `${start ?? "…"} – ${end ?? "…"}` }), st);
+  else toastUndo(t("toast.epochAddedNamed", { name: String(node.name) }), st);
 }
 
 // ---------- accessory views ----------
@@ -10886,6 +10905,47 @@ function followEpochChanges(): void {
   }
   for (const id of [...seen.keys()]) if (!now.has(id)) seen.delete(id);
   if (changed.length) placeInEpochLane(changed);
+}
+
+/**
+ * MICRO-SPAZIO-RITOCCHI-2 p.4 · an epoch born since the Matrix's view layout was
+ * computed gets its lane IN THE VIEW too, at the same place in the stack.
+ *
+ * `addEpochAt` opens the lane in the archival layout (in place: the same object,
+ * so `matrixViewSigNow` does not change and the view layout is not recomputed);
+ * the Matrix draws the VIEW layout, whose lanes did not have it. Measured on
+ * TempluMare_v6 (dev.87): «Epoch 1» was in the Outliner and the Tabular, the
+ * Matrix still drew three lanes and the bar said «3 epochs» — until a relayout
+ * (E.D.'s «Move up / Move down» on the new, empty epoch) made the view again,
+ * and then the Matrix showed five. The same gap opens here as in the archive:
+ * the lanes and the units below slide down by the new lane's height.
+ */
+function followNewLanes(): void {
+  const st = store;
+  const v = matrixViewLayout;
+  if (!st || !v) return;
+  const top = (ls: import("./types").Swimlane[]) =>
+    ls.filter((l) => st.parentEpoch(l.epoch_id) == null).sort((a, b) => a.y - b.y);
+  const live = new Set(st.liveNodes().filter((n) => n.node_type === "EpochNode").map((n) => n.id));
+  const arch = top(st.doc.layout?.swimlanes ?? []).filter((l) => live.has(l.epoch_id));
+  const lanes = (v.swimlanes ??= []);
+  const known = new Set(lanes.map((l) => l.epoch_id));
+  let opened = false;
+  arch.forEach((al, i) => {
+    if (known.has(al.epoch_id)) return;
+    const vTop = top(lanes);
+    // under the lane that is above it in the archive (none: at the top)
+    const above = i > 0 ? vTop.find((l) => l.epoch_id === arch[i - 1].epoch_id) : undefined;
+    const y = above ? above.y + above.height : (vTop[0]?.y ?? 0);
+    const h = al.height || 200;
+    for (const l of lanes) if (l.y >= y) l.y += h;
+    for (const r of Object.values(v.positions ?? {})) if (r && typeof r.y === "number" && r.y >= y) r.y += h;
+    lanes.push({ ...al, y, height: h });
+    top(lanes).forEach((l, k) => { l.order = k; });
+    known.add(al.epoch_id);
+    opened = true;
+  });
+  if (opened) scenesDirty = true;
 }
 
 function placeInEpochLane(changes: [string, string, string][]): void {
@@ -13711,6 +13771,8 @@ document.getElementById("btn-new-project")?.addEventListener("click", () => { vo
 document.getElementById("btn-open-project")?.addEventListener("click", () => { void openProjectGesture(); });
 document.getElementById("btn-reorder-project")?.addEventListener("click", () => { void reorderGesture(); });
 document.getElementById("btn-close-project")?.addEventListener("click", () => { void closeProjectGesture(); });
+// MICRO-SPAZIO-RITOCCHI-2 p.1 · File ▸ «Apri la cartella del progetto» (and a click on the file's name in the bar)
+document.getElementById("btn-reveal-doc")?.addEventListener("click", () => { void revealActiveDoc(); });
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");
@@ -25124,6 +25186,9 @@ function openChronology(epochId?: string): void {
 
 /** the scene's epoch (a top epoch), kept while units are selected */
 let spaceEpochId: string | null = null;
+/** MICRO-SPAZIO-RITOCCHI-2 p.3 · up to this many epochs the Space's bar shows a
+ *  button each; above, a menu with ← → (E.D.: «con molte epoche non ci stanno») */
+const SPACE_EPOCH_BUTTONS = 5;
 /** what s3Dgraphy says is resident (the bridge), for the document it was asked
  *  about; null = not asked yet or offline, and the recorded state decides */
 let spaceResident: { version: number; ids: Set<string> } | null = null;
@@ -29302,6 +29367,17 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     refresh();
   };
   bar.addEventListener("click", onBar);
+  // p.3 · the epochs' menu: a choice is the click on that epoch's button
+  bar.addEventListener("change", (e) => {
+    const pick = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-epoch-pick]");
+    if (!pick?.value) return;
+    e.stopPropagation();
+    spaceEpochId = pick.value;
+    lastPress = { win: win.id, part: "scene", t: performance.now() };
+    select(pick.value);
+    refreshInspector();
+    refresh();
+  });
   const refresh = (): void => {
     askResident();
     const sp = currentSpace();
@@ -29332,7 +29408,43 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     seg.className = "scn-seg";
     seg.setAttribute("role", "group");
     seg.setAttribute("aria-label", t("space.epoch"));
-    for (const e of sp?.epochs ?? []) {
+    // MICRO-SPAZIO-RITOCCHI-2 p.3 · up to SPACE_EPOCH_BUTTONS epochs, one button
+    // each; above, or when the buttons do not fit the bar (measured below, after
+    // the bar is placed), a MENU with the epoch shown and ← → for the previous /
+    // next one, in the order the buttons had (newest first)
+    const epochsHere = sp?.epochs ?? [];
+    const asMenu = (): void => {
+      seg.textContent = "";
+      seg.classList.add("scn-seg-menu");
+      const i = epochsHere.findIndex((e) => e.id === epochId);
+      const arrow = (dir: -1 | 1): HTMLButtonElement => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "scn-ep-step";
+        b.textContent = dir < 0 ? "←" : "→";
+        const to = epochsHere[i + dir];
+        b.disabled = !to;
+        if (to) b.dataset.epoch = to.id;
+        b.title = to ? t(dir < 0 ? "space.epochPrev" : "space.epochNext", { name: to.name }) : "";
+        b.setAttribute("aria-label", t(dir < 0 ? "space.epochPrev" : "space.epochNext", { name: to?.name ?? "—" }));
+        return b;
+      };
+      const pick = document.createElement("select");
+      pick.className = "scn-ep-pick";
+      pick.dataset.epochPick = "1";
+      pick.setAttribute("aria-label", t("space.epoch"));
+      for (const e of epochsHere) {
+        const o = document.createElement("option");
+        o.value = e.id;
+        o.textContent = e.name;
+        o.selected = e.id === epochId;
+        pick.appendChild(o);
+      }
+      pick.title = epochsHere[i]?.name ?? "";
+      seg.append(arrow(-1), pick, arrow(1));
+    };
+    if (epochsHere.length > SPACE_EPOCH_BUTTONS) asMenu();
+    else for (const e of epochsHere) {
       const b = document.createElement("button");
       b.type = "button";
       b.dataset.epoch = e.id;
@@ -29357,6 +29469,17 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     fr.title = t("space.frame");
     bar.append(back, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr, ...geoSpace.barButtons());
     placeBar();
+    // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
+    // than one row) or run past its edge → the menu, for this drawing
+    if (!seg.classList.contains("scn-seg-menu") && epochsHere.length > 1) {
+      const first = seg.firstElementChild as HTMLElement | null;
+      const last = seg.lastElementChild as HTMLElement | null;
+      const box = bar.getBoundingClientRect();
+      if (first && last && box.width > 0 && (last.offsetTop > first.offsetTop
+          || last.getBoundingClientRect().right > box.right + 1 || bar.scrollWidth > bar.clientWidth + 1
+          || seg.getBoundingClientRect().top > (lab.getBoundingClientRect().bottom || box.top) - 1))
+        asMenu();
+    }
     renderBackButtons();
     // CAMPAGNA · the preview, said in the bar and closable; drawn whatever the
     // graph says (a tileset opened from the Storage needs no epoch)
@@ -33014,6 +33137,33 @@ async function closeProjectGesture(): Promise<void> {
   if (dirty.length && !(await askConfirm(t("emtree.closeFileUnsaved", { name: dirty.map((f) => f.name).join(", ") })))) return;
   for (const f of files) closeFile(f.id);
   forgetProjectTrees();
+}
+
+/** MICRO-SPAZIO-RITOCCHI-2 p.1 · «Apri la cartella del progetto»: the folder of
+ *  the ACTIVE em.json in the Finder / Explorer / file manager, the file selected
+ *  where the system can (`/file-reveal`: `open -R`, `explorer /select,`; Linux's
+ *  `xdg-open` opens the folder only). With no bridge to ask — a browser alone —
+ *  nothing can open a folder: the path is said, and copied. */
+async function revealActiveDoc(): Promise<void> {
+  const file = emtree.activeFile();
+  if (!file) { toast(t("fs.revealNoFile")); return; }
+  if (!file.path) {
+    toast(file.room ? t("fs.revealInRoom", { room: file.room.title || file.room.id })
+      : t("fs.revealDropped", { name: file.name }));
+    return;
+  }
+  const native = paths.toNative(file.path);
+  const where = t(/^[A-Za-z]:[\\/]|^\\\\/.test(native) ? "fs.revealExplorer"
+    : /Mac/.test(navigator.platform) ? "fs.revealFinder" : "fs.revealFileManager");
+  try {
+    const bridge = await bridgeUrl();
+    await revealFile(bridge, file.path);
+    toast(t("fs.revealDone", { where, path: native }));
+  } catch {
+    // no desktop answering (or the file moved): the path, said and copied
+    const copied = await navigator.clipboard?.writeText(native).then(() => true, () => false) ?? false;
+    toast(t(copied ? "fs.revealCopied" : "fs.revealSaid", { path: native }));
+  }
 }
 
 async function reorderGesture(): Promise<void> {
@@ -45563,7 +45713,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const ly = e.clientY - rect.top;
       // EM-mode "insert epoch" boundary (left strip) takes priority over the
       // epoch-label select that also lives in the left strip.
-      const ib = insertBoundaryAt(lx, ly);
+      const ib = insertBoundaryAt(lx, ly, true);
       if (ib != null) {
         insertPending = ib;
         armChip();
@@ -45776,9 +45926,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const ib = insertBoundaryAt(sx, sy);
       if (ib !== hoverInsertBoundary) {
         hoverInsertBoundary = ib;
-        canvas.style.cursor = ib != null ? "copy" : "";
         draw();
       }
+      // p.4 · the «copy» cursor where a click makes an epoch: on the disc only
+      if (ib != null) canvas.style.cursor = insertBoundaryAt(sx, sy, true) != null ? "copy" : "";
+      else if (canvas.style.cursor === "copy") canvas.style.cursor = "";
     } else if (hoverInsertBoundary !== null) {
       hoverInsertBoundary = null;
     }
@@ -46179,7 +46331,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const bi = insertPending;
       insertPending = null;
       hoverInsertBoundary = null;
-      if (!moved && insertBoundaryAt(rx, ry) === bi) {
+      if (!moved && insertBoundaryAt(rx, ry, true) === bi) {
         const { start, end } = insertSlotDates(bi);
         addEpochEmMode(bi, start, end);
       }
@@ -46556,14 +46708,24 @@ let insertPending: number | null = null; // insert boundary pressed → add epoc
 // Which top-level lane boundary (0 = above the top lane … lanes.length = below
 // the last) is the cursor near? Only in Matrix, in the left strip, when idle —
 // drives the "insert epoch here" affordance (hover indicator + click).
-function insertBoundaryAt(sx: number, sy: number): number | null {
+//
+// MICRO-SPAZIO-RITOCCHI-2 p.4 · the HOVER is the strip (the dashed line and the
+// «+» disc show where an epoch would go), the CLICK is the disc only (`onDisc`).
+// Measured on TempluMare_v6 (dev.87): any press within 6 px of a lane boundary
+// in the left 150 px made an epoch — «Epoch 1» (2026–) above XX sec and
+// «Epoch 2» (1800–1801) between XX sec and Post antiquity, the dates
+// `insertSlotDates` interpolates — and in the Space's narrow Matrix that strip
+// is half the window: E.D. saw two epochs appear without having asked for one.
+const INSERT_DISC_X = 6 + 12; // renderer.ts: RAIL + 12, radius 8
+function insertBoundaryAt(sx: number, sy: number, onDisc = false): number | null {
   if (view !== "matrix" || !store || dragMode !== "none")
     return null;
   const s = scenes.matrix;
   if (!s || !s.lanes.length) return null;
   if (sx > 150) return null; // left strip only — clear of content and node drags
+  if (onDisc && Math.abs(sx - INSERT_DISC_X) > 10) return null;
   const vp = viewport();
-  const TOL = 6;
+  const TOL = onDisc ? 9 : 6;
   let best: number | null = null;
   let bestD = TOL + 1;
   for (let i = 0; i <= s.lanes.length; i++) {
