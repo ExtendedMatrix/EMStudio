@@ -11583,7 +11583,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
   return { pass: Object.values(conds).every(Boolean), detail: { conds, web, settings, exp, changed, errors } };
 });
 
-test("PR1.ritocchi", "MICRO-PREPARA-RITOCCHI · «Prepara per un uso» con i nomi di E.D. (sette profili, la riga di che cosa serve; webXR con «ATON / Heriverse»): la griglia per gruppi, ciascuno con la sua spunta e il suo razionale, i sicuri già spuntati; aperto un gruppo, le righe con i parametri modificabili (lato, formato); Impostazioni › Componenti aggiuntivi: in cima «per ciò che fai bastano», ogni scheda dice a che cosa serve e se è consigliata o facoltativa, il testo lungo nel suo ⓘ; il validatore si installa «con Node.js» quando Node manca; Obj2Tiles dal fork (1.8.0-em.2)", async () => {
+test("PR1.ritocchi", "MICRO-PREPARA-RITOCCHI · «Prepara per un uso» con i nomi di E.D. (sette profili, la riga di che cosa serve; webXR con «ATON / Heriverse»): la griglia per gruppi, ciascuno con la sua spunta e il suo razionale, i sicuri già spuntati; aperto un gruppo, le righe con i parametri modificabili (lato, formato); Impostazioni › Componenti aggiuntivi: in cima «per ciò che fai bastano», ogni scheda dice a che cosa serve e se è consigliata o facoltativa, il testo lungo nel suo ⓘ; il validatore si installa «con Node.js» quando Node manca; Obj2Tiles dal fork (1.8.0-em.3)", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "pr1");
   mkdirSync(`${pr}/SB/versions`, { recursive: true });
@@ -11674,7 +11674,7 @@ T.write_glb(sys.argv[1]); T.write_glb(sys.argv[2], copies=5)`, `${pr}/SB/version
     cards: card("gltfpack").advice === "recommended" && card("obj2tiles").advice === "optional"
       && /tileset/.test(card("obj2tiles").forYou) && /Facoltativo/.test(card("obj2tiles").when),
     tooltip: /licenza/.test(card("gltfpack").tip) && !/licenza/.test(card("gltfpack").text),
-    fork: /1\.8\.0-em\.2/.test(card("obj2tiles").text) && /Apple Silicon/.test(card("obj2tiles").tip) && /#107/.test(card("obj2tiles").tip),
+    fork: /1\.8\.0-em\.3/.test(card("obj2tiles").text) && /Apple Silicon/.test(card("obj2tiles").tip) && /#107/.test(card("obj2tiles").tip),
     node: ad.cards.some((c) => c.id === "node") && (card("node").advice === "not_needed" || /con Node\.js/.test(card("tiles-validator").withNode)),
     noErrors: !errors.length,
   };

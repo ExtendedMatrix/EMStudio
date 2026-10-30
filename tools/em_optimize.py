@@ -81,17 +81,18 @@ ADDONS["gltfpack"]["builds"]["windows-arm64"] = ADDONS["gltfpack"]["builds"]["wi
 # MICRO-PREPARA-RITOCCHI (E.D., 30 Oct 2026) · FROM E.D.'S FORK until upstream
 # merges his two pull requests to OpenDroneMap/Obj2Tiles — #107 (a native
 # osx-arm64 build) and #108 (``--progress``, JSON lines on stdout). The fork's
-# release v1.8.0-em.2 (branch ``emstudio`` = upstream 1.8.0 + #107 + #108,
-# commit f9e565f, built by the fork's Actions) publishes the six builds; their
+# release v1.8.0-em.3 (branch ``emstudio`` = upstream 1.8.0 + #107 + #108,
+# commit b3d6338, built by the fork's Actions) publishes the six builds; their
 # sizes and digests are the release page's own, checked against the bytes
-# downloaded on 30 Oct 2026. Apple Silicon runs the NATIVE build (no Rosetta;
-# its zip carries no libktx: no KTX2 output there, which our preset does not
-# use). The licence is unchanged (AGPL-3.0, the source public in the fork),
+# downloaded on 30 Oct 2026. Apple Silicon runs the NATIVE build (no Rosetta)
+# and, since em.3 (MICRO-VERSIONE-CONTENITORE), its zip carries an arm64
+# ``libktx.dylib`` (KTX-Software 4.4.2): ``--texture-format Ktx2`` works there
+# too (em.2's had none). The licence is unchanged (AGPL-3.0, the source public in the fork),
 # the credits stay OpenDroneMap's. The day the two PRs are merged and upstream
 # publishes them, ONE field goes back: ``OBJ2TILES_FROM = "upstream"`` (and
 # the upstream table gets that release's assets and digests).
 _O2T_UPSTREAM = "https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.8.0/"
-_O2T_FORK = "https://github.com/zalmoxes-laran/Obj2Tiles/releases/download/v1.8.0-em.2/"
+_O2T_FORK = "https://github.com/zalmoxes-laran/Obj2Tiles/releases/download/v1.8.0-em.3/"
 OBJ2TILES_FROM = "fork"
 _O2T_BUILDS = {
     "upstream": {
@@ -118,29 +119,29 @@ _O2T_BUILDS = {
     },
     "fork": {
         "darwin-arm64": {
-            "version": "1.8.0-em.2", "asset": "Obj2Tiles-OsxArm64.zip", "member": "Obj2Tiles", "extra": [],
-            "size": 9309497, "url": _O2T_FORK + "Obj2Tiles-OsxArm64.zip",
-            "sha256": "4da920932beaedc60ea966692bec4e93e280e1c7d30092a7442179828a101180"},
+            "version": "1.8.0-em.3", "asset": "Obj2Tiles-OsxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
+            "size": 10467153, "url": _O2T_FORK + "Obj2Tiles-OsxArm64.zip",
+            "sha256": "e028a546cb35641e1e4b1d651f959a0bd91482841eaa639879d1c1c869e303e2"},
         "darwin-x86_64": {
-            "version": "1.8.0-em.2", "asset": "Obj2Tiles-Osx64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
-            "size": 11138280, "url": _O2T_FORK + "Obj2Tiles-Osx64.zip",
-            "sha256": "a236b937a2880df1b8a4e7f2849e6c5ae7e97cc5b995f32e2d8477278d61772f"},
+            "version": "1.8.0-em.3", "asset": "Obj2Tiles-Osx64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
+            "size": 11138376, "url": _O2T_FORK + "Obj2Tiles-Osx64.zip",
+            "sha256": "469cae019e58df12f7f7a065f2933052183bd1616f3a9e6a93df458a2ddf1a05"},
         "windows-x86_64": {
-            "version": "1.8.0-em.2", "asset": "Obj2Tiles-Win64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
-            "size": 22220626, "url": _O2T_FORK + "Obj2Tiles-Win64.zip",
-            "sha256": "f2d814404f3b9353ce15aa32e926299116ba496ca349cd7ce17f1fbb1e86698f"},
+            "version": "1.8.0-em.3", "asset": "Obj2Tiles-Win64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
+            "size": 22220425, "url": _O2T_FORK + "Obj2Tiles-Win64.zip",
+            "sha256": "461317f21e15fa8180cf193afe8b7b9d49ded8b17f94c94553649186a5701751"},
         "windows-arm64": {
-            "version": "1.8.0-em.2", "asset": "Obj2Tiles-WinArm64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
-            "size": 21090376, "url": _O2T_FORK + "Obj2Tiles-WinArm64.zip",
-            "sha256": "ab95e6c180d5d7208ed3e28c938de40bee9054ca1021e2403247f464b1f1ebf1"},
+            "version": "1.8.0-em.3", "asset": "Obj2Tiles-WinArm64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
+            "size": 21090251, "url": _O2T_FORK + "Obj2Tiles-WinArm64.zip",
+            "sha256": "fa53f035ebba81cf1c14ebfed8ae258186425676e060a0b6e52e9f25e2135164"},
         "linux-x86_64": {
-            "version": "1.8.0-em.2", "asset": "Obj2Tiles-Linux64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
-            "size": 11416156, "url": _O2T_FORK + "Obj2Tiles-Linux64.zip",
-            "sha256": "3b2ab5e3dbea6e74632bb8cf4d614c559a73658c013bc73fc6f80f41a1401444"},
+            "version": "1.8.0-em.3", "asset": "Obj2Tiles-Linux64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
+            "size": 11416122, "url": _O2T_FORK + "Obj2Tiles-Linux64.zip",
+            "sha256": "afc8a769bd6d3bfc9633805123c0dcd83e07628be5421a328958b39157d724e6"},
         "linux-arm64": {
-            "version": "1.8.0-em.2", "asset": "Obj2Tiles-LinuxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
-            "size": 10985231, "url": _O2T_FORK + "Obj2Tiles-LinuxArm64.zip",
-            "sha256": "29ee7387a55035ee8bc0b289798b9b7327f70f307891e5311aa76467fe875bac"},
+            "version": "1.8.0-em.3", "asset": "Obj2Tiles-LinuxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
+            "size": 10985026, "url": _O2T_FORK + "Obj2Tiles-LinuxArm64.zip",
+            "sha256": "9936ef5b0377ee11b8a15fb2857e351e8e5186fb082fe956bbd76ddd277faa82"},
     },
 }
 _O2T_FROM = {

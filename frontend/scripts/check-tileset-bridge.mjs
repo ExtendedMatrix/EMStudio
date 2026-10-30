@@ -148,8 +148,8 @@ try {
   const o2t = ad.find((x) => x.id === "obj2tiles");
   ok(o2t && o2t.licence === "AGPL-3.0" && /zalmoxes-laran\/Obj2Tiles/.test(o2t.source) && o2t.project === "OpenDroneMap",
      "Obj2Tiles is an add-on: AGPL-3.0, its source E.D.'s fork, the credits OpenDroneMap's (MICRO-PREPARA-RITOCCHI p.6)");
-  ok(o2t && o2t.version === "1.8.0-em.2" && /^[0-9a-f]{64}$/.test(o2t.sha256 ?? "") && /v1\.8\.0-em\.2\//.test(o2t.url ?? ""),
-     "pinned at the fork's release 1.8.0-em.2 with its sha256");
+  ok(o2t && o2t.version === "1.8.0-em.3" && /^[0-9a-f]{64}$/.test(o2t.sha256 ?? "") && /v1\.8\.0-em\.3\//.test(o2t.url ?? ""),
+     "pinned at the fork's release 1.8.0-em.3 with its sha256");
   ok(o2t && /Apple Silicon/.test(o2t.build_note ?? "") && /#107/.test(o2t.pending ?? "") && /#108/.test(o2t.pending ?? ""),
      "the build said (1.8.0 + Apple Silicon + progress) and the way back to upstream (#107, #108)");
   if (o2t?.platform === "darwin-arm64") ok(!o2t.emulated && /OsxArm64/.test(o2t.url), "on Apple Silicon: the native OsxArm64 build, no Rosetta");
