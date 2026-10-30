@@ -339,11 +339,23 @@ def emtools_pd():
     if not em_name:
         raise RuntimeError("EM Tools is not loaded in this Blender")
     pkg = em_name.rsplit(".graph_origins", 1)[0]
+    extra = A.get("s3dgraphy_resources") or ""
+    mine = os.path.join(extra, "use_profiles.py") if extra else ""
     try:
-        import s3dgraphy.resources.use_profiles  # noqa: F401
+        import s3dgraphy.resources.use_profiles as UP
+        # MICRO-PREPARA-RITOCCHI: a bundled table OLDER than the bridge's (no
+        # ALIASES: the profiles before E.D.'s names) is replaced by the
+        # bridge's, so both speak of the same profiles
+        if mine and os.path.isfile(mine) and not hasattr(UP, "ALIASES"):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("s3dgraphy.resources.use_profiles", mine)
+            UP = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(UP)
+            sys.modules["s3dgraphy.resources.use_profiles"] = UP
+            import s3dgraphy.resources as R
+            R.use_profiles = UP
     except ImportError:
-        extra = A.get("s3dgraphy_resources") or ""
-        if extra and os.path.isfile(os.path.join(extra, "use_profiles.py")):
+        if mine and os.path.isfile(mine):
             import s3dgraphy.resources as R
             R.__path__.append(extra)
     return importlib.import_module(pkg + ".sync_manager.prepare_diagnosis")
@@ -394,10 +406,16 @@ def apply_use():
         o.select_set(True)
     bpy.context.view_layer.objects.active = objs[0]
     say("PROGRESS", {"stage": "prepare", "done": 0, "total": 1})
-    r = bpy.ops.em.prepare_diagnose(profile=A.get("profile") or "web", scope="SELECTED",
-                                    model=A.get("model") or "", level=A.get("level") or "lod0",
-                                    replace=bool(A.get("replace")),
-                                    checked_ids=",".join(A.get("checked") or []) or "none")
+    kw = dict(profile=A.get("profile") or "webxr", scope="SELECTED",
+              model=A.get("model") or "", level=A.get("level") or "lod0",
+              replace=bool(A.get("replace")),
+              checked_ids=",".join(A.get("checked") or []) or "none")
+    # MICRO-PREPARA-RITOCCHI: the parameters changed row by row (target
+    # triangles, texture side, format), when this EM Tools takes them
+    names = {p.identifier for p in bpy.ops.em.prepare_diagnose.get_rna_type().properties}
+    if "params_json" in names and A.get("params"):
+        kw["params_json"] = json.dumps(A["params"])
+    r = bpy.ops.em.prepare_diagnose(**kw)
     if r != {"FINISHED"}:
         raise RuntimeError("Prepare for a use answered %s" % sorted(r))
     out = dict(pd.LAST.get("applied") or {})

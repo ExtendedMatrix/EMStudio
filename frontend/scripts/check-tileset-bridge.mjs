@@ -146,12 +146,23 @@ try {
   // ── the add-ons ──
   const ad = (await get("/addons")).j.addons ?? [];
   const o2t = ad.find((x) => x.id === "obj2tiles");
-  ok(o2t && o2t.licence === "AGPL-3.0" && /OpenDroneMap\/Obj2Tiles\/releases/.test(o2t.source), "Obj2Tiles is an add-on: AGPL-3.0, from OpenDroneMap's releases");
-  ok(o2t && o2t.version === "1.8.0" && /^[0-9a-f]{64}$/.test(o2t.sha256 ?? ""), "pinned at 1.8.0 with its sha256");
-  if (o2t?.platform === "darwin-arm64") ok(o2t.emulated === "Rosetta 2" && /Osx64/.test(o2t.url), "on Apple Silicon: the Osx64 build, under Rosetta 2, said");
+  ok(o2t && o2t.licence === "AGPL-3.0" && /zalmoxes-laran\/Obj2Tiles/.test(o2t.source) && o2t.project === "OpenDroneMap",
+     "Obj2Tiles is an add-on: AGPL-3.0, its source E.D.'s fork, the credits OpenDroneMap's (MICRO-PREPARA-RITOCCHI p.6)");
+  ok(o2t && o2t.version === "1.8.0-em.2" && /^[0-9a-f]{64}$/.test(o2t.sha256 ?? "") && /v1\.8\.0-em\.2\//.test(o2t.url ?? ""),
+     "pinned at the fork's release 1.8.0-em.2 with its sha256");
+  ok(o2t && /Apple Silicon/.test(o2t.build_note ?? "") && /#107/.test(o2t.pending ?? "") && /#108/.test(o2t.pending ?? ""),
+     "the build said (1.8.0 + Apple Silicon + progress) and the way back to upstream (#107, #108)");
+  if (o2t?.platform === "darwin-arm64") ok(!o2t.emulated && /OsxArm64/.test(o2t.url), "on Apple Silicon: the native OsxArm64 build, no Rosetta");
   const val = ad.find((x) => x.id === "tiles-validator");
   ok(val && val.licence === "Apache-2.0" && val.needs === "node" && /^sha512-/.test(val.sha256 ?? ""), "the validator is an add-on: Apache-2.0, a Node program, its integrity pinned");
-  ok(val && val.available === false && val.node === null, "without Node it is not available, and says why");
+  const nodeA = ad.find((x) => x.id === "node");
+  ok(nodeA && nodeA.licence === "MIT" && /nodejs\.org\/dist\/v26\.13\.0\//.test(nodeA.url ?? "") && /^[0-9a-f]{64}$/.test(nodeA.sha256 ?? ""),
+     "Node.js is an add-on of its own: MIT, nodejs.org's LTS 26.13.0, its sha256 (p.5)");
+  ok(val && val.node === null && (nodeA?.available ? val.available === true && val.with_node === true && val.node_version === "26.13.0"
+                                                    : val.available === false),
+     "without a Node here the validator installs WITH Node.js (one gesture)");
+  ok(["gltfpack", "obj2tiles", "tiles-validator", "node"].every((id) => (ad.find((x) => x.id === id)?.serves?.actions ?? []).length),
+     "each add-on says the actions it serves (p.4)");
 
   // ── the plan ──
   const pl = (await post("/fs/tileset", { sources: [a, `${fsroot}/RB/LOD1`, `${fsroot}/nothing.obj`] })).j;

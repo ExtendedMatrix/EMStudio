@@ -77,7 +77,10 @@ elif op == "measure":
         "containers": [{"label": "Colonnato", "objects": ["Col_%d" % i for i in range(6)]}]}})
 elif op == "apply_use":
     assert A.get("s3dgraphy_resources"), "the bridge says where its s3dgraphy.resources is"
-    dest = {"web": "web", "heriverse": "aton-heriverse", "realtime": "realtime", "mobile_ar": "mobile", "archive": "archive"}[A["profile"]]
+    dest = {"web": "web", "heriverse": "aton-heriverse", "realtime": "realtime", "mobile_ar": "mobile", "archive": "archive",
+            # MICRO-PREPARA-RITOCCHI · E.D.'s names
+            "webxr": "aton-heriverse", "desktop_realtime": "realtime", "mobile_webxr": "mobile", "preview": "preview",
+            "render_offline": "render"}[A["profile"]]
     folder = os.path.join(os.path.dirname(blend), "versions")
     os.makedirs(folder, exist_ok=True)
     out = os.path.join(folder, "%s@%s-%s.glb" % (A["model"], A["level"], dest))
@@ -85,4 +88,5 @@ elif op == "apply_use":
         say("RESULT", {"ok": False, "error": "already there"}); sys.exit(1)
     glb(out, 120)
     say("RESULT", {"ok": True, "op": op, "result": {"entry": out, "bytes": os.path.getsize(out), "rows": A.get("checked"),
+        "params": A.get("params") or {},
         "measured": {"triangles": 120, "triangles_stored": 120}, "instanced": 5, "decimated": 1, "resized": 1, "warnings": []}})

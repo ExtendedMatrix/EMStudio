@@ -11510,7 +11510,8 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     const tip = (sel) => { const x = document.querySelector(sel); return x?.dataset.tip ?? x?.textContent ?? ""; };
     const tx = (el) => el ? `${el.textContent} ${[...el.querySelectorAll("[data-tip]")].map((x) => x.dataset.tip).join(" ")}` : "";
     return {
-    pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].map((x) => x.textContent),
+    // (section 5, «Prepara per un uso» — MICRO-PREPARA-DIAGNOSI — has its own pill and hint: not counted here)
+    pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].filter((x) => !x.closest(".files-use")).map((x) => x.textContent),
     chips: document.querySelectorAll(".files-tab-optimize [data-opt]").length,
     engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
     why: tip(".files-tab-optimize .files-engine .files-hint"),
@@ -11524,7 +11525,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     stampFirst: [...document.querySelectorAll(".files-tab-optimize .files-warn")].some((x) => /timbra/i.test(x.textContent)),
     tilesSwitch: !!document.querySelector('[data-action="files-tiles-experimental"]'),
     tiles: tx(document.querySelector(".files-tab-optimize")),
-    hints: document.querySelectorAll(".files-tab-optimize p.files-hint:not(.files-warn):not(.files-est):not(.files-addon-link)").length }; });
+    hints: [...document.querySelectorAll(".files-tab-optimize p.files-hint:not(.files-warn):not(.files-est):not(.files-addon-link)")].filter((x) => !x.closest(".files-use")).length }; });
   await p.screenshot({ path: SHOT("ar7-ottimizza") }).catch(() => {});
   await p.click('.files-tab-optimize [data-addon="gltfpack"] [data-action="open-addons"]').catch(() => {});
   await p.waitForSelector('#set-addons [data-addon="gltfpack"]', { timeout: 8000 }).catch(() => {});
@@ -11532,7 +11533,9 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     tab: document.querySelector('#settings-sect-addons')?.dataset.settingsTab ?? "",
     shown: !document.querySelector('#settings-sect-addons')?.classList.contains("hidden"),
     machine: document.getElementById("set-addons-machine")?.textContent ?? "",
-    card: document.querySelector('#set-addons [data-addon="gltfpack"]')?.textContent ?? "",
+    // MICRO-PREPARA-RITOCCHI p.4: the long text (licence, source, digest) is in the card's ⓘ
+    card: (() => { const c = document.querySelector('#set-addons [data-addon="gltfpack"]');
+      return c ? `${c.textContent} ${[...c.querySelectorAll("[data-tip]")].map((x) => x.dataset.tip).join(" ")}` : ""; })(),
     fit: document.querySelector('#set-addons [data-addon="gltfpack"] .files-addon-fit')?.dataset.fit ?? "",
     install: !!document.querySelector('#set-addons [data-addon="gltfpack"] [data-action="addon-install"]') }));
   await p.screenshot({ path: SHOT("ar7-componenti") }).catch(() => {});
@@ -11574,6 +11577,104 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
   return { pass: Object.values(conds).every(Boolean), detail: { conds, web, settings, exp, changed, errors } };
 });
 
+test("PR1.ritocchi", "MICRO-PREPARA-RITOCCHI · «Prepara per un uso» con i nomi di E.D. (sette profili, la riga di che cosa serve; webXR con «ATON / Heriverse»): la griglia per gruppi, ciascuno con la sua spunta e il suo razionale, i sicuri già spuntati; aperto un gruppo, le righe con i parametri modificabili (lato, formato); Impostazioni › Componenti aggiuntivi: in cima «per ciò che fai bastano», ogni scheda dice a che cosa serve e se è consigliata o facoltativa, il testo lungo nel suo ⓘ; il validatore si installa «con Node.js» quando Node manca; Obj2Tiles dal fork (1.8.0-em.2)", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "pr1");
+  mkdirSync(`${pr}/SB/versions`, { recursive: true });
+  const py = new URL("../../../s3Dgraphy/.venv/bin/python", import.meta.url).pathname;
+  const tests = new URL("../../../s3Dgraphy/tests", import.meta.url).pathname;
+  execFileSync(py, ["-c", `import sys; sys.path.insert(0, sys.argv[3]); import test_use_profiles as T
+T.write_glb(sys.argv[1]); T.write_glb(sys.argv[2], copies=5)`, `${pr}/SB/versions/A@lod0-web.glb`, `${pr}/SB/versions/B@lod1-aton-heriverse.glb`, tests],
+    { env: { ...process.env, PYTHONPATH: new URL("../../../s3Dgraphy/src", import.meta.url).pathname } });
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1200 });
+  await p.evaluate(() => { localStorage.removeItem("emstudio.tilesetExperimental"); localStorage.removeItem("emstudio.useProfile"); });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/SB"]`).first().click();
+  await p.waitForTimeout(800);
+  await storageInto(p, ["versions"]);
+  await storageClick(p, "A@lod0-web.glb");
+  await p.keyboard.down(process.platform === "darwin" ? "Meta" : "Control");
+  await storageClick(p, "B@lod1-aton-heriverse.glb");
+  await p.keyboard.up(process.platform === "darwin" ? "Meta" : "Control");
+  await p.click('.files-tab[data-tab="optimize"]');
+  await p.waitForSelector(".files-use [data-use-profile]", { timeout: 10000 }).catch(() => {});
+  const chips = await p.evaluate(() => [...document.querySelectorAll(".files-use [data-use-profile]")].map((c) => ({
+    id: c.dataset.useProfile, text: c.textContent, tip: c.dataset.tip ?? "" })));
+  await p.click('.files-use [data-use-profile="mobile_webxr"]');
+  await p.waitForTimeout(400);
+  await p.click('[data-action="use-diagnose"]');
+  await p.waitForSelector(".files-use-group", { timeout: 15000 }).catch(() => {});
+  // each click repaints the section: the next closed group asked again
+  for (let i = 0; i < 8; i++) {
+    const closed = p.locator('.files-use-group [data-action="use-group-open"][aria-expanded="false"]').first();
+    if (!(await closed.count())) break;
+    await closed.click();
+    await p.waitForTimeout(250);
+  }
+  await p.waitForTimeout(400);
+  const grid = await p.evaluate(() => ({
+    purpose: document.querySelector(".files-use-purpose")?.textContent ?? "",
+    groups: [...document.querySelectorAll(".files-use-group")].map((g) => ({ id: g.dataset.group,
+      ticked: g.querySelector('[data-action="use-group-tick"]')?.checked ?? null,
+      why: g.querySelector(".files-use-why")?.textContent ?? "" })),
+    rows: document.querySelectorAll(".files-use-group .files-use-row").length,
+    side: [...document.querySelectorAll('.files-use-params [data-param="side"]')].map((x) => x.value),
+    format: [...document.querySelectorAll('.files-use-params [data-param="format"]')].map((x) => x.value),
+    after: [...document.querySelectorAll(".files-use-diag .files-lead")].map((x) => x.textContent).find((x) => /→/.test(x)) ?? "" }));
+  // the panel scrolls: for the picture, its ancestors let the section grow
+  const shotWhole = async (sel, name) => {
+    await p.setViewportSize({ width: 1900, height: 3200 });
+    await p.evaluate((q) => { let el = document.querySelector(q)?.parentElement;
+      while (el && el !== document.body) { el.style.overflow = "visible"; el.style.maxHeight = "none"; el.style.height = "auto"; el = el.parentElement; } }, sel);
+    await p.waitForTimeout(300);
+    const el = await p.$(sel);
+    if (el) await el.screenshot({ path: SHOT(name) }).catch(() => {});
+  };
+  await shotWhole(".files-use", "pr1-griglia");
+  await p.evaluate(() => location.hash);   // (the page goes on as it was)
+  // a side changed by hand: the estimate is asked again with it
+  const before = grid.after;
+  const sideIn = await p.$('.files-use-params [data-param="side"]');
+  if (sideIn) { await sideIn.fill("2048"); await sideIn.dispatchEvent("change"); }
+  await p.waitForTimeout(1500);
+  const after2 = await p.evaluate(() => [...document.querySelectorAll(".files-use-diag .files-lead")].map((x) => x.textContent).find((x) => /→/.test(x)) ?? "");
+  // Settings › Add-ons
+  await p.evaluate(() => document.getElementById("btn-settings")?.click());
+  await p.waitForTimeout(400);
+  await p.click('#settings-tabs [data-tab-target="addons"]').catch(() => {});
+  await p.waitForSelector("#set-addons .files-addons-enough", { timeout: 10000 }).catch(() => {});
+  await p.waitForTimeout(400);
+  const ad = await p.evaluate(() => ({
+    enough: document.querySelector("#set-addons .files-addons-enough")?.textContent ?? "",
+    cards: [...document.querySelectorAll("#set-addons .files-addon[data-addon]")].map((c) => ({ id: c.dataset.addon, advice: c.dataset.advice ?? "",
+      forYou: c.querySelector(".files-addon-for")?.textContent ?? "", when: c.querySelector(".files-addon-when")?.textContent ?? "",
+      text: c.textContent, tip: [...c.querySelectorAll("[data-tip]")].map((x) => x.dataset.tip).join(" "),
+      withNode: c.querySelector('[data-with-node="1"]')?.textContent ?? "" })) }));
+  await shotWhole("#settings-sect-addons", "pr1-componenti");
+  await ctx.close();
+  const card = (id) => ad.cards.find((c) => c.id === id) ?? {};
+  const conds = {
+    names: chips.map((c) => c.id).join() === "desktop_realtime,webxr,mobile_webxr,archive,preview,render_offline,print_3d"
+      && chips.some((c) => c.text === "rendering offline") && chips.some((c) => c.text === "stampa 3D")
+      && /ATON \/ Heriverse/.test(chips.find((c) => c.id === "webxr")?.tip ?? ""),
+    purpose: /telefoni e visori/.test(grid.purpose),
+    groups: grid.groups.map((g) => g.id).join() === "instances,textures,compression"
+      && grid.groups.every((g) => g.why.length > 20) && grid.groups.find((g) => g.id === "instances")?.ticked === true
+      && grid.groups.find((g) => g.id === "textures")?.ticked === true,
+    params: grid.rows >= 3 && grid.side.includes("512") && grid.format.length >= 1,
+    estimate: before !== "" && after2 !== "" && after2 !== before,
+    enough: /bastano: gltfpack/.test(ad.enough) && !/Obj2Tiles/.test(ad.enough),
+    cards: card("gltfpack").advice === "recommended" && card("obj2tiles").advice === "optional"
+      && /tileset/.test(card("obj2tiles").forYou) && /Facoltativo/.test(card("obj2tiles").when),
+    tooltip: /licenza/.test(card("gltfpack").tip) && !/licenza/.test(card("gltfpack").text),
+    fork: /1\.8\.0-em\.2/.test(card("obj2tiles").text) && /Apple Silicon/.test(card("obj2tiles").tip) && /#107/.test(card("obj2tiles").tip),
+    node: ad.cards.some((c) => c.id === "node") && (card("node").advice === "not_needed" || /con Node\.js/.test(card("tiles-validator").withNode)),
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, chips, grid, after2, ad: { enough: ad.enough, cards: ad.cards.map((c) => ({ ...c, text: c.text.slice(0, 200), tip: c.tip.slice(0, 200) })) }, errors } };
+});
+
 test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, sperimentale dietro il suo interruttore: acceso, la destinazione «Tileset (3D Tiles)» si aggiunge e si sceglie; il motore Obj2Tiles con il perché (Blender + 3DSC in Blender stesso); Obj2Tiles come componente aggiuntivo (AGPL-3.0, OpenDroneMap, versione e sha256 fissate; sotto Rosetta su Apple Silicon, detto); il giudice (il validatore di Cesium, o il controllo strutturale detto come tale); la riga del file con la sua cartella in RB/versions/‹modello›@tiles, livelli, profondità e memoria; la memoria e il tetto detti prima; il comando; senza Obj2Tiles il pulsante non parte; spento, si torna al web", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab11");
@@ -11592,7 +11693,8 @@ test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, 
   await p.waitForTimeout(600);
   const on = await p.evaluate(() => ({
     chip: document.querySelector('.files-tab-optimize [data-opt="tileset"]')?.getAttribute("aria-pressed") ?? null,
-    pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].map((x) => x.textContent),
+    // (section 5, «Prepara per un uso» — MICRO-PREPARA-DIAGNOSI — has its own pill and hint: not counted here)
+    pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].filter((x) => !x.closest(".files-use")).map((x) => x.textContent),
     engine: document.querySelector(".files-tiles .files-engine")?.dataset.engine ?? "",
     engines: [...document.querySelectorAll('[data-action="files-tiles-engine"] option')].map((o) => o.textContent),
     why: document.querySelector(".files-tiles .files-engine .files-hint")?.dataset.tip ?? "",

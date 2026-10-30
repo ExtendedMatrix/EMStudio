@@ -1816,7 +1816,13 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: versions/, removed with a dry run that names files and nodes); ``POST /jobs
 #: {kind: blender, op: measure | apply_use}`` — the .blend measured by EM Tools,
 #: the ticks applied by EM Tools in Blender.
-BRIDGE_LEVEL = 46   # 30 also = /validate
+#: 47 = MICRO-PREPARA-RITOCCHI: the profiles with E.D.'s names (desktop
+#: realtime, webXR, mobile webXR, archive, preview/catalogue, offline
+#: rendering, 3D printing), the grid in groups with per-row ``params``
+#: (``POST /optimize/diagnose`` and ``apply_use`` take them), a tileset
+#: suggested; ``/addons`` says what each add-on serves, Node.js is an add-on of
+#: its own and the validator installs WITH it; Obj2Tiles from E.D.'s fork.
+BRIDGE_LEVEL = 47   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3601,7 +3607,7 @@ def make_handler(api):
                 from s3dgraphy.resources import use_profiles as UP
             except ImportError as exc:
                 return 501, {"ok": False, "error": f"this s3dgraphy has no profiles of use: {exc}"}
-            prof = str(body.get("profile") or "web")
+            prof = str(body.get("profile") or "webxr")
             engine = str(body.get("engine") or "blender")
             try:
                 UP.profile(prof)
@@ -3628,8 +3634,15 @@ def make_handler(api):
                 except (OSError, ValueError, KeyError) as exc:
                     return 400, {"ok": False, "error": f"could not read the glTF: {exc}"}
                 d["source"] = "files"
-            if isinstance(body.get("checked"), list):
-                d["after"] = UP.estimate(d, [str(x) for x in body["checked"]])
+            params = body.get("params") if isinstance(body.get("params"), dict) else None
+            if isinstance(body.get("checked"), list) or params:
+                checked = [str(x) for x in body["checked"]] if isinstance(body.get("checked"), list) else None
+                try:
+                    d["after"] = UP.estimate(d, checked, params=params)
+                except TypeError:  # an s3dgraphy before MICRO-PREPARA-RITOCCHI
+                    d["after"] = UP.estimate(d, checked)
+                if hasattr(UP, "groups"):
+                    d["groups"] = UP.groups(d, checked)
             d.pop("_objects", None)
             d.pop("_textures", None)
             d["ok"] = True
@@ -3797,14 +3810,14 @@ def make_handler(api):
             if op == "apply_use":
                 try:
                     from s3dgraphy.resources import use_profiles as UP
-                    prof = UP.profile(str(body.get("profile") or "web"))
+                    prof = UP.profile(str(body.get("profile") or "webxr"))
                 except (ImportError, ValueError) as exc:
                     return {"ok": False, "error": str(exc)}
                 model = str(body.get("model") or os.path.splitext(os.path.basename(blend))[0])
                 level = str(body.get("level") or "lod0")
                 folder = UP.versions_folder(blend)
                 name = UP.version_file_name(model, level, prof)
-                path = os.path.join(folder, name if name.endswith(".glb") else name[:-5])
+                path = os.path.join(folder, name[:-5] if name.endswith(".gltf") else name)
                 exists = os.path.exists(path)
                 plan["outputs"] = [{"level": level, "path": path, "name": name, "exists": exists}]
                 if not _fs_inside_roots(path):
@@ -3822,8 +3835,9 @@ def make_handler(api):
                     "container": str(body.get("container") or ""),
                     "s3dgraphy_resources": _s3dgraphy_resources_dir()}
             if op == "apply_use":
-                args.update({"profile": str(body.get("profile") or "web"),
+                args.update({"profile": str(body.get("profile") or "webxr"),
                              "checked": [str(x) for x in body.get("checked") or []],
+                             "params": body.get("params") if isinstance(body.get("params"), dict) else {},
                              "model": str(body.get("model") or ""), "level": str(body.get("level") or "lod0"),
                              "replace": bool(body.get("replace"))})
 

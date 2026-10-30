@@ -729,7 +729,9 @@ import {
 import { currentPlatform } from "./menu-table";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
 import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, removalLines, versionsOf,
-  type Diagnosis, type UseProfile, type VersionOnDisk } from "./use-diagnosis";
+  type Diagnosis, type UseProfile, type VersionOnDisk, type RowParams, groupsOf, rowsOf, groupTicked, tickGroup,
+  paramsFor, profileWords } from "./use-diagnosis";
+import { adviseAddons, enoughFor, type Advice } from "./addon-advice";
 import { pickPathInApp } from "./path-picker";
 import { GraphRemovalError, graphRemovalReport, settleLinksTowards } from "./graph-removal";
 import type { ContainerLike, LinksAction, RemovalReport, ShelfAction } from "./graph-removal";
@@ -13775,7 +13777,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 46;   // 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 47;   // 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -34035,7 +34037,16 @@ interface AddonState { fit?: AddonFit; id: string; name: string; project: string
   /** MICRO-OTTIMIZZA-2 · an x86_64 build on Apple Silicon, and whether Rosetta is here */
   emulated?: string; emulator_ready?: boolean;
   /** a Node.js program (the validator), and the Node of this machine */
-  needs?: "node"; node?: string | null }
+  needs?: "node"; node?: string | null;
+  /** MICRO-PREPARA-RITOCCHI · the Node it runs on (this machine's, or EMStudio's
+   *  own), and whether Node.js comes with it in one gesture */
+  node_from?: "env" | "system" | "addon" | null; with_node?: boolean; node_version?: string; node_size?: number;
+  /** the Node add-on: a Node of 18 or newer already here */
+  system_node?: string | null;
+  /** p.4 · the actions of Ottimizza it serves, the profiles they serve */
+  serves?: { actions: string[]; profiles: string[]; for?: string[] };
+  /** p.6 · a build of its own (E.D.'s fork) and the way back to upstream */
+  build_note?: string; pending?: string; upstream?: string; runtime?: boolean }
 let addonsState: { at: number; list: AddonState[] | null; error?: string; machine?: AddonMachine } | null = null;
 
 function readEngineChoice(): Record<string, string> {
@@ -34256,29 +34267,77 @@ function jobRows(kinds: string[]): HTMLElement | null {
   return box;
 }
 
-/** The add-on's card: what it is, its licence and source, its version and
- *  digest, and the gesture (install · update · remove). `compact`: the tab's
- *  line; else Settings' row. */
-function addonCard(a: AddonState, compact: boolean): HTMLElement {
+/** MICRO-PREPARA-RITOCCHI p.4 · what the person does, read from Ottimizza's
+ *  switches and the profile last chosen in «Prepare for a use». */
+const USE_PROFILE_KEY = "emstudio.useProfile";
+function addonUsage(): { variants: boolean; tileset: boolean; blender: boolean; profile: string | null } {
+  let profile: string | null = null;
+  try { profile = localStorage.getItem(USE_PROFILE_KEY); } catch { /* none */ }
+  return { variants: true, tileset: localStorage.getItem(TILES_EXPERIMENTAL_KEY) === "1", blender: blenderOn(), profile };
+}
+
+/** The add-on's card: first, in plain words, what it is FOR YOU and whether to
+ *  install it (recommended / optional / not needed, p.4); then its state and
+ *  the gesture (install · update · remove; the validator «with Node.js» when
+ *  Node has to come too, p.5). The long text — licence, source, version and
+ *  digest, the path, the build — is in its ⓘ. `compact`: the tab's line;
+ *  else Settings' row. */
+function addonCard(a: AddonState, compact: boolean, advice?: Advice): HTMLElement {
   const box = document.createElement("div");
   box.className = "files-box files-addon";
   box.dataset.addon = a.id;
   box.dataset.installed = a.installed ? "1" : "0";
+  if (advice) box.dataset.advice = advice.code;
   const head = document.createElement("div");
   const b = document.createElement("b");
   b.textContent = `${a.name} ${a.installed?.version ?? a.version ?? ""}`.trim();
-  head.append(b, document.createTextNode(` · ${a.project} · ${t("files.addonLicence", { licence: a.licence })}`));
-  box.appendChild(head);
-  const facts = document.createElement("small");
-  facts.className = "files-addon-facts";
-  facts.textContent = a.installed
+  head.appendChild(b);
+  if (advice && !compact) {
+    const pill = document.createElement("span");
+    pill.className = `files-pill ${advice.code === "recommended" ? "on" : advice.code === "not_here" ? "warn" : "soon"}`;
+    pill.dataset.adviceCode = advice.code;
+    pill.textContent = t(`settings.addonAdvice.${advice.code}`);
+    head.append(" ", pill);
+  }
+  // the long text, in the ⓘ: licence, source, version and digest, path, build
+  const long: string[] = [`${a.project} · ${t("files.addonLicence", { licence: a.licence })} · ${a.licence_url}`];
+  long.push(t("files.addonSource", { source: a.source, author: a.author, does: t(`files.addonDoes.${a.id}`, undefined, a.does) }));
+  long.push(a.installed
     ? t("files.addonHere", { version: a.installed.version, path: a.installed.path })
     : a.available && a.needs === "node"
-      ? t("files.addonWillComeNpm", { version: a.version ?? "", node: a.node ?? "", sha: (a.sha256 ?? "").slice(0, 19), source: a.source })
+      ? t("files.addonWillComeNpm", { version: a.version ?? "", node: a.node ?? (a.node_version ? `${a.node_version} (EMStudio)` : ""),
+          sha: (a.sha256 ?? "").slice(0, 19), source: a.source })
     : a.available
       ? t("files.addonWillCome", { version: a.version ?? "", size: formatBytes(a.size ?? 0), platform: a.platform,
           sha: (a.sha256 ?? "").slice(0, 12), source: a.source })
-      : a.needs === "node" ? t("files.addonNeedsNode") : t("files.addonNoBuild", { platform: a.platform });
+      : t("files.addonNoBuild", { platform: a.platform }));
+  if (a.build_note) long.push(t(`files.addonBuild.${a.id}`, undefined, a.build_note));
+  if (a.pending) long.push(t(`files.addonPending.${a.id}`, undefined, a.pending));
+  if (a.upstream) long.push(t("files.addonUpstream", { url: a.upstream }));
+  if (a.with_node) long.push(t("files.addonWithNodeTip", { version: a.node_version ?? "", size: formatBytes(a.node_size ?? 0) }));
+  head.append(" ", tabTip(long.join("\n")));
+  box.appendChild(head);
+  if (!compact) {
+    // p.4 · first, in plain words: what it does for you, and when to install it
+    const forYou = document.createElement("p");
+    forYou.className = "files-addon-for";
+    forYou.textContent = t(`settings.addonFor.${a.id}`, undefined, a.does);
+    box.appendChild(forYou);
+    if (advice) {
+      const when = document.createElement("small");
+      when.className = "files-addon-facts files-addon-when";
+      when.textContent = t(`settings.addonWhen.${a.id}.${advice.code}`, { node: advice.because ?? "" },
+                           t(`settings.addonWhen.${advice.code}`));
+      box.appendChild(when);
+    }
+  }
+  const facts = document.createElement("small");
+  facts.className = "files-addon-facts";
+  facts.textContent = a.installed
+    ? t("files.addonHereShort", { version: a.installed.version })
+    : a.with_node ? t("files.addonWithNode", { version: a.node_version ?? "" })
+    : a.available ? t("files.addonToInstall", { version: a.version ?? "", size: formatBytes(a.size ?? 0) })
+    : a.needs === "node" ? t("files.addonNeedsNode") : t("files.addonNoBuild", { platform: a.platform });
   box.appendChild(facts);
   // p.2 · installed / to install / not suitable for this machine, and why
   if (a.fit && !compact) {
@@ -34296,13 +34355,6 @@ function addonCard(a: AddonState, compact: boolean): HTMLElement {
     em.dataset.emulated = a.emulator_ready ? "1" : "0";
     em.textContent = t(a.emulator_ready ? "files.addonEmulated" : "files.addonNoEmulator", { emulator: a.emulated });
     box.appendChild(em);
-  }
-  if (!compact) {
-    const src = document.createElement("small");
-    src.className = "files-addon-facts";
-    src.textContent = t("files.addonSource", { source: a.source, author: a.author,
-      does: t(`files.addonDoes.${a.id}`, undefined, a.does) });
-    box.appendChild(src);
   }
   const busy = [...bgJobs.values()].find((j) => j.kind === "addon" && jobRunning(j));
   const row = document.createElement("div");
@@ -34325,7 +34377,10 @@ function addonCard(a: AddonState, compact: boolean): HTMLElement {
     go.type = "button";
     go.className = a.installed ? "ghost" : "primary";
     go.dataset.action = a.installed ? "addon-update" : "addon-install";
-    go.textContent = a.installed ? t("files.addonUpdate", { version: a.version ?? "" }) : t("files.addonInstall");
+    // p.5 · ONE gesture when Node.js has to come too
+    go.textContent = a.installed ? t("files.addonUpdate", { version: a.version ?? "" })
+      : a.with_node ? t("files.addonInstallWithNode") : t("files.addonInstall");
+    if (a.with_node) go.dataset.withNode = "1";
     go.disabled = !!busy;
     go.onclick = () => { void install(); };
     row.appendChild(go);
@@ -34399,14 +34454,25 @@ function paintAddonsSettings(): void {
     const ml = document.getElementById("set-addons-machine");
     if (ml) ml.textContent = addonsState?.machine ? machineLine(addonsState.machine) : "";
     if (!list) { host.appendChild(tabLead(addonsState?.error ?? t("storage.bridgeDown"), "settings-hint")); return; }
+    // p.4 · one line on top: what is enough for what you do
+    const advice = adviseAddons(list, addonUsage());
+    const adv = new Map(advice.map((x) => [x.id, x]));
+    const enough = enoughFor(list, advice);
+    const sum = tabLead(enough.length ? t("settings.addonsEnough", { list: enough.join(", ") }) : t("settings.addonsNoneNeeded"),
+                        "files-lead files-addons-enough");
+    sum.dataset.enough = enough.join(",");
+    sum.append(" ", tabTip(t("settings.addonsEnoughTip")));
+    host.appendChild(sum);
     const fits = list.filter((a) => a.fit?.ok !== false), not = list.filter((a) => a.fit?.ok === false);
-    for (const a of fits) host.appendChild(addonCard(a, false));
+    // the recommended first, then the optional, then what is not needed
+    const rank = (a: AddonState): number => ({ recommended: 0, optional: 1, not_needed: 2, not_here: 3 })[adv.get(a.id)?.code ?? "optional"];
+    for (const a of [...fits].sort((x, y) => rank(x) - rank(y))) host.appendChild(addonCard(a, false, adv.get(a.id)));
     if (not.length) {
       const h = document.createElement("h5");
       h.className = "settings-sub";
       h.textContent = t("settings.addonsNotHere");
       host.appendChild(h);
-      for (const a of not) host.appendChild(addonCard(a, false));
+      for (const a of not) host.appendChild(addonCard(a, false, adv.get(a.id)));
     }
     host.appendChild(blenderSettingsCard());
     host.appendChild(tabLead(t("files.addonsWhere", { folder: list[0]?.folder.replace(/[/\\][^/\\]+$/, "") ?? "" }), "settings-hint"));
@@ -34501,7 +34567,19 @@ const useState = {
   versions: new Map<string, { folder: string; rows: VersionOnDisk[] }>(),
   gone: new Set<string>(), busy: "" as string, error: "", replace: false,
   container: new Map<string, string>(),
+  /** MICRO-PREPARA-RITOCCHI · the parameters changed row by row, and the
+   *  groups opened, by diagnosis */
+  edits: new Map<string, Map<string, RowParams>>(), open: new Set<string>(),
 };
+
+/** The profile chosen: the window's, else the last one chosen anywhere, else
+ *  webXR; a name of before (web, heriverse…) is not in the list: webXR. */
+function useProfileOf(win: Win): string {
+  let last: string | null = null;
+  try { last = localStorage.getItem(USE_PROFILE_KEY); } catch { /* none */ }
+  const want = filesPref(win, "use-profile") ?? last ?? "webxr";
+  return useState.profiles?.some((p) => p.id === want) ? want : "webxr";
+}
 
 async function loadUseProfiles(): Promise<void> {
   try {
@@ -34553,6 +34631,8 @@ async function runUseDiagnosis(files: string[], blend: string, profile: string):
     const ticks = useState.ticks.get(`${key}|${profile}`);
     const prev = useState.diag.get(`${key}|${profile}`);
     if (prev && ticks) body.checked = checkedIds(prev, ticks);
+    const edits = useState.edits.get(`${key}|${profile}`);
+    if (prev && edits?.size) body.params = paramsFor(prev, edits);
     const d = await postUse<Diagnosis>("/optimize/diagnose", body);
     if (!d.ok) { useState.error = String(d.error ?? "?"); return; }
     useState.diag.set(`${key}|${profile}`, d);
@@ -34594,12 +34674,15 @@ async function removeUseVersions(folder: string, names: string[]): Promise<void>
   await loadUseVersions(folder);
 }
 
-async function applyUse(blend: string, d: Diagnosis, ids: string[], model: string, level: string): Promise<void> {
+async function applyUse(blend: string, d: Diagnosis, ids: string[], model: string, level: string,
+                        params: Record<string, RowParams> = {}): Promise<void> {
   const cont = useState.container.get(blend) ?? "";
   const m = useState.measured.get(useKey([], blend));
   const body = { kind: "blender", op: "apply_use", blend, container: cont, objects: cont ? [] : (m?.names ?? []),
-    profile: d.profile, checked: ids, model, level, replace: useState.replace };
-  const label = t("files.useApplying", { name: `${model}@${level}`, profile: d.profile_label });
+    profile: d.profile, checked: ids, params, model, level, replace: useState.replace };
+  const prof = useState.profiles?.find((p) => p.id === d.profile);
+  const label = t("files.useApplying", { name: `${model}@${level}`,
+    profile: prof ? profileWords(prof, getLocale()).label : d.profile_label });
   const job = await startJob(body, label);
   if (!job) { renderStorage(); return; }
   toast(t("files.blStarted", { what: label }));
@@ -34641,26 +34724,41 @@ function filesUseSection(win: Win, chosen: FsEntry[]): HTMLElement {
   const blendE = chosen.find((e) => /\.blend$/i.test(e.name));
   const blend = blendE?.path ?? "";
   if (!gltfs.length && !blend) { sec.appendChild(tabLead(t("files.useChoose"), "files-hint")); return sec; }
-  // the profile
+  // the profile: E.D.'s names, each with the line of what it is for
   const pkey = "use-profile";
-  const profile = filesPref(win, pkey) ?? "web";
+  const profile = useProfileOf(win);
   const chips = document.createElement("div");
   chips.className = "files-chips";
+  const loc = getLocale();
   for (const p of useState.profiles) {
+    const w = profileWords(p, loc);
     const c = document.createElement("button");
     c.type = "button";
     c.className = "files-chip";
     c.dataset.useProfile = p.id;
     c.setAttribute("aria-pressed", String(p.id === profile));
-    c.textContent = p.label;
-    c.title = t("files.useProfileHint", { tris: p.max_triangles?.toLocaleString() ?? "—",
+    c.textContent = w.label;
+    const numbers = t("files.useProfileHint", { tris: p.max_triangles?.toLocaleString() ?? "—",
       obj: p.max_triangles_object?.toLocaleString() ?? "—", side: String(p.max_texture_side ?? "—"),
       tex: p.texture_formats.join("/"), geo: p.geometry_compression.join("/") || "—",
       inst: p.instancing ? t("files.yes") : t("files.no"), pack: p.packaging });
-    c.onclick = () => { setFilesPref(win, pkey, p.id === "web" ? null : p.id); renderStorage(); };
+    c.title = [w.hint, w.purpose, numbers].filter(Boolean).join("\n");
+    c.dataset.tip = c.title;
+    c.onclick = () => {
+      setFilesPref(win, pkey, p.id === "webxr" ? null : p.id);
+      try { localStorage.setItem(USE_PROFILE_KEY, p.id); } catch { /* off */ }
+      renderStorage();
+    };
     chips.appendChild(c);
   }
   sec.appendChild(chips);
+  const chosenP = useState.profiles.find((p) => p.id === profile);
+  if (chosenP) {
+    const w = profileWords(chosenP, loc);
+    const line = tabLead((w.hint ? `${w.hint} — ` : "") + w.purpose, "files-hint files-use-purpose");
+    line.dataset.profile = chosenP.id;
+    sec.appendChild(line);
+  }
   // what: the files, or the .blend (through Blender, its container)
   const key = useKey(gltfs, blend);
   const probe = blenderState?.s?.probe;
@@ -34745,31 +34843,143 @@ function useDiagnosisView(win: Win, d: Diagnosis, key: string, profile: string, 
       r.insertCell().textContent = v;
   }
   box.appendChild(tbl);
-  // the grid
-  const tk = useState.ticks.get(`${key}|${profile}`) ?? new Map<string, boolean>();
-  useState.ticks.set(`${key}|${profile}`, tk);
+  // the grid, by group (MICRO-PREPARA-RITOCCHI p.3): each group with its tick
+  // and its rationale; opened, its rows model by model with their rationale
+  // and the parameters the person may change
+  const dkey = `${key}|${profile}`;
+  const tk = useState.ticks.get(dkey) ?? new Map<string, boolean>();
+  useState.ticks.set(dkey, tk);
+  const ed = useState.edits.get(dkey) ?? new Map<string, RowParams>();
+  useState.edits.set(dkey, ed);
+  const again = (): void => { void runUseDiagnosis(blend ? [] : (d.files ?? []).map((f) => f.path), blend, profile); };
   const grid = document.createElement("div");
   grid.className = "files-use-grid";
   const words = { tris: t("files.useWTris"), stored: t("files.useWStored"), down: t("files.useWDown"),
     gpu: t("files.useWGpu"), calls: t("files.useWCalls") };
-  for (const r of d.improvements) {
-    const row = document.createElement("label");
-    row.className = "files-use-row";
-    row.dataset.row = r.id;
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = r.available && (tk.get(r.id) ?? r.checked);
-    cb.disabled = !r.available || r.kind === "packaging";
-    cb.onchange = () => { tk.set(r.id, cb.checked); void runUseDiagnosis(blend ? [] : (d.files ?? []).map((f) => f.path), blend, profile); };
-    const txt = document.createElement("span");
-    txt.textContent = r.problem ? `${r.problem} → ${r.action}` : r.action;
-    const eff = document.createElement("span");
-    eff.className = "files-hint";
-    eff.textContent = r.available ? effectLine(r.effect, words) : r.why;
-    row.append(cb, " ", txt, " ", eff);
-    if (r.kind === "decimate" && !blend) row.append(" ", tabTip(t("files.useOnlyBlender")));
-    grid.appendChild(row);
+  for (const g of groupsOf(d)) {
+    const rows = rowsOf(d, g.id);
+    if (!rows.length) continue;
+    const gb = document.createElement("div");
+    gb.className = "files-use-group";
+    gb.dataset.group = g.id;
+    const gh = document.createElement("div");
+    gh.className = "files-use-group-h";
+    const opened = useState.open.has(`${dkey}|${g.id}`);
+    const tog = document.createElement("button");
+    tog.type = "button";
+    tog.className = "link files-use-open";
+    tog.dataset.action = "use-group-open";
+    tog.textContent = opened ? "▾" : "▸";
+    tog.setAttribute("aria-expanded", String(opened));
+    tog.onclick = () => { if (opened) useState.open.delete(`${dkey}|${g.id}`); else useState.open.add(`${dkey}|${g.id}`); renderStorage(); };
+    gh.appendChild(tog);
+    const title = document.createElement("b");
+    title.textContent = t(`files.useGroup.${g.id}`, undefined, g.label);
+    if (g.id === "tileset") {
+      gh.append(" ", title);
+    } else {
+      const gc = document.createElement("input");
+      gc.type = "checkbox";
+      gc.dataset.action = "use-group-tick";
+      gc.checked = groupTicked(d, g.id, tk);
+      gc.disabled = !g.available;
+      gc.onchange = () => { tickGroup(d, g.id, gc.checked, tk); again(); };
+      const on = rows.filter((r) => r.available && !r.separate && (tk.get(r.id) ?? r.checked)).length;
+      const n = document.createElement("span");
+      n.className = "files-hint";
+      n.textContent = ` ${on}/${rows.filter((r) => r.available && !r.separate).length}`;
+      const lab = document.createElement("label");
+      lab.append(gc, " ", title, n);
+      gh.appendChild(lab);
+    }
+    gh.append(" ", tabTip(t(`files.useGroupWhy.${g.id}`, undefined, g.rationale)));
+    gb.appendChild(gh);
+    const why = tabLead(t(`files.useGroupWhy.${g.id}`, undefined, g.rationale), "files-hint files-use-why");
+    gb.appendChild(why);
+    if (g.id === "tileset") {
+      // a packaging, not a profile: suggested with why, its action one click away
+      for (const r of rows) gb.appendChild(tabLead(t("files.useTilesetWhy", { why: r.problem }), "files-hint files-warn"));
+      const go = document.createElement("button");
+      go.type = "button";
+      go.dataset.action = "use-tileset";
+      go.textContent = t("files.useTilesetGo");
+      go.onclick = () => {
+        try { localStorage.setItem(TILES_EXPERIMENTAL_KEY, "1"); } catch { /* off */ }
+        setFilesPref(win, "opt", TILESET_PRESET_ID);
+        renderStorage();
+        requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-tiles-switch]")?.scrollIntoView({ block: "start" }));
+      };
+      gb.append(go, " ", tabTip(t("files.useTilesetTip")));
+      grid.appendChild(gb);
+      continue;
+    }
+    if (opened) {
+      for (const r of rows) {
+        const row = document.createElement("div");
+        row.className = "files-use-row";
+        row.dataset.row = r.id;
+        const lab = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = r.available && (tk.get(r.id) ?? r.checked);
+        cb.disabled = !r.available;
+        cb.onchange = () => { tk.set(r.id, cb.checked); again(); };
+        const txt = document.createElement("span");
+        txt.textContent = r.problem ? `${r.problem} → ${r.action}` : r.action;
+        lab.append(cb, " ", txt);
+        const eff = document.createElement("span");
+        eff.className = "files-hint";
+        eff.textContent = r.available ? effectLine(r.effect, words) : r.why;
+        row.append(lab, " ", eff);
+        if (r.rationale) row.append(" ", tabTip(r.rationale));
+        if (r.kind === "decimate" && !blend) row.append(" ", tabTip(t("files.useOnlyBlender")));
+        if (r.params && r.available) {
+          const pr = document.createElement("div");
+          pr.className = "files-use-params";
+          const mine = ed.get(r.id) ?? {};
+          const num = (name: "triangles_to" | "side", labelKey: string, min: number): void => {
+            if (!(name in (r.params as RowParams))) return;
+            const l = document.createElement("label");
+            l.textContent = t(labelKey) + " ";
+            const i = document.createElement("input");
+            i.type = "number";
+            i.min = String(min);
+            i.step = name === "side" ? "256" : "1000";
+            i.dataset.param = name;
+            i.value = String(mine[name] ?? (r.params as RowParams)[name] ?? "");
+            i.onchange = () => { const v = Number(i.value); ed.set(r.id, { ...mine, [name]: Number.isFinite(v) && v > 0 ? v : null }); again(); };
+            l.appendChild(i);
+            pr.appendChild(l);
+          };
+          num("triangles_to", "files.useParamTris", 100);
+          num("side", "files.useParamSide", 64);
+          if ("format" in r.params) {
+            const l = document.createElement("label");
+            l.textContent = t("files.useParamFormat") + " ";
+            const sel = document.createElement("select");
+            sel.dataset.param = "format";
+            for (const f of ["jpeg", "png", "ktx2"]) {
+              const o = document.createElement("option");
+              o.value = f;
+              o.textContent = f.toUpperCase();
+              o.selected = (mine.format ?? r.params.format) === f;
+              sel.appendChild(o);
+            }
+            sel.onchange = () => { ed.set(r.id, { ...mine, format: sel.value }); again(); };
+            l.appendChild(sel);
+            pr.appendChild(l);
+          }
+          row.appendChild(pr);
+        }
+        gb.appendChild(row);
+      }
+    }
+    grid.appendChild(gb);
   }
+  const pack = d.improvements.find((r) => r.kind === "packaging");
+  if (pack) grid.appendChild(tabLead(t("files.usePackaging", { what: pack.action }), "files-hint"));
+  if (d.improvements.some((r) => r.kind === "decimate" && (tk.get(r.id) ?? r.checked)))
+    grid.appendChild(tabLead(t("files.useDecimateBy"), "files-hint"));
   box.appendChild(grid);
   const b = d.before, a = d.after;
   box.appendChild(tabLead(t("files.useAfter", { d0: useMb(b.download_bytes), d1: useMb(a.download_bytes),
@@ -34802,7 +35012,7 @@ function useDiagnosisView(win: Win, d: Diagnosis, key: string, profile: string, 
     ap.dataset.action = "use-apply";
     ap.disabled = !(blenderOn() && probe?.ok && probe.emtools?.loaded);
     ap.textContent = t("files.useApply");
-    ap.onclick = () => { void applyUse(blend, d, ids, model, level); };
+    ap.onclick = () => { void applyUse(blend, d, ids, model, level, paramsFor(d, ed)); };
     box.appendChild(ap);
   } else box.appendChild(tabLead(t("files.useApplyFiles"), "files-hint"));
   return box;

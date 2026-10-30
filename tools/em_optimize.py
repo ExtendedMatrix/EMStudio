@@ -75,57 +75,112 @@ ADDONS["gltfpack"]["builds"]["windows-arm64"] = ADDONS["gltfpack"]["builds"]["wi
 # MICRO-OTTIMIZZA-2 · Obj2Tiles (OpenDroneMap, AGPL-3.0): a textured OBJ → a 3D
 # Tiles tileset with its levels of detail. CALLED as a program of its own by
 # the bridge, never linked: its licence stays its own, and the tab and Settings
-# say it with its source. v1.8.0 (14 Oct 2026) publishes Osx64, Win64,
-# WinArm64, Linux64, LinuxArm64; each zip holds the program and the libktx it
-# loads beside itself (``extra``). On a Mac with Apple Silicon the Osx64 build
-# runs under Rosetta 2 (``emulated``) until upstream publishes
-# ``Obj2Tiles-OsxArm64.zip`` (E.D.'s OpenDroneMap/Obj2Tiles PR #107): that day
-# the ``darwin-arm64`` entry is that asset and its digest, nothing else.
-_O2T = "https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.8.0/"
+# say it with its source. Each zip holds the program and the libktx it loads
+# beside itself for KTX2 output (``extra``; our preset writes JPEG).
+#
+# MICRO-PREPARA-RITOCCHI (E.D., 30 Oct 2026) · FROM E.D.'S FORK until upstream
+# merges his two pull requests to OpenDroneMap/Obj2Tiles — #107 (a native
+# osx-arm64 build) and #108 (``--progress``, JSON lines on stdout). The fork's
+# release v1.8.0-em.2 (branch ``emstudio`` = upstream 1.8.0 + #107 + #108,
+# commit f9e565f, built by the fork's Actions) publishes the six builds; their
+# sizes and digests are the release page's own, checked against the bytes
+# downloaded on 30 Oct 2026. Apple Silicon runs the NATIVE build (no Rosetta;
+# its zip carries no libktx: no KTX2 output there, which our preset does not
+# use). The licence is unchanged (AGPL-3.0, the source public in the fork),
+# the credits stay OpenDroneMap's. The day the two PRs are merged and upstream
+# publishes them, ONE field goes back: ``OBJ2TILES_FROM = "upstream"`` (and
+# the upstream table gets that release's assets and digests).
+_O2T_UPSTREAM = "https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.8.0/"
+_O2T_FORK = "https://github.com/zalmoxes-laran/Obj2Tiles/releases/download/v1.8.0-em.2/"
+OBJ2TILES_FROM = "fork"
+_O2T_BUILDS = {
+    "upstream": {
+        "darwin-x86_64": {
+            "version": "1.8.0", "asset": "Obj2Tiles-Osx64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
+            "size": 11113512, "url": _O2T_UPSTREAM + "Obj2Tiles-Osx64.zip",
+            "sha256": "2f843f40ba23f535953ccfc19103549a80fba953d6483a21fe8a9e48545548b3"},
+        "windows-x86_64": {
+            "version": "1.8.0", "asset": "Obj2Tiles-Win64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
+            "size": 22160647, "url": _O2T_UPSTREAM + "Obj2Tiles-Win64.zip",
+            "sha256": "762cc3500af613dda8c601d70d503218298b0d6dc45a91a9133d04134e3005c6"},
+        "windows-arm64": {
+            "version": "1.8.0", "asset": "Obj2Tiles-WinArm64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
+            "size": 21034189, "url": _O2T_UPSTREAM + "Obj2Tiles-WinArm64.zip",
+            "sha256": "089523f069cc61c76043a7b4f86e5102fcf07b11c2798ee07e456f286b695c87"},
+        "linux-x86_64": {
+            "version": "1.8.0", "asset": "Obj2Tiles-Linux64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
+            "size": 11391412, "url": _O2T_UPSTREAM + "Obj2Tiles-Linux64.zip",
+            "sha256": "f50663075d6b4ebff46e0e52fd365d9b8f78d6b5b9f4c9f07d56866f5a6f7de9"},
+        "linux-arm64": {
+            "version": "1.8.0", "asset": "Obj2Tiles-LinuxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
+            "size": 10962078, "url": _O2T_UPSTREAM + "Obj2Tiles-LinuxArm64.zip",
+            "sha256": "1903851bb5da073b7e239b09094f694ceeb8fbffe0f1ce68fdb0b1575768da77"},
+    },
+    "fork": {
+        "darwin-arm64": {
+            "version": "1.8.0-em.2", "asset": "Obj2Tiles-OsxArm64.zip", "member": "Obj2Tiles", "extra": [],
+            "size": 9309497, "url": _O2T_FORK + "Obj2Tiles-OsxArm64.zip",
+            "sha256": "4da920932beaedc60ea966692bec4e93e280e1c7d30092a7442179828a101180"},
+        "darwin-x86_64": {
+            "version": "1.8.0-em.2", "asset": "Obj2Tiles-Osx64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
+            "size": 11138280, "url": _O2T_FORK + "Obj2Tiles-Osx64.zip",
+            "sha256": "a236b937a2880df1b8a4e7f2849e6c5ae7e97cc5b995f32e2d8477278d61772f"},
+        "windows-x86_64": {
+            "version": "1.8.0-em.2", "asset": "Obj2Tiles-Win64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
+            "size": 22220626, "url": _O2T_FORK + "Obj2Tiles-Win64.zip",
+            "sha256": "f2d814404f3b9353ce15aa32e926299116ba496ca349cd7ce17f1fbb1e86698f"},
+        "windows-arm64": {
+            "version": "1.8.0-em.2", "asset": "Obj2Tiles-WinArm64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
+            "size": 21090376, "url": _O2T_FORK + "Obj2Tiles-WinArm64.zip",
+            "sha256": "ab95e6c180d5d7208ed3e28c938de40bee9054ca1021e2403247f464b1f1ebf1"},
+        "linux-x86_64": {
+            "version": "1.8.0-em.2", "asset": "Obj2Tiles-Linux64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
+            "size": 11416156, "url": _O2T_FORK + "Obj2Tiles-Linux64.zip",
+            "sha256": "3b2ab5e3dbea6e74632bb8cf4d614c559a73658c013bc73fc6f80f41a1401444"},
+        "linux-arm64": {
+            "version": "1.8.0-em.2", "asset": "Obj2Tiles-LinuxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
+            "size": 10985231, "url": _O2T_FORK + "Obj2Tiles-LinuxArm64.zip",
+            "sha256": "29ee7387a55035ee8bc0b289798b9b7327f70f307891e5311aa76467fe875bac"},
+    },
+}
+_O2T_FROM = {
+    "upstream": {"source": "https://github.com/OpenDroneMap/Obj2Tiles/releases",
+                 "licence_url": "https://github.com/OpenDroneMap/Obj2Tiles/blob/master/LICENSE.md",
+                 "build": ""},
+    "fork": {"source": "https://github.com/zalmoxes-laran/Obj2Tiles/tree/emstudio",
+             "licence_url": "https://github.com/zalmoxes-laran/Obj2Tiles/blob/emstudio/LICENSE.md",
+             "build": "CNR-ISPC build: 1.8.0 + Apple Silicon + progress",
+             "pending": "back to OpenDroneMap's release when its pull requests #107 (osx-arm64) and "
+                        "#108 (--progress) are merged: one field, OBJ2TILES_FROM"},
+}
 ADDONS["obj2tiles"] = {
     "name": "Obj2Tiles",
     "project": "OpenDroneMap",
     "author": "OpenDroneMap contributors (Luca Di Leo, Piero Toffanin)",
     "licence": "AGPL-3.0",
-    "licence_url": "https://github.com/OpenDroneMap/Obj2Tiles/blob/master/LICENSE.md",
-    "source": "https://github.com/OpenDroneMap/Obj2Tiles/releases",
+    "licence_url": _O2T_FROM[OBJ2TILES_FROM]["licence_url"],
+    "source": _O2T_FROM[OBJ2TILES_FROM]["source"],
+    "upstream": "https://github.com/OpenDroneMap/Obj2Tiles",
+    "build_note": _O2T_FROM[OBJ2TILES_FROM]["build"],
+    "pending": _O2T_FROM[OBJ2TILES_FROM].get("pending", ""),
     "does": "textured OBJ → Cesium 3D Tiles: decimation per level of detail, spatial splitting, tiling",
     "heavy": True,
     # below this a survey's mesh rarely fits (round 2: 1.1 GB of OBJ → 3.1 GB)
     "min_memory_mb": 8192,
-    "builds": {
-        "darwin-x86_64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-Osx64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
-            "size": 11113512, "url": _O2T + "Obj2Tiles-Osx64.zip",
-            "sha256": "2f843f40ba23f535953ccfc19103549a80fba953d6483a21fe8a9e48545548b3"},
-        "windows-x86_64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-Win64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
-            "size": 22160647, "url": _O2T + "Obj2Tiles-Win64.zip",
-            "sha256": "762cc3500af613dda8c601d70d503218298b0d6dc45a91a9133d04134e3005c6"},
-        "windows-arm64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-WinArm64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
-            "size": 21034189, "url": _O2T + "Obj2Tiles-WinArm64.zip",
-            "sha256": "089523f069cc61c76043a7b4f86e5102fcf07b11c2798ee07e456f286b695c87"},
-        "linux-x86_64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-Linux64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
-            "size": 11391412, "url": _O2T + "Obj2Tiles-Linux64.zip",
-            "sha256": "f50663075d6b4ebff46e0e52fd365d9b8f78d6b5b9f4c9f07d56866f5a6f7de9"},
-        "linux-arm64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-LinuxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
-            "size": 10962078, "url": _O2T + "Obj2Tiles-LinuxArm64.zip",
-            "sha256": "1903851bb5da073b7e239b09094f694ceeb8fbffe0f1ce68fdb0b1575768da77"},
-    },
+    "builds": dict(_O2T_BUILDS[OBJ2TILES_FROM]),
 }
-ADDONS["obj2tiles"]["builds"]["darwin-arm64"] = {**ADDONS["obj2tiles"]["builds"]["darwin-x86_64"],
-                                                 "emulated": "Rosetta 2"}
+if "darwin-arm64" not in ADDONS["obj2tiles"]["builds"]:
+    # upstream 1.8.0 has no Apple Silicon build: the Intel one under Rosetta 2
+    ADDONS["obj2tiles"]["builds"]["darwin-arm64"] = {**ADDONS["obj2tiles"]["builds"]["darwin-x86_64"],
+                                                     "emulated": "Rosetta 2"}
 
 # MICRO-OTTIMIZZA-2 · Cesium's 3d-tiles-validator (Apache-2.0): the judge of
-# every tileset before it enters the graph. It is a Node program: installed by
-# the npm of this machine from the npm registry at a FIXED version whose
-# tarball integrity (sha512, the registry's own) is checked in the lockfile
-# npm writes; ``sharp`` is then rebuilt (its prebuilt image library), the
-# other install scripts never run. Without Node the add-on says so, and a
-# tileset is judged by EMStudio's own structural check, said as such.
+# every tileset before it enters the graph. It is a Node program, installed by
+# npm from the npm registry at a FIXED version whose tarball integrity (sha512,
+# the registry's own) is checked in the lockfile npm writes; ``sharp`` is then
+# rebuilt (its prebuilt image library), the other install scripts never run.
+# Without the validator a tileset is judged by EMStudio's own structural
+# check, said as such.
 ADDONS["tiles-validator"] = {
     "name": "3d-tiles-validator",
     "project": "Cesium",
@@ -140,6 +195,77 @@ ADDONS["tiles-validator"] = {
             "size": 220_000_000},
     "builds": {},
 }
+
+# MICRO-PREPARA-RITOCCHI p.5 (E.D., 30 Oct 2026) · Node.js ITSELF as a managed
+# add-on, so the validator never asks «install Node» of whoever has none:
+# downloaded on request from nodejs.org's official release at a FIXED LTS
+# (v26.13.0 «Lithium», the Active LTS since 28 Oct 2026), its sha256 the one
+# of the release's SHASUMS256.txt, unpacked whole (node and its npm) into
+# ``<addons>/node/<version>/`` and used by EMStudio only (never put on the
+# system's PATH). A Node of 18 or newer already on this machine is used
+# instead (:func:`node_tool`). Licence MIT (Node.js contributors; the bundled
+# third-party licences travel in its LICENSE file).
+_NODE = "https://nodejs.org/dist/v26.13.0/"
+ADDONS["node"] = {
+    "name": "Node.js",
+    "project": "OpenJS Foundation",
+    "author": "Node.js contributors",
+    "licence": "MIT",
+    "licence_url": "https://github.com/nodejs/node/blob/v26.13.0/LICENSE",
+    "source": "https://nodejs.org/en/download",
+    "does": "the JavaScript runtime the 3d-tiles-validator runs on, with its npm",
+    "runtime": True,
+    "builds": {
+        "darwin-arm64": {
+            "version": "26.13.0", "asset": "node-v26.13.0-darwin-arm64.tar.gz",
+            "member": "node-v26.13.0-darwin-arm64/bin/node",
+            "npm": "node-v26.13.0-darwin-arm64/lib/node_modules/npm/bin/npm-cli.js",
+            "size": 58334661, "url": _NODE + "node-v26.13.0-darwin-arm64.tar.gz",
+            "sha256": "d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6"},
+        "darwin-x86_64": {
+            "version": "26.13.0", "asset": "node-v26.13.0-darwin-x64.tar.gz",
+            "member": "node-v26.13.0-darwin-x64/bin/node",
+            "npm": "node-v26.13.0-darwin-x64/lib/node_modules/npm/bin/npm-cli.js",
+            "size": 59802926, "url": _NODE + "node-v26.13.0-darwin-x64.tar.gz",
+            "sha256": "525c9b29bb0263d687de60a4cec0e2a6db876a8eb032369e5795eca71e7c358e"},
+        "linux-x86_64": {
+            "version": "26.13.0", "asset": "node-v26.13.0-linux-x64.tar.gz",
+            "member": "node-v26.13.0-linux-x64/bin/node",
+            "npm": "node-v26.13.0-linux-x64/lib/node_modules/npm/bin/npm-cli.js",
+            "size": 62893692, "url": _NODE + "node-v26.13.0-linux-x64.tar.gz",
+            "sha256": "5848553868b402d3fabb5b09270649977780a390f832155721025a08b5104455"},
+        "linux-arm64": {
+            "version": "26.13.0", "asset": "node-v26.13.0-linux-arm64.tar.gz",
+            "member": "node-v26.13.0-linux-arm64/bin/node",
+            "npm": "node-v26.13.0-linux-arm64/lib/node_modules/npm/bin/npm-cli.js",
+            "size": 62611009, "url": _NODE + "node-v26.13.0-linux-arm64.tar.gz",
+            "sha256": "439e9c438acdf6a6ffe47418da709153d66c4bed812e30a473faacb107dd2791"},
+        "windows-x86_64": {
+            "version": "26.13.0", "asset": "node-v26.13.0-win-x64.zip",
+            "member": "node-v26.13.0-win-x64/node.exe",
+            "npm": "node-v26.13.0-win-x64/node_modules/npm/bin/npm-cli.js",
+            "size": 41157375, "url": _NODE + "node-v26.13.0-win-x64.zip",
+            "sha256": "dcc60d59a0746999f99064a01c020445d54d84228c691cdbf25b49ac3b59150a"},
+        "windows-arm64": {
+            "version": "26.13.0", "asset": "node-v26.13.0-win-arm64.zip",
+            "member": "node-v26.13.0-win-arm64/node.exe",
+            "npm": "node-v26.13.0-win-arm64/node_modules/npm/bin/npm-cli.js",
+            "size": 37005985, "url": _NODE + "node-v26.13.0-win-arm64.zip",
+            "sha256": "a9427139595156ef484e1fb08957676e09d4232368dd1743a2a9f93f3d241b14"},
+    },
+}
+#: The oldest Node the validator runs on (its package.json: ``engines``).
+NODE_MIN_MAJOR = 18
+
+# MICRO-PREPARA-RITOCCHI p.4 · what each add-on is FOR YOU: the actions of
+# Ottimizza that use it, and the profiles of use those actions serve.
+# Settings › Add-ons says it first, in plain words, and whether it is
+# recommended for what you do or optional (EMStudio decides from the switches
+# and choices you made: ``addon-advice.ts``).
+ADDONS["gltfpack"]["serves"] = {"actions": ["variants"], "profiles": ["preview", "mobile_webxr"]}
+ADDONS["obj2tiles"]["serves"] = {"actions": ["tileset"], "profiles": ["desktop_realtime", "webxr"]}
+ADDONS["tiles-validator"]["serves"] = {"actions": ["tileset"], "profiles": ["desktop_realtime", "webxr"]}
+ADDONS["node"]["serves"] = {"actions": ["tileset"], "profiles": [], "for": ["tiles-validator"]}
 
 
 def platform_key() -> str:
@@ -176,18 +302,68 @@ def installed(addon_id: str):
     return m
 
 
-def node_tool():
-    """Node and npm of this machine (``EM_NODE``, the PATH): ``{node, npm,
-    version}`` or None. The validator add-on needs them."""
-    node = os.environ.get("EM_NODE") or shutil.which("node") or ""
-    npm = shutil.which("npm", path=os.path.dirname(node) + os.pathsep + os.environ.get("PATH", "")) if node else None
-    if not node or not os.path.isfile(node):
-        return None
+def _node_version(node: str):
+    """``(major, "v26.13.0")`` of a Node binary, or None."""
     try:
         v = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=10).stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
+        return int(v.lstrip("v").split(".")[0]), v
+    except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
-    return {"node": node, "npm": npm or "", "version": v}
+
+
+def _npm_beside(node: str):
+    """The npm that goes with ``node``: ``[npm]`` on its folder or the PATH,
+    or ``[node, npm-cli.js]`` from its own lib — a list to prefix a command."""
+    folder = os.path.dirname(node)
+    for js in (os.path.join(folder, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+               os.path.join(folder, "node_modules", "npm", "bin", "npm-cli.js")):
+        if os.path.isfile(js):
+            return [node, os.path.normpath(js)]
+    npm = shutil.which("npm", path=folder + os.pathsep + os.environ.get("PATH", ""))
+    return [npm] if npm else []
+
+
+#: Where a Node of this machine may live when EMStudio (an app started from
+#: the Dock) does not inherit the shell's PATH: Homebrew, the official
+#: installer, Volta, the system.
+_NODE_PLACES = ("/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node",
+                os.path.expanduser("~/.volta/bin/node"), r"C:\Program Files\nodejs\node.exe")
+
+
+def node_tool(system_only: bool = False):
+    """The Node the validator runs on: ``EM_NODE``; a Node of
+    :data:`NODE_MIN_MAJOR` or newer already on this machine (the PATH, then
+    the usual places) — with ``EM_NODE`` set, only that one —; else
+    EMStudio's own (the ``node`` add-on). →
+    ``{node, npm, npm_cmd, version, from}`` (``from``: ``env``, ``system`` or
+    ``addon``) or None. ``npm`` is kept for who reads it; ``npm_cmd`` is the
+    list a command starts with."""
+    cands = []
+    if os.environ.get("EM_NODE"):
+        # explicit: that one (or none), never a search of the machine
+        cands.append(("env", os.environ["EM_NODE"]))
+    else:
+        on_path = shutil.which("node")
+        if on_path:
+            cands.append(("system", on_path))
+        cands += [("system", p) for p in _NODE_PLACES]
+    if not system_only:
+        mine = tool_path("node")
+        if mine:
+            cands.append(("addon", mine))
+    seen = set()
+    for origin, node in cands:
+        if not node or node in seen or not os.path.isfile(node):
+            continue
+        seen.add(node)
+        got = _node_version(node)
+        if got is None or (origin != "env" and got[0] < NODE_MIN_MAJOR):
+            continue
+        npm = _npm_beside(node)
+        if not npm:
+            continue
+        return {"node": node, "npm": npm[-1], "npm_cmd": npm, "version": got[1], "from": origin}
+    return None
 
 
 def rosetta_ready() -> bool:
@@ -230,10 +406,24 @@ def addon_state(addon_id: str) -> dict:
         out["emulated"] = build["emulated"]
         out["emulator_ready"] = rosetta_ready()
     if spec.get("npm"):
+        # p.5 · with a Node of this machine, or with EMStudio's own: ONE
+        # gesture, «Install (with Node.js)», when Node has to come too
         node = node_tool()
         out["needs"] = "node"
         out["node"] = node["version"] if node else None
-        out["available"] = bool(node and node.get("npm"))
+        out["node_from"] = node["from"] if node else None
+        node_build = ADDONS["node"]["builds"].get(key)
+        out["with_node"] = node is None and node_build is not None
+        if out["with_node"]:
+            out["node_version"] = node_build["version"]
+            out["node_size"] = node_build["size"]
+        out["available"] = bool(node) or node_build is not None
+    if addon_id == "node":
+        sysnode = node_tool(system_only=True)
+        out["system_node"] = sysnode["version"] if sysnode else None
+    for k in ("serves", "build_note", "pending", "upstream", "runtime"):
+        if spec.get(k):
+            out[k] = spec[k]
     out["fit"] = addon_fit(spec, out, memory_total_mb())
     return out
 
@@ -352,20 +542,53 @@ def install(addon_id: str, job=None, *, fetch=None) -> dict:
     say(f"sha256 {got} = pinned")
     home = addons_dir() / addon_id
     dest_dir = home / build["version"]
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(buf) as z:
-        # the program, and what it loads beside itself (Obj2Tiles' libktx)
-        for member in [build["member"], *build.get("extra", [])]:
-            data = z.read(member)
-            out = dest_dir / os.path.basename(member)
-            tmp = out.with_name(out.name + ".part")
-            tmp.write_bytes(data)
-            os.chmod(tmp, 0o755)
-            os.replace(tmp, out)
-    dest = dest_dir / build["member"]
+    if spec.get("runtime"):
+        # p.5 · a runtime (Node.js) is unpacked WHOLE (node and its npm),
+        # into a folder of its own made complete before it takes its place
+        part = home / (build["version"] + ".part")
+        shutil.rmtree(part, ignore_errors=True)
+        part.mkdir(parents=True, exist_ok=True)
+        buf.seek(0)
+        if build["asset"].endswith(".zip"):
+            with zipfile.ZipFile(buf) as z:
+                for info in z.infolist():
+                    target = (part / info.filename).resolve()
+                    if not str(target).startswith(str(part.resolve())):
+                        raise RuntimeError(f"{info.filename} would land outside the add-on's folder")
+                z.extractall(part)
+        else:
+            import tarfile
+            with tarfile.open(fileobj=buf, mode="r:*") as tz:
+                try:
+                    tz.extractall(part, filter="tar")
+                except TypeError:  # Python before 3.12: the members checked here
+                    for m in tz.getmembers():
+                        target = (part / m.name).resolve()
+                        if not str(target).startswith(str(part.resolve())):
+                            raise RuntimeError(f"{m.name} would land outside the add-on's folder")
+                    tz.extractall(part)
+        if not (part / build["member"]).is_file():
+            raise RuntimeError(f"{build['member']} is not in {build['asset']}")
+        os.chmod(part / build["member"], 0o755)
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        os.replace(part, dest_dir)
+    else:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(buf) as z:
+            # the program, and what it loads beside itself (Obj2Tiles' libktx)
+            for member in [build["member"], *build.get("extra", [])]:
+                data = z.read(member)
+                out = dest_dir / os.path.basename(member)
+                tmp = out.with_name(out.name + ".part")
+                tmp.write_bytes(data)
+                os.chmod(tmp, 0o755)
+                os.replace(tmp, out)
+    dest = dest_dir / (build["member"] if spec.get("runtime") else os.path.basename(build["member"]))
     manifest = {"version": build["version"], "path": str(dest), "asset": build["asset"],
                 "sha256": build["sha256"], "url": build["url"], "licence": spec["licence"],
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    if build.get("npm"):
+        manifest["npm"] = str(dest_dir / build["npm"])
     _manifest_path(addon_id).write_text(json.dumps(manifest, indent=1), "utf-8")
     for old in home.iterdir():
         if old.is_dir() and old.name != build["version"]:
@@ -381,26 +604,39 @@ def _install_npm(addon_id: str, job=None) -> dict:
     lockfile npm wrote against the pinned one (another → nothing installed)."""
     spec = ADDONS[addon_id]
     n = spec["npm"]
-    node = node_tool()
-    if not node or not node.get("npm"):
-        raise RuntimeError(f"{spec['name']} is a Node.js program: install Node.js 18 or newer (nodejs.org), then try again")
     say = (job.say if job else (lambda *_a, **_k: None))
+    node = node_tool()
+    if not node:
+        # p.5 · no Node of 18 or newer here: EMStudio's own comes first
+        if ADDONS["node"]["builds"].get(platform_key()) is None:
+            raise RuntimeError(f"{spec['name']} is a Node.js program and Node.js publishes no build for "
+                               f"{platform_key()}: install Node.js {NODE_MIN_MAJOR} or newer, then try again")
+        say(f"Node.js {ADDONS['node']['builds'][platform_key()]['version']} first (nodejs.org, MIT): "
+            f"EMStudio's own, used by EMStudio only")
+        install("node", job)
+        node = node_tool()
+        if not node:
+            raise RuntimeError("Node.js was installed but does not answer")
+    say(f"Node.js {node['version']} ({node['from']}: {node['node']})")
     home = addons_dir() / addon_id
     dest_dir = home / n["version"]
     part = home / (n["version"] + ".part")
     shutil.rmtree(part, ignore_errors=True)
     part.mkdir(parents=True, exist_ok=True)
     (part / "package.json").write_text(json.dumps({"name": "emstudio-addon", "private": True}), "utf-8")
-    steps = [[node["npm"], "install", "--prefix", str(part), f"{n['package']}@{n['version']}",
-              "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact"]]
-    steps += [[node["npm"], "rebuild", r, "--prefix", str(part)] for r in n.get("rebuild", [])]
+    npm = list(node["npm_cmd"])
+    steps = [npm + ["install", "--prefix", str(part), f"{n['package']}@{n['version']}",
+                    "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact"]]
+    steps += [npm + ["rebuild", r, "--prefix", str(part)] for r in n.get("rebuild", [])]
+    # the scripts npm runs (sharp's rebuild) find THIS node first
+    env = dict(os.environ, PATH=os.path.dirname(node["node"]) + os.pathsep + os.environ.get("PATH", ""))
     for i, cmd in enumerate(steps):
-        say(" ".join(["npm"] + cmd[1:]))
+        say(" ".join(["npm"] + cmd[len(npm):]))
         if job:
             job.progress = 0.1 + 0.8 * i / len(steps)
-            run = job.run_process(cmd, timeout=900)
+            run = job.run_process(cmd, timeout=900, env=env)
         else:
-            run = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            run = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
         if run.returncode != 0:
             raise RuntimeError(f"npm: {(run.stderr or run.stdout or '').strip()[-400:]}")
     try:
@@ -422,7 +658,7 @@ def _install_npm(addon_id: str, job=None) -> dict:
     os.replace(part, dest_dir)
     manifest = {"version": n["version"], "path": str(dest_dir / n["main"]), "asset": f"{n['package']}@{n['version']}",
                 "sha256": n["integrity"], "url": f"https://registry.npmjs.org/{n['package']}", "licence": spec["licence"],
-                "node": node["version"], "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+                "node": node["version"], "node_from": node["from"], "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     _manifest_path(addon_id).write_text(json.dumps(manifest, indent=1), "utf-8")
     for old in home.iterdir():
         if old.is_dir() and old.name != n["version"]:
@@ -483,9 +719,9 @@ class Job:
         if echo:
             sys.stderr.write(f"  [job {self.id} {self.kind}] {line}\n")
 
-    def run_process(self, cmd: list, timeout: float = 3600):
+    def run_process(self, cmd: list, timeout: float = 3600, env=None):
         """The tool in a process of its own; cancel ends it. → CompletedProcess."""
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         t0 = time.time()
         try:
             while True:
@@ -841,12 +1077,19 @@ def obj2tiles_command(tool: str, source: str, out_dir: str, plan: dict, *, progr
 
 class O2TProgress:
     """The share done of one Obj2Tiles run. Its JSON lines when it writes them
-    (``{"stage", "done", "total", "percent"}``); else an ESTIMATE BY PHASES
-    from the lines it prints today (v1.8.0): decimation (one ``Output:`` per
-    level after the first, 30%), splitting (``[LOD-i-Mesh-k/T] Done``, 55%),
-    tiling (``Converting to glb``, 15%)."""
+    (``--progress`` of E.D.'s build, ``Obj2Tiles/Stages/ProgressReporter.cs``:
+    ``{"stage", "done", "total", "percent"}`` for decimation, splitting —
+    with its ``lod``, ``percent`` the whole stage's —, tiling and packing;
+    ``{"stage": "done", "elapsed"}``; ``{"stage": "error", "message"}``); else
+    an ESTIMATE BY PHASES from the lines upstream v1.8.0 prints: decimation
+    (one ``Output:`` per level after the first, 30%), splitting
+    (``[LOD-i-Mesh-k/T] Done``, 55%), tiling (``Converting to glb``, 15%).
+    Measured on the native build (30 Oct 2026, 45 k triangles): 4 decimation,
+    88 splitting, 85 tiling lines and «done», the share never going back."""
 
-    WEIGHTS = {"decimation": (0.0, 0.30), "splitting": (0.30, 0.55), "tiling": (0.85, 0.15)}
+    WEIGHTS = {"decimation": (0.0, 0.30), "splitting": (0.30, 0.55), "tiling": (0.85, 0.13),
+               "packing": (0.98, 0.02)}
+    error = ""
 
     def __init__(self, lods: int, leaves: int):
         self.lods = max(1, lods)
@@ -886,6 +1129,8 @@ class O2TProgress:
                     return self._at(st, frac)
                 if st == "done":
                     self.stage, self.share = "done", 1.0
+                elif st == "error":
+                    self.error = str(ev.get("message") or "")
                 return self.share
         if not self.estimated:
             return None
@@ -1330,7 +1575,7 @@ def _tileset_one(job: Job, it: dict, row: dict, tool: dict, pack, refresh) -> di
     if run["returncode"] != 0 or not os.path.isfile(os.path.join(folder, "tileset.json")):
         shutil.rmtree(folder, ignore_errors=True)
         row["state"] = "failed"
-        return {**it, "state": "failed", "error": "\n".join(run["tail"][-6:])[-600:] or f"exit {run['returncode']}",
+        return {**it, "state": "failed", "error": prog.error or "\n".join(run["tail"][-6:])[-600:] or f"exit {run['returncode']}",
                 "run": {k: run[k] for k in ("seconds", "peak_mb")}}
     job.say(f"{it['name']}: tileset in {run['seconds']} s" + (f", {run['peak_mb']} MB at most" if run["peak_mb"] else ""))
     row["stage"] = "validation"
