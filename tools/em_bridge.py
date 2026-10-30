@@ -2534,7 +2534,7 @@ def make_handler(api):
                 # MICRO-OTTIMIZZA-1 · the add-ons: what is pinned, what is here
                 import em_optimize as O
                 self._json({"ok": True, "addons": O.all_addons(), "platform": O.platform_key(),
-                            "folder": str(O.addons_dir())})
+                            "folder": str(O.addons_dir()), "machine": O.machine()})
             elif route == "/jobs":
                 # MICRO-OTTIMIZZA-1 · one job (its new lines since N), or them all
                 import em_optimize as O

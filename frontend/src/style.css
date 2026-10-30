@@ -962,7 +962,8 @@ body.sync-active #mode-indicator::before {
    scroll away with the content it is switching, which is the whole reason it
    exists. The dialog is a little wider than the other modals to hold it. */
 #settings-modal .modal-card {
-  width: min(520px, 94vw);
+  /* 620 since MICRO-OTTIMIZZA-3: six tabs, «Componenti aggiuntivi» the sixth */
+  width: min(620px, 94vw);
 }
 .settings-tabs {
   display: flex;
@@ -10744,6 +10745,14 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .files-ph small { color: var(--text-faint); font-size: 11px; }
 .files-lead { margin: 6px 0; line-height: 1.4; }
 .files-hint { margin: 6px 0; color: var(--text-muted); font-size: 11.5px; line-height: 1.4; }
+/* MICRO-OTTIMIZZA-3 p.1 · the explanations in their ⓘ, the panel says only what to do */
+.files-tip { display: inline-block; margin: 0; cursor: help; color: var(--text-faint); font-size: 12px; line-height: 1; }
+.files-tip:hover, .files-tip:focus-visible { color: var(--accent); outline: none; }
+.files-est:empty { display: none; }
+.files-addon.flash { animation: sol-flash 1.2s ease-out; }
+#settings-sect-addons .settings-sub { margin: 12px 0 4px; font-size: 12px; color: var(--text-muted); }
+.files-addon-fit[data-fit="no_build"], .files-addon-fit[data-fit="no_emulator"], .files-addon-fit[data-fit="needs_node"], .files-addon-fit[data-fit="memory"] { color: var(--warn-ink); }
+.files-addon-link button.link { border: 0; background: transparent; padding: 0; color: var(--accent-ink); cursor: pointer; text-decoration: underline; font: inherit; }
 .files-warn { color: var(--warn-ink); }
 .files-box { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-subtle); line-height: 1.4; }
 .files-box .t { font-weight: 700; margin-bottom: 4px; }

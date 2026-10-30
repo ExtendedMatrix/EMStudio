@@ -11456,21 +11456,41 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
   await p.waitForSelector(".files-tab-optimize .files-prev td", { timeout: 10000 }).catch(() => {});
   await p.waitForSelector('.files-tab-optimize [data-addon="gltfpack"]', { timeout: 8000 }).catch(() => {});
   await p.waitForTimeout(500);
-  const web = await p.evaluate(() => ({
+  // MICRO-OTTIMIZZA-3 p.1 · the explanations are in the ⓘ (`data-tip`): a
+  // text read here is the panel's AND its tooltips'
+  const web = await p.evaluate(() => {
+    const tip = (sel) => { const x = document.querySelector(sel); return x?.dataset.tip ?? x?.textContent ?? ""; };
+    const tx = (el) => el ? `${el.textContent} ${[...el.querySelectorAll("[data-tip]")].map((x) => x.dataset.tip).join(" ")}` : "";
+    return {
     pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].map((x) => x.textContent),
     chips: document.querySelectorAll(".files-tab-optimize [data-opt]").length,
     engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
-    why: document.querySelector(".files-tab-optimize .files-engine .files-hint")?.textContent ?? "",
-    kv: document.querySelector(".files-tab-optimize .files-kv")?.textContent ?? "",
+    why: tip(".files-tab-optimize .files-engine .files-hint"),
+    kv: tip(".files-tab-optimize .files-kv-tip"),
     variant: [...document.querySelectorAll(".files-tab-optimize .files-prev td")].map((x) => x.textContent),
-    command: document.querySelector(".files-tab-optimize .files-cmd")?.textContent ?? "",
-    addon: document.querySelector('.files-tab-optimize [data-addon="gltfpack"]')?.textContent ?? "",
-    install: !!document.querySelector('.files-tab-optimize [data-action="addon-install"]'),
+    command: tip(".files-tab-optimize .files-cmd"),
+    // p.2 · the add-on missing: ONE line, to Settings › Add-ons; no card here
+    link: !!document.querySelector('.files-tab-optimize [data-addon="gltfpack"] [data-action="open-addons"]'),
+    cardHere: !!document.querySelector('.files-tab-optimize .files-addon'),
     go: document.querySelector('[data-action="files-optimize"]')?.disabled ?? null,
     stampFirst: [...document.querySelectorAll(".files-tab-optimize .files-warn")].some((x) => /timbra/i.test(x.textContent)),
     tilesSwitch: !!document.querySelector('[data-action="files-tiles-experimental"]'),
-    tiles: document.querySelector(".files-tab-optimize")?.textContent ?? "" }));
+    tiles: tx(document.querySelector(".files-tab-optimize")),
+    hints: document.querySelectorAll(".files-tab-optimize p.files-hint:not(.files-warn):not(.files-est):not(.files-addon-link)").length }; });
   await p.screenshot({ path: SHOT("ar7-ottimizza") }).catch(() => {});
+  await p.click('.files-tab-optimize [data-addon="gltfpack"] [data-action="open-addons"]').catch(() => {});
+  await p.waitForSelector('#set-addons [data-addon="gltfpack"]', { timeout: 8000 }).catch(() => {});
+  const settings = await p.evaluate(() => ({
+    tab: document.querySelector('#settings-sect-addons')?.dataset.settingsTab ?? "",
+    shown: !document.querySelector('#settings-sect-addons')?.classList.contains("hidden"),
+    machine: document.getElementById("set-addons-machine")?.textContent ?? "",
+    card: document.querySelector('#set-addons [data-addon="gltfpack"]')?.textContent ?? "",
+    fit: document.querySelector('#set-addons [data-addon="gltfpack"] .files-addon-fit')?.dataset.fit ?? "",
+    install: !!document.querySelector('#set-addons [data-addon="gltfpack"] [data-action="addon-install"]') }));
+  await p.screenshot({ path: SHOT("ar7-componenti") }).catch(() => {});
+  await p.keyboard.press("Escape");
+  await p.evaluate(() => document.getElementById("settings-modal")?.classList.add("hidden"));
+  await p.waitForTimeout(300);
   await p.click('.files-tab-optimize [data-opt="experience"]');
   await p.waitForTimeout(500);
   const exp = await p.evaluate(() => ({ engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
@@ -11479,25 +11499,31 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
   await p.selectOption('[data-action="files-opt-engine"]', "gltfpack");
   await p.waitForTimeout(800);
   const changed = await p.evaluate(() => ({ engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
-    said: document.querySelector(".files-tab-optimize .files-engine .files-hint")?.textContent ?? "",
+    said: document.querySelector(".files-tab-optimize .files-engine .files-hint")?.dataset.tip ?? "",
     stored: localStorage.getItem("emstudio.optEngine") ?? "" }));
   await p.click('[data-action="files-tiles-experimental"]');
   await p.waitForTimeout(500);
-  const tilesOn = await p.evaluate(() => ({ stored: localStorage.getItem("emstudio.tilesetExperimental"),
-    text: document.querySelector(".files-tab-optimize")?.textContent ?? "" }));
+  const tilesOn = await p.evaluate(() => { const el = document.querySelector(".files-tab-optimize");
+    return { stored: localStorage.getItem("emstudio.tilesetExperimental"),
+      text: el ? `${el.textContent} ${[...el.querySelectorAll("[data-tip]")].map((x) => x.dataset.tip).join(" ")}` : "" }; });
   await ctx.close();
   const conds = {
     on: web.pills.join(",") === "acceso,acceso,sperimentale,sperimentale" && web.chips === 5,
     engine: web.engine === "gltfpack" && /un secondo/.test(web.why) && /KTX2/.test(web.kv) && /meshopt/.test(web.kv),
     named: web.variant.includes("OB_CUBO_LOD1@lod4-web.glb") && /-si 0\.1 -cc -tc -tl 1024/.test(web.command),
-    addon: /gltfpack/.test(web.addon) && /licenza MIT/.test(web.addon) && /sha256/.test(web.addon) && web.install && web.go === true,
+    addon: web.link && !web.cardHere && web.go === true,
+    // p.2 · Settings › Add-ons, a tab of its own: this machine, the card with its licence, sha256, state and install
+    settings: settings.tab === "addons" && settings.shown && /Questa macchina: macOS/.test(settings.machine)
+      && /licenza MIT/.test(settings.card) && /sha256/.test(settings.card) && settings.fit === "ok" && settings.install,
+    // p.1 · no paragraph of explanation left in the panel: they are in the ⓘ
+    fewWords: web.hints === 0,
     stampFirst: web.stampFirst,
     experience: exp.engine === "blender3dsc" && exp.notYet && exp.options.join(",") === "blender3dsc,gltfpack",
     changeable: changed.engine === "gltfpack" && /al posto di/.test(changed.said) && /"experience":"gltfpack"/.test(changed.stored),
     tiles: web.tilesSwitch && /RealityScan/.test(web.tiles) && /Obj2Tiles/.test(web.tiles) && tilesOn.stored === "1" && /giro 2/.test(tilesOn.text),
     noErrors: !errors.length,
   };
-  return { pass: Object.values(conds).every(Boolean), detail: { conds, web, exp, changed, errors } };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, web, settings, exp, changed, errors } };
 });
 
 test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, sperimentale dietro il suo interruttore: acceso, la destinazione «Tileset (3D Tiles)» si aggiunge e si sceglie; il motore Obj2Tiles con il perché (Blender + 3DSC in Blender stesso); Obj2Tiles come componente aggiuntivo (AGPL-3.0, OpenDroneMap, versione e sha256 fissate; sotto Rosetta su Apple Silicon, detto); il giudice (il validatore di Cesium, o il controllo strutturale detto come tale); la riga del file con la sua cartella in RB/versions/‹modello›@tiles, livelli, profondità e memoria; la memoria e il tetto detti prima; il comando; senza Obj2Tiles il pulsante non parte; spento, si torna al web", async () => {
@@ -11521,13 +11547,13 @@ test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, 
     pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].map((x) => x.textContent),
     engine: document.querySelector(".files-tiles .files-engine")?.dataset.engine ?? "",
     engines: [...document.querySelectorAll('[data-action="files-tiles-engine"] option')].map((o) => o.textContent),
-    why: document.querySelector(".files-tiles .files-engine .files-hint")?.textContent ?? "",
+    why: document.querySelector(".files-tiles .files-engine .files-hint")?.dataset.tip ?? "",
     tool: !!document.querySelector('.files-tiles [data-tool="obj2tiles"]'),
-    addon: document.querySelector('.files-tiles [data-addon="obj2tiles"]')?.textContent ?? "",
+    addon: !!document.querySelector('.files-tiles [data-addon="obj2tiles"] [data-action="open-addons"]'),
     validator: document.querySelector(".files-tiles [data-validator]")?.dataset.validator ?? "",
     row: [...document.querySelectorAll(".files-tiles .files-prev td")].map((x) => x.textContent),
-    command: document.querySelector(".files-tiles .files-cmd")?.textContent ?? "",
-    text: document.querySelector(".files-tiles")?.textContent ?? "",
+    command: document.querySelector(".files-tiles .files-cmd")?.dataset.tip ?? "",
+    text: ((el) => el ? `${el.textContent} ${[...el.querySelectorAll("[data-tip]")].map((x) => x.dataset.tip).join(" ")}` : "")(document.querySelector(".files-tiles")),
     go: document.querySelector('[data-action="files-tileset"]')?.disabled ?? null,
     goText: document.querySelector('[data-action="files-tileset"]')?.textContent ?? "" }));
   await p.screenshot({ path: SHOT("ar11-tileset") }).catch(() => {});
@@ -11540,7 +11566,7 @@ test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, 
   const conds = {
     chosen: on.chip === "true" && on.pills[0] === "sperimentale",
     engine: on.engine === "obj2tiles" && on.engines.some((e) => /non ancora da qui/.test(e)) && /senza Blender/.test(on.why),
-    addon: on.tool || (/Obj2Tiles 1\.8\.0/.test(on.addon) && /AGPL-3\.0/.test(on.addon) && /sha256/.test(on.addon)),
+    addon: on.tool || on.addon,
     agpl: /AGPL-3\.0/.test(on.text) && /non lo distribuisce/.test(on.text),
     judge: on.validator === "cesium" || (on.validator === "basic" && /controllo strutturale/.test(on.text)),
     row: on.row.some((x) => /OB_CUBO_LOD1@tiles\/ → OB_CUBO_LOD1@tiles\.3tz/.test(x)) && on.row.some((x) => /LOD, profondità 0/.test(x))
@@ -11566,8 +11592,9 @@ test("AR12.blender", "MICRO-OTTIMIZZA-3 · Blender come seconda via, dietro il s
   await storageClick(p, "OB_CUBO_LOD1.obj");
   await p.click('.files-tab[data-tab="optimize"]');
   await p.waitForTimeout(800);
-  const off = await p.evaluate(() => ({ sw: document.querySelector('[data-blender-switch]')?.dataset.blenderSwitch ?? "",
-    text: document.querySelector('[data-blender-switch]')?.textContent ?? "" }));
+  const off = await p.evaluate(() => { const el = document.querySelector('[data-blender-switch]');
+    return { sw: el?.dataset.blenderSwitch ?? "",
+      text: el ? `${el.textContent} ${[...el.querySelectorAll("[data-tip]")].map((x) => x.dataset.tip).join(" ")}` : "" }; });
   await p.click('[data-action="files-blender-experimental"]');
   await p.waitForSelector(".files-bl-lines li", { timeout: 20000 }).catch(() => {});
   await p.waitForSelector('[data-way="atlas"] .files-prev td', { timeout: 10000 }).catch(() => {});

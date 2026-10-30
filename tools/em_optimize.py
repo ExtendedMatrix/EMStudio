@@ -91,6 +91,8 @@ ADDONS["obj2tiles"] = {
     "source": "https://github.com/OpenDroneMap/Obj2Tiles/releases",
     "does": "textured OBJ → Cesium 3D Tiles: decimation per level of detail, spatial splitting, tiling",
     "heavy": True,
+    # below this a survey's mesh rarely fits (round 2: 1.1 GB of OBJ → 3.1 GB)
+    "min_memory_mb": 8192,
     "builds": {
         "darwin-x86_64": {
             "version": "1.8.0", "asset": "Obj2Tiles-Osx64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
@@ -232,7 +234,67 @@ def addon_state(addon_id: str) -> dict:
         out["needs"] = "node"
         out["node"] = node["version"] if node else None
         out["available"] = bool(node and node.get("npm"))
+    out["fit"] = addon_fit(spec, out, memory_total_mb())
     return out
+
+
+def addon_fit(spec: dict, state: dict, memory_mb: int) -> dict:
+    """Whether the add-on suits THIS machine, and why not (MICRO-OTTIMIZZA-3,
+    E.D. 28 Oct: Settings › Add-ons lists them filtered for the hardware and
+    the system): ``code`` is ``ok``, ``emulated`` (it runs, translated),
+    ``memory`` (it runs, but the machine has less than it wants), or — not
+    suitable — ``no_build`` (nothing published for this platform),
+    ``no_emulator`` (the x86_64 build without Rosetta) or ``needs_node``."""
+    if spec.get("npm") and not state.get("available"):
+        return {"ok": False, "code": "needs_node"}
+    if not state.get("available"):
+        return {"ok": False, "code": "no_build", "platform": state.get("platform")}
+    if state.get("emulated") and not state.get("emulator_ready"):
+        return {"ok": False, "code": "no_emulator", "emulator": state["emulated"]}
+    want = int(spec.get("min_memory_mb") or 0)
+    if want and memory_mb and memory_mb < want:
+        return {"ok": True, "code": "memory", "want_mb": want, "have_mb": memory_mb}
+    if state.get("emulated"):
+        return {"ok": True, "code": "emulated", "emulator": state["emulated"]}
+    return {"ok": True, "code": "ok"}
+
+
+def machine() -> dict:
+    """This machine as the add-ons care about it: the system, the processor
+    (Apple Silicon, Intel, AMD, ARM), the memory and the graphics — Metal on a
+    Mac, CUDA where ``nvidia-smi`` answers. Asked once, remembered."""
+    global _MACHINE
+    if _MACHINE is not None:
+        return _MACHINE
+    key = platform_key()
+    system, arch = key.split("-", 1)
+    cpu = platform.processor() or ""
+    if system == "darwin":
+        try:
+            cpu = subprocess.run(["/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True,
+                                 text=True, timeout=3).stdout.strip() or cpu
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    chip = ("apple_silicon" if system == "darwin" and arch == "arm64"
+            else "intel" if "intel" in cpu.lower() or (system == "darwin" and arch == "x86_64")
+            else "amd" if "amd" in cpu.lower() else "arm" if arch == "arm64" else arch)
+    gpus = []
+    if system == "darwin":
+        gpus.append({"api": "Metal", "name": cpu if chip == "apple_silicon" else ""})
+    smi = shutil.which("nvidia-smi")
+    if smi:
+        try:
+            names = subprocess.run([smi, "--query-gpu=name", "--format=csv,noheader"], capture_output=True,
+                                   text=True, timeout=5).stdout
+            gpus += [{"api": "CUDA", "name": n.strip()} for n in names.splitlines() if n.strip()]
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    _MACHINE = {"platform": key, "system": system, "arch": arch, "chip": chip, "cpu": cpu,
+                "memory_mb": memory_total_mb(), "gpus": gpus}
+    return _MACHINE
+
+
+_MACHINE = None
 
 
 def all_addons() -> list:

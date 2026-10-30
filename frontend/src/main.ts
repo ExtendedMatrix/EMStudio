@@ -33693,9 +33693,9 @@ const tabHead = (title: string, sub: string): HTMLElement => {
   h.className = "files-ph";
   const b = document.createElement("b");
   b.textContent = title;
-  const s = document.createElement("small");
-  s.textContent = sub;
-  h.append(b, s);
+  // MICRO-OTTIMIZZA-3 p.1 · what the tab is for, in its ⓘ (Timbro, Ottimizza,
+  // Stanza, Info alike)
+  h.append(b, " ", tabTip(sub, "files-ph-sub"));
   return h;
 };
 const tabLead = (text: string, cls = "files-lead"): HTMLElement => {
@@ -33704,6 +33704,28 @@ const tabLead = (text: string, cls = "files-lead"): HTMLElement => {
   p.textContent = text;
   return p;
 };
+/**
+ * MICRO-OTTIMIZZA-3 p.1 (E.D., 28 Oct, on lab.13: «un muro di spiegazioni») ·
+ * an explanation the panel no longer prints: an ⓘ beside what it explains, the
+ * text in its tooltip (hover and focus). `data-tip` holds it (the checks read
+ * it), the label is what a screen reader says.
+ */
+function tabTip(text: string, cls = "files-hint"): HTMLElement {
+  const s = document.createElement("span");
+  s.className = `files-tip ${cls}`;
+  s.tabIndex = 0;
+  s.textContent = "ⓘ";
+  s.title = text;
+  s.dataset.tip = text;
+  s.setAttribute("aria-label", text);
+  return s;
+}
+/** A line of the panel with the ⓘ of what it does not say. */
+function tipLine(text: string, tips: (string | HTMLElement | null | undefined)[], cls = "files-lead"): HTMLElement {
+  const p = tabLead(text, cls);
+  for (const x of tips) if (x) p.append(" ", typeof x === "string" ? tabTip(x) : x);
+  return p;
+}
 const noChoice = (box: HTMLElement, what: string): void => {
   box.appendChild(tabLead(what));
   box.appendChild(tabLead(t("files.chooseHint"), "files-hint"));
@@ -33965,7 +33987,14 @@ interface OptPlan { at: number; tool: OptTool | null; outputs: OptOut[]; error?:
 interface OptOut { source: string; path?: string; name?: string; exists?: boolean; error?: string; state?: string;
   bytes?: number; bytes_in?: number; sha256?: string; seconds?: number; command?: string;
   facts?: { faces: number; vertices: number; texture_count: number; texture_side_px: number | null; extensions: string[] } }
-interface AddonState { id: string; name: string; project: string; author: string; licence: string; licence_url: string;
+/** MICRO-OTTIMIZZA-3 p.2 · whether an add-on suits this machine, as the bridge
+ *  says it (`em_optimize.addon_fit`) */
+interface AddonFit { ok: boolean; code: "ok" | "emulated" | "memory" | "no_build" | "no_emulator" | "needs_node";
+  platform?: string; emulator?: string; want_mb?: number; have_mb?: number }
+/** this machine as the add-ons care about it (`em_optimize.machine`) */
+interface AddonMachine { platform: string; system: string; arch: string; chip: string; cpu: string; memory_mb: number;
+  gpus: { api: string; name: string }[] }
+interface AddonState { fit?: AddonFit; id: string; name: string; project: string; author: string; licence: string; licence_url: string;
   source: string; does: string; platform: string; available: boolean; version: string | null; url: string | null;
   sha256: string | null; size: number | null; installed: { version: string; path: string; at: string } | null;
   upgradable: boolean; folder: string;
@@ -33973,7 +34002,7 @@ interface AddonState { id: string; name: string; project: string; author: string
   emulated?: string; emulator_ready?: boolean;
   /** a Node.js program (the validator), and the Node of this machine */
   needs?: "node"; node?: string | null }
-let addonsState: { at: number; list: AddonState[] | null; error?: string } | null = null;
+let addonsState: { at: number; list: AddonState[] | null; error?: string; machine?: AddonMachine } | null = null;
 
 function readEngineChoice(): Record<string, string> {
   try { return JSON.parse(localStorage.getItem(OPT_ENGINE_KEY) ?? "{}") as Record<string, string>; } catch { return {}; }
@@ -33985,8 +34014,9 @@ async function loadAddons(force = false): Promise<AddonState[] | null> {
   if (addonsState && !force && Date.now() - addonsState.at < 30000) return addonsState.list;
   try {
     const r = await fetch(`${await bridgeUrl()}/addons`, { cache: "no-store" });
-    const j = await r.json().catch(() => ({})) as { addons?: AddonState[] };
-    addonsState = { at: Date.now(), list: r.ok ? j.addons ?? [] : null, error: r.ok ? undefined : t("files.optOldBridge") };
+    const j = await r.json().catch(() => ({})) as { addons?: AddonState[]; machine?: AddonMachine };
+    addonsState = { at: Date.now(), list: r.ok ? j.addons ?? [] : null, error: r.ok ? undefined : t("files.optOldBridge"),
+                    machine: j.machine };
   } catch { addonsState = { at: Date.now(), list: null, error: t("storage.bridgeDown") }; }
   return addonsState.list;
 }
@@ -34216,7 +34246,17 @@ function addonCard(a: AddonState, compact: boolean): HTMLElement {
           sha: (a.sha256 ?? "").slice(0, 12), source: a.source })
       : a.needs === "node" ? t("files.addonNeedsNode") : t("files.addonNoBuild", { platform: a.platform });
   box.appendChild(facts);
-  if (a.emulated) {
+  // p.2 · installed / to install / not suitable for this machine, and why
+  if (a.fit && !compact) {
+    const fit = document.createElement("small");
+    fit.className = "files-addon-facts files-addon-fit";
+    fit.dataset.fit = a.fit.code;
+    fit.textContent = a.installed && a.fit.ok ? t("files.addonState.installed")
+      : t(`files.addonFit.${a.fit.code}`, { platform: a.fit.platform ?? a.platform, emulator: a.fit.emulator ?? "",
+          want: formatMb(a.fit.want_mb ?? 0, getLocale()), have: formatMb(a.fit.have_mb ?? 0, getLocale()) });
+    box.appendChild(fit);
+  }
+  if (a.emulated && (compact || !a.fit)) {
     const em = document.createElement("small");
     em.className = "files-addon-facts";
     em.dataset.emulated = a.emulator_ready ? "1" : "0";
@@ -34283,8 +34323,38 @@ function addonCard(a: AddonState, compact: boolean): HTMLElement {
   return box;
 }
 
-/** Settings › Advanced › Add-ons: each add-on with its licence, source,
- *  version — the credits of what EMStudio calls and does not ship. */
+/** MICRO-OTTIMIZZA-3 p.2 · an add-on a tab needs and does not find: ONE line,
+ *  with the way to Settings › Add-ons, where it is installed (its card says
+ *  what it does, version, licence, source, and whether it suits this machine). */
+let addonFocus: string | null = null;
+function addonLink(id: string, why: string): HTMLElement {
+  const p = document.createElement("p");
+  p.className = "files-hint files-addon-link";
+  p.dataset.addon = id;
+  p.append(why, " ");
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "link";
+  b.dataset.action = "open-addons";
+  b.textContent = t("files.addonOpenSettings");
+  b.onclick = () => { addonFocus = id; openSettings("settings-sect-addons"); };
+  p.appendChild(b);
+  return p;
+}
+
+/** This machine in one line: «macOS · Apple M4 Max (Apple Silicon) · grafica
+ *  Metal · 64 GB». */
+function machineLine(m: AddonMachine): string {
+  const sys = ({ darwin: "macOS", windows: "Windows", linux: "Linux" } as Record<string, string>)[m.system] ?? m.system;
+  const chip = t(`settings.machine.chip.${m.chip}`, undefined, m.chip);
+  const gpu = m.gpus.length ? m.gpus.map((g) => g.name && g.api === "CUDA" ? `${g.api} (${g.name})` : g.api).join(", ") : t("settings.machine.noGpu");
+  return t("settings.machine", { system: sys, cpu: m.cpu ? `${m.cpu} (${chip})` : chip, gpu, memory: formatMb(m.memory_mb, getLocale()) });
+}
+
+/** Settings › Add-ons (a tab of its own since MICRO-OTTIMIZZA-3): this machine,
+ *  the add-ons that suit it — each with what it does, its pinned version,
+ *  licence and source, its state and install · update · remove — then the
+ *  ones that do not, each with why; Blender last. */
 function paintAddonsSettings(): void {
   const host = document.getElementById("set-addons");
   if (!host) return;
@@ -34292,10 +34362,23 @@ function paintAddonsSettings(): void {
   host.appendChild(tabLead(t("files.addonsAsking"), "settings-hint"));
   void loadAddons(true).then((list) => {
     host.textContent = "";
+    const ml = document.getElementById("set-addons-machine");
+    if (ml) ml.textContent = addonsState?.machine ? machineLine(addonsState.machine) : "";
     if (!list) { host.appendChild(tabLead(addonsState?.error ?? t("storage.bridgeDown"), "settings-hint")); return; }
-    for (const a of list) host.appendChild(addonCard(a, false));
+    const fits = list.filter((a) => a.fit?.ok !== false), not = list.filter((a) => a.fit?.ok === false);
+    for (const a of fits) host.appendChild(addonCard(a, false));
+    if (not.length) {
+      const h = document.createElement("h5");
+      h.className = "settings-sub";
+      h.textContent = t("settings.addonsNotHere");
+      host.appendChild(h);
+      for (const a of not) host.appendChild(addonCard(a, false));
+    }
     host.appendChild(blenderSettingsCard());
     host.appendChild(tabLead(t("files.addonsWhere", { folder: list[0]?.folder.replace(/[/\\][^/\\]+$/, "") ?? "" }), "settings-hint"));
+    const focus = addonFocus ? host.querySelector<HTMLElement>(`[data-addon="${addonFocus}"]`) : null;
+    addonFocus = null;
+    if (focus) { focus.classList.add("flash"); focus.scrollIntoView({ block: "nearest" }); }
   });
 }
 
@@ -34399,21 +34482,14 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
   };
   el.appendChild(sel);
   eng.appendChild(el);
-  eng.appendChild(tabLead(engine === pre.engine ? t(pre.whyKey) : t("files.optEngineChanged", { engine: t(`files.engine.${engine}`), default: t(`files.engine.${pre.engine}`) }), "files-hint"));
-  sec.appendChild(eng);
-
-  const kv = document.createElement("dl");
-  kv.className = "files-kv";
+  // p.1 · why this engine, and what the destination does, in their ⓘ
+  el.append(" ", tabTip(engine === pre.engine ? t(pre.whyKey) : t("files.optEngineChanged", { engine: t(`files.engine.${engine}`), default: t(`files.engine.${pre.engine}`) })));
   const textures = pre.ktx2 ? t("files.optTexturesKtx2", { px: String(pre.texturePx) }) : t("files.optTexturesAre");
-  for (const [k, v] of [[t("files.optGeometry"), t("files.optGeometryIs", { pct: String(Math.round(pre.ratio * 100)) })],
-                        [t("files.optTextures"), textures],
-                        [t("files.optCompression"), pre.meshopt ? t("files.optCompressionMeshopt") : t("files.optCompressionNone")],
-                        [t("files.optWhere"), t("files.optWhereIs")]]) {
-    const dt = document.createElement("dt"); dt.textContent = k;
-    const dd = document.createElement("dd"); dd.textContent = v;
-    kv.append(dt, dd);
-  }
-  sec.appendChild(kv);
+  el.append(" ", tabTip([[t("files.optGeometry"), t("files.optGeometryIs", { pct: String(Math.round(pre.ratio * 100)) })],
+                         [t("files.optTextures"), textures],
+                         [t("files.optCompression"), pre.meshopt ? t("files.optCompressionMeshopt") : t("files.optCompressionNone")],
+                         [t("files.optWhere"), t("files.optWhereIs")]].map(([k, v]) => `${k}: ${v}`).join("\n"), "files-hint files-kv-tip"));
+  sec.appendChild(eng);
 
   if (engine === "blender3dsc") {
     // MICRO-OTTIMIZZA-3 · the experiences' engine: 3DSC's LOD set in Blender
@@ -34430,19 +34506,8 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
     const paint = (pl: OptPlan): void => {
       slot.textContent = "";
       if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
-      if (pl.tool) {
-        const tool = document.createElement("div");
-        tool.className = "files-box";
-        tool.dataset.tool = "1";
-        tool.textContent = t("files.optTool", { version: pl.tool.version || "gltfpack", path: pl.tool.path });
-        slot.appendChild(tool);
-      } else {
-        // the add-on, downloaded on request
-        slot.appendChild(tabLead(t("files.optNoTool"), "files-hint"));
-        const a = addonsState?.list?.find((x) => x.id === "gltfpack");
-        if (a) slot.appendChild(addonCard(a, true));
-        else void loadAddons().then((list) => { if (list && slot.isConnected) renderStorage(); });
-      }
+      // p.2 · the add-on missing: one line, to Settings › Add-ons
+      if (!pl.tool) slot.appendChild(addonLink("gltfpack", t("files.optNoTool")));
       const table = document.createElement("table");
       table.className = "files-prev";
       const hr = document.createElement("tr");
@@ -34460,14 +34525,18 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
       }
       slot.appendChild(table);
       const where = pl.outputs.find((o) => o.path)?.path;
-      if (where) slot.appendChild(tabLead(t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }), "files-hint"));
-      if (pl.command) slot.appendChild(tabLead(t("files.optCommand", { cmd: `gltfpack ${pl.command}` }), "files-hint files-cmd"));
       const unstamped = models.filter((m) => !filesStamped(listing, m.path));
       if (unstamped.length) slot.appendChild(tabLead(tn("files.optStampFirst", unstamped.length), "files-hint files-warn"));
       const todo = pl.outputs.filter((o) => o.path && !o.exists && !o.error && !unstamped.some((u) => u.path === o.source));
       const mb = variantMemoryMb(Math.max(0, ...todo.map((o) => o.bytes_in ?? 0)));
-      if (todo.length) slot.appendChild(tabLead(t("files.optMemory", { mb: String(mb) }), "files-hint"));
       const running = [...bgJobs.values()].some((j) => j.kind === "variants" && jobRunning(j));
+      // p.1 · the estimate in one line; the folder, the tool, the command, what
+      // is born and the queue in its ⓘ
+      slot.appendChild(tipLine(todo.length ? t("files.optMemory", { mb: String(mb) }) : "", [
+        where ? t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }) : null,
+        pl.tool ? t("files.optTool", { version: pl.tool.version || "gltfpack", path: pl.tool.path }) : null,
+        pl.command ? tabTip(t("files.optCommand", { cmd: `gltfpack ${pl.command}` }), "files-hint files-cmd") : null,
+        t("files.optBorn"), running ? t("files.optParallel") : null], "files-hint files-est"));
       const go = document.createElement("button");
       go.type = "button";
       go.className = "primary";
@@ -34476,8 +34545,6 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
       go.disabled = !pl.tool || !todo.length;
       go.onclick = () => { void runOptimize(win, pre, todo.map((o) => o.source), mb); };
       slot.appendChild(go);
-      if (running) slot.appendChild(tabLead(t("files.optParallel"), "files-hint"));
-      slot.appendChild(tabLead(t("files.optBorn"), "files-hint"));
     };
     if (plan) paint(plan);
     else {
@@ -34518,11 +34585,11 @@ function filesPackSection(listing: FsListing): HTMLElement {
   ph.append(pb, pp);
   pk.appendChild(ph);
   const isTileset = !listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json");
+  ph.append(" ", tabTip(t(isTileset ? "files.optPackBorn" : "files.optPackWhere")));
   if (isTileset) {
     pk.appendChild(pack3tzButton(listing.path, { viaBridge: true }));
     if (!filesFolderStamped(listing)) pk.appendChild(tabLead(t("files.optPackStampFirst"), "files-hint files-warn"));
-    pk.appendChild(tabLead(t("files.optPackBorn"), "files-hint"));
-  } else pk.appendChild(tabLead(t("files.optPackWhere"), "files-hint"));
+  }
   const prows = jobRows(["pack3tz"]);
   if (prows) pk.appendChild(prows);
   return pk;
@@ -34556,11 +34623,9 @@ function filesTilesSwitch(win: Win, ton: boolean): HTMLElement {
   };
   const swt = document.createElement("span");
   swt.textContent = t("files.optTilesSwitch");
-  sw.append(cb, swt);
+  sw.append(cb, swt, " ", tabTip(ton ? t("files.optTilesSwitchOn") : t("files.optTilesOff")),
+            " ", tabTip(t("files.optTilesEngines")), " ", tabTip(t("files.optTilesMissing")));
   ts.appendChild(sw);
-  ts.appendChild(tabLead(ton ? t("files.optTilesSwitchOn") : t("files.optTilesOff"), "files-hint"));
-  ts.appendChild(tabLead(t("files.optTilesEngines"), "files-hint"));
-  ts.appendChild(tabLead(t("files.optTilesMissing"), "files-hint"));
   return ts;
 }
 
@@ -34614,7 +34679,7 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
   };
   el.appendChild(sel);
   eng.appendChild(el);
-  eng.appendChild(tabLead(t("files.tilesWhy"), "files-hint"));
+  el.append(" ", tabTip(t("files.tilesWhy")));
   body.appendChild(eng);
   if (!TILES_ENGINES_TODAY.has(engine)) {
     body.appendChild(tabLead(t("files.optEngineNotYet", { engine: t(`files.engine.${engine}`) }), "files-hint files-warn"));
@@ -34654,31 +34719,18 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
       }
       slot.appendChild(box);
     }
-    // Obj2Tiles: here, or the add-on to download (AGPL-3.0, said)
-    const o2t = addonsState?.list?.find((x) => x.id === "obj2tiles");
-    if (pl.tool) {
-      const tool = document.createElement("div");
-      tool.className = "files-box";
-      tool.dataset.tool = "obj2tiles";
-      tool.textContent = t("files.tilesTool", { version: pl.tool.version || "Obj2Tiles", path: pl.tool.path })
+    // Obj2Tiles: here (said in an ⓘ), or one line to Settings › Add-ons
+    const toolTip = pl.tool ? tabTip(t("files.tilesTool", { version: pl.tool.version || "Obj2Tiles", path: pl.tool.path })
         + (pl.tool.emulated ? " " + t("files.tilesRosetta") : "")
-        + " " + t(pl.tool.progress ? "files.tilesProgressExact" : "files.tilesProgressPhases");
-      slot.appendChild(tool);
-    } else {
-      slot.appendChild(tabLead(t("files.tilesNoTool"), "files-hint"));
-      if (o2t) slot.appendChild(addonCard(o2t, true));
-      else void loadAddons().then((list) => { if (list && slot.isConnected) renderStorage(); });
-    }
-    slot.appendChild(tabLead(t("files.tilesAgpl"), "files-hint"));
+        + " " + t(pl.tool.progress ? "files.tilesProgressExact" : "files.tilesProgressPhases") + " " + t("files.tilesAgpl")) : null;
+    if (toolTip) toolTip.dataset.tool = "obj2tiles";
+    else slot.appendChild(addonLink("obj2tiles", t("files.tilesNoTool")));
     // the judge: Cesium's validator, or the structural check said as such
-    const val = addonsState?.list?.find((x) => x.id === "tiles-validator");
-    const vbox = document.createElement("div");
-    vbox.className = "files-box";
-    vbox.dataset.validator = pl.validator.name.startsWith("3d-tiles-validator") ? "cesium" : "basic";
-    vbox.textContent = vbox.dataset.validator === "cesium" ? t("files.tilesValidator", { name: pl.validator.name })
-      : pl.validator.node ? t("files.tilesValidatorMissing") : t("files.tilesValidatorNoNode");
-    slot.appendChild(vbox);
-    if (vbox.dataset.validator === "basic" && val && val.available) slot.appendChild(addonCard(val, true));
+    const cesium = pl.validator.name.startsWith("3d-tiles-validator");
+    const vtip = tabTip(cesium ? t("files.tilesValidator", { name: pl.validator.name })
+      : pl.validator.node ? t("files.tilesValidatorMissing") : t("files.tilesValidatorNoNode"));
+    vtip.dataset.validator = cesium ? "cesium" : "basic";
+    if (!cesium && pl.validator.node) slot.appendChild(addonLink("tiles-validator", t("files.tilesValidatorShort")));
     // the files, one row each
     const table = document.createElement("table");
     table.className = "files-prev";
@@ -34710,18 +34762,18 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
     }
     slot.appendChild(table);
     const where = pl.items.find((o) => o.folder)?.folder;
-    if (where) slot.appendChild(tabLead(t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }), "files-hint"));
     const first = pl.items.find((o) => o.command);
-    if (first) slot.appendChild(tabLead(t("files.optCommand", { cmd: `Obj2Tiles ${first.command}` }), "files-hint files-cmd"));
-    // the memory, said before anything starts
-    if (sched.todo.length) {
-      slot.appendChild(tabLead(t(sched.todo.length === 1 ? "files.tilesMemoryOne" : "files.tilesMemoryMany", {
+    const unstamped = sched.todo.filter((it) => !filesStampedPath(it.source));
+    // the memory, said before anything starts, in one line; the rest in its ⓘ
+    slot.appendChild(tipLine(sched.todo.length ? t(sched.todo.length === 1 ? "files.tilesMemoryOne" : "files.tilesMemoryMany", {
         mb: formatMb(sched.todo[0].estimate_mb ?? 0, getLocale()), total: formatMb(sched.totalMb, getLocale()),
         parallel: String(sched.parallel), start: formatMb(sched.startMb, getLocale()),
-        ceiling: formatMb(pl.ceiling_mb, getLocale()), memory: formatMb(pl.memory_mb, getLocale()) }), "files-hint"));
-    }
-    const unstamped = sched.todo.filter((it) => !filesStampedPath(it.source));
-    if (unstamped.length) slot.appendChild(tabLead(tn("files.tilesDeclared", unstamped.length), "files-hint"));
+        ceiling: formatMb(pl.ceiling_mb, getLocale()), memory: formatMb(pl.memory_mb, getLocale()) }) : "", [
+      toolTip ?? t("files.tilesAgpl"), vtip,
+      where ? t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }) : null,
+      first ? tabTip(t("files.optCommand", { cmd: `Obj2Tiles ${first.command}` }), "files-hint files-cmd") : null,
+      unstamped.length ? tn("files.tilesDeclared", unstamped.length) : null,
+      t("files.tilesBorn")], "files-hint files-est"));
     const running = [...bgJobs.values()].some((j) => j.kind === "tileset" && jobRunning(j));
     const go = document.createElement("button");
     go.type = "button";
@@ -34732,7 +34784,6 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
     go.onclick = () => { void runTileset(win, sources, sched.todo.length); };
     slot.appendChild(go);
     if (running) slot.appendChild(tabLead(t("files.tilesOneAtATime"), "files-hint"));
-    slot.appendChild(tabLead(t("files.tilesBorn"), "files-hint"));
   };
   const plan = tsPlans.get(key);
   if (plan) paint(plan);
@@ -35062,8 +35113,7 @@ function blenderReport(compact: boolean): HTMLElement {
   if (!st) { box.appendChild(tabLead(blenderState.error ?? t("storage.bridgeDown"), "files-hint files-warn")); return box; }
   if (!st.current) {
     box.dataset.blender = "none";
-    box.appendChild(tabLead(t("files.blNone"), "files-hint files-warn"));
-    box.appendChild(tabLead(t("files.blWhereLooked"), "files-hint"));
+    box.appendChild(tipLine(t("files.blNone"), [t("files.blWhereLooked")], "files-hint files-warn"));
     return box;
   }
   box.dataset.blender = st.probe ? (st.probe.ok ? "asked" : "silent") : "found";
@@ -35080,7 +35130,7 @@ function blenderReport(compact: boolean): HTMLElement {
       ul.appendChild(li);
     }
     box.appendChild(ul);
-  } else box.appendChild(tabLead(t("files.blNotAsked"), "files-hint"));
+  } else head.append(" ", tabTip(t("files.blNotAsked")));
   const running = [...bgJobs.values()].some((j) => j.kind === "blender" && jobRunning(j) && j.label === t("files.blProbing"));
   const b = document.createElement("button");
   b.type = "button";
@@ -35090,7 +35140,7 @@ function blenderReport(compact: boolean): HTMLElement {
   b.disabled = running;
   b.onclick = () => { b.disabled = true; void probeBlender(); };
   box.appendChild(b);
-  if (st.found.length > 1 && compact) box.appendChild(tabLead(tn("files.blOthers", st.found.length - 1), "files-hint"));
+  if (st.found.length > 1 && compact) head.append(" ", tabTip(tn("files.blOthers", st.found.length - 1)));
   return box;
 }
 
@@ -35132,9 +35182,9 @@ function blenderPlanTable(pl: BlPlan, slot: HTMLElement, go: { label: string; ac
   }
   if (pl.outputs.length) slot.appendChild(table);
   const where = pl.outputs.find((o) => o.path)?.path;
-  if (where) slot.appendChild(tabLead(t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }), "files-hint"));
   const todo = pl.outputs.filter((o) => !o.exists && !o.error);
-  if (pl.estimate_mb) slot.appendChild(tabLead(t("files.blMemory", { mb: formatMb(pl.estimate_mb), ceiling: formatMb(pl.ceiling_mb ?? 0) }), "files-hint"));
+  slot.appendChild(tipLine(pl.estimate_mb ? t("files.blMemory", { mb: formatMb(pl.estimate_mb), ceiling: formatMb(pl.ceiling_mb ?? 0) }) : "",
+    [where ? t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }) : null], "files-hint files-est"));
   const b = document.createElement("button");
   b.type = "button";
   b.className = "primary";
@@ -35166,8 +35216,7 @@ function filesBlenderVariants(win: Win, listing: FsListing, sec: HTMLElement, ch
         run: () => { void runBlender(win, { op: "lod_set", source: m.path, levels: 3 }, m.path, "lod_set"); } });
     }));
   }
-  if (unstamped.length) sec.appendChild(tabLead(tn("files.blStampFirst", unstamped.length), "files-hint"));
-  sec.appendChild(tabLead(t("files.blLodSetBorn"), "files-hint"));
+  sec.appendChild(tipLine("", [unstamped.length ? tn("files.blStampFirst", unstamped.length) : null, t("files.blLodSetBorn")], "files-hint"));
 }
 
 /** Section 4 of Ottimizza: Blender — its switch, what it has, and the ways
@@ -35201,7 +35250,7 @@ function filesBlenderSection(win: Win, chosen: FsEntry[], models: FsEntry[]): HT
   swt.textContent = t("files.blSwitch");
   sw.append(cb, swt);
   sec.appendChild(sw);
-  if (!on) { sec.appendChild(tabLead(t("files.blOff"), "files-hint")); return sec; }
+  if (!on) { sw.append(" ", tabTip(t("files.blOff"))); return sec; }
   sec.appendChild(blenderReport(true));
   const probe = blenderState?.s?.probe;
   if (!probe?.ok) { const rows = jobRows(["blender"]); if (rows) sec.appendChild(rows); return sec; }
@@ -35290,7 +35339,7 @@ function filesBlenderSection(win: Win, chosen: FsEntry[], models: FsEntry[]): HT
           pw.appendChild(blenderPlanSlot(body, (pl, slot) =>
             blenderPlanTable(pl, slot, { label: t("files.blGoPrepare"), action: "blender-prepare",
               run: () => { void runBlender(win, { ...body, doc: store?.doc }, blend.path, "prepare"); } })));
-          pw.appendChild(tabLead(t("files.blPrepareBorn"), "files-hint"));
+          ul.append(" ", tabTip(t("files.blPrepareBorn")));
         }
         w.appendChild(pw);
       }
@@ -35453,8 +35502,7 @@ function filesRoomTab(win: Win, listing: FsListing): HTMLElement {
   box.className = "files-tab-room";
   box.appendChild(tabHead(t("files.tab.room"), t("files.roomSub")));
   if (!sync.room) {
-    box.appendChild(tabLead(t("files.roomOutside")));
-    box.appendChild(tabLead(t("files.roomHowIn"), "files-hint"));
+    box.appendChild(tipLine(t("files.roomOutside"), [t("files.roomHowIn")]));
     return box;
   }
   const kv = document.createElement("dl");
@@ -35507,7 +35555,8 @@ function filesRoomTab(win: Win, listing: FsListing): HTMLElement {
     toast(tn("files.roomQueued", goes.length));
   };
   box.appendChild(go);
-  box.appendChild(tabLead(t("files.roomDelivery"), "files-hint"));
+  // MICRO-OTTIMIZZA-3 p.1 · the delivery explained in the ⓘ beside the button
+  box.append(" ", tabTip(t("files.roomDelivery")));
   return box;
 }
 
