@@ -10749,6 +10749,10 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .files-tip { display: inline-block; margin: 0; cursor: help; color: var(--text-faint); font-size: 12px; line-height: 1; }
 .files-tip:hover, .files-tip:focus-visible { color: var(--accent); outline: none; }
 .files-est:empty { display: none; }
+/* MICRO-OTTIMIZZA-3 p.3 · one tileset for the survey, or one per file */
+.files-combine { display: flex; flex-direction: column; gap: 2px; margin: 6px 0; font-size: 12px; }
+.files-combine .files-hint { margin: 2px 0 0; }
+.files-combined { font-weight: 600; }
 .files-addon.flash { animation: sol-flash 1.2s ease-out; }
 #settings-sect-addons .settings-sub { margin: 12px 0 4px; font-size: 12px; color: var(--text-muted); }
 .files-addon-fit[data-fit="no_build"], .files-addon-fit[data-fit="no_emulator"], .files-addon-fit[data-fit="needs_node"], .files-addon-fit[data-fit="memory"] { color: var(--warn-ink); }

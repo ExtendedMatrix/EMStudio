@@ -34645,7 +34645,11 @@ const TILES_ENGINE_KEY = "emstudio.tilesEngine";
 interface TsTool { path: string; version: string; addon?: boolean; progress?: boolean; emulated?: string | null }
 interface TsRecognized { path: string; engine: "tileset" | "blocks"; software: string; generator?: string; root?: string | null;
   form?: string; blocks?: number; srs_origin?: string | null }
-interface TsPlan { at: number; error?: string; tool: TsTool | null; items: TilesetItem[]; recognized: TsRecognized[];
+/** MICRO-OTTIMIZZA-3 p.3 · the parts as ONE tileset of the survey (the bridge's `_tileset_combined`) */
+interface TsCombined { name: string; folder?: string; path?: string; exists?: boolean; parts?: number; estimate_mb?: number; error?: string }
+interface TsCombinedOut extends TsCombined { state: string; sha256?: string; bytes?: number; sources: string[]; parts_done?: string[];
+  facts?: TsOut["facts"]; validation?: TsOut["validation"]; pack?: TsOut["pack"] }
+interface TsPlan { combined?: TsCombined | null; at: number; error?: string; tool: TsTool | null; items: TilesetItem[]; recognized: TsRecognized[];
   ceiling_mb: number; memory_mb: number; workers: number; validator: { name: string; node?: string | null } }
 interface TsOut extends TilesetItem { state: string; sha256?: string; bytes?: number; progress_estimated?: boolean;
   run?: { seconds: number; peak_mb: number | null }; facts?: { files: number; bytes: number; geometric_error_m: number | null };
@@ -34693,12 +34697,40 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
     if (rows) body.appendChild(rows);
     return body;
   }
-  const key = sources.join("|");
+  // MICRO-OTTIMIZZA-3 p.3 · several OBJ (or a folder): ONE tileset of the
+  // survey, recommended and the default when they come from one folder (the
+  // 11 parts of Templu Mare's RB/LOD0), or a tileset per file
+  const many = sources.length > 1 || chosen.some((e) => e.type === "dir");
+  const oneFolder = new Set(sources.map((x) => chosen.find((e) => e.path === x)?.type === "dir" ? x : paths.dirname(x))).size === 1;
+  const combinePref = filesPref(win, "tilesCombine");
+  const combine = many && (combinePref === null ? oneFolder : combinePref === "1");
+  if (many) {
+    const cw = document.createElement("div");
+    cw.className = "files-combine";
+    cw.dataset.combine = combine ? "one" : "each";
+    for (const [v, k] of [["1", "files.tilesCombineOne"], ["0", "files.tilesCombineEach"]] as const) {
+      const lab = document.createElement("label");
+      const r = document.createElement("input");
+      r.type = "radio";
+      r.name = `tiles-combine-${win?.id ?? ""}`;
+      r.dataset.action = v === "1" ? "files-tiles-combine-one" : "files-tiles-combine-each";
+      r.checked = combine === (v === "1");
+      r.onchange = () => { setFilesPref(win, "tilesCombine", v === (oneFolder ? "1" : "0") ? null : v); renderStorage(); };
+      lab.append(r, " ", t(k));
+      cw.appendChild(lab);
+    }
+    cw.appendChild(tipLine(t("files.tilesCombineHint"), [t("files.tilesCombineHow")], "files-hint"));
+    body.appendChild(cw);
+  }
+  const combineName = currentFilePath ? baseName(currentFilePath) : "";
+  const key = `${sources.join("|")}|${combine ? "one" : "each"}`;
   const slot = document.createElement("div");
   body.appendChild(slot);
   const paint = (pl: TsPlan): void => {
     slot.textContent = "";
     if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
+    const cmb = combine ? pl.combined ?? null : null;
+    if (cmb?.error) slot.appendChild(tabLead(cmb.error, "files-hint files-warn"));
     // what a photogrammetry program already made: packed and stamped as theirs
     for (const r of pl.recognized) {
       const box = document.createElement("div");
@@ -34746,7 +34778,8 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
       if (refused) tr.className = "done";
       tr.dataset.tilesItem = it.name;
       const cells = [baseName(it.source),
-        it.error ? it.error : it.exists ? t("files.optExists", { name: it.name }) : `${it.name}/ → ${it.name}.3tz`,
+        it.error ? it.error : it.exists ? t("files.optExists", { name: it.name })
+          : cmb && it.folder ? `${baseName(cmb.folder ?? "")}/${it.name}/` : `${it.name}/ → ${it.name}.3tz`,
         it.error || it.exists ? "" : t("files.tilesLevelsIs", { lods: String(it.lods), d: String(it.divisions), leaves: String(it.leaves),
           tri: (it.triangles_est ?? 0).toLocaleString(getLocale()) }),
         it.error || it.exists ? "" : formatMb(it.estimate_mb ?? 0, getLocale()) + (sched.over.includes(it) ? ` — ${t("files.tilesOver")}` : "")];
@@ -34761,7 +34794,15 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
       table.appendChild(tr);
     }
     slot.appendChild(table);
-    const where = pl.items.find((o) => o.folder)?.folder;
+    if (cmb && !cmb.error) {
+      const one = document.createElement("p");
+      one.className = "files-lead files-combined";
+      one.dataset.combined = cmb.name;
+      one.textContent = cmb.exists ? t("files.optExists", { name: `${cmb.name}.3tz` })
+        : t("files.tilesCombined", { name: `${cmb.name}.3tz`, n: String(cmb.parts ?? 0) });
+      slot.appendChild(one);
+    }
+    const where = cmb?.folder ?? pl.items.find((o) => o.folder)?.folder;
     const first = pl.items.find((o) => o.command);
     const unstamped = sched.todo.filter((it) => !filesStampedPath(it.source));
     // the memory, said before anything starts, in one line; the rest in its ⓘ
@@ -34779,9 +34820,9 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
     go.type = "button";
     go.className = "primary";
     go.dataset.action = "files-tileset";
-    go.textContent = tn("files.tilesGo", sched.todo.length);
-    go.disabled = !pl.tool || !sched.todo.length || running;
-    go.onclick = () => { void runTileset(win, sources, sched.todo.length); };
+    go.textContent = cmb && !cmb.error ? tn("files.tilesGoSurvey", sched.todo.length) : tn("files.tilesGo", sched.todo.length);
+    go.disabled = !pl.tool || !sched.todo.length || running || !!cmb?.error;
+    go.onclick = () => { void runTileset(win, sources, sched.todo.length, cmb && !cmb.error ? { name: combineName } : null); };
     slot.appendChild(go);
     if (running) slot.appendChild(tabLead(t("files.tilesOneAtATime"), "files-hint"));
   };
@@ -34794,7 +34835,7 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
       const empty = { tool: null, items: [], recognized: [], ceiling_mb: 0, memory_mb: 0, workers: 1, validator: { name: "" } };
       try {
         const r = await fetch(`${await bridgeUrl()}/fs/tileset`, { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sources }) });
+          body: JSON.stringify({ sources, ...(combine ? { combine: true, combine_name: combineName } : {}) }) });
         const j = await r.json().catch(() => ({})) as Partial<TsPlan> & { ok?: boolean; error?: string };
         pl = r.status === 404 ? { at: Date.now(), ...empty, error: t("files.tilesOldBridge") }
           : j.ok ? { at: Date.now(), ...empty, ...j } as TsPlan
@@ -34826,16 +34867,18 @@ function filesStampedPath(path: string): boolean {
  *  OBJ (`tiling`, Obj2Tiles and its parameters), the .3tz from the folder
  *  (`packing`), the .3tz registered as a version of the model with its
  *  checksum; a summary at the end, wherever the person is. */
-async function runTileset(win: Win, sources: string[], n: number): Promise<void> {
-  const job = await startJob({ kind: "tileset", sources }, n === 1 ? `Obj2Tiles · ${baseName(sources[0])}` : `Obj2Tiles · ${tn("files.tilesN", n)}`);
+async function runTileset(win: Win, sources: string[], n: number, combine: { name: string } | null = null): Promise<void> {
+  const job = await startJob({ kind: "tileset", sources, ...(combine ? { combine: true, combine_name: combine.name } : {}) },
+    combine ? `Obj2Tiles · ${t("files.tilesSurveyJob", { n: String(n) })}` : n === 1 ? `Obj2Tiles · ${baseName(sources[0])}` : `Obj2Tiles · ${tn("files.tilesN", n)}`);
   if (!job) return;
   toast(tn("files.tilesStarted", n));
   tsPlans.clear();
   renderStorage();
   const end = await job.done;
-  const res = (end.result ?? {}) as { tool?: TsTool; outputs?: TsOut[] };
+  const res = (end.result ?? {}) as { tool?: TsTool; outputs?: TsOut[]; combined?: TsCombinedOut };
   const outs = res.outputs ?? [];
   if (end.state === "failed") { toast(t("files.optFailed", { why: end.error ?? "" })); logWarn(jobText(end)); }
+  if (res.combined) { await landSurveyTileset(win, res.combined, outs, res.tool); return; }
   const done = outs.filter((o) => o.state === "done" && o.path && o.sha256);
   const version = (res.tool?.version ?? "").replace(/^Obj2Tiles\s*/i, "").replace(/\+.*$/, "");
   let stamped = 0, registered = 0;
@@ -34881,10 +34924,61 @@ async function runTileset(win: Win, sources: string[], n: number): Promise<void>
   renderStorage();
 }
 
+/** MICRO-OTTIMIZZA-3 p.3 · the survey's ONE tileset, landed: its folder
+ *  stamped as DERIVED from ALL the OBJ (tiling, one step with N inputs), the
+ *  .3tz from the folder (packing), the .3tz registered as an alternative
+ *  visualisation of the whole document (one resource, one step whose inputs
+ *  are the parts' resources); a summary wherever the person is. */
+async function landSurveyTileset(win: Win, c: TsCombinedOut, outs: TsOut[], tool: TsTool | undefined): Promise<void> {
+  const version = (tool?.version ?? "").replace(/^Obj2Tiles\s*/i, "").replace(/\+.*$/, "");
+  const name = `${c.name}.3tz`;
+  if (c.state !== "done" || !c.path || !c.sha256 || !c.folder) {
+    const m = t("files.tilesSurveyFailed", { name, why: c.error ?? c.state });
+    toast(m); logWarn(m);
+    tsPlans.clear(); forgetProjectTrees(); renderStorage();
+    return;
+  }
+  const params: Record<string, unknown> = { parts: outs.length, preset: "standard", zsplit: false, root_content: false, octree: true,
+    tool: "Obj2Tiles", composed: "EMStudio · one tileset of a survey's parts", validator: c.validation?.validator ?? null,
+    validation_errors: c.validation?.errors ?? null, validation_warnings: c.validation?.warnings ?? null,
+    lods: outs.map((o) => o.lods ?? null), divisions: outs.map((o) => o.divisions ?? null) };
+  const software = [{ name: "Obj2Tiles", version }];
+  let stamped = false, registered: string | null = t("files.optNoGraph");
+  try {
+    const a = await stampDerived(c.sources, { path: c.folder }, { kind: "tiling", technique: "obj2tiles", parameters: params, software },
+      { tree: true, declare: true });
+    const b = a ? await stampDerived(c.folder, { path: c.path, sha256: c.sha256 }, { kind: "packing", technique: "3tz",
+      parameters: { profile: "dtcstamp 3tz", entries: c.pack?.entries ?? null, canonical: c.pack?.canonical?.canonical ?? null,
+                    content_digest: c.pack?.content_digest?.digest ?? null },
+      software: [{ name: "dtcstamp.write_canonical_3tz", version: String(c.pack?.writer?.version ?? "") }] }) : false;
+    stamped = a && b;
+    if (!stamped) logWarn(t("files.tilesNotStamped", { name }));
+  } catch (e) { logWarn(`${name}: ${(e as Error).message}`); }
+  try {
+    registered = await registerTileset({ ...(outs[0] ?? {}), source: c.sources[0], path: c.path, sha256: c.sha256, bytes: c.bytes,
+      facts: c.facts, state: "done" } as TsOut, params, version, c.sources);
+    if (registered !== null) logWarn(t("files.optNotRegistered", { name, why: registered }));
+  } catch (e) { logWarn(`${name}: ${(e as Error).message}`); }
+  const msg = t("files.tilesSurveyDone", { name, n: String(outs.length), mb: formatBytes(c.bytes ?? 0),
+    validator: c.validation?.validator ?? "", stamped: t(stamped ? "files.tilesSurveyStamped" : "files.tilesSurveyNotStamped"),
+    registered: t(registered === null ? "files.tilesSurveyRegistered" : "files.tilesSurveyNotRegistered") });
+  toast(msg);
+  logInfo(msg);
+  tsPlans.clear();
+  pathStamps.clear();
+  forgetProjectTrees();
+  if (win && storagePath(win) !== null) {
+    await storageGoChecked(win, paths.dirname(c.path));
+    setStorageSelected(win, c.path);
+  }
+  renderStorage();
+}
+
 /** The .3tz as a VERSION of its model in the open graph (level «tiles»), with
  *  its checksum — without it the Viewer draws the resource as missing — and
  *  the root geometric error, the measure s3Dgraphy keeps for a tileset. */
-async function registerTileset(o: TsOut, params: Record<string, unknown>, toolVersion: string): Promise<string | null> {
+async function registerTileset(o: TsOut, params: Record<string, unknown>, toolVersion: string,
+                               sources: string[] | null = null): Promise<string | null> {
   if (!store?.doc) return t("files.optNoGraph");
   const me = currentIdentity();
   const rel = (abs: string) => {
@@ -34896,6 +34990,8 @@ async function registerTileset(o: TsOut, params: Record<string, unknown>, toolVe
   const r = await fetch(`${await bridgeUrl()}/graph/add-version`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ doc: store.doc, source: o.source, em_json: currentFilePath ?? "", master_id: master ?? "",
+      // p.3 · the survey's ONE tileset: the parts, the bridge's `_add_survey_view`
+      ...(sources && sources.length > 1 ? { sources, name: baseName(o.path!).replace(/\.3tz$/i, "") } : {}),
       locator: rel(o.path!), sha256: o.sha256, bytes: o.bytes, level: "tiles", destination: "tileset", use: ["web", "realtime"],
       media_type: "application/vnd.maxar.archive.3tz+zip", packaging: "archive",
       measures: { geometric_error_m: o.facts?.geometric_error_m ?? undefined },
@@ -34913,7 +35009,8 @@ async function registerTileset(o: TsOut, params: Record<string, unknown>, toolVe
     for (const nd of j.nodes ?? []) if (!st.node(nd.id)) st.addNode(nd);
     for (const e of j.edges ?? []) st.addEdge(e.source, e.target, String(e.edge_type ?? ""), undefined, e.id);
   });
-  logInfo(t(j.revises ? "files.tilesRevision" : "files.tilesVersion", { name: baseName(o.path!) }), j.version_id ? [j.version_id] : undefined);
+  logInfo(t(sources && sources.length > 1 ? "files.tilesSurveyView" : j.revises ? "files.tilesRevision" : "files.tilesVersion",
+            { name: baseName(o.path!), n: String(sources?.length ?? 1) }), j.version_id ? [j.version_id] : undefined);
   return null;
 }
 
@@ -34935,15 +35032,19 @@ function folderStampOf(folder: string): { self: { resource_id: string; digest?: 
 /** A file just made by a job, stamped as DERIVED from its stamped source —
  *  the act said (kind, technique, parameters, the tool and its version) — and
  *  landed in the Chain. → true when the stamp was written. */
-async function stampDerived(source: string, out: { path: string; sha256?: string }, act: { kind: string; technique: string;
+async function stampDerived(source: string | string[], out: { path: string; sha256?: string }, act: { kind: string; technique: string;
     parameters: Record<string, unknown>; software: { name: string; version: string }[] },
     opts: { tree?: boolean; declare?: boolean; parent?: DeclaredParent } = {}): Promise<boolean> {
   const me = currentIdentity();
   if (!me?.orcid) return false;
-  const src = opts.parent ? null : await readStamp(stampPathFor(source)).catch(() => null);
+  // MICRO-OTTIMIZZA-3 p.3 · one step with N inputs (the parts of a survey's
+  // ONE tileset): each stamped source an input, each other one declared
+  const all = Array.isArray(source) ? source : [source];
+  const stamps = opts.parent ? all.map(() => null) : await Promise.all(all.map((x) => readStamp(stampPathFor(x)).catch(() => null)));
+  const src = stamps[0];
   // MICRO-OTTIMIZZA-2 · a source nobody stamped is DECLARED (a file, by its
   // name), when the caller allows it: the batch of a folder of OBJ
-  if (!src && !opts.declare) return false;
+  if (stamps.some((x) => !x) && !opts.declare) return false;
   const listing = await fsList(paths.dirname(out.path));
   const entry = listing.entries.find((e) => e.path === out.path);
   if (!entry) return false;
@@ -34962,8 +35063,13 @@ async function stampDerived(source: string, out: { path: string; sha256?: string
   draft.operator = { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") };
   const n = new Date();
   draft.at = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
-  if (src) draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(source), path: source }];
-  else draft.declared = [{ parents: [opts.parent ?? { kind: "file", label: baseName(source), path: source }] }];
+  if (all.length > 1) {
+    const ins = all.flatMap((x, i) => { const st = stamps[i]; return st ? [{ resource_id: st.self.resource_id, digest: st.self.digest ?? "", label: baseName(x), path: x }] : []; });
+    const decl = all.filter((_, i) => !stamps[i]).map((x) => ({ kind: "file" as const, label: baseName(x), path: x }));
+    if (ins.length) draft.inputs = ins;
+    if (decl.length) draft.declared = [{ parents: decl }];
+  } else if (src) draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(all[0]), path: all[0] }];
+  else draft.declared = [{ parents: [opts.parent ?? { kind: "file", label: baseName(all[0]), path: all[0] }] }];
   const emitted = await emitDraft(draft, { graph_id: store?.doc?.graph?.graph_id as string | undefined });
   if (!emitted.written.length) return false;
   landEmission(draft, emitted);

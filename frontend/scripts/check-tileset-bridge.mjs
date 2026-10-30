@@ -260,6 +260,52 @@ try {
   const v6 = await until(c5.get, j6.j.job);
   ok(v6.result?.outputs?.[0]?.progress_estimated === false, "its progress read from them, not estimated");
 
+  // ── MICRO-OTTIMIZZA-3 p.3 · many meshes, ONE tileset of the survey ──
+  bridge.proc.kill();
+  bridge = await start({});
+  const c8 = call(bridge.B);
+  mkdirSync(`${fsroot}/EM`, { recursive: true });
+  const parts = ["OB_EST_L_LOD0", "OB_INT_R_LOD0", "OB_PODIO_LOD0"].map((n) => obj(n));
+  const p9 = (await c8.post("/fs/tileset", { sources: parts, combine: true, combine_name: "Survey.em.json" })).j;
+  const cb = p9.combined ?? {};
+  ok(cb.name === "Survey_LOD0@tiles" && cb.parts === 3 && /\/RB\/versions\/Survey_LOD0@tiles\.3tz$/.test(cb.path ?? ""),
+     `one tileset for the survey: ${cb.name}, the document's name and the parts' ending, in the project's RB/versions/`);
+  ok(p9.items.every((it) => it.folder === `${cb.folder}/${it.name}` && it.path === null),
+     "each part tiled into its sub-folder of it, none packed on its own");
+  const p9b = (await c8.post("/fs/tileset", { sources: parts })).j;
+  ok(!p9b.combined && p9b.items.every((it) => /@tiles$/.test(it.name)), "without combine: a tileset per file, as before");
+  const j9 = await c8.post("/jobs", { kind: "tileset", sources: parts, combine: true, combine_name: "Survey.em.json" });
+  ok(j9.status === 202, "the job of the survey starts");
+  const v9 = await until(c8.get, j9.j.job, 60000);
+  const co = v9.result?.combined ?? {};
+  ok(v9.state === "done" && co.state === "done" && existsSync(co.path) && !parts.some((x) => existsSync(x.replace(/^.*\//, `${fsroot}/RB/versions/`).replace(/\.obj$/, "@tiles.3tz"))),
+     "ONE .3tz, no archive per part");
+  const parent = JSON.parse(readFileSync(`${co.folder}/tileset.json`, "utf8"));
+  ok(parent.root.children.length === 3 && parent.root.children.every((ch, i) => ch.content.uri === `${co.parts[i]}/tileset.json`)
+     && !parent.root.content && parent.root.refine === "ADD", "the parent: each part an external tileset, the root without content, ADD");
+  ok(parent.root.children.every((ch) => ch.geometricError <= parent.root.geometricError && ch.geometricError >= 0.27),
+     "its errors: the root's the largest, a part's never below its own");
+  ok(co.validation?.ok && co.validation.errors === 0, `the whole judged (${co.validation?.validator}) and passed`);
+  ok(co.sources?.length === 3 && /^sha256:/.test(co.sha256 ?? ""), "its sources are the three OBJ, its sha256 for the stamp");
+  const again9 = await c8.post("/jobs", { kind: "tileset", sources: parts, combine: true, combine_name: "Survey.em.json" });
+  ok(again9.status === 400, "made again: nothing to make (the survey's tileset exists)");
+  // registered as an alternative visualisation of the WHOLE document: one
+  // resource, ONE step with three inputs
+  const header9 = { format: "em.json", version: "1.0" };
+  const doc9 = { header: header9, graph: { graph_id: "g9", nodes: parts.map((x, i) => ({ id: `res-${i}`, node_type: "resource",
+    name: x.replace(/^.*\//, ""), data: { url: `../RB/LOD1/${x.replace(/^.*\//, "")}`, url_type: "3d_model", tier: "master" } })), edges: [] } };
+  const av9 = await c8.post("/graph/add-version", { doc: doc9, sources: parts, em_json: `${fsroot}/EM/Survey.em.json`,
+    locator: "../RB/versions/Survey_LOD0@tiles.3tz", sha256: co.sha256, bytes: co.bytes, level: "tiles", destination: "tileset",
+    use: ["web", "realtime"], packaging: "archive", technique: "tiling", tool: "Obj2Tiles", software: [{ name: "Obj2Tiles", version: "1.8.0" }],
+    at: "2026-10-30" });
+  if (!av9.j.registered) console.log("  add-version said:", JSON.stringify(av9.j).slice(0, 400));
+  const res9 = (av9.j.nodes ?? []).find((n) => n.id === av9.j.version_id);
+  const steps9 = (av9.j.nodes ?? []).filter((n) => n.node_type === "dtc_process");
+  const ins9 = (av9.j.edges ?? []).filter((e) => e.edge_type === "dtc_had_input").map((e) => e.target).sort();
+  ok(av9.j.registered && res9?.data?.represents === "document" && res9.data.url === "../RB/versions/Survey_LOD0@tiles.3tz",
+     "registered as a visualisation of the whole document, its .3tz its file");
+  ok(steps9.length === 1 && ins9.join(",") === "res-0,res-1,res-2", "ONE step with the three parts as its inputs");
+
   // ── the validator of Cesium, when it is here (EM_TILES_VALIDATOR + Node) ──
   if (process.env.CESIUM_VALIDATOR && existsSync(process.env.CESIUM_VALIDATOR)) {
     bridge.proc.kill();

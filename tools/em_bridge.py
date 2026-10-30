@@ -3300,17 +3300,57 @@ def make_handler(api):
                         "Obj2Tiles", os.path.basename(src), os.path.basename(out), it,
                         progress=bool(tool and tool.get("progress")))[1:])
                     items.append(it)
+            combined = self._tileset_combined(body, items) if body.get("combine") else None
             ceiling = O.memory_ceiling_mb()
             workers = max(1, min(4, (os.cpu_count() or 4) // 4))
             val = O.validator_tool()
             node = O.node_tool()
-            return {"ok": True, "tool": tool, "items": items, "recognized": recognized,
+            return {"ok": True, "tool": tool, "items": items, "recognized": recognized, "combined": combined,
                     "ceiling_mb": ceiling, "memory_mb": O.memory_total_mb(), "workers": workers,
                     "validator": {"name": val["version"]} if val else
                                  {"name": "EMStudio structural check", "node": node["version"] if node else None},
                     "command": " ".join(O.obj2tiles_command("Obj2Tiles", "‹in.obj›", "‹out›",
                                                             {"lods": 3, "divisions": 0},
                                                             progress=bool(tool and tool.get("progress")))[1:])}
+
+        def _tileset_combined(self, body, items):
+            """MICRO-OTTIMIZZA-3 p.3 · ``combine``: the OBJ of the batch as the
+            parts of ONE tileset — ``<name>@tiles/`` in the ``versions/`` of the
+            first part's tree, each part tiled into ``<name>@tiles/<part>/``,
+            the parent written over them and the whole packed into
+            ``<name>@tiles.3tz``. ``<name>`` is ``combine_name`` (the page
+            gives the open document's) with the parts' common ending
+            (``_LOD0``), else the project's folder with it. The items are
+            rewritten to their part folders; ``exists`` when the archive is
+            already there. None when fewer than two parts can be made."""
+            import re
+            from s3dgraphy.project_tree import variant_path, find_project_root
+            live = [it for it in items if not it.get("error") and it.get("source", "").lower().endswith(".obj")]
+            if len(live) < 2:
+                return None
+            stems = [os.path.splitext(os.path.basename(it["source"]))[0] for it in live]
+            tail = os.path.commonprefix([x[::-1] for x in stems])[::-1]
+            tail = tail if re.fullmatch(r"[_\-.]\w*", tail or "") else ""
+            root = find_project_root(live[0]["source"])
+            base = str(body.get("combine_name") or "") or os.path.basename(root or os.path.dirname(live[0]["source"]))
+            base = re.sub(r"\.em\.json$|\.json$", "", os.path.basename(base))
+            name = re.sub(r"[^\w.\-]+", "_", base + (tail if not base.endswith(tail) else "")).strip("_") or "survey"
+            folder = variant_path(os.path.join(os.path.dirname(live[0]["source"]), name + ".obj"), "", "tiles",
+                                  root=root, ext="")
+            if not _fs_inside_roots(folder):
+                return {"name": os.path.basename(folder), "error": f"{folder} is outside the folders this bridge serves"}
+            exists = os.path.exists(folder + ".3tz")
+            if not exists and os.path.exists(folder):
+                return {"name": os.path.basename(folder), "folder": folder, "path": folder + ".3tz",
+                        "error": f"{os.path.basename(folder)}/ is there without its .3tz: move it away to make it again"}
+            for it, stem in zip(live, stems):
+                it["folder"] = os.path.join(folder, stem)
+                it["name"] = stem
+                it["path"] = None
+                it["exists"] = exists
+                it.pop("error", None)
+            return {"name": os.path.basename(folder), "folder": folder, "path": folder + ".3tz", "exists": exists,
+                    "parts": len(live), "estimate_mb": sum(it.get("estimate_mb") or 0 for it in live)}
 
         def _jobs_post(self, body):
             """``POST /jobs``: ``{kind: "variants", sources, preset…}`` ·
@@ -3341,13 +3381,20 @@ def make_handler(api):
                         raise RuntimeError(payload.get("error") or status)
                     return payload
 
+                combined = plan.get("combined")
+                if combined and combined.get("error"):
+                    self._fail(400, combined["error"])
+                    return
+
                 def target(job):
                     return O.run_tileset_batch(job, todo, plan["tool"], pack,
-                                               ceiling_mb=plan["ceiling_mb"], workers=plan["workers"])
+                                               ceiling_mb=plan["ceiling_mb"], workers=plan["workers"],
+                                               combine=combined)
                 total = sum(it.get("estimate_mb") or 0 for it in todo if not it.get("error") and not it.get("exists"))
-                job = O.submit("tileset", {"sources": [it["source"] for it in todo]}, target, heavy=True,
-                               estimate_mb=min(total, plan["ceiling_mb"]),
-                               label=f"Obj2Tiles · {len(todo)} tileset" if len(todo) != 1 else f"Obj2Tiles · {todo[0]['name']}")
+                job = O.submit("tileset", {"sources": [it["source"] for it in todo], "combine": bool(combined)}, target,
+                               heavy=True, estimate_mb=min(total, plan["ceiling_mb"]),
+                               label=f"Obj2Tiles · {combined['name']}" if combined else
+                                     f"Obj2Tiles · {len(todo)} tileset" if len(todo) != 1 else f"Obj2Tiles · {todo[0]['name']}")
                 self._json({"ok": True, "job": job.id, "plan": plan}, 202)
                 return
             if kind == "variants":
@@ -3597,6 +3644,9 @@ def make_handler(api):
             except Exception as exc:
                 self._fail(400, f"em.json not readable: {exc}")
                 return
+            if isinstance(body.get("sources"), list) and len(body["sources"]) > 1:
+                self._add_survey_view(body, graph, warnings)
+                return
             source = os.path.abspath(os.path.expanduser(str(body.get("source") or "")))
             master = str(body.get("master_id") or "")
             node_ids = {n.node_id for n in graph.nodes}
@@ -3647,6 +3697,64 @@ def make_handler(api):
             edges = [e for e in g["edges"] if e.get("id") not in before_edges]
             self._json({"ok": True, "registered": True, "master_id": master, **out,
                         "nodes": nodes, "edges": edges, "warnings": [str(w) for w in warnings]})
+
+        def _add_survey_view(self, body, graph, warnings):
+            """MICRO-OTTIMIZZA-3 p.3 · ONE tileset of a survey's parts,
+            registered as an alternative visualisation of the WHOLE document:
+            a resource of its own (``tier: distribution``, the .3tz, its uses)
+            and ONE step with N inputs — the resources of the parts, found as
+            /graph/add-version finds a master (``s3dgraphy``'s
+            ``declare_derivation``: ``dtc_had_input`` each, ``dtc_derived_from``
+            each). Parts the graph does not hold are said, not invented; none
+            at all answers ``registered: false``."""
+            from s3dgraphy.dtc.ingest import declare_derivation
+            em_json = str(body.get("em_json") or "")
+            sources = [os.path.abspath(os.path.expanduser(str(x))) for x in body["sources"]]
+            masters, missing = [], []
+            for src in sources:
+                m = _master_of(graph, src, em_json)
+                (masters if m and m not in masters else missing).append(m or os.path.basename(src))
+            if not masters:
+                self._json({"ok": True, "registered": False,
+                            "reason": "none of the parts is a resource of this graph"})
+                return
+            sha = str(body.get("sha256") or "")
+            locator = str(body.get("locator") or "")
+            for n in graph.nodes:
+                d = getattr(n, "data", None) or {}
+                if getattr(n, "node_type", "") == "resource" and sha and d.get("checksum") == sha:
+                    self._json({"ok": True, "registered": False, "reason": f"{n.name} already holds these bytes"})
+                    return
+            before_nodes = {n.node_id for n in graph.nodes}
+            before_edges = {getattr(e, "edge_id", None) for e in graph.edges}
+            uses = [u for u in (body.get("use") or []) if isinstance(u, str)]
+            name = str(body.get("name") or "") or os.path.splitext(os.path.basename(locator))[0]
+            res = api.add_resource(graph, name=name, kind="3d_model", tier="distribution",
+                                   packaging=str(body.get("packaging") or "archive"),
+                                   files=[{"path": locator, "checksum": sha or None, "size_bytes": body.get("bytes"),
+                                           "media_type": str(body.get("media_type") or "application/vnd.maxar.archive.3tz+zip")}],
+                                   size_bytes=body.get("bytes"),
+                                   description=str(body.get("description") or ""),
+                                   data={k: v for k, v in {
+                                       "use": uses or None, "level": str(body.get("level") or "tiles"),
+                                       "purpose": str(body.get("destination") or "tileset"), "represents": "document",
+                                       "measures": {k: v for k, v in (body.get("measures") or {}).items() if v is not None} or None,
+                                       "author": str(body.get("author") or "") or None}.items() if v})
+            step = declare_derivation(graph, res.node_id, masters, dtc_kind="lod_generation",
+                                      technique=str(body.get("technique") or "tiling"),
+                                      parameters=body.get("parameters") or None,
+                                      tool=str(body.get("tool") or "") or None,
+                                      software=body.get("software") or None,
+                                      author=str(body.get("author") or "") or None,
+                                      at=str(body.get("at") or "") or None)
+            projected = api.graph_to_emjson(graph)
+            g = projected["graph"] if "graph" in projected else projected
+            self._json({"ok": True, "registered": True, "version_id": res.node_id,
+                        "process_id": step.get("process_id") if isinstance(step, dict) else None,
+                        "inputs": masters, "missing": missing, "revises": None,
+                        "nodes": [n for n in g["nodes"] if n.get("id") not in before_nodes],
+                        "edges": [e for e in g["edges"] if e.get("id") not in before_edges],
+                        "warnings": [str(w) for w in warnings]})
 
         def _stamp_members(self, body):
             """``{"paths": [...]}`` → ``{"sets": {path: {members, digest,

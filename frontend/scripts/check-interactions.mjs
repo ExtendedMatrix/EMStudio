@@ -11580,6 +11580,54 @@ test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, 
   return { pass: Object.values(conds).every(Boolean), detail: { conds, on, off, errors } };
 });
 
+test("AR13.survey", "MICRO-OTTIMIZZA-3 p.3 · più mesh, un solo tileset: due OBJ della stessa cartella con la destinazione «Tileset» → l'interruttore «un tileset per tutto il rilievo» acceso da sé (consigliato: «Un rilievo intero si guarda meglio come un tileset solo»), la riga ‹documento›_LOD0@tiles.3tz di 2 parti, le parti nelle sue sottocartelle, il pulsante «Fai il tileset del rilievo (2 parti)»; «un tileset per file» torna alle righe di prima", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab13");
+  for (const n of ["OB_EST_L_LOD0", "OB_INT_R_LOD0"]) writeFileSync(`${pr}/RB/LOD1/${n}.obj`, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/RB"]`).first().click();
+  await p.waitForTimeout(800);
+  await storageInto(p, ["LOD1"]);
+  await storageClick(p, "OB_EST_L_LOD0.obj");
+  await p.locator(".storage-row", { has: p.locator(".storage-name", { hasText: /^OB_INT_R_LOD0\.obj$/ }) }).first().click({ modifiers: ["Meta"] });
+  await p.waitForTimeout(600);
+  await p.click('.files-tab[data-tab="optimize"]');
+  await p.waitForTimeout(600);
+  await p.click('[data-action="files-tiles-experimental"]');
+  await p.waitForSelector(".files-tiles .files-combined", { timeout: 15000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const one = await p.evaluate(() => ({
+    mode: document.querySelector(".files-combine")?.dataset.combine ?? "",
+    checked: document.querySelector('[data-action="files-tiles-combine-one"]')?.checked ?? null,
+    hint: document.querySelector(".files-combine .files-hint")?.textContent ?? "",
+    line: document.querySelector(".files-tiles .files-combined")?.textContent ?? "",
+    rows: [...document.querySelectorAll(".files-tiles .files-prev td")].map((x) => x.textContent),
+    go: document.querySelector('[data-action="files-tileset"]')?.textContent ?? "" }));
+  await p.screenshot({ path: SHOT("ar13-rilievo") }).catch(() => {});
+  await p.click('[data-action="files-tiles-combine-each"]');
+  await p.waitForTimeout(400);
+  await p.waitForSelector(".files-tiles .files-prev td", { timeout: 10000 }).catch(() => {});
+  await p.waitForTimeout(400);
+  const each = await p.evaluate(() => ({
+    mode: document.querySelector(".files-combine")?.dataset.combine ?? "",
+    line: !!document.querySelector(".files-tiles .files-combined"),
+    rows: [...document.querySelectorAll(".files-tiles .files-prev td")].map((x) => x.textContent),
+    go: document.querySelector('[data-action="files-tileset"]')?.textContent ?? "" }));
+  await ctx.close();
+  const conds = {
+    oneByDefault: one.mode === "one" && one.checked === true,
+    advice: /Un rilievo intero si guarda meglio come un tileset solo/.test(one.hint),
+    line: /ab13_LOD0@tiles\.3tz: un tileset di 2 parti/.test(one.line),
+    parts: one.rows.some((x) => x === "ab13_LOD0@tiles/OB_EST_L_LOD0/") && one.rows.some((x) => x === "ab13_LOD0@tiles/OB_INT_R_LOD0/"),
+    go: one.go === "Fai il tileset del rilievo (2 parti)",
+    each: each.mode === "each" && !each.line && each.rows.some((x) => /OB_EST_L_LOD0@tiles\/ → OB_EST_L_LOD0@tiles\.3tz/.test(x)) && each.go === "Fai 2 tileset",
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, one, each, errors } };
+});
+
 test("AR12.blender", "MICRO-OTTIMIZZA-3 · Blender come seconda via, dietro il suo interruttore «sperimentale»: acceso, il bridge trova Blender e lo interroga (un lavoro leggero) e la scheda dice in parole che cosa c'è e che cosa manca — EM Tools che non si carica perché le sue librerie sono per Python 3.11 e questo Blender ha Python 3.13, 3D Survey Collection con il suo set di LOD; l'atlante ricotto di un modello (OB_CUBO_LOD1@atlas.glb); le esperienze col motore Blender + 3DSC: tre livelli RB/versions/‹modello›@lodN-realtime.glb, la memoria detta prima; il set di LOD come lavoro, i glb nella cartella delle versioni; spento, la sezione lo dice", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab12");

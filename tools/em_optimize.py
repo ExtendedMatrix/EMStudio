@@ -1097,13 +1097,92 @@ def tileset_facts(folder: str) -> dict:
     return {"files": n, "bytes": size, "geometric_error_m": ge}
 
 
-def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: int, workers: int) -> dict:
+# ── MICRO-OTTIMIZZA-3 p.3 · many meshes, ONE tileset ───────────────────────
+#
+# E.D. (28 Oct): the 11 parts of OB_*_LOD0 of Templu Mare are one survey, and
+# a survey is best looked at as one tileset. Each part is tiled on its own (side
+# by side under the memory ceiling, as a batch), into a sub-folder of ONE folder;
+# then a PARENT tileset.json composes them — each part an external tileset,
+# its tile's box the part's root box in the parent's frame — and the whole
+# folder is judged and packed into ONE .3tz. The way of 3D Survey Collection's
+# ``cesium_exporter/tileset_stitcher.py`` (``_build_parent_tileset``), with the
+# children's root transforms carried into the boxes.
+
+def _mat_mul_point(m, p):
+    """A column-major 4×4 (3D Tiles' ``transform``) applied to a point."""
+    x, y, z = p
+    return (m[0] * x + m[4] * y + m[8] * z + m[12],
+            m[1] * x + m[5] * y + m[9] * z + m[13],
+            m[2] * x + m[6] * y + m[10] * z + m[14])
+
+
+def _box_aabb(box, m=None):
+    """A 3D Tiles ``box`` (centre + three half-axes) → its axis-aligned bounds,
+    after the transform ``m`` when there is one."""
+    c, axes = box[0:3], (box[3:6], box[6:9], box[9:12])
+    if m:
+        c = _mat_mul_point(m, c)
+        axes = tuple(tuple(m[r] * a[0] + m[4 + r] * a[1] + m[8 + r] * a[2] for r in range(3)) for a in axes)
+    ext = [sum(abs(a[i]) for a in axes) for i in range(3)]
+    return [c[i] - ext[i] for i in range(3)], [c[i] + ext[i] for i in range(3)]
+
+
+def _aabb_box(lo, hi):
+    c = [(lo[i] + hi[i]) / 2 for i in range(3)]
+    h = [max((hi[i] - lo[i]) / 2, 1e-6) for i in range(3)]
+    return [c[0], c[1], c[2], h[0], 0.0, 0.0, 0.0, h[1], 0.0, 0.0, 0.0, h[2]]
+
+
+def compose_tileset(folder: str, parts: list) -> dict:
+    """The parent ``tileset.json`` of ``folder`` over the tilesets of its
+    sub-folders ``parts`` (names): one child tile per part, ``content.uri``
+    ``<part>/tileset.json`` (an external tileset), its box the part root's box
+    in the parent's frame (the part's ``transform`` applied, so it stays the
+    part's), its geometric error the part's box diagonal (never below the
+    part's own); the root without content, ``ADD``, its box the union and its
+    error that union's diagonal — the viewer always descends into the parts.
+    → ``{parts, geometric_error_m, box}``; raises when a part is unreadable."""
+    import math
+    children, lows, highs = [], [], []
+    for name in parts:
+        doc = json.loads(open(os.path.join(folder, name, "tileset.json"), encoding="utf-8").read())
+        root = doc.get("root") or {}
+        box = (root.get("boundingVolume") or {}).get("box")
+        if not isinstance(box, list) or len(box) != 12:
+            raise ValueError(f"{name}: its root has no boundingVolume.box")
+        lo, hi = _box_aabb([float(v) for v in box], root.get("transform"))
+        diag = math.dist(lo, hi)
+        own = float(doc.get("geometricError") or root.get("geometricError") or 0.0)
+        children.append({"boundingVolume": {"box": _aabb_box(lo, hi)}, "geometricError": max(diag, own),
+                         "content": {"uri": f"{name}/tileset.json"}})
+        lows.append(lo)
+        highs.append(hi)
+    lo = [min(v[i] for v in lows) for i in range(3)]
+    hi = [max(v[i] for v in highs) for i in range(3)]
+    ge = max([math.dist(lo, hi), 1.0] + [c["geometricError"] for c in children])
+    box = _aabb_box(lo, hi)
+    parent = {"asset": {"version": "1.1", "generator": "EMStudio (MICRO-OTTIMIZZA-3): one tileset of a survey's parts"},
+              "geometricError": ge,
+              "root": {"boundingVolume": {"box": box}, "geometricError": ge, "refine": "ADD", "children": children}}
+    with open(os.path.join(folder, "tileset.json"), "w", encoding="utf-8") as fh:
+        json.dump(parent, fh, indent=1)
+    return {"parts": len(children), "geometric_error_m": ge, "box": box}
+
+
+def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: int, workers: int,
+                      combine: dict = None) -> dict:
     """The batch: each OBJ → its tileset folder → the validator → the .3tz
     (``pack(folder) → result``), MORE PROCESSES SIDE BY SIDE as long as their
     estimates stay under ``ceiling_mb`` together (never past it; one that alone
     passes it is refused before it starts), at most ``workers``. Each item has
     its own state, progress and cancel (``job.items``); the job's progress is
-    their mean. A process that stalls is tried once more."""
+    their mean. A process that stalls is tried once more.
+
+    ``combine`` (MICRO-OTTIMIZZA-3 p.3) ``{folder, name, path}``: the parts are
+    not packed one by one; when ALL of them pass, :func:`compose_tileset`
+    writes the parent in ``folder``, the validator judges the whole, and ONE
+    .3tz is packed (``result.combined``). One part that fails, or does not
+    pass, and there is no combined tileset: the parts' folders stay."""
     job.items = [{"source": it["source"], "name": it.get("name"), "state": "queued", "progress": 0.0,
                   "stage": "", "estimate_mb": it.get("estimate_mb"), "cancel": False} for it in items]
     results: list = [None] * len(items)
@@ -1121,7 +1200,7 @@ def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: in
     def one(i: int):
         it, row = items[i], job.items[i]
         try:
-            res = _tileset_one(job, it, row, tool, pack, refresh)
+            res = _tileset_one(job, it, row, tool, None if combine else pack, refresh)
         except _Cancelled:
             res = {**it, "state": "cancelled"}
             row["state"] = "cancelled"
@@ -1182,7 +1261,39 @@ def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: in
     out = [r for r in results if r]
     if job.cancel.is_set() and not any(r.get("state") == "done" for r in out):
         raise _Cancelled()
+    if combine:
+        return {"tool": tool, "outputs": out, "ceiling_mb": ceiling_mb,
+                "combined": _combine_parts(job, combine, items, out, pack)}
     return {"tool": tool, "outputs": out, "ceiling_mb": ceiling_mb}
+
+
+def _combine_parts(job: Job, combine: dict, items: list, out: list, pack) -> dict:
+    """The parts done → the parent, judged, packed: ``{state, folder, path,
+    sha256, bytes, facts, validation, pack, sources, parts}``."""
+    folder = combine["folder"]
+    head = {"name": combine.get("name"), "folder": folder, "path": combine.get("path"),
+            "sources": [it["source"] for it in items]}
+    bad = [r for r in out if r.get("state") != "done"]
+    if bad or job.cancel.is_set():
+        why = "; ".join(f"{r.get('name')}: {r.get('error') or r.get('state')}" for r in bad) or "cancelled"
+        job.say(f"one tileset of the survey: not made — {why}")
+        return {**head, "state": "failed", "error": why}
+    job.stage = "composing"
+    parts = [os.path.basename(r["folder"].rstrip("/\\")) for r in out]
+    composed = compose_tileset(folder, parts)
+    job.say(f"one tileset of the survey: {composed['parts']} parts composed in {os.path.basename(folder)}/tileset.json")
+    job.stage = "validation"
+    verdict = validate_tileset(folder)
+    job.say(f"one tileset of the survey: {verdict['validator']}: {verdict['errors']} errors, {verdict['warnings']} warnings")
+    facts = tileset_facts(folder)
+    if not verdict["ok"]:
+        return {**head, "state": "invalid", "validation": verdict, "facts": facts,
+                "error": "; ".join(verdict["messages"][:3])}
+    job.stage = "packing"
+    packed = pack(folder)
+    return {**head, "state": "done", "parts": parts, "composed": composed, "validation": verdict, "facts": facts,
+            "pack": packed, "sha256": packed.get("sha256"), "bytes": packed.get("bytes"),
+            "path": packed.get("path") or combine.get("path")}
 
 
 def _tileset_one(job: Job, it: dict, row: dict, tool: dict, pack, refresh) -> dict:
@@ -1238,6 +1349,11 @@ def _tileset_one(job: Job, it: dict, row: dict, tool: dict, pack, refresh) -> di
         return {**base, "state": "invalid", "error": "; ".join(verdict["messages"][:3])}
     if row["cancel"] or job.cancel.is_set():
         raise _Cancelled()
+    if pack is None:
+        # a part of ONE tileset: packed with the others, after the parent
+        row["state"] = "done"
+        row["stage"] = ""
+        return {**base, "state": "done"}
     row["stage"] = "packing"
     row["progress"] = 0.96
     refresh()
