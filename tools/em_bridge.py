@@ -1829,7 +1829,14 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: confirmed), ``GET /blend/session`` (open in a Blender? unsaved changes? who
 #: may save) and ``POST /blend/open`` (Blender with its interface, as a sidecar
 #: of the graph open in EMStudio).
-BRIDGE_LEVEL = 48   # 30 also = /validate
+#: 49 = MICRO-INGRESSO-ASSET-1: «Fai entrare un asset», the frame by points —
+#: ``POST /geo/fit-points`` (the rototranslation, the scale only when asked,
+#: each point's residual, the mean error and the RMS: s3Dgraphy's
+#: ``geometry.registration.fit_points``, and the two nodes the graph holds
+#: when ``crs`` and ids are given) and ``POST /geo/parse-points`` (the points
+#: of a total station's or a CSV file, by ``text`` or ``path``; with
+#: ``local`` the pairs by name). Neither needs pyproj.
+BRIDGE_LEVEL = 49   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -5989,7 +5996,52 @@ def make_handler(api):
             except ValueError as exc:
                 self._fail(400, str(exc))
 
+        def _geo_points(self, route, body):
+            from s3dgraphy.geometry import registration as REG
+            try:
+                if route == "/geo/parse-points":
+                    text = body.get("text")
+                    if text is None and body.get("path"):
+                        path = self._geo_inside(body.get("path"))
+                        if not path or not os.path.isfile(_long_path(path)):
+                            self._fail(404, "no such file (or outside the served roots)")
+                            return
+                        if os.path.getsize(_long_path(path)) > 8 * 1024 * 1024:
+                            self._fail(413, "a file of points is not 8 MB")
+                            return
+                        with open(_long_path(path), "rb") as fh:
+                            raw = fh.read()
+                        try:
+                            text = raw.decode("utf-8-sig")
+                        except UnicodeDecodeError:
+                            text = raw.decode("latin-1")
+                    out = REG.parse_points(str(text or ""))
+                    if isinstance(body.get("local"), list):
+                        out["pairing"] = REG.pair_by_name(body["local"], out["points"])
+                    self._json({"ok": True, **out})
+                    return
+                pts = [p for p in (body.get("points") or []) if isinstance(p, dict)]
+                fit = REG.fit_points([p.get("local") for p in pts], [p.get("world") for p in pts],
+                                     scale=bool(body.get("scale")),
+                                     ids=[str(p.get("id") or f"P{i + 1}") for i, p in enumerate(pts)],
+                                     use=[p.get("use", True) is not False for p in pts])
+                if body.get("transform_id") and body.get("gcp_id"):
+                    fit["graph"] = REG.registration_nodes(
+                        fit, pts, crs=body.get("crs") or None, transform_id=str(body["transform_id"]),
+                        gcp_id=str(body["gcp_id"]), name=str(body.get("name") or "Registration"),
+                        gcp_name=str(body.get("gcp_name") or "Control points"))
+                self._json(fit)
+            except REG.RegistrationError as exc:
+                self._json({"ok": False, "error": str(exc)}, 422)
+            except Exception as exc:  # noqa: BLE001
+                self._json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 422)
+
         def _geo_post(self, route, body):
+            # MICRO-INGRESSO-ASSET-1 · the frame by points: pure s3Dgraphy, no
+            # pyproj — answered before em_geotiles is imported
+            if route in ("/geo/fit-points", "/geo/parse-points"):
+                self._geo_points(route, body)
+                return
             import em_geotiles as G
             inside = lambda p: bool(self._geo_inside(p))
             try:

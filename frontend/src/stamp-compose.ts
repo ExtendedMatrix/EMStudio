@@ -140,6 +140,11 @@ export interface Draft {
   /** MICRO-CONTENTS-2 D31 · «Timbra un passo da questo file…»: the step opens
    *  with NO file made and asks which — the name of the file it starts from */
   madeFrom?: string;
+  /** MICRO-INGRESSO-ASSET-1 · the tier said by who knows it: an asset that
+   *  ENTERS as a master is one even when a process made it (photogrammetry,
+   *  texturing). Absent: an origin is a master, a process's output a
+   *  distribution, as before. */
+  tier?: "master" | "distribution";
 }
 
 export function newDraft(outputs: DraftOutput[]): Draft {
@@ -479,7 +484,7 @@ async function emitOne(
       // members digest (dtcstamp), its files travel with it. CAMPAGNA · a tree
       // is a `directory` or an `archive`: dtcstamp writes its content digest
       packaging: o.tree ? o.tree.packaging : o.members ? "file_set" : "file",
-      tier: draft.origin ? "master" : "distribution",
+      tier: draft.tier ?? (draft.origin ? "master" : "distribution"),
       size_bytes: o.size,
       ...(o.members ? { files: o.members.map((m) => ({ path: m.path, digest: m.digest,
         size_bytes: m.size_bytes, role: m.role })) } : {}),

@@ -21,7 +21,10 @@
  *   · everything else is the window-wide drop of the browser: the first file
  *     opens as a document (em.json, .emj, GraphML) through the door the OS's
  *     «Open With» uses (`openPathFromDesktop`);
- *   · a folder or an archive anywhere else is said, not opened as a graph.
+ *   · a folder or an archive anywhere else is said, not opened as a graph;
+ *   · MICRO-INGRESSO-ASSET-1 · on the ARCHIVE (the File window), the files and
+ *     folders that are not a graph ENTER: «Fai entrare un asset» opens on
+ *     them (a graph among them still opens as before).
  *
  * Pure (no DOM, no Tauri).
  */
@@ -34,6 +37,7 @@ export interface DropTarget { win: string; type: string }
 export type DesktopDropPlan =
   | { action: "tileset"; win: string; path: string; type: PathKind; pinFolder: boolean }
   | { action: "open"; path: string }
+  | { action: "ingress"; win: string; paths: string[] }
   | { action: "none"; why: "empty" | "folder-elsewhere" | "archive-elsewhere" };
 
 /** the window types a tileset is dropped on (as `dropTilesetOn`) */
@@ -41,6 +45,8 @@ export const TILESET_TARGETS = ["viewer", "scene"] as const;
 
 const ARCHIVE = /\.(3tz|zip)$/i;
 const DOC = /\.(em\.json|emj|json|graphml|xml)$/i;
+/** a graph, which a drop on the Archive still opens */
+const GRAPH = /\.(em\.json|emj|graphml)$/i;
 /** extensions a dropped path is a FILE by, without asking the disk */
 const KNOWN_FILE = /\.(em\.json|emj|json|graphml|xml|3tz|zip|ttl|xlsx|csv|txt|md|pdf|png|jpe?g|tiff?|webp|gif|obj|glb|gltf|ply|las|laz|e57|b3dm|blend)$/i;
 
@@ -80,6 +86,8 @@ export function planDesktopDrop(items: DroppedPath[], target: DropTarget | null)
                        pinFolder: target.type === "viewer" && pick.kind === "dir" };
   }
   const notArchives = files.filter((i) => !ARCHIVE.test(base(i.path)));
+  if (target?.type === "storage" && !notArchives.some((i) => GRAPH.test(base(i.path))))
+    return { action: "ingress", win: target.win, paths: list.map((i) => i.path) };
   const doc = notArchives.find((i) => DOC.test(base(i.path))) ?? notArchives[0];
   if (doc) return { action: "open", path: doc.path };
   return { action: "none", why: dirs.length ? "folder-elsewhere" : "archive-elsewhere" };

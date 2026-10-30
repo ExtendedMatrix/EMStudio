@@ -164,7 +164,23 @@ const O = { origin: "http://localhost:5173" };
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${B}/health`)).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 150)); }
   const health = await (await fetch(`${B}/health`)).json();
-  eq(health.bridge_level, 47, "the bridge's level: 47 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root; 40 /geo/tileset-frame; 41 /web-meta; 42 /project-tree, /fs/optimize; 43 /addons, /jobs, /graph/add-version; 44 /fs/tileset, the tileset job; 45 /blender, the Blender jobs; 46 /optimize/profiles, /optimize/diagnose, /optimize/versions; 47 the profiles with E.D.'s names, per-row params, Node.js an add-on)");
+  eq(health.bridge_level, 49, "the bridge's level: 49 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root; 40 /geo/tileset-frame; 41 /web-meta; 42 /project-tree, /fs/optimize; 43 /addons, /jobs, /graph/add-version; 44 /fs/tileset, the tileset job; 45 /blender, the Blender jobs; 46 /optimize/profiles, /optimize/diagnose, /optimize/versions; 47 the profiles with E.D.'s names, per-row params, Node.js an add-on; 48 the .blend as a folder; 49 /geo/fit-points, /geo/parse-points)");
+  // MICRO-INGRESSO-ASSET-1 · the frame by points: s3Dgraphy's rototranslation
+  // through the bridge (no pyproj), the nodes the graph holds, a file of points
+  {
+    const c = Math.cos(Math.PI / 6), sn = Math.sin(Math.PI / 6), T = [327372.56 + 12.5, 448682.65 + 7.25, 31.4];
+    const local = [[0, 0, 0], [10, 0, 0], [10, 8, 3], [0, 8, 3]];
+    const points = local.map((l, i) => ({ id: `P${i + 1}`, local: l, world: [c * l[0] - sn * l[1] + T[0], sn * l[0] + c * l[1] + T[1], l[2] + T[2]] }));
+    const post = (r, b) => fetch(`${B}${r}`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify(b) });
+    const fit = await (await post("/geo/fit-points", { points, crs: "EPSG:3844", transform_id: "rt", gcp_id: "gcp" })).json();
+    ok(fit.ok && fit.rms < 1e-6 && Math.abs(fit.translation[0] - T[0]) < 1e-6 && fit.scale === 1,
+      `/geo/fit-points: a known rototranslation given back (RMS ${fit.rms?.toExponential(1)} m)`);
+    eq(fit.graph?.nodes.map((n) => n.node_type), ["registration_transform", "gcp_set"], "…with the transform and the control set, built by s3Dgraphy");
+    const two = await post("/geo/fit-points", { points: points.slice(0, 2) });
+    eq(two.status, 422, "/geo/fit-points: two pairs refused by name");
+    const parsed = await (await post("/geo/parse-points", { text: "Name;N;E;H\nGCP1;448667,65;327412,56;28,75\n" })).json();
+    eq(parsed.points?.[0]?.xyz, [327412.56, 448667.65, 28.75], "/geo/parse-points: a total station's file, northing first, decimal commas");
+  }
   // MICRO tileset, shift e epoche · the Basilica Iulia's root (RealityScan,
   // E−291407 N−4640813 declared as EPSG:6708: on the equator) back in Rome
   {

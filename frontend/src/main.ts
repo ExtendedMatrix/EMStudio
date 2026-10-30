@@ -263,7 +263,12 @@ import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type 
 import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type Probes } from "./load-failure";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
-import { epsgOf, georefSummary } from "./georef";
+import { epsgOf, georefSummary, parseShiftTxt } from "./georef";
+import {
+  actFor, documentNode, documentsOf, effective, entering, frameData, newIngress, stampParameters,
+  type IngressAsset, type IngressState, type PointsFit, type V3 as IngressV3,
+} from "./ingress";
+import { closeIngress, ingressIsOpen, openIngress } from "./ingress-ui";
 import { proposalNow, proposeConversion, renderGeorefSection, renderSitePinProposal, type GeorefDeps } from "./georef-panel";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
@@ -445,7 +450,7 @@ import { type Access, type ConnectionState, type NodeApi, type NodeEntry, type R
 import { stateBadge, stateSign } from "./state-symbols";
 import * as alignment from "./alignment";
 import { buildCommand, type CommandVerb } from "./commands";
-import { addResource, fileCounts, foldFiles, movePointers, packagingLabel, parseBlendLocator, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
+import { addResource, fileCounts, foldFiles, makeBlendLocator, movePointers, packagingLabel, parseBlendLocator, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
 import { askWhichPointersMove } from "./resource-panel";
 import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
 import { foldForms, landPack, packTileset } from "./pack3tz";
@@ -685,7 +690,7 @@ import { hintsPathFor, readHints, recordFound, setHintsBridgeResolver } from "./
 // da s3Dgraphy attraverso il bridge: `stamp-compose.ts` non costruisce mai un
 // timbro, lo chiede.
 import {
-  applyHandle, chainsFor, emitDraft, fetchSets, hasFileSets, missingFields, newDraft, outputFrom, suggestedKind,
+  applyHandle, chainsFor, emitDraft, readyToStamp, fetchSets, hasFileSets, missingFields, newDraft, outputFrom, suggestedKind,
   DOOR_EXT, requiredFields, retitleStamp, roadFor, setComposeBridgeResolver,
   doiFromName, normalizeSource, proposeActName, dateFormOf, readDate, showDate,
   type Draft, type DraftInput,
@@ -2818,6 +2823,9 @@ window.__EM_SCENE__ = () => {
   // MICRO-WINDOWS-MODELLI p.5 · «Raccogli le risorse…»: the window, and what it did
   collect: () => collectResources(),
   collectState: () => collectLast,
+  /** MICRO-INGRESSO-ASSET-1 · «Fai entrare» on paths, and the procedure's state */
+  ingress: (list: string[]) => ingressFromPaths(list),
+  ingressState: () => lastIngress,
   /** SPAZIO · `api.measure` of an extractor's place, and of a region */
   measure: (x: string) => {
     const g = store ? chain.geometryOf(store.doc, x) : null;
@@ -13852,7 +13860,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 48;   // 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 49;   // 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -25867,6 +25875,8 @@ async function wireDesktopFileDrop(): Promise<void> {
       const plan = planDesktopDrop(items, w ? { win: w.id, type: w.type } : null);
       logInfo(`desktop drop: ${ev.paths.length} path(s) on ${w?.type ?? "no window"} → ${plan.action}`);
       if (plan.action === "open") { await openPathFromDesktop(plan.path); return; }
+      // MICRO-INGRESSO-ASSET-1 · on the Archive the files ENTER
+      if (plan.action === "ingress") { await ingressFromPaths(plan.paths); return; }
       if (plan.action === "none") {
         if (plan.why !== "empty") toast(t(plan.why === "folder-elsewhere" ? "tsp.desktopFolderElsewhere" : "tsp.desktopArchiveElsewhere"));
         return;
@@ -33970,6 +33980,26 @@ function filesCentre(win: Win, listing: FsListing, wasAt: unknown): HTMLElement 
   };
   q.oninput = () => { setFilesPref(win, "q", q.value || null); fill(); };
   kind.onchange = () => { setFilesPref(win, "kind", kind.value === "all" ? null : kind.value); fill(); };
+  // MICRO-INGRESSO-ASSET-1 · files dragged from the Finder onto the Archive
+  // ENTER: written into the folder shown (never over a file), then «Fai
+  // entrare». The desktop app gets paths instead (`planDesktopDrop`).
+  if (!listing.roots) {
+    list.addEventListener("dragover", (e) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      list.classList.add("ingress-over");
+    });
+    list.addEventListener("dragleave", () => list.classList.remove("ingress-over"));
+    list.addEventListener("drop", (e) => {
+      list.classList.remove("ingress-over");
+      const got = [...(e.dataTransfer?.files ?? [])];
+      if (!got.length || e.dataTransfer?.types.includes(STORAGE_MIME)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void ingressFromBrowserFiles(listing.path, got);
+    });
+  }
   fill();
   requestAnimationFrame(() => restoreSurfaceScroll(win, list, wasAt as never));
   return centre;
@@ -41139,6 +41169,13 @@ function blendFolderCentre(win: Win, blend: string): HTMLElement {
       // the node of the graph it stands for, shown in the graph
       const nid = cr?.rm ?? cr?.unit ?? cr?.master;
       if (nid) el.addEventListener("dblclick", () => revealFromTable(nid));
+      // MICRO-INGRESSO-ASSET-1 · the door on an object of the .blend: it enters
+      // as a master exported by EM Tools («Esporta come master»)
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showBlendObjectMenu(blend, o.name, cr?.master ?? null, e.clientX, e.clientY);
+      });
     } else {
       ic.textContent = r.kind === "library" ? "🔗" : r.open ? "▾" : "▸";
       meta.textContent = r.kind === "library" ? (r.library?.rel ?? "") : tn("blend.objects", r.count ?? 0);
@@ -41395,6 +41432,18 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
          store ? undefined : t("blend.checkNeedsDoc"));
     item(t("blend.openInBlender"), "blend-open-blender", () => { void openInBlender(entry.path); });
   }
+  // MICRO-INGRESSO-ASSET-1 · THE DOOR (V1 = C): «Fai entrare…» on a file, the
+  // picked files, a folder; the room is the large dialog (V1 = A)
+  if (entry.type === "dir") {
+    item(t("ingress.menuFolder"), "ingress-open", () => { void ingressFromPaths([entry.path]); });
+  } else if (/\.blend$/i.test(entry.name)) {
+    item(t("ingress.menuBlend"), "ingress-open", () => openBlendAsFolder(win, entry.path));
+  } else if (!isStampPath(entry.path) && !/\.(em\.json|emj|graphml)$/i.test(entry.name)) {
+    const picked = storagePicked(win);
+    const group = picked.length > 1 && picked.includes(entry.path) ? picked : [entry.path];
+    item(group.length > 1 ? t("ingress.menuN", { n: String(group.length) }) : t("ingress.menu"), "ingress-open",
+      () => { void ingressFromPaths(group); });
+  }
   if (entry.type === "dir") {
     item(t("storage.menuOpenFolder"), "open-folder", () => setStoragePath(win, entry.path));
   } else {
@@ -41430,6 +41479,399 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
   });
   document.body.appendChild(menu);
   ctxMenuEl = menu;
+}
+
+// ── MICRO-INGRESSO-ASSET-1 · «Fai entrare un asset» ─────────────────────────
+// The door is here (the Archive's menus, a drop on it); the room is
+// `ingress-ui.ts`; what is decided is `ingress.ts`; the rototranslation is
+// s3Dgraphy's (`/geo/fit-points`). What enters: the master STAMPED (the
+// Timbro's emission, the act read off the provenance), the DOCUMENT made or
+// chosen, the RESOURCE of each file linked to it, the FRAME on the resource
+// (`data.frame`, or the registration by points) — inherited by its versions
+// —, the licence and the embargo; all the graph's part in ONE undo step.
+
+const INGRESS_MODEL = /\.(glb|gltf|obj)$/i;
+const INGRESS_ASSET = /\.(glb|gltf|obj|ply|fbx|stl|usdz?|e57|las|laz|abc|dae|3ds|x3d|3tz)$/i;
+
+/** the paths dropped or picked, as assets: a folder that is a tileset enters
+ *  as one; any other folder enters with the models it holds */
+async function ingressFromPaths(list: string[]): Promise<void> {
+  const out: IngressAsset[] = [];
+  let folder = "";
+  try {
+    for (const p of list) {
+      const dir = paths.dirname(p);
+      const listing = await fsList(dir);
+      const entry = listing.entries.find((e) => e.path === p);
+      if (!entry) continue;
+      folder ||= dir;
+      if (entry.type === "dir") {
+        const inner = await fsList(entry.path);
+        if (inner.entries.some((e) => e.name.toLowerCase() === "tileset.json")) {
+          out.push({ path: entry.path, name: entry.name, size: 0, mtime: entry.mtime, type: "dir" });
+          continue;
+        }
+        folder = entry.path;
+        for (const e of inner.entries)
+          if (e.type === "file" && INGRESS_ASSET.test(e.name) && !isSystemFile(e.name))
+            out.push({ path: e.path, name: e.name, size: e.size, mtime: e.mtime, type: "file" });
+      } else out.push({ path: entry.path, name: entry.name, size: entry.size, mtime: entry.mtime, type: "file" });
+    }
+  } catch { toast(t("storage.bridgeDown")); return; }
+  if (!out.length) { toast(t("ingress.nothing")); return; }
+  await openIngressOn(out, folder);
+}
+
+/** the browser's drop: the bytes written beside the others, then the door */
+async function ingressFromBrowserFiles(folder: string, got: File[]): Promise<void> {
+  const written: string[] = [];
+  toast(t("ingress.dropWriting", { n: String(got.length), folder: paths.basename(folder) }));
+  for (const f of got) {
+    const target = `${folder}/${f.name}`;
+    try {
+      const r = await fetch(`${await bridgeUrl()}/fs/write`, { method: "POST",
+        headers: { "X-EM-Path": encodeURIComponent(target), "Content-Type": "application/octet-stream" }, body: f });
+      if (r.ok) written.push(target);
+      else if (r.status === 409) { written.push(target); logInfo(t("ingress.dropExists", { name: f.name })); }
+      else toast(t("ingress.dropFailed", { name: f.name, why: String(r.status) }));
+    } catch { toast(t("storage.bridgeDown")); return; }
+  }
+  renderStorage();
+  if (written.length) await ingressFromPaths(written);
+}
+
+/** the menu of an object of a .blend opened as a folder */
+function showBlendObjectMenu(blend: string, object: string, master: string | null, x: number, y: number): void {
+  hideContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu storage-row-menu";
+  menu.dataset.blendObjectMenu = object;
+  menu.style.left = Math.min(x, innerWidth - 260) + "px";
+  menu.style.top = Math.min(y, innerHeight - 120) + "px";
+  const header = document.createElement("div");
+  header.className = "ctx-header";
+  header.textContent = object;
+  const b = document.createElement("button");
+  b.textContent = t("ingress.menuObject");
+  b.dataset.act = "ingress-open";
+  b.onclick = () => {
+    hideContextMenu();
+    void openIngressOn([{ path: `${blend}#${object}`, name: object, size: 0, mtime: 0, type: "datablock",
+      blend: { file: blend, object } }], paths.dirname(blend), master ? { [`${blend}#${object}`]: master } : {});
+  };
+  menu.append(header, b);
+  document.body.appendChild(menu);
+  ctxMenuEl = menu;
+}
+
+/** the masters of the graph an object of a .blend already stands for */
+let ingressBlendMasters: Record<string, string> = {};
+
+/** a SHIFT*.txt in the folder of the assets or in the two above it */
+async function ingressShiftFile(folder: string): Promise<{ epsg: number; shift: IngressV3; name: string } | null> {
+  let dir = folder;
+  for (let i = 0; i < 3 && dir; i++) {
+    try {
+      const listing = await fsList(dir);
+      const f = listing.entries.find((e) => e.type === "file" && /^shift.*\.txt$/i.test(e.name));
+      if (f) {
+        const text = await (await fetch(await fsFileUrl(f.path))).text();
+        const got = parseShiftTxt(text);
+        if (got) return { epsg: got.epsg, shift: [got.shift_x, got.shift_y, got.shift_z], name: f.name };
+      }
+    } catch { return null; }
+    const up = paths.dirname(dir);
+    if (!up || up === dir) break;
+    dir = up;
+  }
+  return null;
+}
+
+/** the names given in the graph (a proposal never repeats one) */
+function ingressTakenNames(): string[] {
+  return (store?.doc.graph.nodes ?? []).map((n) => String(n.name ?? ""));
+}
+
+async function openIngressOn(assets: IngressAsset[], folder: string, masters: Record<string, string> = {}): Promise<void> {
+  if (ingressIsOpen()) closeIngress();
+  ingressBlendMasters = masters;
+  const geo = (store?.doc.graph.nodes.find((n) => n.node_type === "geo_position")?.data ?? null) as Record<string, unknown> | null;
+  const epsg = geo ? epsgOf(geo) : null;
+  const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const shiftFile = await ingressShiftFile(folder);
+  const me = currentIdentity();
+  const urls = new Map<string, string>();
+  for (const a of assets) if (a.type === "file" && INGRESS_MODEL.test(a.name)) {
+    try { urls.set(a.path, await fsUrlFor(a.path)); } catch { /* no bridge: no 3D view */ }
+  }
+  const n = new Date();
+  const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  const state = newIngress(assets, {
+    nextDocName: (store && (initialName(store.doc, "document") ?? nextFreeName(store.doc, "document"))) || "D.01",
+    takenNames: ingressTakenNames(), today,
+    operator: me?.orcid ? { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") }
+      : { id: "", label: [me?.name, me?.surname].filter(Boolean).join(" ") },
+    graphFrame: epsg ? { epsg, shift: [num(geo?.shift_x), num(geo?.shift_y), num(geo?.shift_z)] } : null,
+    shiftFile,
+  });
+  lastIngress = state;
+  openIngress(state, {
+    bridge: () => bridgeUrl(),
+    modelUrl: (p) => urls.get(p) ?? null,
+    mountViewer: (host, url, onPick) => mount3dViewer(host, url, { label: t("ingress.title"), onPick: (p) => onPick(p) }),
+    documents: () => (store?.doc.graph.nodes ?? []).filter((x) => x.node_type === "document" && !isRemoved(x))
+      .map((x) => ({ id: x.id, name: String(x.name ?? x.id), description: String(x.description ?? "") })),
+    textFiles: async () => {
+      const seen = new Set<string>();
+      const out: Array<{ path: string; name: string }> = [];
+      let dir = folder;
+      for (let i = 0; i < 3 && dir; i++) {
+        const listing = await fsList(dir).catch(() => null);
+        for (const e of listing?.entries ?? [])
+          if (e.type === "file" && /\.(csv|txt|xyz|pts|asc)$/i.test(e.name) && !seen.has(e.path)) {
+            seen.add(e.path);
+            out.push({ path: e.path, name: i ? `${"../".repeat(i)}${e.name}` : e.name });
+          }
+        const up = paths.dirname(dir);
+        if (!up || up === dir) break;
+        dir = up;
+      }
+      return out;
+    },
+    takenNames: ingressTakenNames,
+    licenses: () => ["CC-BY-4.0", "CC-BY-SA-4.0", "CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC0-1.0"],
+    enter: (s) => runIngress(s),
+    hasGraph: () => !!store,
+    onClose: () => { renderStorage(); },
+  });
+}
+
+/** the last procedure opened (the probes read it) */
+let lastIngress: IngressState | null = null;
+
+/** a path as the graph writes it: relative to the em.json when inside its
+ *  PROJECT (`EM/` beside `SB/` and `RB/`: «../RB/LOD0/…», as EM Tools writes
+ *  the masters it exports), absolute only outside it */
+function ingressRel(abs: string): string {
+  if (!currentFilePath) return abs;
+  const root = projectRootOf(currentFilePath);
+  return paths.isInside(root, abs) ? paths.relativeTo(currentFilePath, abs) : abs;
+}
+
+interface IngressStamped { resourceId: string; digest: string; packaging: string; size: number; media?: string; already: boolean }
+
+/** the masters of one document with the same act, stamped as ONE act (a lot of
+ *  scans is one campaign): the Timbro's emission, nothing rewritten here */
+async function ingressStamp(s: IngressState, docName: string, group: IngressAsset[], lines: string[]): Promise<Map<string, IngressStamped>> {
+  const got = new Map<string, IngressStamped>();
+  const todo: FsEntry[] = [];
+  let tree: TreeInfo | null = null;
+  for (const a of group) {
+    const st = await readStamp(stampPathFor(a.path)).catch(() => null);
+    if (st) {
+      const self = (st as { self: { resource_id: string; digest?: string; packaging?: string; size_bytes?: number } }).self;
+      got.set(a.path, { resourceId: self.resource_id, digest: self.digest ?? "", packaging: self.packaging ?? "file",
+                        size: self.size_bytes ?? a.size, already: true });
+      lines.push(t("ingress.lineAlready", { name: a.name }));
+      continue;
+    }
+    const listing = await fsList(paths.dirname(a.path));
+    const entry = listing.entries.find((e) => e.path === a.path);
+    if (!entry) { lines.push(t("ingress.lineGone", { name: a.name })); continue; }
+    if (a.type === "dir") { tree = await treeOf(a.path).catch(() => null); if (!tree?.ok) { lines.push(t("ingress.lineGone", { name: a.name })); continue; } }
+    todo.push(entry);
+  }
+  if (!todo.length) return got;
+  const e = effective(s, group[0]);
+  const act = actFor(e.provenance, e.master, { text: s.doc.provenanceText, reducedMesh: s.stamp.reducedMesh, alignedImages: s.stamp.alignedImages });
+  const draft = newDraft(todo.map((x) => outputFrom(x)));
+  if (tree) { draft.tree = tree; applyHandle(draft); }
+  else {
+    draft.sets = await fetchSets(todo.map((x) => x.path)).catch(() => ({}));
+    applyHandle(draft);
+  }
+  for (const o of draft.outputs) if (!o.digest) o.digest = (await digestOf(o.path, o.size, o.mtime)) ?? undefined;
+  draft.origin = act.origin;
+  draft.originDeclared = act.origin;
+  draft.kind = act.kind;
+  draft.technique = act.technique;
+  draft.software = act.technique ? [{ name: act.technique }] : [{ name: t(`ingress.provenance.${e.provenance}`) }];
+  draft.declared = act.parents.length ? [{ parents: act.parents.map((p) => ({ kind: p.kind,
+    label: p.label ? `${t(p.labelKey)}: ${p.label}` : t(p.labelKey), ...(p.path ? { path: p.path } : {}) })) }] : [];
+  // the act's name (its process_id is derived from it, graph-scoped): the
+  // document, the technique, the day — two ingresses into one document by
+  // different means stay two acts
+  draft.campaign = [docName, act.technique || act.kind, s.doc.date].filter(Boolean).join(" · ");
+  draft.campaignEdited = true;
+  draft.tier = "master";
+  draft.parameters = stampParameters(s.frame, e.frameMode);
+  draft.operator = { ...s.stamp.operator };
+  draft.at = s.doc.date;
+  draft.title = draft.outputs.length === 1 ? draft.outputs[0].name : "";
+  draft.description = s.doc.description.trim();
+  const why = readyToStamp(draft);
+  if (why) { lines.push(t("ingress.lineNotStamped", { name: docName, why })); return got; }
+  const out = await emitDraft(draft, { graph_id: store?.doc?.graph?.graph_id as string | undefined });
+  if (out.error) lines.push(t("ingress.lineNotStamped", { name: docName, why: out.error }));
+  for (const r of out.refused) lines.push(t("ingress.lineNotStamped", { name: baseName(r.path), why: r.why }));
+  if (out.written.length) landEmission(draft, out);
+  for (const o of draft.outputs) {
+    const stamp = out.stamps.find((x) => x.path === o.path);
+    if (!stamp || !out.written.includes(stamp.stamp_path)) continue;
+    const self = ((stamp.stamp ?? {}) as { self?: { resource_id?: string; digest?: string } }).self;
+    const rec: IngressStamped = { resourceId: self?.resource_id ?? `res:${(o.digest ?? "").slice(7, 19)}`, digest: self?.digest ?? o.digest ?? "",
+      packaging: o.tree ? o.tree.packaging : o.members ? "file_set" : "file", size: o.size, media: o.media_type, already: false };
+    // the members of a set (obj → mtl → textures) all point at the door's resource
+    for (const a of group) if (a.path === o.path || o.members?.some((m) => paths.isInside(paths.dirname(o.path), a.path) && a.path.endsWith("/" + m.path))) got.set(a.path, rec);
+    lines.push(t("ingress.lineStamped", { name: o.name, kind: act.kind }));
+  }
+  return got;
+}
+
+/** «Fai entrare»: the stamps first (the bridge), then the graph in ONE step */
+async function runIngress(s: IngressState): Promise<{ ok: boolean; lines: string[] }> {
+  if (!store) return { ok: false, lines: [t("ingress.why.graph")] };
+  if (refuseReadOnly()) return { ok: false, lines: [t("ingress.readOnly")] };
+  const st = store;
+  const lines: string[] = [];
+  const docs = documentsOf(s, ingressTakenNames());
+  // 1 · the stamps, a document at a time, one act per (provenance, master)
+  const stamped = new Map<string, IngressStamped>();
+  try {
+    for (const d of docs) {
+      const files = d.assets.filter((a) => a.type !== "datablock");
+      const groups = new Map<string, IngressAsset[]>();
+      for (const a of files) {
+        const e = effective(s, a);
+        const k = `${e.provenance}|${e.master}|${e.frameMode}`;
+        groups.set(k, [...(groups.get(k) ?? []), a]);
+      }
+      for (const g of groups.values()) for (const [p, r] of await ingressStamp(s, d.name, g, lines)) stamped.set(p, r);
+    }
+  } catch (err) {
+    return { ok: false, lines: [...lines, t("ingress.lineBridge", { why: String((err as Error).message ?? err) })] };
+  }
+  // 2 · the registration by points, built by s3Dgraphy with the graph's ids
+  let registration: PointsFit["graph"] | null = null;
+  if (docs.some((d) => d.assets.some((a) => effective(s, a).frameMode === "points")) && s.frame.fit?.ok) {
+    try {
+      const pts = s.frame.points.filter((p) => p.local && p.world).map((p) => ({ id: p.id, local: p.local, world: p.world, use: p.use }));
+      const r = await fetch(`${await bridgeUrl()}/geo/fit-points`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ points: pts, scale: s.frame.scale, crs: s.frame.epsg ? `EPSG:${s.frame.epsg}` : null,
+          transform_id: st.newId(), gcp_id: st.newId(), name: t("ingress.regName", { doc: docs[0]?.name ?? "" }),
+          gcp_name: t("ingress.gcpName", { doc: docs[0]?.name ?? "" }) }) });
+      const j = await r.json() as PointsFit;
+      registration = j.ok ? j.graph ?? null : null;
+      if (!registration) lines.push(t("ingress.lineNoRegistration", { why: j.error ?? "" }));
+    } catch { lines.push(t("ingress.lineNoRegistration", { why: t("storage.bridgeDown") })); }
+  }
+  // 3 · the graph: documents, resources, frame, registration, rights — one undo step
+  const madeDocs: string[] = [];
+  const blendExports: Array<{ blend: string; object: string }> = [];
+  st.batch(() => {
+    const regId = registration ? String(registration.nodes[0].id) : "";
+    if (registration) {
+      for (const n of registration.nodes) st.addNode(n as unknown as EmNode);
+      for (const e of registration.edges) st.addEdge(e.source, e.target, e.edge_type);
+    }
+    const authorId = (() => {
+      const who = s.doc.author.trim();
+      if (!who) return "";
+      const have = st.doc.graph.nodes.find((n) => n.node_type === "author" && !isRemoved(n)
+        && String(n.name ?? "").trim().toLowerCase() === who.toLowerCase());
+      return have ? have.id : st.addNode({ id: st.newId(), node_type: "author", name: who, description: "" } as EmNode).id;
+    })();
+    const licenseId = (() => {
+      const lic = s.stamp.license.trim();
+      if (!lic) return "";
+      const have = st.doc.graph.nodes.find((n) => n.node_type === "license" && !isRemoved(n)
+        && String(((n.data ?? {}) as Record<string, unknown>).license_type ?? n.name ?? "") === lic);
+      return have ? have.id : st.addNode({ id: st.newId(), node_type: "license", name: lic, description: "",
+        data: { license_type: lic } } as EmNode).id;
+    })();
+    const embargoId = s.stamp.embargoUntil ? st.addNode({ id: st.newId(), node_type: "embargo",
+      name: t("ingress.embargoName", { date: s.stamp.embargoUntil }), description: "",
+      data: { embargo_end: s.stamp.embargoUntil } } as EmNode).id : "";
+    const graphFrame = (() => {
+      const geo = (st.doc.graph.nodes.find((n) => n.node_type === "geo_position")?.data ?? null) as Record<string, unknown> | null;
+      const e = geo ? epsgOf(geo) : null;
+      return e ? { crs: `EPSG:${e}`, shift: [Number(geo?.shift_x) || 0, Number(geo?.shift_y) || 0, Number(geo?.shift_z) || 0], source: "graph" } : null;
+    })();
+    for (const d of docs) {
+      const docId = d.existingId ?? st.addNode(documentNode(st.newId(), d, s, ingressRel) as unknown as EmNode).id;
+      if (!d.existingId) madeDocs.push(d.name);
+      if (authorId && !st.doc.graph.edges.some((e) => e.source === docId && e.target === authorId && e.edge_type === "has_author"))
+        st.addEdge(docId, authorId, "has_author");
+      const linked = new Set<string>();
+      for (const a of d.assets) {
+        const e = effective(s, a);
+        let resId = "";
+        if (a.type === "datablock" && a.blend) {
+          resId = ingressBlendMasters[a.path] ?? "";
+          if (!resId || !st.node(resId)) {
+            resId = addResource(storeGraph(st), { name: a.name, kind: "3d_model", packaging: "datablock", tier: "master",
+              files: [{ path: makeBlendLocator(ingressRel(a.blend.file), "Object", a.blend.object) }] }).id;
+          }
+          blendExports.push({ blend: a.blend.file, object: a.blend.object });
+        } else {
+          const r = stamped.get(a.path);
+          if (!r) continue;
+          resId = st.node(r.resourceId) ? r.resourceId
+            : st.doc.graph.nodes.find((n) => n.node_type === "resource" && !isRemoved(n)
+                && String(((n.data ?? {}) as Record<string, unknown>).checksum ?? "") === r.digest && r.digest)?.id ?? "";
+          if (!resId) {
+            resId = addResource(storeGraph(st), { resourceId: r.resourceId, name: a.name, kind: "3d_model", tier: "master",
+              residency: "resident", packaging: r.packaging, sizeBytes: r.size,
+              files: [{ path: ingressRel(a.path), checksum: r.digest || null, ...(r.media ? { media_type: r.media } : {}) }] }).id;
+          }
+        }
+        if (linked.has(resId)) continue;
+        linked.add(resId);
+        if (!st.doc.graph.edges.some((x) => x.source === docId && x.target === resId && x.edge_type === "has_linked_resource"))
+          st.addEdge(docId, resId, "has_linked_resource");
+        // the frame on the MASTER: its versions inherit it (frame_of / registration_of)
+        if (e.frameMode === "epsg") { const f = frameData(s.frame); if (f) st.setField(resId, "data.frame", f); }
+        else if (e.frameMode === "already" && graphFrame) st.setField(resId, "data.frame", graphFrame);
+        else if (e.frameMode === "points" && regId) st.addEdge(resId, regId, "has_registration_transform");
+        if (licenseId) st.addEdge(resId, licenseId, "has_license");
+        if (embargoId) st.addEdge(resId, embargoId, "has_embargo");
+      }
+    }
+  });
+  if (madeDocs.length) lines.unshift(tn("ingress.lineDocs", madeDocs.length, { names: madeDocs.join(", ") }));
+  // 4 · a .blend's objects: «Esporta come master» is EM Tools' and it changes
+  // the graph, so only the Blender that has the .blend OPEN does it (a
+  // background Blender refuses it: emstudio_runner's BACKGROUND_ACTIONS,
+  // measured). Open there: the command goes to it; not open: said, and
+  // «Apri in Blender» offered — the object stays «only in the .blend».
+  for (const [blend, objs] of groupBy(blendExports, (x) => x.blend)) {
+    const live = !!blendFolders.get(blend)?.data?.session?.live && sync.connected && !!hostInfo.accepts_commands;
+    if (live) {
+      void applyBlendRows(blend, objs.map((o) => ({ key: o.object, object: o.object, name: o.object, action: "export_master", tick: true,
+        actions: ["export_master", "leave"], state: "only_here", sign: "○" } as unknown as CheckRow)));
+      lines.push(t("ingress.lineBlendSent", { n: String(objs.length), blend: baseName(blend) }));
+    } else {
+      lines.push(t("ingress.lineBlendOnly", { names: objs.map((o) => o.object).join(", "), blend: baseName(blend) }));
+      void askConfirm(t("ingress.askOpenBlender", { blend: baseName(blend) })).then((yes) => { if (yes) void openInBlender(blend); });
+    }
+  }
+  // 5 · after: Ottimizza on the master(s) — the levels and the tileset are made there
+  if (s.after !== "nothing") {
+    const win = windowsOf().find((w) => w.type === "storage");
+    const masters = entering(s).filter((a) => a.type === "file").map((a) => a.path);
+    if (win && masters.length) void filesTakeDrop(win, "optimize", masters);
+  }
+  toastUndo(lines[0] ?? t("ingress.done"), st);
+  for (const l of lines) logInfo(l);
+  refreshInspector();
+  renderStorage();
+  return { ok: true, lines };
+}
+
+function groupBy<T>(xs: T[], key: (x: T) => string): Map<string, T[]> {
+  const m = new Map<string, T[]>();
+  for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x]);
+  return m;
 }
 
 /** MICRO-CONTENTS-2 C22 · «Metti sullo scaffale», a button of the detail: the

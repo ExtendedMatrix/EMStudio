@@ -10988,3 +10988,67 @@ body:not(.tt-comfy) .tile-tablebody .mdl-rm .btn.sm { line-height: 16px; font-si
 .scn-seg-menu .scn-ep-step:disabled { opacity: 0.4; cursor: default; }
 .scn-seg-menu .scn-ep-pick { border: 0; border-right: 1px solid var(--border); background: var(--accent); color: var(--on-accent); font: inherit; padding: 1px 4px; max-width: 22ch; cursor: pointer; }
 .scn-seg-menu .scn-ep-pick option { background: var(--bg-panel); color: var(--text); }
+
+/* MICRO-INGRESSO-ASSET-1 · «Fai entrare un asset»: the room — a large dialog
+   over the Archive, the five steps in a row (ingress-ui.ts) */
+.ingress-veil { position: fixed; inset: 0; z-index: 900; background: rgba(20, 26, 34, .38);
+  display: flex; align-items: center; justify-content: center; }
+.ingress { width: min(1180px, 94vw); height: min(820px, 90vh); display: flex; flex-direction: column;
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); box-shadow: 0 18px 60px rgba(0, 0, 0, .28); overflow: hidden; }
+.ingress-head { display: flex; align-items: baseline; gap: 12px; padding: 12px 16px 6px; }
+.ingress-head b { font-size: 15px; }
+.ingress-what { color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ingress-steps { display: flex; gap: 4px; list-style: none; margin: 0; padding: 4px 16px 10px;
+  border-bottom: 1px solid var(--border); }
+.ingress-step button { border: 1px solid var(--border); background: var(--bg-subtle); border-radius: 999px;
+  padding: 4px 12px; cursor: pointer; color: var(--text-muted); }
+.ingress-step.on button { background: var(--bg-accent-soft); border-color: var(--accent); color: var(--text); font-weight: 600; }
+.ingress-body { flex: 1; overflow: auto; padding: 12px 16px; }
+.ingress-body h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.ingress-hint, .ingress-note { color: var(--text-muted); margin: 4px 0 8px; }
+.ingress-sub { display: block; color: var(--text-faint); font-size: 11px; }
+.ingress-choices { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.ingress-choice { border: 1px solid var(--border); background: var(--bg-panel); border-radius: var(--radius);
+  padding: 6px 12px; cursor: pointer; }
+.ingress-choice.on { border-color: var(--accent); background: var(--bg-accent-soft); font-weight: 600; }
+.ingress-choice:disabled { opacity: .5; cursor: not-allowed; }
+.ingress-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 6px 0; }
+.ingress-field { display: grid; grid-template-columns: 180px 1fr; gap: 8px; align-items: center; margin: 6px 0; }
+.ingress-field textarea { min-height: 54px; }
+.ingress-num { width: 120px; font-family: var(--font-mono); }
+.ingress-assets, .ingress-ptable, .ingress-summary { border-collapse: collapse; width: 100%; }
+.ingress-assets th, .ingress-ptable th, .ingress-summary th { text-align: left; font-weight: 600; color: var(--text-muted);
+  border-bottom: 1px solid var(--border); padding: 4px 6px; font-size: 12px; }
+.ingress-assets td, .ingress-ptable td, .ingress-summary td { border-bottom: 1px solid var(--border-faint); padding: 4px 6px; vertical-align: middle; }
+.ingress-assets tr.skip td { opacity: .45; }
+.ingress-docname, .ingress-pid { width: 90px; }
+.ingress-points { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(420px, 1.1fr); gap: 14px; }
+.ingress-view { position: relative; overflow: hidden; min-height: 320px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--canvas-bg); color: var(--text-faint); }
+.ingress-view[data-view="none"] { display: flex; align-items: center; justify-content: center; padding: 16px; text-align: center; }
+.ingress-view canvas { width: 100% !important; height: auto !important; }
+.ingress-ptable tr { cursor: pointer; }
+.ingress-ptable tr.on td { background: var(--bg-accent-soft); }
+.ingress-ptable .ingress-num { width: 92px; font-size: 11px; }
+.ingress-row label { display: inline-flex; gap: 6px; align-items: center; }
+.ingress-local { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.ingress-res { font-family: var(--font-mono); white-space: nowrap; }
+.ingress-res.high { color: var(--danger); font-weight: 600; }
+.ingress-scale { display: block; margin: 8px 0; }
+.ingress-fit { margin-top: 8px; padding: 8px 10px; border-radius: var(--radius); background: var(--bg-sunken); font-family: var(--font-mono); font-size: 12px; }
+.ingress-fit[data-fit="ok"] { background: var(--ok-soft); color: var(--ok-ink); }
+.ingress-fit[data-fit="failed"] { background: var(--bg-danger-soft); color: var(--danger); }
+.ingress-paste { width: 100%; min-height: 70px; font-family: var(--font-mono); font-size: 11px; }
+.ingress-chains { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.ingress-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.ingress-piece { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 12px; background: var(--bg-panel); }
+.ingress-piece.ingress-act { border-color: var(--accent); background: var(--bg-accent-soft); }
+.ingress-piece.ingress-doc { border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+.ingress-piece.ingress-frame { border-style: dashed; }
+.ingress-piece.ingress-parent { color: var(--text-muted); }
+.ingress-arrow { color: var(--text-faint); }
+.ingress-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+.ingress-why { flex: 1; color: var(--warn-ink); font-size: 12px; }
+.ingress-result { margin: 0; padding: 6px 16px 10px 32px; max-height: 120px; overflow: auto; font-size: 12px; color: var(--text-muted); }
+.storage-list.ingress-over { outline: 2px dashed var(--accent); outline-offset: -4px; }
