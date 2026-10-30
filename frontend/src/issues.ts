@@ -62,6 +62,12 @@ export interface IssueFixers {
   rename?: { label: string; run: (nodeId: string, name: string) => void };
   /** a degraded edge → the relation chosen (`reverse`: the arrow turned) */
   retype?: (edgeId: string, edgeType: string, reverse: boolean) => void;
+  /** MICRO-OTTIMIZZA-3 p.4 · a degraded edge between a PROPERTY and a DOCUMENT
+   *  is cured with the extractor in between (never `has_documentation`, which
+   *  the datamodel still admits): `between(source type, target type)` says the
+   *  pair, `run` replaces the edge with property → extractor → document */
+  viaExtractor?: { label: string; between: (from: string | undefined, to: string | undefined) => boolean;
+                   run: (edgeId: string, propertyId: string, documentId: string) => void };
   /** «+ property» for a unit with none */
   addProperty?: { label: string; run: (unitId: string) => void };
   /** the label of a relation (its datamodel name, in the interface language) */
@@ -346,6 +352,19 @@ export function issues(src: IssueSources): Issue[] {
     // with a relation the datamodel admits between the two types — either way
     // round, since a yEd arrow is only a line style
     if (d.edgeId && d.targetId && (d.candidates || d.reverse)) {
+      const sT = anyById.get(d.nodeId)?.node_type, dT = anyById.get(d.targetId)?.node_type;
+      const via = !fx.viaExtractor ? null
+        : fx.viaExtractor.between(sT, dT) ? [d.nodeId, d.targetId]
+        : fx.viaExtractor.between(dT, sT) ? [d.targetId, d.nodeId] : null;
+      if (via) {
+        const edgeId = d.edgeId;
+        push({ node: d.nodeId, sev: "warn", rule: "datamodel",
+               txt: t(d.origin ? "issues.degradedFrom" : "issues.degraded",
+                      { s: name(d.nodeId), d: name(d.targetId), origin: d.origin ?? "" }),
+               fix: { kind: "button" as const, label: fx.viaExtractor!.label,
+                      run: () => fx.viaExtractor!.run(edgeId, via[0], via[1]) } });
+        continue;
+      }
       const options = [
         ...(d.candidates ?? []).map((e) => ({ value: `${e}|`, label: label(e), group: t("issues.fixSameWay") })),
         ...(d.reverse ?? []).map((e) => ({ value: `${e}|rev`, label: `← ${label(e)}`, group: t("issues.fixReverse") })),

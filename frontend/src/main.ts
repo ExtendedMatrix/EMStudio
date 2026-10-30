@@ -19027,6 +19027,19 @@ function issueFixers(st: DocumentStore): IssueFixers {
         done(t("fix.renameDone", { a: was, b: v }), [id]);
       },
     },
+    viaExtractor: {
+      label: t("issues.fixViaExtractor"),
+      between: throughExtractor,
+      run: (edgeId, prop, docId) => {
+        const e = st.liveEdges().find((x) => x.id === edgeId);
+        if (!e) return;
+        const r = st.batch(() => {
+          st.deleteEdge(e);
+          return chain.extractBetween(st, prop, docId);
+        });
+        done(t("chain.readingMade", { x: nm(r.extractorId), from: nm(docId), prop: nm(prop) }), [r.extractorId, prop, docId]);
+      },
+    },
     retype: (edgeId, edgeType, reverse) => {
       const e = st.liveEdges().find((x) => x.id === edgeId);
       if (!e) return;

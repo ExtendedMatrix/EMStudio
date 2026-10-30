@@ -25,6 +25,7 @@ const bundle = await esbuild.build({
       export { DocumentStore } from "./model";
       export { handleEdgeTypes, existingLinks, linkedItems, handleItems, connectItems, throughExtractor } from "./add-menu";
       export { readFromProperty } from "./property-source";
+      export { issues as computeIssues } from "./issues";
       export { buildMatrixScene } from "./views/matrix";
     `,
     resolveDir: SRC,
@@ -41,7 +42,7 @@ const bundle = await esbuild.build({
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
 const { chain, DocumentStore, handleEdgeTypes, existingLinks, linkedItems, handleItems, connectItems, throughExtractor,
-        readFromProperty, buildMatrixScene } = M;
+        readFromProperty, buildMatrixScene, computeIssues } = M;
 
 let checks = 0;
 const ok = (c, what) => { assert.ok(c, what); checks++; };
@@ -173,6 +174,25 @@ if (hasLayout) {
   // an existing has_documentation (an old file) is left as it is
   const legacy = st.addEdge(CT, D01, "has_documentation");
   ok(st.doc.graph.edges.includes(legacy), "an old direct edge is still admitted when read (the datamodel is unchanged)");
+}
+
+// MICRO-OTTIMIZZA-3 p.4 · the Issues panel: a connection degraded between a
+// property and a document (an old yEd line) is cured with the extractor in
+// between, never with the `has_documentation` the datamodel still admits
+{
+  const doc = { graph: { nodes: [{ id: "P", node_type: "property", name: "height" }, { id: "D", node_type: "document", name: "D.09" },
+                                 { id: "U", node_type: "US", name: "US1" }], edges: [] } };
+  const ran = [];
+  const fixers = { retype: () => ran.push("retype"), edgeLabel: (e) => e,
+                   viaExtractor: { label: "Through a new extractor", between: throughExtractor, run: (...a) => ran.push(a) } };
+  const diag = (s, d) => ({ kind: "degraded", nodeId: s, targetId: d, edgeId: `${s}-${d}`, message: "", candidates: ["has_documentation"], reverse: [] });
+  const issues = computeIssues({ doc, nodes: doc.graph.nodes, isUnit: () => false, t: (k) => k, fixers,
+                                 diagnostics: [diag("P", "D"), diag("D", "P"), diag("U", "D")] }).filter((i) => i.rule === "datamodel");
+  eq(issues.map((i) => i.fix?.kind), ["button", "button", "pick"], "property–document: one button, either way round; another pair keeps its pick");
+  ok(issues[0].fix.label === "Through a new extractor" && !JSON.stringify(issues[0].fix).includes("has_documentation"),
+     "…the button says the extractor, has_documentation is not offered");
+  issues[0].fix.run(); issues[1].fix.run();
+  eq(ran, [["P-D", "P", "D"], ["D-P", "P", "D"]], "…and it runs with (edge, property, document)");
 }
 
 console.log(`check-proprieta-paradati: ${checks} checks OK (${PATH})`);
