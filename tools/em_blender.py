@@ -423,11 +423,75 @@ def apply_use():
     return {k: v for k, v in out.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
 
 
+def officina():
+    """EM Tools' «Blender as the workshop» module (MICRO-BLEND-OFFICINA-1)."""
+    em_name, _ = module_with(None, ".graph_origins")
+    if not em_name:
+        raise RuntimeError("EM Tools is not loaded in this Blender")
+    pkg = em_name.rsplit(".graph_origins", 1)[0]
+    try:
+        return importlib.import_module(pkg + ".sync_manager.blend_officina")
+    except ImportError:
+        raise RuntimeError("this EM Tools cannot read a .blend as a folder (blend_officina): "
+                           "it comes with EM Tools 1.6.0-dev.39")
+
+
+def inventory():
+    """The .blend as a folder: what Blender sees, as plain data (EM Tools'
+    ``blend_officina.collect``); the bridge normalises and checks it."""
+    BO = officina()
+    say("PROGRESS", {"stage": "inventory", "done": 0, "total": 1})
+    out = BO.collect()
+    say("PROGRESS", {"stage": "inventory", "done": 1, "total": 1})
+    return out
+
+
+#: what a BACKGROUND Blender may do to a .blend: the actions that change only
+#: the .blend. Those that change the graph (export a master, register a
+#: version or a resource) go to the open Blender, whose EM Tools holds it
+BACKGROUND_ACTIONS = ("relink_texture", "relink_library", "unpack_texture", "take_epochs_from_graph",
+                      "restore_from_master")
+
+
+def blend_apply():
+    """«Apply» the ticked rows of «Check against the graph» in this background
+    Blender, then save — only if the file did not change since it was read
+    (``read_mtime``): never a second save over somebody's."""
+    BO = officina()
+    rows = [r for r in (A.get("rows") or []) if isinstance(r, dict)]
+    mine = [r for r in rows if r.get("action") in BACKGROUND_ACTIONS]
+    refused = [r.get("name") for r in rows if r.get("action") not in BACKGROUND_ACTIONS + ("leave", None, "")]
+    graph = None
+    if A.get("em_json"):
+        em = bpy.context.scene.em_tools
+        em.graphml_files.clear()
+        row = em.graphml_files.add()
+        row.name = os.path.splitext(os.path.basename(A["em_json"]))[0]
+        row.graphml_path = A["em_json"]
+        em.active_file_index = 0
+        getattr(bpy.ops, "import").em_emjson(file_index=0)
+        graph, _doc, _f = BO.active_graph_doc(bpy.context)
+    say("PROGRESS", {"stage": "apply", "done": 0, "total": len(mine) or 1})
+    out = BO.apply_rows(bpy.context, graph, mine, A.get("em_json") or "", em_folder=A.get("em_folder") or "")
+    saved = False
+    if out["done"] and A.get("save"):
+        path = bpy.data.filepath
+        cur = os.path.getmtime(path)
+        if A.get("read_mtime") is not None and abs(cur - float(A["read_mtime"])) > 1e-3:
+            raise RuntimeError("the .blend changed on disk since it was read: nothing saved")
+        bpy.ops.wm.save_mainfile()
+        saved = True
+    say("PROGRESS", {"stage": "apply", "done": len(mine) or 1, "total": len(mine) or 1})
+    return {"done": out["done"], "failed": out["failed"], "refused": refused, "saved": saved,
+            "blend": bpy.data.filepath}
+
+
 try:
     t0 = time.time()
     op = A.get("op") or "probe"
     res = {"probe": probe, "objects": objects, "lod_set": lod_set, "atlas": atlas, "prepare": prepare,
-           "measure": measure, "apply_use": apply_use}[op]()
+           "measure": measure, "apply_use": apply_use, "inventory": inventory,
+           "blend_apply": blend_apply}[op]()
     say("RESULT", {"ok": True, "op": op, "seconds": round(time.time() - t0, 2), "result": res})
 except Exception as exc:
     traceback.print_exc()
@@ -570,6 +634,52 @@ def run_op(job, blender: str, args: dict, blend: str = "", timeout: float = 4 * 
         raise RuntimeError(result.get("error") or "\n".join(run["tail"][-6:]) or f"Blender exited {run['returncode']}")
     res = result.get("result")
     return {"result": res, "seconds": run["seconds"], "peak_mb": run["peak_mb"]}
+
+
+#: what a Blender opened WITH its interface runs once the .blend is loaded:
+#: the graph open in EMStudio as EM Tools' graph, and the Sidecar started so
+#: EMStudio connects to it (MICRO-BLEND-OFFICINA-1, point 6)
+OPEN_EXPR = r'''
+import bpy, json, os
+_A = json.loads(%r)
+def _em_open():
+    try:
+        if _A.get("em_json") and hasattr(bpy.context.scene, "em_tools"):
+            em = bpy.context.scene.em_tools
+            if not any(r.graphml_path == _A["em_json"] for r in em.graphml_files):
+                row = em.graphml_files.add()
+                row.name = os.path.splitext(os.path.basename(_A["em_json"]))[0]
+                row.graphml_path = _A["em_json"]
+            em.active_file_index = [r.graphml_path for r in em.graphml_files].index(_A["em_json"])
+            getattr(bpy.ops, "import").em_emjson(file_index=em.active_file_index)
+        if _A.get("sidecar") and hasattr(bpy.ops.em, "set_mode"):
+            bpy.ops.em.set_mode(mode="sidecar")
+    except Exception as exc:
+        print("[EMStudio] open in Blender:", exc)
+    return None
+bpy.app.timers.register(_em_open, first_interval=1.0)
+'''
+
+
+def open_command(blender: str, blend: str, em_json: str = "", sidecar: bool = True) -> list:
+    """Blender WITH its interface on ``blend``, joined to EMStudio as a sidecar
+    of the graph open there (``em_json``: the document's own file — EM Tools
+    reads it, nothing is copied)."""
+    expr = OPEN_EXPR % json.dumps({"em_json": em_json, "sidecar": bool(sidecar)})
+    return [blender, blend, "--python-expr", expr]
+
+
+def open_gui(blender: str, blend: str, em_json: str = "", sidecar: bool = True) -> dict:
+    """Start it, detached: EMStudio does not wait for (nor end) the person's
+    Blender."""
+    cmd = open_command(blender, blend, em_json, sidecar)
+    kw: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if sys.platform == "win32":
+        kw["creationflags"] = 0x00000008 | 0x00000200   # DETACHED_PROCESS | NEW_PROCESS_GROUP
+    else:
+        kw["start_new_session"] = True
+    p = subprocess.Popen(cmd, **kw)
+    return {"ok": True, "pid": p.pid, "blend": blend, "em_json": em_json, "sidecar": bool(sidecar)}
 
 
 def _sha256(path: str) -> str:

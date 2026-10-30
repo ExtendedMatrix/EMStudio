@@ -90,3 +90,35 @@ elif op == "apply_use":
     say("RESULT", {"ok": True, "op": op, "result": {"entry": out, "bytes": os.path.getsize(out), "rows": A.get("checked"),
         "params": A.get("params") or {},
         "measured": {"triangles": 120, "triangles_stored": 120}, "instanced": 5, "decimated": 1, "resized": 1, "warnings": []}})
+# MICRO-BLEND-OFFICINA-1 · the .blend as a folder (EM Tools' collect, as it
+# answers on Templu Mare: an RB library, a master in em_cache) and «Apply»
+elif op == "inventory":
+    here = os.path.dirname(blend)
+    say("RESULT", {"ok": True, "op": op, "result": {
+        "blend": blend, "mtime": os.path.getmtime(blend), "dirty": False, "blender": "5.2.0 (fake)",
+        "libraries": [{"name": "TM.blend", "filepath": "//../RB/TM.blend", "abspath": os.path.normpath(os.path.join(here, "../RB/TM.blend")),
+                       "exists": False, "parent": None}],
+        "objects": [
+            {"name": "Architrave", "type": "MESH", "collections": ["Architettura"], "triangles": 384,
+             "props": {"em_rm_node_id": "Architrave_model", "graswald": 1}, "mesh": "Architrave"},
+            {"name": "ME_PODIO", "type": "MESH", "collections": ["RB"], "props": {}, "mesh": "ME_PODIO",
+             "data_library": "TM.blend"},
+            {"name": "GT16.SU001", "type": "MESH", "collections": ["Proxy"], "props": {}},
+            {"name": "Deco", "type": "MESH", "collections": ["Samples"], "props": {}},
+            {"name": "Camera", "type": "CAMERA", "collections": [], "props": {}}],
+        "collections": [{"name": "Architettura", "children": [], "objects": ["Architrave"]},
+                        {"name": "RB", "children": [], "objects": ["ME_PODIO"]},
+                        {"name": "Proxy", "children": [], "objects": ["GT16.SU001"]},
+                        {"name": "Samples", "children": [], "objects": ["Deco"]}],
+        "scene_collection": ["Architettura", "RB", "Proxy", "Samples"],
+        "images": [{"name": "t.jpg", "filepath": "//t.jpg", "abspath": os.path.join(here, "t.jpg"), "packed": True,
+                    "exists": False, "source": "FILE"}]}})
+elif op == "blend_apply":
+    rows = A.get("rows") or []
+    if A.get("save"):
+        open(blend, "a").write("\n# saved by a background Blender\n")
+    say("RESULT", {"ok": True, "op": op, "result": {"done": ["%s: %s" % (r.get("name"), r.get("action")) for r in rows
+                                                              if r.get("action") in ("relink_texture", "unpack_texture")],
+                                                     "failed": [], "refused": [r.get("name") for r in rows
+                                                                               if r.get("action") in ("export_master",)],
+                                                     "saved": bool(A.get("save")), "em_folder": A.get("em_folder")}})

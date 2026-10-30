@@ -20,7 +20,9 @@
  *  invented before the two ends agree on the mechanism is how protocols rot. */
 import { envelope, type WireMessage } from "./wire";
 
-export const COMMAND_VERBS = ["create_proxy_for_unit", "import_geometry"] as const;
+// MICRO-BLEND-OFFICINA-1 · `blend_apply`: «Apply» of «Check against the graph»
+// sent to the Blender that has the .blend open (EM Tools' `commands.blend_apply`)
+export const COMMAND_VERBS = ["create_proxy_for_unit", "import_geometry", "blend_apply"] as const;
 export type CommandVerb = (typeof COMMAND_VERBS)[number];
 
 /** The BODY of a `command` message. WIRE 2: the envelope (`v`, `type`,

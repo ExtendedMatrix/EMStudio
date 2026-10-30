@@ -291,6 +291,9 @@ export interface OutlinerView {
   /** MICRO-PROVA-DEV48 p.4 · a record selected in another window: its row is
    *  scrolled into view (its branches already opened by `opensFor`) */
   reveal?: string | null;
+  /** MICRO-BLEND-OFFICINA-1 · the state of a record against its .blend (the
+   *  last «Check against the graph»): a small dot, the sign in its tooltip */
+  blendState?: (id: string) => { sign: string; state: string; title: string } | null;
 }
 
 /**
@@ -495,6 +498,15 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     name.textContent = r.name;
     name.title = r.title ?? r.name;
     line.append(tw, g, name);
+    const bs = v.blendState?.(r.id) ?? null;
+    if (bs) {
+      const d = document.createElement("span");
+      d.className = `sol-blend sol-blend-${bs.state}`;
+      d.dataset.blend = bs.state;
+      d.textContent = bs.sign;
+      d.title = bs.title;
+      line.appendChild(d);
+    }
     // MICRO-SPAZIO-COMPATTO p.5 · ↖ and 👁 beside the name (they were at the far
     // right of a wide panel); the chips and the levels after them
     const sw = document.createElement("span");

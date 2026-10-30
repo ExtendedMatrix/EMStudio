@@ -728,6 +728,7 @@ import {
 } from "./menu-ui";
 import { currentPlatform } from "./menu-table";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
+import { blendLabel, filterChoices, flatten, STATE_SIGN, type BlendFilters, type BlendFolder, type BlendState, type CheckRow } from "./blend-folder";
 import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, removalLines, versionsOf,
   type Diagnosis, type UseProfile, type VersionOnDisk, type RowParams, groupsOf, rowsOf, groupTicked, tickGroup,
   paramsFor, profileWords } from "./use-diagnosis";
@@ -4598,6 +4599,16 @@ function renderNameStrip(): void {
     ep ? name(ep.target) : "",
     part ? t("strip.partOf", { x: name(part.target) }) : "",
   ].filter(Boolean).join(" · ");
+  // MICRO-BLEND-OFFICINA-1 · against its .blend (the last «Check against the graph»)
+  const bs = blendStateOfNode(n.id);
+  if (bs) {
+    const d = document.createElement("span");
+    d.className = `ns-blend blend-state-${bs.state}`;
+    d.dataset.blend = bs.state;
+    d.textContent = ` ${bs.sign}`;
+    d.title = bs.title;
+    ctx.appendChild(d);
+  }
 }
 // MICRO-PULIZIA p.1 · the dot beside the name is Save, for the mouse and for Tab
 dirtyDot.addEventListener("click", () => click("btn-save"));
@@ -13779,7 +13790,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 47;   // 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 48;   // 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -14455,6 +14466,7 @@ btnSync.addEventListener("click", () => {
     // captured once — a photograph would miss every change after connect.
     describeSelf: () => describeOpenDocument(),
     onCommandResult: (res) => applyCommandResult(res),
+    onOpen: (p) => { if (p.what === "prepare") void openBlendPrepare(String(p.blend ?? ""), String(p.container ?? "")); },
     // WIRE 2 · a host that speaks another protocol version is SAID. Without
     // this it would look exactly like a host that has gone quiet.
     onWireMismatch: (reason) => {
@@ -28863,6 +28875,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
   }
   renderOutliner(el, {
     rows, prefs: shownPrefs, reveal, selected: spaceSelectedKeys(sp), active: spaceSel(sp).active, substituted: spaceSubstituted, isolated: spaceIsolated, query: spaceQuery,
+    blendState: blendStateOfNode,
     glyph: (k) => typeIconElement(k),
     texts: { search: t("s3.search"), isolate: t("s3.isolate"), frame: t("s3.frame"), eye: t("s3.eye"),
              arrow: t("s3.arrow"), palette: t("s3.palette"), close: t("s3.closeOutliner"), empty: t("s3.outlinerEmpty"),
@@ -33697,6 +33710,10 @@ function filesPlaces(win: Win, listing: FsListing): HTMLElement {
 // ── the centre (AR4–AR10) ───────────────────────────────────────────────────
 
 function filesCentre(win: Win, listing: FsListing, wasAt: unknown): HTMLElement {
+  // MICRO-BLEND-OFFICINA-1 · a .blend opened as a folder takes the centre
+  const asFolder = filesPref(win, "blend");
+  if (asFolder && !listing.roots && paths.dirname(asFolder) === listing.path) return blendFolderCentre(win, asFolder);
+  if (asFolder) setFilesPref(win, "blend", null);
   const centre = document.createElement("div");
   centre.className = "files-centre";
   // the bar of the centre: ◧ · search · type · list|thumbnails · ◨
@@ -40720,6 +40737,319 @@ function revealChainFile(nodeId: string): void {
   }
 }
 
+// ── MICRO-BLEND-OFFICINA-1 · the .blend as a folder ─────────────────────────
+
+let blendFirstPress: { win: Win; path: string; at: number } | null = null;
+document.addEventListener("mousedown", (e) => {
+  const f = blendFirstPress;
+  if (e.detail !== 2 || !f || Date.now() - f.at > 600) return;
+  blendFirstPress = null;
+  openBlendAsFolder(f.win, f.path);
+}, true);
+
+/** The .blend files read (by path): what Blender saw, the last check. */
+const blendFolders = new Map<string, { data?: BlendFolder; busy?: boolean; error?: string }>();
+/** The graph's nodes against the last .blend checked: the Outliner's and the Inspector's dot. */
+let blendNodeStates: { blend: string; nodes: Record<string, BlendState> } | null = null;
+/** The collections turned shut, by .blend (the view's, for the session) */
+const blendClosed = new Map<string, Set<string>>();
+const blendFilters = new Map<string, BlendFilters>();
+
+/** Read a .blend through a headless Blender (EM Tools' collect, s3Dgraphy's
+ *  inventory); with `check` and a document open, «Check against the graph». */
+async function readBlendFolder(blend: string, check: boolean): Promise<void> {
+  const cur = blendFolders.get(blend) ?? {};
+  if (cur.busy) return;
+  blendFolders.set(blend, { ...cur, busy: true, error: "" });
+  renderStorage();
+  const body: Record<string, unknown> = { kind: "blender", op: "inventory", blend };
+  if (check && store) { body.doc = store.doc; if (currentFilePath) body.doc_path = currentFilePath; }
+  const job = await startJob(body, t("blend.reading", { name: baseName(blend) }));
+  if (!job) { blendFolders.set(blend, { ...cur, busy: false }); renderStorage(); return; }
+  const end = await job.done;
+  const res = end.result as (BlendFolder & { session?: unknown }) | undefined;
+  if (end.state !== "done" || !res?.inventory) {
+    blendFolders.set(blend, { ...cur, busy: false, error: jobText(end) });
+  } else {
+    blendFolders.set(blend, { busy: false, data: { inventory: res.inventory, tree: res.tree, session: res.session as BlendFolder["session"],
+                                                   check: res.check ?? cur.data?.check } });
+    if (res.check?.nodes) {
+      blendNodeStates = { blend, nodes: res.check.nodes };
+      refreshInspector();
+      refreshSurfaces("scene");
+    }
+  }
+  renderStorage();
+}
+
+function openBlendAsFolder(win: Win, blend: string): void {
+  setFilesPref(win, "blend", blend);
+  if (storagePath(win) !== paths.dirname(blend)) setStoragePath(win, paths.dirname(blend));
+  if (!blendFolders.get(blend)?.data) void readBlendFolder(blend, !!store);
+  renderStorage();
+}
+
+/** «Open in Blender»: with its interface, EM Tools on the em.json open here,
+ *  its Sidecar started — or said when a Blender has it open already. */
+async function openInBlender(blend: string): Promise<void> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}/blend/open`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blend, doc_path: currentFilePath ?? "" }) });
+    const j = await r.json().catch(() => ({})) as { ok?: boolean; already?: boolean; error?: string };
+    if (r.status === 404) { toast(t("blend.oldBridge")); return; }
+    if (!j.ok) { toast(t("blend.openFailed", { why: String(j.error ?? r.status) })); return; }
+    toast(j.already ? t("blend.alreadyOpen", { name: baseName(blend) }) : t("blend.opened", { name: baseName(blend) }));
+  } catch { toast(t("storage.bridgeDown")); }
+}
+
+/** «Apply» the ticked rows: to the Blender that has the file open (the
+ *  sidecar's command), else a background Blender after a confirmation —
+ *  never a second save (point 1 of the MICRO, measured on Blender 5.2). */
+async function applyBlendRows(blend: string, rows: CheckRow[]): Promise<void> {
+  const ticked = rows.filter((r) => r.tick && r.action && r.action !== "leave");
+  if (!ticked.length) { toast(t("blend.nothingTicked")); return; }
+  const send = async (confirm: boolean) => {
+    const r = await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "blender", op: "blend_apply", blend, rows: ticked, confirm,
+                             doc: store?.doc, doc_path: currentFilePath ?? "" }) });
+    return { status: r.status, j: await r.json().catch(() => ({})) as { ok?: boolean; job?: string; route?: string; error?: string } };
+  };
+  let a = await send(false);
+  if (a.status === 409 && a.j.route === "session") {
+    // the open Blender does it: through the sidecar's command channel
+    if (sync.connected && hostInfo.accepts_commands) {
+      const msg = buildCommand("blend_apply", blend, { rows: ticked } as unknown as Record<string, unknown>);
+      if (sync.sendCommand(msg)) {
+        pendingCommands.set(msg.payload.cmd_id, { verb: "blend_apply", target: blend });
+        toast(t("blend.sentToSession"));
+        return;
+      }
+    }
+    await tell(t("blend.inSession", { say: String(a.j.error ?? "") }));
+    return;
+  }
+  if (a.status === 409 && a.j.route === "confirm") {
+    if (!await askConfirm(t("blend.confirmBackground", { name: baseName(blend), n: String(ticked.length) }))) return;
+    a = await send(true);
+  }
+  if (!a.j.ok || !a.j.job) { toast(t("blend.applyFailed", { why: String(a.j.error ?? a.status) })); return; }
+  toast(t("blend.applying", { name: baseName(blend) }));
+  // the job is the bridge's: its line appears in the jobs list; read again when done
+  setTimeout(() => { void readBlendFolder(blend, true); }, 1500);
+}
+
+/** EM Tools' «Prepare in EMStudio»: the Archive on the .blend, its
+ *  container chosen, the «Ottimizza» tab open (the optimisation window left
+ *  EM Tools for here). */
+async function openBlendPrepare(blend: string, container: string): Promise<void> {
+  if (!blend) { toast(t("blend.prepareNoBlend")); return; }
+  let st = windowsOf().find((w) => w.type === "storage");
+  if (!st) { setWorkspace("assets"); st = windowsOf().find((w) => w.type === "storage"); }
+  if (!st) { toast(t("blend.prepareNoArchive")); return; }
+  selectWindow(st.id);
+  if (container) useState.container.set(blend, container);
+  await filesTakeDrop(st, "optimize", [blend]);
+  toast(t("blend.prepareFromBlender", { name: baseName(blend), container: container || "—" }));
+}
+
+function blendStateOfNode(id: string): { sign: string; state: string; title: string } | null {
+  const st = blendNodeStates?.nodes[id];
+  if (!st) return null;
+  return { sign: STATE_SIGN[st], state: st, title: t(`blend.state.${st}`) + " · " + baseName(blendNodeStates!.blend) };
+}
+
+/** The centre of the File window when a .blend is opened as a folder. */
+function blendFolderCentre(win: Win, blend: string): HTMLElement {
+  const centre = document.createElement("div");
+  centre.className = "files-centre blend-folder";
+  centre.dataset.blend = blend;
+  const cur = blendFolders.get(blend) ?? {};
+  const f = cur.data;
+  const bar = document.createElement("div");
+  bar.className = "files-bar blend-bar";
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "ghost files-ib";
+  back.dataset.action = "blend-close";
+  back.textContent = "←";
+  back.title = t("blend.back");
+  back.onclick = () => { setFilesPref(win, "blend", null); renderStorage(); };
+  const title = document.createElement("b");
+  title.className = "blend-title";
+  title.textContent = baseName(blend);
+  const btn = (label: string, act: string, run: () => void, why?: string): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ghost";
+    b.dataset.action = act;
+    b.textContent = label;
+    if (why) { b.disabled = true; b.title = why; }
+    b.onclick = run;
+    return b;
+  };
+  bar.append(back, title,
+    btn(t("blend.check"), "blend-check", () => { void readBlendFolder(blend, true); }, store ? (cur.busy ? t("blend.busy") : undefined) : t("blend.checkNeedsDoc")),
+    btn(t("blend.reread"), "blend-reread", () => { void readBlendFolder(blend, false); }, cur.busy ? t("blend.busy") : undefined),
+    btn(t("blend.openInBlender"), "blend-open-blender", () => { void openInBlender(blend); }));
+  centre.appendChild(bar);
+  const line = document.createElement("div");
+  line.className = "storage-status blend-line";
+  if (cur.busy) line.textContent = t("blend.reading", { name: baseName(blend) });
+  else if (cur.error) line.textContent = t("blend.failed", { why: cur.error });
+  else if (f) {
+    const c = f.inventory.counts;
+    const said = [tn("blend.objects", c.objects), tn("blend.libraries", c.libraries),
+                  t("blend.textures", { packed: String(c.textures.packed ?? 0), external: String(c.textures.external ?? 0),
+                                        missing: String(c.textures.missing ?? 0) })];
+    if (f.check) said.push(f.check.sentence + (f.check.offline ? ` · ${t("blend.offline", { at: f.check.as_of })}` : ""));
+    if (f.session?.live) said.push(f.session.dirty ? t("blend.openDirty") : t("blend.openClean"));
+    line.textContent = said.join(" · ");
+    line.dataset.blendLine = "1";
+  }
+  centre.appendChild(line);
+  if (!f) return centre;
+
+  // the filters: name, kind, collection, epoch, model, unit, document, state
+  const flt = blendFilters.get(blend) ?? {};
+  const fb = document.createElement("div");
+  fb.className = "files-bar blend-filters";
+  const choices = filterChoices(f.inventory);
+  const sel = (key: keyof BlendFilters, all: string, opts: Array<[string, string]>): HTMLSelectElement => {
+    const s2 = document.createElement("select");
+    s2.dataset.blendFilter = key;
+    const o0 = document.createElement("option");
+    o0.value = "";
+    o0.textContent = all;
+    s2.appendChild(o0);
+    for (const [v, l] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = l; s2.appendChild(o); }
+    s2.value = String(flt[key] ?? "");
+    s2.onchange = () => { blendFilters.set(blend, { ...flt, [key]: s2.value || undefined }); renderStorage(); };
+    return s2;
+  };
+  const text = (key: keyof BlendFilters, ph: string): HTMLInputElement => {
+    const i = document.createElement("input");
+    i.type = "search";
+    i.placeholder = ph;
+    i.dataset.blendFilter = key;
+    i.value = String(flt[key] ?? "");
+    i.onchange = () => { blendFilters.set(blend, { ...flt, [key]: i.value || undefined }); renderStorage(); };
+    return i;
+  };
+  fb.append(text("q", t("blend.fName")),
+    sel("kind", t("blend.fKind"), choices.kinds.map((k) => [k, t(`blend.kind.${k}`)])),
+    sel("collection", t("blend.fCollection"), choices.collections.map((k) => [k, k])),
+    sel("epoch", t("blend.fEpoch"), choices.epochs.map((k) => [k, k])),
+    text("model", t("blend.fModel")), text("unit", t("blend.fUnit")), text("document", t("blend.fDocument")),
+    sel("state", t("blend.fState"), (["missing", "newer_outside", "changed_here", "only_here", "aligned"] as BlendState[])
+      .map((k) => [k, `${STATE_SIGN[k]} ${t(`blend.state.${k}`)}`])));
+  centre.appendChild(fb);
+
+  const closed = blendClosed.get(blend) ?? new Set<string>();
+  blendClosed.set(blend, closed);
+  const list = document.createElement("div");
+  list.className = "storage-list blend-list";
+  const rows = flatten(f, flt, closed);
+  if (!rows.length) list.appendChild(storageEmpty(t("files.nothingWithFilter")));
+  for (const r of rows) {
+    const el = document.createElement("div");
+    el.className = `storage-row blend-row blend-${r.kind}`;
+    el.dataset.key = r.key;
+    el.style.paddingLeft = `${6 + r.depth * 14}px`;
+    const ic = document.createElement("span");
+    ic.className = "storage-icon";
+    const nm = document.createElement("span");
+    nm.className = "storage-name";
+    nm.textContent = r.name || t("blend.loose");
+    const meta = document.createElement("span");
+    meta.className = "storage-meta";
+    const st = document.createElement("span");
+    st.className = "blend-state" + (r.state ? ` blend-state-${r.state}` : "");
+    if (r.state) { st.textContent = STATE_SIGN[r.state]; st.title = t(`blend.state.${r.state}`); st.dataset.state = r.state; }
+    if (r.kind === "object" && r.object) {
+      const o = r.object;
+      ic.textContent = o.kind === "proxy" ? "◇" : o.kind === "usv" ? "◆" : o.kind === "sf" ? "✦" : o.kind === "alternative" ? "⇄" : o.type === "MESH" ? "▲" : "•";
+      ic.title = t(`blend.kind.${o.kind}`);
+      meta.textContent = o.triangles ? tn("blend.tris", o.triangles) : o.type.toLowerCase();
+      el.dataset.object = o.name;
+      const cr = f.check?.rows.find((x) => x.object === o.name);
+      if (cr) el.title = [cr.why, ...(cr.notes ?? [])].filter(Boolean).join(" · ");
+      el.append(ic, nm, st, meta);
+      if (o.linked) {
+        // «Go to the linked file»: the .blend that holds the mesh, opened as a folder
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = "ghost blend-go";
+        go.dataset.action = "blend-go-linked";
+        go.textContent = (o.missing ? "✗ " : "↗ ") + o.source_rel;
+        go.title = o.missing ? t("blend.libMissing", { path: o.source_rel }) : t("blend.goLinked", { path: o.source_rel });
+        go.disabled = o.missing;
+        go.onclick = (e) => { e.stopPropagation(); openBlendAsFolder(win, o.source); };
+        el.appendChild(go);
+      }
+      // the node of the graph it stands for, shown in the graph
+      const nid = cr?.rm ?? cr?.unit ?? cr?.master;
+      if (nid) el.addEventListener("dblclick", () => revealFromTable(nid));
+    } else {
+      ic.textContent = r.kind === "library" ? "🔗" : r.open ? "▾" : "▸";
+      meta.textContent = r.kind === "library" ? (r.library?.rel ?? "") : tn("blend.objects", r.count ?? 0);
+      el.append(ic, nm, st, meta);
+      if (r.kind === "library" && r.library) {
+        const lib = r.library;
+        if (lib.exists === false) { el.classList.add("blend-missing"); el.title = t("blend.libMissing", { path: lib.rel ?? "" }); }
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = "ghost blend-go";
+        go.dataset.action = "blend-go-library";
+        go.textContent = "↗";
+        go.title = t("blend.goLinked", { path: lib.rel ?? "" });
+        go.disabled = lib.exists === false;
+        go.onclick = (e) => { e.stopPropagation(); if (lib.path) openBlendAsFolder(win, lib.path); };
+        el.appendChild(go);
+      }
+      el.addEventListener("click", () => {
+        if (closed.has(r.key)) closed.delete(r.key); else closed.add(r.key);
+        renderStorage();
+      });
+    }
+    list.appendChild(el);
+  }
+  centre.appendChild(list);
+
+  // «Check against the graph»: the rows that need a hand, ticks, «Apply»
+  if (f.check) {
+    const box = document.createElement("div");
+    box.className = "blend-check";
+    const h = document.createElement("b");
+    h.textContent = t("blend.checkTitle");
+    box.appendChild(h);
+    const todo = f.check.rows.filter((r) => r.state !== "aligned" || (r.actions?.length ?? 0) > 0);
+    for (const r of todo.slice(0, 200)) {
+      const l = document.createElement("label");
+      l.className = `blend-check-row blend-state-${r.state}`;
+      l.dataset.key = r.key;
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = r.tick;
+      cb.disabled = !r.action || r.action === "leave";
+      cb.onchange = () => { r.tick = cb.checked; };
+      const sp = document.createElement("span");
+      sp.textContent = `${r.sign} ${r.name}` + (r.why ? ` — ${r.why}` : "");
+      sp.title = (r.notes ?? []).join(" · ");
+      const act = document.createElement("select");
+      for (const a of r.actions ?? []) { const o = document.createElement("option"); o.value = a; o.textContent = t(`blend.act.${a}`); act.appendChild(o); }
+      act.value = r.action ?? "leave";
+      act.disabled = !(r.actions?.length);
+      act.onchange = () => { r.action = act.value; cb.disabled = act.value === "leave"; };
+      l.append(cb, sp, act);
+      box.appendChild(l);
+    }
+    const ap = btn(t("blend.apply"), "blend-apply", () => { void applyBlendRows(blend, f.check!.rows); });
+    box.appendChild(ap);
+    centre.appendChild(box);
+  }
+  return centre;
+}
+
 function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement {
   const row = document.createElement("div");
   row.className = "storage-row" + (entry.outside ? " storage-outside" : "");
@@ -40729,7 +41059,15 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
     requestAnimationFrame(() => row.scrollIntoView({ block: "nearest" }));
   }
   // DEV29 B4 · a double click opens, it does not select the panel's text
-  row.addEventListener("mousedown", (e) => { if (e.detail > 1) e.preventDefault(); });
+  row.addEventListener("mousedown", (e) => {
+    if (e.detail > 1) e.preventDefault();
+    // MICRO-BLEND-OFFICINA-1 · the double click opens a .blend as a folder. The
+    // first press selects and the window draws itself again (asynchronously:
+    // the second press lands on whatever is there), so the second press is
+    // read by the document (`blendSecondPress`)
+    if (e.detail === 1 && entry.type === "file" && /\.blend$/i.test(entry.name))
+      blendFirstPress = { win, path: entry.path, at: Date.now() };
+  });
 
   const icon = document.createElement("span");
   icon.className = "storage-icon";
@@ -40762,6 +41100,26 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
     }
   }
   row.append(icon, name, seal, use, size, date);
+  // MICRO-BLEND-OFFICINA-1 · a .blend: its label (objects, the last check),
+  // and the double click opens it as a folder
+  if (entry.type === "file" && /\.blend$/i.test(entry.name)) {
+    row.dataset.blend = "1";
+    icon.textContent = "▣";
+    // its icon opens it as a folder with ONE click (the double click too)
+    icon.classList.add("storage-blend-open");
+    icon.dataset.action = "blend-open-folder";
+    icon.title = t("blend.openAsFolder");
+    icon.addEventListener("click", (e) => { e.stopPropagation(); openBlendAsFolder(win, entry.path); });
+    const lb = blendLabel(blendFolders.get(entry.path)?.data);
+    if (lb) {
+      const tag = document.createElement("span");
+      tag.className = "storage-blend-label";
+      tag.dataset.blendLabel = lb;
+      tag.textContent = lb;
+      tag.title = blendFolders.get(entry.path)?.data?.check?.sentence ?? t("blend.labelTitle");
+      name.after(tag);
+    }
+  }
   // CAMPAGNA · a stamped file (or folder) carries the little seal, which opens
   // the card; the sidecar row stays the plain file it is
   const own = cover?.selves.get(stampPathFor(entry.path));
@@ -40812,6 +41170,7 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
       return;
     }
     if (entry.type !== "file") return;
+
     // CATENA · ⌘/Ctrl/Shift-click PICKS several files: the group an EM Stamp is
     // composed for («EM Stamp di gruppo»)
     if (e.metaKey || e.ctrlKey || e.shiftKey) {
@@ -40880,6 +41239,12 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
     menu.appendChild(b);
   };
   const folder = paths.dirname(entry.path) || "/";
+  if (entry.type === "file" && /\.blend$/i.test(entry.name)) {
+    item(t("blend.openAsFolder"), "blend-open-folder", () => openBlendAsFolder(win, entry.path));
+    item(t("blend.check"), "blend-check", () => { void readBlendFolder(entry.path, true).then(() => openBlendAsFolder(win, entry.path)); },
+         store ? undefined : t("blend.checkNeedsDoc"));
+    item(t("blend.openInBlender"), "blend-open-blender", () => { void openInBlender(entry.path); });
+  }
   if (entry.type === "dir") {
     item(t("storage.menuOpenFolder"), "open-folder", () => setStoragePath(win, entry.path));
   } else {

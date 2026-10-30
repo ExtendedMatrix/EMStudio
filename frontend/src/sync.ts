@@ -232,6 +232,9 @@ export interface SyncCallbacks {
    *  user deserves the difference. */
   onWireMismatch?: (reason: string) => void;
   /** CMD1 · the host answered a command: a delta to merge, or an error */
+  /** MICRO-BLEND-OFFICINA-1 · EM Tools asks EMStudio to open a place
+   *  (`{what: "prepare", container, blend, em_json}`) */
+  onOpen?: (payload: Record<string, unknown>) => void;
   onCommandResult?: (result: {
     cmd_id: string; ok: boolean;
     delta?: { nodes?: unknown[]; edges?: unknown[] };
@@ -513,6 +516,10 @@ export class SyncClient {
         this.cb?.onSnapshotUnavailable?.(body);
       } else if (type === "host_info") {
         this.cb?.onHostInfo?.(payload as HostInfo);
+      } else if (type === "open") {
+        // MICRO-BLEND-OFFICINA-1 · EM Tools' «Prepare in EMStudio»: an explicit
+        // ask of the person at Blender, not an echo — not gated
+        this.cb?.onOpen?.(payload as Record<string, unknown>);
       } else if (type === "presence") {
         // P4.3 · awareness, never gated by the sync direction: knowing who is in
         // the room is not an echo of anybody's work.

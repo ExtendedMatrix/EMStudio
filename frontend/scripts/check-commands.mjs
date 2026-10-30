@@ -66,7 +66,7 @@ ok(C.commandId("create_proxy_for_unit", "US101", {}) !==
   eq(msg.payload.params, {}, "no params is an empty object, not undefined");
 }
 
-eq([...C.COMMAND_VERBS], ["create_proxy_for_unit", "import_geometry"],
-   "two verbs — the vocabulary is small on purpose");
+eq([...C.COMMAND_VERBS], ["create_proxy_for_unit", "import_geometry", "blend_apply"],
+   "three verbs — the vocabulary is small on purpose");
 
 console.log(`commands: ${checks} checks passed`);

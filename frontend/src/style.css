@@ -10930,3 +10930,26 @@ body:not(.tt-comfy) .tile-tablebody .mdl-rm .sol-chip { line-height: 14px; }
 .tile-tablebody .mdl td { white-space: nowrap; }
 .tile-tablebody .mdl .mdl-eye { font-size: 11px; line-height: 16px; }
 body:not(.tt-comfy) .tile-tablebody .mdl-rm .btn.sm { line-height: 16px; font-size: 11px; padding-top: 0; padding-bottom: 0; }
+
+/* MICRO-BLEND-OFFICINA-1 · the .blend as a folder, its states (✔ ↑ ↓ ✗ ○) */
+.storage-blend-label { font-size: 11px; opacity: .75; margin-left: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.blend-folder .blend-title { margin: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.blend-folder .blend-filters { flex-wrap: wrap; gap: 4px; }
+.blend-folder .blend-filters input, .blend-folder .blend-filters select { max-width: 9.5em; font-size: 12px; }
+.blend-row { cursor: default; }
+.blend-row.blend-collection, .blend-row.blend-loose, .blend-row.blend-library { font-weight: 600; cursor: pointer; }
+.blend-row.blend-missing .storage-name { text-decoration: line-through; opacity: .7; }
+.blend-go { font-size: 11px; padding: 0 4px; margin-left: 4px; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blend-state, .sol-blend, .ns-blend { display: inline-block; min-width: 1.1em; text-align: center; font-size: 11px; }
+.blend-state-aligned { color: #3c8d4a; }
+.blend-state-changed_here { color: #b07a12; }
+.blend-state-newer_outside { color: #2d6fb3; }
+.blend-state-missing { color: #c0392b; }
+.blend-state-only_here { color: #7a7a7a; }
+.sol-blend-aligned { color: #3c8d4a; } .sol-blend-changed_here { color: #b07a12; } .sol-blend-newer_outside { color: #2d6fb3; }
+.sol-blend-missing { color: #c0392b; } .sol-blend-only_here { color: #7a7a7a; }
+.blend-check { border-top: 1px solid var(--line, #ddd); padding: 6px 8px; max-height: 40%; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.blend-check-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.blend-check-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blend-check > button { align-self: flex-end; margin-top: 4px; }
+.storage-blend-open { cursor: pointer; }

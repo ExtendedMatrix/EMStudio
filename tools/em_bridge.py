@@ -1822,7 +1822,14 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: (``POST /optimize/diagnose`` and ``apply_use`` take them), a tileset
 #: suggested; ``/addons`` says what each add-on serves, Node.js is an add-on of
 #: its own and the validator installs WITH it; Obj2Tiles from E.D.'s fork.
-BRIDGE_LEVEL = 47   # 30 also = /validate
+#: 48 = MICRO-BLEND-OFFICINA-1: the .blend as a folder — ``POST /jobs {kind:
+#: blender, op: inventory}`` (EM Tools reads it headless; s3Dgraphy's
+#: inventory, tree and «Check against the graph»), ``{op: blend_apply}`` (the
+#: ticked rows applied by a background Blender, only when none has it open,
+#: confirmed), ``GET /blend/session`` (open in a Blender? unsaved changes? who
+#: may save) and ``POST /blend/open`` (Blender with its interface, as a sidecar
+#: of the graph open in EMStudio).
+BRIDGE_LEVEL = 48   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -2646,6 +2653,18 @@ def make_handler(api):
                 # MICRO-OTTIMIZZA-3 · the Blenders found, the one used, its last probe
                 import em_blender as BL
                 self._json(BL.state())
+            elif route == "/blend/session":
+                # MICRO-BLEND-OFFICINA-1 · is this .blend open in a Blender, with
+                # unsaved changes? who may save it (``blend_folder.save_rule``)
+                if not self._fs_gate():
+                    return
+                q = urllib.parse.parse_qs(parsed.query)
+                blend, err = self._blend_of({"blend": (q.get("path") or [""])[0]})
+                if err:
+                    self._fail(400, err)
+                    return
+                from s3dgraphy.resources import blend_folder as BF
+                self._json({"ok": True, **BF.session_state(blend)})
             elif route == "/optimize/profiles":
                 # MICRO-PREPARA-DIAGNOSI · s3Dgraphy's table, the one EM Tools reads
                 try:
@@ -3133,6 +3152,16 @@ def make_handler(api):
                 import em_blender as BL
                 out = BL.choose(str((body or {}).get("path") or ""))
                 self._json({**BL.state(), **out}, 200 if out.get("ok") else 400)
+            elif route == "/blend/open":
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                status, out = self._blend_open(body if isinstance(body, dict) else {})
+                self._json(out, status)
             elif route in ("/optimize/diagnose", "/optimize/versions/remove"):
                 # MICRO-PREPARA-DIAGNOSI · the diagnosis, and the versions removed
                 if not self._fs_gate():
@@ -3853,6 +3882,128 @@ def make_handler(api):
                            label=f"Blender · {what} · {os.path.basename(plan['blend'])}")
             self._json({"ok": True, "job": job.id, "plan": plan}, 202)
 
+        # ── MICRO-BLEND-OFFICINA-1 · the .blend as a folder, checked ─────────
+
+        def _blend_of(self, body):
+            """(path of the .blend asked, error)."""
+            blend, err = self._fs_resolve(os.path.abspath(os.path.expanduser(str(body.get("blend") or ""))),
+                                          want="file")
+            if err:
+                return "", err[1]
+            if not blend.lower().endswith(".blend"):
+                return "", "a .blend is wanted"
+            return blend, ""
+
+        def _officina_job(self, body):
+            """``POST /jobs {kind: blender, op: inventory, blend, doc?, doc_path?,
+            source?}`` → a LIGHT job: Blender headless reads the .blend (EM Tools'
+            ``blend_officina.collect``), the bridge answers s3Dgraphy's inventory
+            (``blend_folder.normalize``), its tree, the session rule
+            (``session_state``) and, with the document open in EMStudio,
+            «Check against the graph» (``blend_folder.check`` on the disk's
+            stamps beside the em.json ``doc_path``).
+
+            ``{op: blend_apply, blend, rows, doc?, doc_path?, confirm}`` → the
+            ticked rows applied by a BACKGROUND Blender that saves — only when no
+            Blender has the file open (else 409 ``{route: session}``: the page
+            sends them to that Blender through the sidecar), only with
+            ``confirm``, and only if the file did not change since it was read."""
+            import tempfile
+            import em_blender as BL
+            import em_optimize as O
+            try:
+                from s3dgraphy.resources import blend_folder as BF
+            except ImportError as exc:
+                self._fail(501, f"this s3dgraphy cannot read a .blend as a folder: {exc}")
+                return
+            op = str(body.get("op"))
+            blender = str(body.get("blender") or "") or BL.current()
+            if not blender or not os.path.isfile(blender):
+                self._fail(400, "Blender is not here: choose it in Settings › Add-ons")
+                return
+            blend, err = self._blend_of(body)
+            if err:
+                self._fail(400, err)
+                return
+            doc = body.get("doc") if isinstance(body.get("doc"), dict) else None
+            em_folder = os.path.dirname(str(body.get("doc_path") or "")) if body.get("doc_path") else ""
+            rule = BF.session_state(blend, read_mtime=body.get("read_mtime"))
+            if op == "blend_apply":
+                if rule["route"] != "background":
+                    self._json({"ok": False, "route": rule["route"], "error": rule["say"], "session": rule}, 409)
+                    return
+                if not body.get("confirm"):
+                    self._json({"ok": False, "route": "confirm", "error": "a background Blender saves this .blend: "
+                                "confirm first", "session": rule}, 409)
+                    return
+            em_json = ""
+            if doc is not None:
+                fd, em_json = tempfile.mkstemp(prefix="emstudio-officina-", suffix=".em.json")
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(doc, fh)
+            args = {"op": op}
+            if op == "blend_apply":
+                args.update({"rows": [r for r in body.get("rows") or [] if isinstance(r, dict)],
+                             "em_json": em_json, "em_folder": em_folder, "save": True,
+                             "read_mtime": rule.get("mtime") if body.get("read_mtime") is None
+                             else body.get("read_mtime")})
+
+            def target(job):
+                job.stage = os.path.basename(blend)
+                try:
+                    run = BL.run_op(job, blender, args, blend, timeout=900 if op == "inventory" else 4 * 3600)
+                finally:
+                    if em_json:
+                        try:
+                            os.remove(em_json)
+                        except OSError:
+                            pass
+                res = run["result"] or {}
+                out = {"op": op, "blend": blend, "seconds": run["seconds"], "peak_mb": run["peak_mb"]}
+                if op == "blend_apply":
+                    out["result"] = res
+                    return out
+                inv = BF.normalize(res)
+                out.update({"inventory": inv, "tree": BF.tree(inv),
+                            "session": BF.session_state(blend), "dirty_in_session": bool(rule.get("dirty"))})
+                if doc is not None:
+                    files = BF.disk_files(doc, em_folder) if em_folder else {}
+                    chk = BF.check(inv, doc, files=files, source="disk", em_folder=em_folder)
+                    chk["nodes"] = BF.node_states(chk)
+                    out["check"] = chk
+                return out
+            what = {"inventory": "the .blend as a folder", "blend_apply": "apply to the .blend"}[op]
+            heavy = op == "blend_apply"
+            job = O.submit("blender", {"op": op, "sources": [blend]}, target, heavy=heavy,
+                           estimate_mb=BL.memory_mb("objects" if op == "inventory" else "prepare",
+                                                    os.path.getsize(blend)),
+                           label=f"Blender · {what} · {os.path.basename(blend)}")
+            self._json({"ok": True, "job": job.id, "session": rule}, 202)
+
+        def _blend_open(self, body):
+            """``POST /blend/open {blend, doc_path?, sidecar?}`` → Blender WITH
+            its interface on the .blend, EM Tools on the em.json open in
+            EMStudio and its Sidecar started (point 6). A .blend already open
+            in a Blender is not opened twice: answered ``{already: true}``."""
+            import em_blender as BL
+            from s3dgraphy.resources import blend_folder as BF
+            blender = str(body.get("blender") or "") or BL.current()
+            if not blender or not os.path.isfile(blender):
+                return 400, {"ok": False, "error": "Blender is not here: choose it in Settings › Add-ons"}
+            blend, err = self._blend_of(body)
+            if err:
+                return 400, {"ok": False, "error": err}
+            rule = BF.session_state(blend)
+            if rule["live"]:
+                return 200, {"ok": True, "already": True, "session": rule}
+            em_json = str(body.get("doc_path") or "")
+            if em_json:
+                full, e2 = self._fs_resolve(os.path.abspath(os.path.expanduser(em_json)), want="file")
+                em_json = full if not e2 else ""
+            out = BL.open_gui(blender, blend, em_json, bool(body.get("sidecar", True)))
+            out["session"] = rule
+            return 200, out
+
         def _blender_job(self, body):
             """``POST /jobs {kind: blender, op, …}`` (see :meth:`_blender_plan`);
             ``dry_run`` answers the plan. probe and objects are light jobs; a
@@ -3863,6 +4014,9 @@ def make_handler(api):
             import tempfile
             import em_blender as BL
             import em_optimize as O
+            if str(body.get("op") or "") in ("inventory", "blend_apply"):
+                self._officina_job(body)
+                return
             try:
                 plan = self._blender_plan(body)
             except ImportError as exc:
