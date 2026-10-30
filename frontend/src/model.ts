@@ -18,6 +18,7 @@ import { paradataGroupName } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
 import type { SpellingPlan } from "./rules";
 import { VOLATILE_KEY } from "./volatile";
+import { alignPropertyAtBirth, alignPropertyPatch, alignPropertyValues } from "./property-value";
 import { currentIdentity, signatureAuth, type SignatureAuth } from "./identity";
 import { birthLanguage } from "./translation";
 import { resolveNodePair } from "./container";
@@ -417,6 +418,9 @@ export class DocumentStore {
     migrateLegacyNodeTypes(doc);
     migrateLegacyGraphScope(doc);
     settleHeaderCode(doc);
+    // a property's value in both places (E.D., 28 Oct 2026): a file with one
+    // only is completed in memory; it changes on disk when it is saved
+    alignPropertyValues(doc);
   }
 
   onChange(fn: () => void): void {
@@ -1019,6 +1023,7 @@ export class DocumentStore {
   // ---------- mutations ----------
   addNode(node: EmNode, pos?: LayoutRect): EmNode {
     this.checkpoint();
+    alignPropertyAtBirth(node); // description and data.value, one value
     this.stampNew(node);
     this.doc.graph.nodes.push(node);
     if (pos) {
@@ -1344,9 +1349,8 @@ export class DocumentStore {
         return existing.id;
       }
       const seed = ed[boundKey] != null ? String(ed[boundKey]) : "";
-      // A PropertyNode's VALUE lives in `description` (the EM convention: real
-      // graphml-imported properties carry the value there, `value` stays null).
-      // property_type is the only thing we keep in data.
+      // A PropertyNode's VALUE lives in `description` (the EM convention) and
+      // in `data.value`, which mirrors it: addNode aligns the two.
       const p = this.addNode(
         {
           id: this.newId(),
@@ -1516,9 +1520,9 @@ export class DocumentStore {
           id: pid,
           name: pt,
           node_type: "property",
-          // value lives in description (uniform with real EM property data)
+          // the value in both places (description and data.value)
           description: String(ed[bk]),
-          data: { property_type: pt },
+          data: { property_type: pt, value: String(ed[bk]) },
         });
         positions[pid] = { x: 20 + s * 100, y: baseY, w: 90, h: 30 };
         g.edges.push({
@@ -2014,7 +2018,7 @@ export class DocumentStore {
     const pdgId = this.epochParadataGroup(epochId);
     if (pdgId) {
       const p = this.propInGroup(pdgId, propType);
-      if (p) this.updateNode(p.id, { description: v }); // value = description
+      if (p) this.updateNode(p.id, { description: v }); // updateNode mirrors it into data.value
     }
   }
 
@@ -2660,6 +2664,8 @@ export class DocumentStore {
     this.checkpoint();
     // snapshot BEFORE, so the field stamps land on what actually changed
     const before = JSON.parse(JSON.stringify(n)) as Record<string, unknown>;
+    // a property's description and data.value are written together
+    patch = alignPropertyPatch(n, patch);
     Object.assign(n, patch);
     const fields = this.stampFields(n, before);
     this.stampEdit(n);

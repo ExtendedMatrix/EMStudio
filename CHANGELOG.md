@@ -6,6 +6,24 @@ that asked for one.
 
 ## [Unreleased]
 
+### Changed
+- **The value of a property in two places** (MICRO valore-proprietà, decided by
+  E.D. on 28 October 2026). `description` (EM's historical place) and
+  `data.value`, which mirrors it, are written together by every gesture:
+  `DocumentStore.addNode` and `updateNode` complete the other place
+  (`property-value.ts`, the same rule as s3Dgraphy's `PropertyNode`), and a
+  document is completed in memory on opening — the file changes when it is
+  saved. The geometry property and a `data.value` that is a bare uuid keep their
+  two places apart. The epoch's temporal properties and the em-data sheet's
+  claims (which wrote a top-level `value` that was never saved) write both.
+- **Property → document is read from the datamodel** (p.6): connections 1.6.51
+  declares `has_documentation` from a PropertyNode read-only
+  (`read_only_sources`); `throughExtractor` reads it (`rules.readOnlyEdgeTypes`)
+  instead of a hand-written rule, and no menu offers a read-only edge. The
+  datamodel sync also brings the site's datamodel (nodes 1.6.39, connections
+  1.6.50, visual rules 1.6.41 with the `site` glyph still a draft, qualia
+  1.6.10), not vendored until now.
+
 ### Fixed
 - **Properties and their paradata chain** (MICRO-PROPRIETA-PARADATI, E.D. on
   dev.82, 28 October 2026; Templu Mare v4, SU020, PD_SU020).

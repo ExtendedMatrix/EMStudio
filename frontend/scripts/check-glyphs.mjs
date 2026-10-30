@@ -176,8 +176,13 @@ const GLYPH_TYPES = rules["2d_render_glyph_types"].types;
   for (const k of kinds)
     ok(M.glyphFor("link", { dtc_kind: k.slice(4) })?.key === k, `a node with dtc_kind ${k.slice(4)} draws ${k}`);
   eq(M.glyphFor("US"), null, "a shape type is not a glyph");
-  ok(!Object.values(rules["2d_glyphs"]).some((e) => e && typeof e === "object" && e.draft),
-     "no glyph is a draft (em_visual_rules 1.6.20)");
+  // no glyph is a draft (em_visual_rules 1.6.20) — save the site's, drawn as a
+  // DRAFT in visual rules 1.6.41 (MICRO lab sito, 30 Oct 2026) and awaiting
+  // E.D.'s approval; it came with the datamodel sync of MICRO valore-proprietà
+  const DRAFTS_AWAITING = new Set(["site"]);
+  eq(Object.entries(rules["2d_glyphs"]).filter(([, e]) => e && typeof e === "object" && e.draft)
+       .map(([k]) => k).filter((k) => !DRAFTS_AWAITING.has(k)), [],
+     "no glyph is a draft but the site's, awaiting approval (em_visual_rules 1.6.20, 1.6.41)");
   // NIGHT-SPAZIO · the eight DTC glyphs drawn on 30 Sep and approved (visual
   // rules 1.6.25): each is drawn from paths on the canvas (the DTC) and has its
   // SVG among the vendored pictograms, which is what the palette (Shift+A in a

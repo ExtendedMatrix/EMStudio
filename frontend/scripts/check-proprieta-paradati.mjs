@@ -71,10 +71,14 @@ const hasLayout = !!Object.keys(st.doc.layout?.positions ?? {}).length;
 // ── p.1 · the value is read where it truly is ─────────────────────────────────
 {
   const p = st.node(CT);
-  ok(!String(p.description ?? "").trim() && String(p.data.value).startsWith("Rialzo dei muri"),
-     "construction_technique has its value in data.value only (the case E.D. saw empty)");
+  const onDisk = JSON.parse(RAW).graphs[st.doc.graph.id]?.nodes.find((n) => n.id === CT);
+  ok(onDisk && !String(onDisk.description ?? "").trim() && String(onDisk.data.value).startsWith("Rialzo dei muri"),
+     "construction_technique has its value in data.value only in the file (the case E.D. saw empty)");
   ok(chain.propertyValue(p).startsWith("Rialzo dei muri"), "propertyValue reads data.value first");
-  ok(!String(st.node(CT).description ?? "").trim(), "reading wrote nothing (no normalisation in the file)");
+  // MICRO valore-proprietà (E.D., 28 Oct 2026) overturns «reading writes nothing»:
+  // opening completes the missing place IN MEMORY, the file changes when saved
+  eq(String(p.description ?? ""), String(p.data.value),
+     "opening completed the description from data.value, in memory (MICRO valore-proprietà)");
   eq(chain.propertyValue({ node_type: "property", description: "old", data: {} }), "old",
      "a value written only in the description (older files) is still read");
   st.setPropertyValue(CT, "Muro restaurato");

@@ -35,7 +35,8 @@ const PHRASED = new Set(Object.entries(
   .filter(([, v]) => !!v.ui_phrase).map(([k]) => k));
 function menuEdgeTypes(from: string | undefined, to: string | undefined): string[] {
   if (throughExtractor(from, to)) return [];
-  return allowedEdgeTypes(from, to).filter((e) => PHRASED.has(e));
+  const readOnly = readOnlyEdgeTypes(from, to);
+  return allowedEdgeTypes(from, to).filter((e) => PHRASED.has(e) && !readOnly.includes(e));
 }
 
 /**
@@ -46,15 +47,20 @@ function menuEdgeTypes(from: string | undefined, to: string | undefined): string
  * legacy yEd dashed connector), so an old file keeps it and validation accepts
  * it; but no gesture of EMStudio writes it any more — a «link to a document»
  * from a property makes the extractor in between (`chain.extractBetween`).
- * Read off the class hierarchy, not the type names. The datamodel correction
- * (the relation marked as read-only for authoring) is proposed in s3Dgraphy.
+ * MICRO valore-proprietà p.6 (E.D., 28 Oct 2026): READ FROM THE DATAMODEL,
+ * no longer written here — connections 1.6.51 declares the property source of
+ * `has_documentation` read-only (`read_only_sources`), and the chain that
+ * replaces it is the datamodel's too: from → extractor `has_data_provenance`,
+ * extractor → to `extracted_from`.
  */
+const EXTRACTOR_TYPE = nodeTypeForClass("ExtractorNode") ?? "extractor";
 export function throughExtractor(from: string | undefined, to: string | undefined): boolean {
-  return ancestorsOf(from).includes("PropertyNode") && ancestorsOf(to).includes("DocumentNode");
+  if (!readOnlyEdgeTypes(from, to).length) return false;
+  return allowedEdgeTypes(from, EXTRACTOR_TYPE).includes("has_data_provenance")
+    && allowedEdgeTypes(EXTRACTOR_TYPE, to).includes("extracted_from");
 }
 import {
   allowedEdgeTypes,
-  ancestorsOf,
   connectValidity,
   dtcAuthoringKinds,
   hdtoAuthoringTypes,
@@ -63,6 +69,8 @@ import {
   isStratigraphicType,
   isSymmetricEdgeType,
   nodeLabel,
+  nodeTypeForClass,
+  readOnlyEdgeTypes,
   relationKey,
   typeDescription,
   typeLabel,

@@ -16,7 +16,7 @@ interface EdgeTypeDef {
   name?: string;
   label?: string;
   description?: string;
-  allowed_connections?: { source?: string[]; target?: string[] };
+  allowed_connections?: { source?: string[]; target?: string[]; read_only_sources?: string[] };
   /** `"chain"` on the DTC edges a provenance walk may traverse — connections
    *  datamodel 1.6.13. Absent means CONTEXT, which is what makes a new edge
    *  born non-traversable. */
@@ -521,6 +521,29 @@ export function allowedEdgeTypes(
 }
 
 export type ConnectValidity = "valid" | "generic" | "invalid";
+
+/**
+ * Connections 1.6.51 (E.D., 28 Oct 2026) · the edges `source → target` the
+ * datamodel READS but no tool creates: `allowed_connections.read_only_sources`.
+ * An old file keeps them and validation accepts them (they are still in
+ * `allowedEdgeTypes`); a menu never offers them. Today: a PropertyNode →
+ * DocumentNode `has_documentation` (BUGFIX-CONN3), whose chain goes through
+ * the extractor.
+ */
+export function readOnlyEdgeTypes(
+  sourceType: string | undefined,
+  targetType: string | undefined,
+): string[] {
+  const sa = ancestorsOf(sourceType);
+  const ta = ancestorsOf(targetType);
+  return Object.entries(EDGE_TYPES)
+    .filter(([, def]) => {
+      const ac = def.allowed_connections;
+      return !!ac?.read_only_sources?.length
+        && intersects(ac.read_only_sources, sa) && intersects(ac.target, ta);
+    })
+    .map(([name]) => name);
+}
 
 export function connectValidity(
   sourceType: string | undefined,

@@ -620,9 +620,10 @@ export function addQualiaClaim(
       id,
       name: propertyType,
       node_type: "property",
+      // the value in both places: description and data.value (E.D., 28 Oct
+      // 2026); a top-level `value` was not part of the node and was not saved
       description: value,
-      property_type: propertyType,
-      value: value,
+      data: { property_type: propertyType, value },
     } as EmNode);
     store.addEdge(targetId, id, "has_property");
   });
