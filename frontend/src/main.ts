@@ -291,7 +291,7 @@ import { buildChain, type FlowVersion, type VersionMode } from "./lod-flow";
 import { fingerprint, getMeasure, putMeasure } from "./measure-cache";
 import { defaultLevel, isHeavy, levelShort, levelsOf, lightestVersion, type Level } from "./lod-levels";
 import { oneLine } from "./one-line";
-import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, SAME_COVERAGE_IOU, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
+import { findSet, isTilesetData, measureCoverage, planDeclareAlternative, planSubcontainer, SAME_COVERAGE_IOU, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
 import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE } from "./space";
 import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame } from "./file-frame";
@@ -737,6 +737,10 @@ import { blendLabel, filterChoices, flatten, STATE_SIGN, type BlendFilters, type
 import { applyGraphDelta, COMPOSE_PROFILES, fileKey, idsOfObject, LEASE_RENEW_S, leaseFor, leaseLabel,
          manualLevel, mayRelease, mayWrite, objectsOfIds, recipeLine, recipesOf, SelectionGate,
          type DeltaStore, type GraphDelta, type Lease } from "./blend-room";
+import { applyWholeDelta, composeCounts, documentsReaching, PLATFORMS as CONS_PLATFORMS, prepareSource, presetForProfile,
+         rowActions, rowsShown, statesOf, STATUS_SIGN as CONS_SIGN, updateRows, versionLine, WORK_PROFILES,
+         type BeforeAfter, type ComposeGraphPlan, type ConsolidateAnswer, type ConsolidateRow, type Finding,
+         type WholeDelta } from "./consolidate";
 import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, removalLines, versionsOf,
   type Diagnosis, type UseProfile, type VersionOnDisk, type RowParams, groupsOf, rowsOf, groupTicked, tickGroup,
   paramsFor, profileWords } from "./use-diagnosis";
@@ -13807,6 +13811,8 @@ document
   ?.addEventListener("click", () => pinProjectVersion());
 document.getElementById("btn-relocate-files")?.addEventListener("click", () => { void relocateFiles(); });
 document.getElementById("btn-collect-files")?.addEventListener("click", () => { void collectResources(); });
+document.getElementById("btn-consolidate")?.addEventListener("click", () => { void consolidateDialog(); });
+document.getElementById("btn-compose-graph")?.addEventListener("click", () => { void composeFromGraphDialog(); });
 // MICRO-CONTENTS-1 D9 · File ▸ New EM project…, beside New
 document.getElementById("btn-new-project")?.addEventListener("click", () => { void newProjectGesture(); });
 // MICRO-ARCHIVIO-2 · File ▸ Apri progetto / Riordina secondo lo standard / Chiudi il progetto
@@ -13894,7 +13900,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 50;   // 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 51;   // 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -28409,6 +28415,12 @@ const altHelp = new Map<string, { kind: "partial" | "more" | "whole"; text: stri
  *  «Fa da alternativa a…» with the containers and the models of its epoch, and
  *  with no container the two roads to make one. */
 function renderAlternativeInto(host: HTMLElement, nodeId: string): boolean {
+  const space = renderAlternativeSpaceInto(host, nodeId);
+  // MICRO-BLEND-OFFICINA-3 (4) · the tileset as the level «Intero», under its document
+  const whole = tilesetWholeInto(host, nodeId);
+  return space || whole;
+}
+function renderAlternativeSpaceInto(host: HTMLElement, nodeId: string): boolean {
   const sp = currentSpace();
   if (!sp || !store) return false;
   const rm = sp.rms.find((r) => r.id === nodeId);
@@ -35175,6 +35187,9 @@ async function applyUse(blend: string, d: Diagnosis, ids: string[], model: strin
   logInfo(msg);
   for (const w of res.warnings ?? []) logWarn(w);
   useState.replace = false;
+  // MICRO-BLEND-OFFICINA-3 · the version enters the graph as every other
+  // (EM Tools in a background Blender has no graph: it writes and stamps)
+  await registerUseVersion(blend, d.profile, model, level, res);
   const folder = paths.dirname(blend) + "/versions";
   void loadUseVersions(folder);
 }
@@ -36169,14 +36184,16 @@ async function stampDerived(source: string | string[], out: { path: string; sha2
  *  `api.add_version` through the bridge): the version resource and its
  *  `lod_generation` step, inserted as one step of undo. → why not, or null. */
 async function registerVersion(o: OptOut, pre: Pick<OptimizePreset, "lod" | "destination" | "use">, params: Record<string, unknown>, toolVersion: string,
-                               how: { technique: string; tool: string; software: { name: string; version: string }[] } | null = null): Promise<string | null> {
+                               how: { technique: string; tool: string; software: { name: string; version: string }[] } | null = null,
+                               masterId = "", primitives?: Record<string, number>): Promise<string | null> {
   if (!store?.doc) return t("files.optNoGraph");
   const me = currentIdentity();
   const rel = (abs: string) => {
     const dir = currentFilePath ? paths.dirname(currentFilePath) : "";
     return dir && paths.isInside(dir, abs) ? paths.relativeTo(currentFilePath!, abs) : abs;
   };
-  const master = filesUses(o.source).find((f) => f.node_type === "resource")?.id;
+  // MICRO-BLEND-OFFICINA-3 · a .blend holds many masters: the one named wins
+  const master = masterId || filesUses(o.source).find((f) => f.node_type === "resource")?.id;
   const f = o.facts;
   const n = new Date();
   const r = await fetch(`${await bridgeUrl()}/graph/add-version`, {
@@ -36184,7 +36201,7 @@ async function registerVersion(o: OptOut, pre: Pick<OptimizePreset, "lod" | "des
     body: JSON.stringify({ doc: store.doc, source: o.source, em_json: currentFilePath ?? "", master_id: master ?? "",
       locator: rel(o.path!), sha256: o.sha256, bytes: o.bytes, level: pre.lod, destination: pre.destination, use: pre.use,
       measures: f ? { texture_count: f.texture_count, texture_side_px: f.texture_side_px ?? undefined } : undefined,
-      primitives: f ? { faces: f.faces, vertices: f.vertices } : undefined,
+      primitives: f ? { faces: f.faces, vertices: f.vertices } : primitives,
       parameters: params, technique: how?.technique ?? "decimation", tool: how?.tool ?? "gltfpack",
       software: how?.software ?? [{ name: "gltfpack", version: toolVersion }],
       author: me?.orcid ? `https://orcid.org/${me.orcid}` : undefined,
@@ -41095,6 +41112,7 @@ async function applyBlendRows(blend: string, rows: CheckRow[]): Promise<void> {
   if (res.refused?.length) logWarn(t("blend.refusedInBackground", { names: res.refused.join(", ") }));
   const said = applyBlendDelta(res.delta);
   logInfo(t("blend.appliedBackground", { n: String(res.done?.length ?? 0), name: baseName(blend) }) + (said ? ` · ${said}` : ""));
+  blendUpdateTicks.delete(blend);
   void readBlendFolder(blend, true);
 }
 
@@ -41478,6 +41496,568 @@ function detailRecipesBlock(nodeId: string): HTMLElement | null {
   return box;
 }
 
+// ── MICRO-BLEND-OFFICINA-3 · «Consolida per…» and «Componi un .blend dal grafo»
+// (E.D., 31 Oct 2026: two actions, not one). «Consolida per…» writes nothing:
+// Heriverse / ATON / the web read the em.json as it is; it SAYS, model by
+// model, what a viewer will find (s3Dgraphy's `consolidate` through the bridge,
+// the resolver's states the Archive holds) and offers the hand for each thing
+// missing — «Prepara» opens Ottimizza on that model with the profile chosen,
+// «Carica nella stanza» the room's upload by sha256, out of a room the road on
+// disk. «Componi un .blend dal grafo» composes a WORKING .blend from the open
+// study (no .blend to start from): s3Dgraphy's `compose_from_graph`, the
+// room's files fetched by the bridge into the project's cache, EM Tools in a
+// background Blender. The before/after of «Controlla col grafo» and the
+// tileset as the level «Intero» of a container are in their places below.
+
+let consPlatform = "heriverse";
+let consOnlyTodo = true;
+/** a .blend opened in Ottimizza by «Prepara» on a master inside it: the
+ *  version EM Tools makes there is registered on THAT master */
+const prepareCtx = new Map<string, { master: string; model: string; name: string; profile: string }>();
+
+async function postGraph<T>(route: string, body: Record<string, unknown>): Promise<T & { ok?: boolean; error?: string; status: number }> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}${route}`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({})) as T & { ok?: boolean; error?: string };
+    if (r.status === 404) return { ...j, ok: false, error: t("cons.oldBridge"), status: 404 };
+    if (r.status === 501) return { ...j, ok: false, error: t("cons.oldS3d"), status: 501 };
+    return { ...j, status: r.status };
+  } catch { return { ok: false, error: t("storage.bridgeDown"), status: 0 } as T & { ok: boolean; error: string; status: number }; }
+}
+
+/** The resolver's answers the Archive holds, asked first when it has none. */
+async function archiveStates(): Promise<void> {
+  if (!fileStates().length && !filesChecking) await checkFiles();
+}
+
+async function askConsolidate(platform: string): Promise<ConsolidateAnswer | string> {
+  if (!store) return t("cons.noDoc");
+  await archiveStates();
+  const j = await postGraph<ConsolidateAnswer>("/consolidate", { doc: store.doc, doc_path: currentFilePath ?? "", platform,
+    states: statesOf(fileStates()), in_room: !!fileRoom() });
+  if (!j.ok) return String(j.error ?? j.status);
+  return j;
+}
+
+/** Close the dialog this element is in (its OK). */
+function closeDialogOf(el: HTMLElement): void {
+  el.closest(".app-dialog")?.querySelector<HTMLButtonElement>("[data-dialog-ok]")?.click();
+}
+
+/** «Consolida per…»: the platform, one row per published model with its
+ *  findings and their hands, the totals; nothing is written. */
+async function consolidateDialog(): Promise<void> {
+  if (!store) { toast(t("cons.noDoc")); return; }
+  const body = document.createElement("div");
+  body.className = "cons-dialog";
+  const head = document.createElement("div");
+  head.className = "cons-head";
+  const plat = document.createElement("select");
+  plat.dataset.cons = "platform";
+  for (const p of CONS_PLATFORMS) { const o = document.createElement("option"); o.value = p.id; o.textContent = p.label; plat.appendChild(o); }
+  plat.value = consPlatform;
+  const todoL = document.createElement("label");
+  const todo = document.createElement("input");
+  todo.type = "checkbox";
+  todo.dataset.cons = "only-todo";
+  todo.checked = consOnlyTodo;
+  todoL.append(todo, " " + t("cons.onlyTodo"));
+  const pl = document.createElement("label");
+  pl.append(t("cons.platform") + " ", plat);
+  head.append(pl, todoL);
+  const say = document.createElement("p");
+  say.className = "cons-say";
+  say.dataset.consSay = "";
+  const room = document.createElement("p");
+  room.className = "files-hint cons-room";
+  const tot = document.createElement("div");
+  tot.className = "cons-totals";
+  const counts = document.createElement("p");
+  counts.className = "cons-counts";
+  const list = document.createElement("div");
+  list.className = "cons-rows";
+  body.append(head, say, room, tot, counts, list);
+  let ans: ConsolidateAnswer | null = null;
+  const action = (r: ConsolidateRow, f: Finding): HTMLButtonElement => {
+    const k = String(f.action.kind);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "insp-btn cons-act";
+    b.dataset.consAct = k;
+    b.textContent = t(`cons.act.${k}`, { profile: t(`bcomp.p.${f.action.profile ?? ""}`) });
+    b.title = f.say_it;
+    b.onclick = () => {
+      if (k === "prepare") { closeDialogOf(body); void prepareFromConsolidate(r, f, plat.value); }
+      else if (k === "upload") void uploadForResource(String(f.action.resource_id ?? ""), r).then(refresh);
+      else if (k === "disk") { closeDialogOf(body); void collectResources(); }
+      else if (k === "check") void checkFiles().then(refresh);
+      else if (k === "find") { closeDialogOf(body); void relocateFiles(); }
+      else if (k === "stamp") { closeDialogOf(body); if (f.action.resource_id) select(f.action.resource_id); }
+    };
+    return b;
+  };
+  const draw = (): void => {
+    list.innerHTML = "";
+    tot.innerHTML = "";
+    if (!ans) return;
+    say.textContent = ans.say_it;
+    say.dataset.consSay = ans.say_it;
+    const rm = fileRoom();
+    room.textContent = ans.in_room ? t("cons.inRoom", { room: rm?.room_id ?? "" }) : t("cons.outRoom");
+    room.dataset.inRoom = String(ans.in_room);
+    for (const k of ["platform", "floor"] as const) {
+      const p = document.createElement("p");
+      p.className = `cons-total ${ans.totals[k].ok ? "" : "files-warn"}`;
+      p.dataset.consTotal = k;
+      p.textContent = `${CONS_SIGN.sufficient} ${ans.totals[k].say_it}`;
+      tot.appendChild(p);
+    }
+    const st = ans.counts.status;
+    counts.textContent = t("cons.status", { ok: String(st.ok ?? 0), necessary: String(st.necessary ?? 0),
+      recommended: String(st.recommended ?? 0), opportune: String(st.opportune ?? 0), presence: String(st.presence ?? 0) });
+    const rows = rowsShown(ans.rows, todo.checked);
+    if (!rows.length) { const p = document.createElement("p"); p.className = "files-hint"; p.textContent = t("cons.allOk"); list.appendChild(p); }
+    const loc = getLocale();
+    for (const r of rows.slice(0, 500)) {
+      const el = document.createElement("div");
+      el.className = `cons-row cons-${r.status}`;
+      el.dataset.consRow = r.id;
+      el.dataset.status = r.status;
+      const sign = document.createElement("span");
+      sign.className = "cons-sign";
+      sign.textContent = CONS_SIGN[r.status];
+      sign.title = t(`cons.level.${r.status}`);
+      const nm = document.createElement("button");
+      nm.type = "button";
+      nm.className = "ghost cons-name";
+      nm.textContent = r.name + (r.kind === "container" ? ` · ${t("cons.container")}` : "");
+      nm.title = t("cons.showNode");
+      nm.onclick = () => { closeDialogOf(body); select(r.id); };
+      const v = document.createElement("span");
+      v.className = "cons-versions";
+      v.textContent = `${t("cons.base")}: ${versionLine(r.base, loc)} · ${t("cons.best", { platform: ans!.platform.label_it })}: ${versionLine(r.best ?? (r.loaded_is === "master" ? r.loaded : null), loc)}`;
+      el.append(sign, nm, v);
+      const fl = document.createElement("ul");
+      fl.className = "cons-findings";
+      for (const f of r.findings) {
+        const li = document.createElement("li");
+        li.dataset.level = f.level;
+        li.dataset.code = f.code;
+        li.textContent = `${t(`cons.level.${f.level}`)}: ${f.say_it}`;
+        fl.appendChild(li);
+      }
+      if (r.findings.length) el.appendChild(fl);
+      const acts = document.createElement("span");
+      acts.className = "cons-acts";
+      for (const a of rowActions(r)) acts.appendChild(action(r, a.finding));
+      el.appendChild(acts);
+      list.appendChild(el);
+    }
+    if (rows.length > 500) { const p = document.createElement("p"); p.className = "files-hint"; p.textContent = t("cons.more", { n: String(rows.length - 500) }); list.appendChild(p); }
+  };
+  async function refresh(): Promise<void> {
+    say.textContent = t("cons.asking");
+    const a = await askConsolidate(plat.value);
+    if (typeof a === "string") { ans = null; say.textContent = a; list.innerHTML = ""; tot.innerHTML = ""; return; }
+    ans = a;
+    draw();
+  }
+  plat.onchange = () => { consPlatform = plat.value; void refresh(); };
+  todo.onchange = () => { consOnlyTodo = todo.checked; draw(); };
+  void refresh();
+  await openDialog({ title: t("cons.title"), body, ok: t("cons.close"), cancel: null, kind: "consolidate" });
+}
+
+/** «Carica nella stanza» for a row: the files of that resource on this
+ *  computer, through the room's upload (by sha256, never around the room). */
+async function uploadForResource(resId: string, r: ConsolidateRow): Promise<void> {
+  const v = [r.base, r.best].find((x) => x?.id === resId);
+  const ids = [resId, ...(v?.files ?? []).map((f) => f.id)];
+  const fs = [...new Set(ids)].map((id) => fileStateOf(id)).filter((f): f is FileState => !!f && !!f.path && f.state === "on_disk");
+  if (!fs.length) { toast(t("cons.noLocalFile")); return; }
+  await uploadFiles(fs);
+}
+
+/** «Prepara»: Ottimizza on that model, the profile already chosen — the
+ *  master's file, else the version loaded now, else the .blend that holds the
+ *  master (consolidate.ts `prepareSource`). The version made is registered in
+ *  the graph as every other: gltfpack's variants through /graph/add-version,
+ *  EM Tools' «Preparato per un uso» on a .blend too (`registerUseVersion`). */
+async function prepareFromConsolidate(r: ConsolidateRow, f: Finding, platform: string): Promise<void> {
+  const profile = String(f.action.profile ?? "mobile_webxr");
+  const masterId = String(f.action.asset_id ?? "");
+  const mNode = masterId ? store?.node(masterId) : undefined;
+  const master = mNode ? { url: String((mNode.data as Record<string, unknown> | undefined)?.url ?? ""), path: fileStateOf(masterId)?.path ?? "" } : null;
+  const vers = [r.loaded, r.best, r.base].filter((x): x is NonNullable<typeof x> => !!x)
+    .map((x) => ({ url: x.url, path: fileStateOf(x.id)?.path ?? "" }));
+  const src = prepareSource(master, vers);
+  if (src.kind === "none") { toast(t(`cons.prepareNo.${src.why}`, { name: r.name })); return; }
+  let st = windowsOf().find((w) => w.type === "storage");
+  if (!st) { setWorkspace("assets"); st = windowsOf().find((w) => w.type === "storage"); }
+  if (!st) { toast(t("blend.prepareNoArchive")); return; }
+  selectWindow(st.id);
+  setFilesPref(st, "use-profile", profile === "webxr" ? null : profile);
+  try { localStorage.setItem(USE_PROFILE_KEY, profile); } catch { /* off */ }
+  const preset = presetForProfile(profile, platform);
+  if (src.kind === "files") setFilesPref(st, "opt", preset === "web" ? null : preset);
+  else {
+    prepareCtx.set(src.path, { master: masterId, model: r.id, name: src.block || r.name, profile });
+    setFilesPref(st, `use-model:${src.path}`, r.name);
+  }
+  await filesTakeDrop(st, "optimize", [src.path]);
+  const m = t(src.kind === "blend" ? "cons.preparedBlend" : "cons.preparedFile",
+    { name: r.name, profile: t(`bcomp.p.${profile}`), file: baseName(src.path), block: src.block,
+      preset: t(OPTIMIZE_PRESETS.find((p) => p.id === preset)?.labelKey ?? "files.optWeb") });
+  toast(m);
+  logInfo(m, [r.id]);
+}
+
+/** EM Tools' «Preparato per un uso» on a .blend writes and stamps the version
+ *  but a background Blender has no graph (EM Tools says «not registered»):
+ *  registered here, as gltfpack's are, on the master «Prepara» named — or the
+ *  one the graph says is the model inside that .blend. */
+async function registerUseVersion(blend: string, profile: string, model: string, level: string,
+                                  res: { entry?: string; bytes?: number; measured?: { triangles?: number } }): Promise<void> {
+  if (!store || !res.entry) return;
+  const ctx = prepareCtx.get(blend);
+  let master = ctx?.master ?? "";
+  if (!master) {
+    // a master inside this .blend whose datablock or RM bears the model's name
+    const hits = store.liveNodes().filter((n) => n.node_type === "resource"
+      && String((n.data as Record<string, unknown> | undefined)?.url ?? "").startsWith("blend://")
+      && paths.toPosix(fileStateOf(n.id)?.path ?? "") === paths.toPosix(blend)
+      && (String((n.data as Record<string, unknown>).url).endsWith(`/${model}`) || n.name === model));
+    if (hits.length === 1) master = hits[0].id;
+  }
+  const name = baseName(res.entry);
+  if (!master) { logWarn(t("files.useNotRegistered", { name, why: t("files.useNoMaster") })); return; }
+  const prof = useState.profiles?.find((p) => p.id === profile) as (UseProfile & { uses?: string[]; destination?: string }) | undefined;
+  const sha = await bridgeChecksum(res.entry);
+  const why = await registerVersion({ source: blend, path: res.entry, name, sha256: sha ?? undefined, bytes: res.bytes,
+    facts: undefined } as unknown as OptOut,
+    { lod: level, destination: prof?.destination ?? profile, use: prof?.uses ?? [] },
+    { profile, model, level }, "", { technique: "prepare_for_use", tool: "EM Tools · Prepare for a use",
+      software: [{ name: "EM Tools · Prepare for a use", version: "" }] }, master,
+    res.measured?.triangles != null ? { triangles: res.measured.triangles } : undefined);
+  if (why === null) { prepareCtx.delete(blend); toast(t("files.useRegistered", { name, master: String(store.node(master)?.name ?? master) })); }
+  else logWarn(t("files.useNotRegistered", { name, why }));
+}
+
+/** «Componi un .blend dal grafo»: from the open study, no .blend to start
+ *  from — a working profile, the containers / epochs, link or append, from
+ *  the disk or the room; the plan shown first, then EM Tools composes it. */
+async function composeFromGraphDialog(): Promise<void> {
+  if (!store) { toast(t("cons.noDoc")); return; }
+  if (!currentFilePath) { toast(t("gcomp.noPath")); return; }
+  const st = store;
+  const body = document.createElement("div");
+  body.className = "compose-dialog gcomp-dialog";
+  const lab = (text: string, el: HTMLElement) => {
+    const l = document.createElement("label");
+    l.className = "compose-field";
+    l.append(text + " ", el);
+    return l;
+  };
+  const prof = document.createElement("select");
+  prof.dataset.gcomp = "profile";
+  for (const k of WORK_PROFILES) { const o = document.createElement("option"); o.value = k; o.textContent = t(`bcomp.p.${k}`); prof.appendChild(o); }
+  const pubHint = document.createElement("p");
+  pubHint.className = "files-hint";
+  pubHint.textContent = t("gcomp.pubHint");
+  const how = document.createElement("select");
+  how.dataset.gcomp = "how";
+  for (const [v, l] of [["link", t("bcomp.link")], ["append", t("bcomp.append")]]) {
+    const o = document.createElement("option"); o.value = v; o.textContent = l; how.appendChild(o);
+  }
+  const from = document.createElement("select");
+  from.dataset.gcomp = "from";
+  const rm = fileRoom();
+  for (const [v, l] of [["disk", t("gcomp.disk")], ...(rm ? [["room", t("gcomp.room", { room: rm.room_id })]] : [])]) {
+    const o = document.createElement("option"); o.value = v; o.textContent = l; from.appendChild(o);
+  }
+  // what: containers and epochs, as the graph has them (none ticked = all)
+  const picks = (type: string, key: string): { box: HTMLElement; chosen: () => string[] } => {
+    const box = document.createElement("div");
+    box.className = "gcomp-picks";
+    box.dataset.gcomp = key;
+    const nodes = st.liveNodes().filter((n) => n.node_type === type)
+      .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
+    for (const n of nodes) {
+      const l = document.createElement("label");
+      const c = document.createElement("input");
+      c.type = "checkbox";
+      c.value = n.id;
+      c.onchange = () => { void refresh(); };
+      l.append(c, " " + String(n.name || n.id));
+      box.appendChild(l);
+    }
+    return { box, chosen: () => [...box.querySelectorAll<HTMLInputElement>("input:checked")].map((c) => c.value) };
+  };
+  const conts = picks(RM_GROUP_TYPE, "containers");
+  const eps = picks("EpochNode", "epochs");
+  const out = document.createElement("input");
+  out.type = "text";
+  out.dataset.gcomp = "out";
+  out.style.width = "100%";
+  let outTouched = false;
+  out.oninput = () => { outTouched = true; };
+  const preview = document.createElement("div");
+  preview.className = "compose-preview";
+  preview.dataset.gcomp = "preview";
+  body.append(lab(t("gcomp.profile"), prof), pubHint, lab(t("bcomp.how"), how), lab(t("gcomp.source"), from),
+    lab(t("gcomp.containers"), conts.box), lab(t("gcomp.epochs"), eps.box), lab(t("bcomp.out"), out), preview);
+  const got: { plan: ComposeGraphPlan | null } = { plan: null };
+  let seq = 0;
+  async function refresh(): Promise<void> {
+    const mine = ++seq;
+    preview.textContent = "…";
+    await archiveStates();
+    const j = await postGraph<{ plan?: ComposeGraphPlan; out?: string }>("/graph/compose-plan", {
+      doc: st.doc, doc_path: currentFilePath ?? "", profile: prof.value, how: how.value,
+      containers: conts.chosen(), epochs: eps.chosen(),
+      resolved: fileStates().map((f) => ({ id: f.id, state: f.state, path: f.path })), in_room: from.value === "room" });
+    if (mine !== seq) return;
+    preview.innerHTML = "";
+    got.plan = null;
+    if (!j.ok || !j.plan) { preview.textContent = String(j.error ?? j.status); return; }
+    got.plan = j.plan;
+    if (!outTouched && j.out) out.value = j.out;
+    const p = document.createElement("p");
+    p.dataset.gcompSay = j.plan.say_it;
+    p.textContent = j.plan.say_it;
+    preview.appendChild(p);
+    const c = composeCounts(j.plan);
+    const line = document.createElement("p");
+    line.className = "files-hint";
+    line.dataset.gcompCounts = JSON.stringify(c);
+    line.textContent = t("gcomp.counts", { imp: String(c.import), link: String(c.link + c.append), fetch: String(c.fetch), tiles: String(c.tileset) });
+    preview.appendChild(line);
+    const ul = document.createElement("ul");
+    ul.className = "gcomp-items";
+    for (const it of j.plan.items.slice(0, 300)) {
+      const li = document.createElement("li");
+      li.dataset.item = it.model_id;
+      li.dataset.how = it.source.how;
+      const lv = it.entry.level || it.entry.lod_level || (it.entry.master ? "master" : "");
+      li.textContent = `${it.name} · ${lv} · ${t(`gcomp.from.${it.source.how}`)} · ${paths.basename(it.source.file)}`;
+      li.title = [it.source.say_it, `${t("gcomp.tags")}: ${Object.entries(it.tags).filter(([, v]) => v && (!Array.isArray(v) || v.length)).map(([k]) => k).join(", ")}`].filter(Boolean).join("\n");
+      ul.appendChild(li);
+    }
+    preview.appendChild(ul);
+    if (j.plan.missing.length) {
+      const h = document.createElement("p");
+      h.className = "compose-missing";
+      h.textContent = t("gcomp.missingHead", { n: String(j.plan.missing.length) }) + " "
+        + j.plan.missing.slice(0, 12).map((m) => `${m.name} (${m.say_it})`).join(" · ") + (j.plan.missing.length > 12 ? " …" : "");
+      preview.appendChild(h);
+    }
+  }
+  for (const el of [prof, how, from]) el.onchange = () => { void refresh(); };
+  void refresh();
+  const ans = await openDialog({ title: t("gcomp.title"), body, ok: t("bcomp.go"), kind: "compose-graph" });
+  if (!ans.ok) return;
+  const plan = got.plan;
+  if (!plan?.ok || !plan.items.length) { toast(t("gcomp.empty")); return; }
+  const target = out.value.trim();
+  if (!target) return;
+  const job = await startJob({ kind: "blender", op: "compose_graph", plan, out: target,
+                               room: from.value === "room" ? fileRoom() : null },
+                             t("gcomp.job", { name: paths.basename(target) }));
+  if (!job) return;
+  const end = await job.done;
+  if (end.state !== "done") { toast(t("gcomp.failed", { why: jobText(end) })); logWarn(jobText(end)); return; }
+  const res = (end.result ?? {}) as { fetched?: number; result?: { objects?: number } };
+  const m = t("gcomp.done", { name: paths.basename(target), n: String(res.result?.objects ?? plan.items.length),
+    fetched: res.fetched ? t("gcomp.fetched", { n: String(res.fetched) }) : "" });
+  toast(m);
+  logInfo(m);
+  if (res.fetched) void checkFiles();
+  renderStorage();
+}
+
+/** MICRO-BLEND-OFFICINA-3 (3) · «Aggiorna»: the ticks of the before/after,
+ *  by .blend and object name (they survive a redraw, not a new check). */
+const blendUpdateTicks = new Map<string, Set<string>>();
+
+/** The before/after under «Controlla col grafo»: for each object with the
+ *  graph's tags the version in the scene, the last in the graph, who made it
+ *  and when, and «Aggiorna» — through «Applica» (the open Blender by the
+ *  sidecar, else a background one after a confirmation) or alone. */
+function beforeAfterBox(blend: string, f: BlendFolder): HTMLElement | null {
+  const chk = f.check as (BlendFolder["check"] & { before_after?: BeforeAfter[]; before_after_missing?: string }) | undefined;
+  if (!chk) return null;
+  const box = document.createElement("div");
+  box.className = "blend-ba";
+  const h = document.createElement("b");
+  h.textContent = t("ba.title");
+  box.appendChild(h);
+  if (!chk.before_after) {
+    if (!chk.before_after_missing) return null;
+    box.appendChild(Object.assign(document.createElement("p"), { className: "files-hint", textContent: t("ba.missing", { need: chk.before_after_missing }) }));
+    return box;
+  }
+  const ba = chk.before_after;
+  const n = (k: string) => String(ba.filter((r) => r.state === k).length);
+  const cnt = document.createElement("p");
+  cnt.className = "files-hint";
+  cnt.dataset.baCounts = JSON.stringify({ aligned: +n("aligned"), newer: +n("newer"), revised: +n("revised"), unknown: +n("unknown") });
+  cnt.textContent = t("ba.counts", { aligned: n("aligned"), newer: n("newer"), revised: n("revised"), unknown: n("unknown") });
+  box.appendChild(cnt);
+  const ticks = blendUpdateTicks.get(blend) ?? new Set<string>();
+  blendUpdateTicks.set(blend, ticks);
+  const upd = updateRows(ba, (id) => fileStateOf(id)?.path ?? "");
+  const shown = [...ba].sort((a, b) => (a.state === "aligned" ? 1 : 0) - (b.state === "aligned" ? 1 : 0)).slice(0, 300);
+  for (const r of shown) {
+    const row = document.createElement("div");
+    row.className = `blend-ba-row blend-ba-${r.state}`;
+    row.dataset.baRow = r.name;
+    row.dataset.baState = r.state;
+    const nm = document.createElement("span");
+    nm.className = "blend-ba-name";
+    nm.textContent = r.name;
+    const here = document.createElement("span");
+    here.className = "blend-ba-here";
+    here.textContent = r.here ? t("ba.here", { v: r.here.level || r.here.name, who: r.here.made_say }) : r.say_it;
+    const late = document.createElement("span");
+    late.className = "blend-ba-latest";
+    late.textContent = r.latest && r.state !== "aligned" ? t("ba.latest", { v: r.latest.level || r.latest.name, who: r.latest.made_say }) : "";
+    row.title = r.say_it;
+    row.append(nm, here, late);
+    const u = upd.find((x) => x.name === r.name);
+    if (u) {
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.dataset.baTick = r.name;
+      cb.title = t("ba.updateTitle");
+      cb.checked = ticks.has(r.name);
+      cb.onchange = () => { if (cb.checked) ticks.add(r.name); else ticks.delete(r.name); };
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ghost";
+      b.dataset.action = "blend-update";
+      b.textContent = t("ba.update");
+      b.title = t("ba.updateTitle");
+      b.onclick = () => { void applyBlendRows(blend, [{ ...u, tick: true } as unknown as CheckRow]); };
+      row.append(cb, b);
+    }
+    box.appendChild(row);
+  }
+  return box;
+}
+
+/** the «Aggiorna» rows ticked for a .blend, for «Applica» */
+function tickedUpdates(blend: string, f: BlendFolder): CheckRow[] {
+  const ba = (f.check as { before_after?: BeforeAfter[] } | undefined)?.before_after ?? [];
+  const ticks = blendUpdateTicks.get(blend);
+  if (!ticks?.size) return [];
+  return updateRows(ba, (id) => fileStateOf(id)?.path ?? "").filter((u) => ticks.has(u.name))
+    .map((u) => ({ ...u, tick: true }) as unknown as CheckRow);
+}
+
+/** MICRO-BLEND-OFFICINA-3 (4) · the tileset as the level «Intero» of a
+ *  container, under the document of the meshes it is made from: in the
+ *  «Alternativa» panel of a container (its tileset) and of a tileset resource
+ *  (which container). s3Dgraphy decides (`register_tileset_whole` through the
+ *  bridge), EMStudio applies the delta in one undo step; several documents →
+ *  EMStudio asks which. */
+function tilesetWholeInto(host: HTMLElement, nodeId: string): boolean {
+  const st = store;
+  if (!st) return false;
+  const g = st.doc.graph;
+  const node = st.node(nodeId);
+  if (!node) return false;
+  const isTs = (id: string) => { const n = st.node(id); return n?.node_type === "resource" && isTilesetData((n.data ?? {}) as Record<string, unknown>, ALT_RULE); };
+  const hatted = (cid: string) => g.edges.filter((e) => e.source === cid && e.edge_type === "has_linked_resource" && isTs(e.target)).map((e) => e.target);
+  const wrap = document.createElement("div");
+  wrap.className = "alt-whole";
+  wrap.dataset.altWhole = nodeId;
+  const hint = (text: string, attr: string) => { const p = document.createElement("p"); p.className = "insp-hint"; p.dataset.whole = attr; p.textContent = text; wrap.appendChild(p); };
+  const btn = (tsId: string, cid: string) => {
+    const b = document.createElement("button");
+    b.className = "insp-btn";
+    b.dataset.s3 = "tileset-whole";
+    b.textContent = t("whole.register");
+    b.title = t("whole.registerTitle");
+    b.addEventListener("click", () => { void registerTilesetWhole(tsId, cid); });
+    wrap.appendChild(b);
+  };
+  if (node.node_type === RM_GROUP_TYPE) {
+    const ts = hatted(nodeId);
+    if (!ts.length) return false;
+    for (const id of ts) {
+      const docs = documentsReaching(g, [id]);
+      const tsName = String(st.node(id)?.name ?? id);
+      if (docs.length) hint(t("whole.under", { tileset: tsName, container: String(node.name ?? nodeId), doc: docs.map((d) => d.name).join(", ") }), "under");
+      else { hint(t("whole.noDoc", { tileset: tsName, container: String(node.name ?? nodeId) }), "no-doc"); btn(id, nodeId); }
+    }
+  } else if (isTs(nodeId)) {
+    const groups = st.liveNodes().filter((n) => n.node_type === RM_GROUP_TYPE);
+    if (!groups.length) return false;
+    const cur = groups.find((c) => hatted(c.id).includes(nodeId));
+    const docs = documentsReaching(g, [nodeId]);
+    if (cur && docs.length) { hint(t("whole.under", { tileset: String(node.name ?? nodeId), container: String(cur.name ?? cur.id), doc: docs.map((d) => d.name).join(", ") }), "under"); host.appendChild(wrap); return true; }
+    const sel = document.createElement("select");
+    sel.dataset.wholeContainer = "1";
+    for (const c of groups) { const o = document.createElement("option"); o.value = c.id; o.textContent = String(c.name ?? c.id); o.selected = c.id === cur?.id; sel.appendChild(o); }
+    const l = document.createElement("label");
+    l.append(t("whole.container") + " ", sel);
+    wrap.appendChild(l);
+    const b = document.createElement("button");
+    b.className = "insp-btn";
+    b.dataset.s3 = "tileset-whole";
+    b.textContent = t("whole.register");
+    b.title = t("whole.registerTitle");
+    b.addEventListener("click", () => { void registerTilesetWhole(nodeId, sel.value); });
+    wrap.appendChild(b);
+  } else return false;
+  const h = document.createElement("h4");
+  h.className = "insp-sub";
+  h.textContent = t("whole.head");
+  wrap.prepend(h);
+  host.appendChild(wrap);
+  return true;
+}
+
+async function registerTilesetWhole(tilesetId: string, containerId: string, documentId = ""): Promise<void> {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  type Ans = { document?: string | null; ask?: { id: string; name: string; members: number; of: number }[]; said?: string;
+               delta?: WholeDelta; warnings?: string[] };
+  const j = await postGraph<Ans>("/graph/tileset-whole", { doc: st.doc, tileset_id: tilesetId, container_id: containerId,
+    ...(documentId ? { document_id: documentId } : {}) });
+  if (!j.ok || !j.delta) { toast(t("whole.failed", { why: String(j.error ?? j.status) })); return; }
+  if (!j.document && j.ask?.length) {
+    // several documents describe the meshes: the person says which
+    const sel = document.createElement("select");
+    sel.dataset.wholeAsk = "1";
+    for (const d of j.ask) { const o = document.createElement("option"); o.value = d.id; o.textContent = `${d.name} (${d.members}/${d.of})`; sel.appendChild(o); }
+    const bx = document.createElement("div");
+    bx.appendChild(sel);
+    const a = await openDialog({ title: t("whole.head"), message: t("whole.ask", { container: String(st.node(containerId)?.name ?? containerId) }),
+      body: bx, ok: t("whole.register"), kind: "tileset-whole-ask" });
+    if (!a.ok) return;
+    await registerTilesetWhole(tilesetId, containerId, sel.value);
+    return;
+  }
+  const ws: Parameters<typeof applyWholeDelta>[0] = {
+    batch: (fn) => st.batch(fn),
+    node: (id) => st.node(id),
+    addNode: (n) => st.addNode(n as unknown as EmNode),
+    deleteNode: (id) => st.deleteNode(id),
+    hasEdge: (id) => st.doc.graph.edges.some((e) => e.id === id),
+    deleteEdge: (id) => { const e = st.doc.graph.edges.find((x) => x.id === id); if (e) st.deleteEdge(e); },
+    addEdge: (a, b, ty, at, id) => st.addEdge(a, b, ty, at, id),
+  };
+  const got = applyWholeDelta(ws, j.delta);
+  if (got.skipped.length) logWarn(t("blend.deltaSkipped", { ids: got.skipped.join(", ") }));
+  for (const w of j.warnings ?? []) logWarn(w);
+  const msg = got.added || got.removed ? t("whole.done", { said: j.said ?? "" }) : t("whole.already", { said: j.said ?? "" });
+  logInfo(msg, [containerId, tilesetId]);
+  if (got.added || got.removed) toastUndo(msg, st); else toast(msg);
+  buildScenes(); draw(); refreshSurfaces("scene"); refreshInspector();
+}
+
 function blendStateOfNode(id: string): { sign: string; state: string; title: string } | null {
   const st = blendNodeStates?.nodes[id];
   if (!st) return null;
@@ -41693,7 +42273,11 @@ function blendFolderCentre(win: Win, blend: string): HTMLElement {
       l.append(cb, sp, act);
       box.appendChild(l);
     }
-    const ap = btn(t("blend.apply"), "blend-apply", () => { void applyBlendRows(blend, f.check!.rows); });
+    // MICRO-BLEND-OFFICINA-3 (3) · the before/after of each tagged object,
+    // and «Aggiorna» ticked here goes with «Applica»
+    const ba = beforeAfterBox(blend, f);
+    if (ba) box.appendChild(ba);
+    const ap = btn(t("blend.apply"), "blend-apply", () => { void applyBlendRows(blend, [...f.check!.rows, ...tickedUpdates(blend, f)]); });
     box.appendChild(ap);
     centre.appendChild(box);
   }

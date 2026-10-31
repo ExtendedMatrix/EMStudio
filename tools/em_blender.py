@@ -453,7 +453,11 @@ def inventory():
 #: they added comes back as a DELTA that EMStudio applies to its live graph in
 #: one undo step — Blender never writes the em.json open in EMStudio
 BACKGROUND_ACTIONS = ("relink_texture", "relink_library", "unpack_texture", "take_epochs_from_graph",
-                      "restore_from_master", "export_master", "register_version", "register_resource")
+                      "restore_from_master", "export_master", "register_version", "register_resource",
+                      # MICRO-BLEND-OFFICINA-3 (3) · «Aggiorna»: an object to the
+                      # last version registered (its mesh and its graph tags;
+                      # the graph is not changed)
+                      "update_version")
 
 
 def graph_payloads(graph):
@@ -550,12 +554,46 @@ def compose():
     return {k: v for k, v in res.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
 
 
+def compose_graph():
+    """«Componi un .blend dal grafo» (MICRO-BLEND-OFFICINA-3, point 2): EM
+    Tools composes s3Dgraphy's plan (``graph_compose.compose_from_graph``: per
+    model the version for the working profile, its source — a file to import,
+    a datablock to link or append, a file the bridge fetched from the room —
+    and the graph's TAGS to write on each object) in an EMPTY Blender, saved
+    as ``out`` — never over a file that exists. The function is EM Tools'
+    ``sync_manager.blend_compose.compose_graph(plan, out, save=True)``."""
+    em_name, _ = module_with(None, ".graph_origins")
+    if not em_name:
+        raise RuntimeError("EM Tools is not loaded in this Blender")
+    pkg = em_name.rsplit(".graph_origins", 1)[0]
+    try:
+        BC = importlib.import_module(pkg + ".sync_manager.blend_compose")
+    except ImportError:
+        BC = None
+    # EM Tools names it compose_graph (MICRO-BLEND-OFFICINA-3, ea63861)
+    fn = (getattr(BC, "compose_graph", None) or getattr(BC, "compose_from_graph", None)) \
+        if BC is not None else None
+    if fn is None:
+        raise RuntimeError("this EM Tools cannot compose a .blend from the graph "
+                           "(blend_compose.compose_graph): update EM Tools")
+    out = A.get("out") or ""
+    if not out or os.path.exists(out):
+        raise RuntimeError("the working .blend would go over a file that exists: %s" % out)
+    plan = A.get("plan") or {}
+    say("PROGRESS", {"stage": "compose", "done": 0, "total": len(plan.get("items") or []) or 1})
+    res = fn(plan, out, save=True)
+    say("PROGRESS", {"stage": "compose", "done": 1, "total": 1})
+    res = dict(res or {})
+    res.setdefault("out", out)
+    return {k: v for k, v in res.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
+
+
 try:
     t0 = time.time()
     op = A.get("op") or "probe"
     res = {"probe": probe, "objects": objects, "lod_set": lod_set, "atlas": atlas, "prepare": prepare,
            "measure": measure, "apply_use": apply_use, "inventory": inventory,
-           "blend_apply": blend_apply, "compose": compose}[op]()
+           "blend_apply": blend_apply, "compose": compose, "compose_graph": compose_graph}[op]()
     say("RESULT", {"ok": True, "op": op, "seconds": round(time.time() - t0, 2), "result": res})
 except Exception as exc:
     traceback.print_exc()

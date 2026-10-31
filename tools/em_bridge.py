@@ -1011,6 +1011,34 @@ def _scan_notes(api, folder: str) -> dict:
     return {"no_id": sorted(no_id), "duplicate_ids": dup}
 
 
+def _room_fetch(room, sha256, dest):
+    """The bytes of ``sha256`` from the room's store into ``dest``, checked
+    against their digest before they are kept («Keep it on the disk too», and
+    «Componi un .blend dal grafo» from the room). A ``dest`` already holding
+    those bytes is ``already``; one holding others is never overwritten.
+    → ``{path, bytes, already}``."""
+    import urllib.request
+    hexd = str(sha256).split(":")[-1].lower()
+    if os.path.exists(dest):
+        if _sha256_path(dest) == hexd:
+            return {"path": dest, "bytes": os.path.getsize(dest), "already": True}
+        raise FileExistsError(f"{dest} exists with other bytes: nothing is overwritten")
+    base = str(room["base"]).rstrip("/")
+    rid = urllib.parse.quote(str(room["room_id"]), safe="")
+    headers = {"Authorization": f"Bearer {room['token']}"} if room.get("token") else {}
+    req = urllib.request.Request(f"{base}/v1/rooms/{rid}/asset/sha256:{hexd}", headers=headers)
+    with em_net.urlopen(req, timeout=600) as answer:
+        data = answer.read()
+    if hashlib.sha256(data).hexdigest() != hexd:
+        raise ValueError("the bytes from the node are not the ones the graph names")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".part"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, dest)
+    return {"path": dest, "bytes": len(data), "already": False}
+
+
 def _room_probe(room):
     """``on_node(hex)`` for a room ``{base, room_id, token}`` — the store's HEAD —
     or None when no room was given. The token stays in this call."""
@@ -1207,6 +1235,10 @@ def _files_route(route, body):
         caches = [d for d in body.get("cache_dirs") or [] if d]
         if root and os.path.isdir(os.path.join(root, ".em_cache")):
             caches.append(os.path.join(root, ".em_cache"))
+        # MICRO-BLEND-OFFICINA-3 · where «Componi un .blend dal grafo» puts
+        # what it fetched from the room (EM Tools' em_cache/files, by sha256)
+        if root and os.path.isdir(os.path.join(root, "em_cache", "files")):
+            caches.append(os.path.join(root, "em_cache", "files"))
         results, rows = [], []
         for graph, gname in zip(graphs, gnames):
             part = api.resolve_files(graph, project_root=root, base_dirs=folders,
@@ -1295,18 +1327,7 @@ def _files_route(route, body):
             dest = os.path.abspath(os.path.expanduser(body["dest"]))
         if os.path.exists(dest):
             raise FileExistsError(f"{dest} exists: nothing is overwritten")
-        base = str(room["base"]).rstrip("/")
-        rid = urllib.parse.quote(str(room["room_id"]), safe="")
-        headers = {"Authorization": f"Bearer {room['token']}"} if room.get("token") else {}
-        req = urllib.request.Request(f"{base}/v1/rooms/{rid}/asset/sha256:{hexd}", headers=headers)
-        with em_net.urlopen(req, timeout=600) as answer:
-            data = answer.read()
-        if hashlib.sha256(data).hexdigest() != hexd:
-            raise ValueError("the bytes from the node are not the ones the graph names")
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "wb") as fh:
-            fh.write(data)
-        return {"ok": True, "path": dest, "bytes": len(data)}
+        return {"ok": True, **_room_fetch(room, hexd, dest)}
     if route == "/nodes":
         # N1 · the same finder EM Tools asks (s3dgraphy tools.node_finder)
         from s3dgraphy.tools.node_finder import find_nodes
@@ -1844,7 +1865,21 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: also exports masters and registers versions/resources on a COPY of the
 #: graph beside the em.json and returns the ``delta``; ``/blend/open`` takes
 #: ``readonly`` (held in the room by someone else).
-BRIDGE_LEVEL = 50   # 30 also = /validate
+#: 51 = MICRO-BLEND-OFFICINA-3: ``POST /consolidate`` («Consolida per…»
+#: Heriverse / ATON / web: s3Dgraphy's ``consolidate``, one row per published
+#: model with the floor, the best, the opportune, the sufficient and the
+#: presence, the resolver's states given by the page or resolved here);
+#: ``POST /graph/compose-plan`` («Componi un .blend dal grafo»: s3Dgraphy's
+#: ``graph_compose.compose_from_graph``, working profiles only, the default
+#: path never over a file) and ``POST /jobs {kind: blender, op:
+#: compose_graph}`` (the files only in the room fetched by sha256 into the
+#: project's ``em_cache/files``, then EM Tools' ``blend_compose`` in an empty
+#: Blender); ``POST /graph/before-after`` (the before/after of «Controlla col
+#: grafo», also in the inventory job's check) and the row ``update_version``
+#: in the background; ``POST /graph/tileset-whole`` (a tileset as the level
+#: «Intero» of a container under its document, as a delta; several documents
+#: → ``ask``).
+BRIDGE_LEVEL = 51   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3185,6 +3220,36 @@ def make_handler(api):
                 fn = self._compose_plan if route == "/blend/compose-plan" else self._master_place
                 status, out = fn(body if isinstance(body, dict) else {})
                 self._json(out, status)
+            elif route in ("/consolidate", "/graph/compose-plan", "/graph/before-after", "/graph/tileset-whole"):
+                # MICRO-BLEND-OFFICINA-3 · s3Dgraphy's consolidate and
+                # graph_compose: «Consolida per…», «Componi un .blend dal
+                # grafo», the before/after of the check, the tileset «Intero»
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                try:
+                    from s3dgraphy.resources import consolidate as _C  # noqa: F401
+                    from s3dgraphy.resources import graph_compose as _GC  # noqa: F401
+                except ImportError as exc:
+                    self._fail(501, f"this s3dgraphy has no consolidate / graph_compose "
+                                    f"(s3dgraphy ≥ 1.6.0.dev80 is needed): {exc}")
+                    return
+                body = body if isinstance(body, dict) else {}
+                if not isinstance(body.get("doc"), dict):
+                    self._fail(400, "the graph open in EMStudio is wanted ('doc')")
+                    return
+                fn = {"/consolidate": self._consolidate, "/graph/compose-plan": self._graph_compose_plan,
+                      "/graph/before-after": self._before_after,
+                      "/graph/tileset-whole": self._tileset_whole}[route]
+                try:
+                    status, out = fn(body)
+                except ValueError as exc:
+                    status, out = 400, {"ok": False, "error": str(exc)}
+                self._json(out, status)
             elif route == "/blend/open":
                 if not self._fs_gate():
                     return
@@ -4029,6 +4094,16 @@ def make_handler(api):
                     files = BF.disk_files(doc, em_folder) if em_folder else {}
                     chk = BF.check(inv, doc, files=files, source="disk", em_folder=em_folder)
                     chk["nodes"] = BF.node_states(chk)
+                    # MICRO-BLEND-OFFICINA-3 (3) · each object with the graph's
+                    # tags: the version in the scene against the last registered
+                    try:
+                        from s3dgraphy.resources import graph_compose as GC
+                        from s3dgraphy import api as _api
+                        chk["before_after"] = GC.before_after(_api.load_emjson(doc)[0], inv.get("objects") or [])
+                    except ImportError:
+                        chk["before_after_missing"] = "s3dgraphy ≥ 1.6.0.dev80"
+                    except Exception as exc:  # noqa: BLE001 — the check stands without it
+                        chk["before_after_error"] = str(exc)
                     out["check"] = chk
                 return out
             what = {"inventory": "the .blend as a folder", "blend_apply": "apply to the .blend",
@@ -4095,6 +4170,193 @@ def make_handler(api):
             return 200, {"ok": True, **got, "versions": BR.versions_place(got["folder"]),
                          "root": root, "branch": branch}
 
+        # ── MICRO-BLEND-OFFICINA-3 · Consolida per… / Componi dal grafo ───────
+
+        def _graph_of(self, body):
+            """The graph of ``doc`` (the one open in EMStudio) and the folder
+            of its em.json (``doc_path``), "" in a browser without a path."""
+            from s3dgraphy import api
+            graph, _w = api.load_emjson(body["doc"])
+            doc_path = str(body.get("doc_path") or "")
+            return graph, (os.path.dirname(os.path.abspath(os.path.expanduser(doc_path))) if doc_path else "")
+
+        def _resolved_for(self, graph, body, em_folder):
+            """The resolver's answers (``locate``: id, state, path) the page
+            sent — those the Archive already has — else asked here as
+            /files-state asks them (the project's tree, the em.json's folder,
+            the cache by sha256, the room's store when a room is given)."""
+            got = body.get("resolved")
+            if isinstance(got, list) and got:
+                return [r for r in got if isinstance(r, dict) and r.get("id")], False
+            states = body.get("states")
+            if isinstance(states, dict) and states:
+                return [{"id": str(k), "state": str(v), "path": ""} for k, v in states.items()], False
+            from s3dgraphy import api
+            from s3dgraphy.project_tree import find_project_root
+            folders = [em_folder] if em_folder else []
+            folders += [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
+            root = str(body.get("project_root") or "") or next(
+                (r for r in (find_project_root(f) for f in folders) if r), None)
+            caches = [d for d in ((os.path.join(root, ".em_cache"), os.path.join(root, "em_cache", "files"))
+                                  if root else ()) if os.path.isdir(d)]
+            res = api.resolve_files(graph, project_root=root, base_dirs=folders, cache_dirs=caches,
+                                    on_node=_room_probe(body.get("room")))
+            return res, True
+
+        def _consolidate(self, body):
+            """``POST /consolidate {doc, doc_path?, platform, states? | resolved?,
+            in_room?, models?}`` → s3Dgraphy's ``consolidate``: one row per
+            published model (the floor mobile webXR, the best for the platform,
+            the opportune, the sufficient, the presence), the totals, the counts.
+            Nothing is written."""
+            from s3dgraphy.resources import consolidate as C
+            graph, em_folder = self._graph_of(body)
+            res, here = self._resolved_for(graph, body, em_folder)
+            states = {str(r["id"]): str(r.get("state") or "") for r in res if r.get("state")}
+            models = body.get("models") if isinstance(body.get("models"), list) else None
+            out = C.consolidate(graph, str(body.get("platform") or "heriverse"), models=models,
+                                states=states, in_room=bool(body.get("in_room")))
+            out["platforms"] = [{"id": k, "label": v.get("label"), "label_it": v.get("label_it")}
+                                for k, v in C.PLATFORMS.items()]
+            out["resolved_here"] = here
+            return 200, {"ok": True, **out}
+
+        def _graph_compose_plan(self, body):
+            """``POST /graph/compose-plan {doc, doc_path, profile, how,
+            containers?, epochs?, models?, resolved?, in_room?, prefer?}`` →
+            s3Dgraphy's ``compose_from_graph`` (working profiles only: a
+            publication profile answers ``go: consolidate``), the working
+            .blend's default path in the project's folder (``<em.json
+            stem>_<profile>.blend``, ``-2``… never over a file) and the working
+            profiles."""
+            from s3dgraphy.resources import graph_compose as GC
+            graph, em_folder = self._graph_of(body)
+            if not em_folder:
+                return 400, {"ok": False, "error": "the em.json's folder is wanted (doc_path): "
+                                                   "a study with no file cannot say where its files are"}
+            res, here = self._resolved_for(graph, body, em_folder)
+            from s3dgraphy.project_tree import find_project_root
+            project = str(body.get("project_root") or "") or find_project_root(em_folder) or os.path.dirname(em_folder)
+            lst = lambda k: [str(x) for x in body[k]] if isinstance(body.get(k), list) and body[k] else None  # noqa: E731
+            how = "append" if body.get("how") == "append" else "link"
+            plan = GC.compose_from_graph(graph, str(body.get("profile") or "modelling"), em_folder=em_folder,
+                                         project_folder=project, containers=lst("containers"), epochs=lst("epochs"),
+                                         models=lst("models"), how=how, resolved=res,
+                                         in_room=bool(body.get("in_room")), prefer=str(body.get("prefer") or ""))
+            stem = os.path.basename(str(body.get("doc_path") or "study")).split(".")[0] or "study"
+            out = os.path.join(project, f"{stem}_{plan['profile']}.blend")
+            n = 2
+            while os.path.exists(out):
+                out = os.path.join(project, f"{stem}_{plan['profile']}-{n}.blend")
+                n += 1
+            return 200, {"ok": True, "plan": plan, "out": out, "project": project, "resolved_here": here,
+                         "profiles": [{"id": k, "label_it": GC.LABELS_IT.get(k, k)} for k in GC.WORK_PROFILES]}
+
+        def _before_after(self, body):
+            """``POST /graph/before-after {doc, objects}`` → for each object that
+            carries the graph's tags (``{name, props}`` of the inventory) the
+            version in the scene, the last in the graph, who and when, the
+            action (s3Dgraphy's ``graph_compose.before_after``)."""
+            from s3dgraphy.resources import graph_compose as GC
+            graph, _f = self._graph_of(body)
+            objs = [o for o in body.get("objects") or [] if isinstance(o, dict)]
+            rows = GC.before_after(graph, objs)
+            return 200, {"ok": True, "rows": rows,
+                         "counts": {k: sum(1 for r in rows if r["state"] == k)
+                                    for k in ("aligned", "newer", "revised", "unknown")}}
+
+        def _tileset_whole(self, body):
+            """``POST /graph/tileset-whole {doc, tileset_id, container_id,
+            document_id?}`` → s3Dgraphy's ``register_tileset_whole`` on a copy of
+            the graph, answered as a DELTA the page applies in one undo step
+            (edges and nodes added, edges and nodes removed: the hats the
+            tileset had before lose it). Several documents → ``ask`` (the page
+            asks which, then sends ``document_id``)."""
+            from s3dgraphy import api
+            from s3dgraphy.resources import graph_compose as GC
+            graph, _f = self._graph_of(body)
+            before_n = {n.node_id for n in graph.nodes}
+            before_e = {getattr(e, "edge_id", None) for e in graph.edges}
+            doc_id = str(body.get("document_id") or "") or None
+            got = GC.register_tileset_whole(graph, str(body.get("tileset_id") or ""),
+                                            str(body.get("container_id") or ""), document_id=doc_id)
+            after_e = {getattr(e, "edge_id", None) for e in graph.edges}
+            after_n = {n.node_id for n in graph.nodes}
+            projected = api.graph_to_emjson(graph)
+            g = projected["graph"] if "graph" in projected else projected
+            delta = {"nodes_added": [n for n in g["nodes"] if n.get("id") not in before_n],
+                     "edges_added": [e for e in g["edges"] if e.get("id") not in before_e],
+                     "edges_removed": sorted(x for x in before_e - after_e if x),
+                     "nodes_removed": sorted(before_n - after_n)}
+            hat = got.get("hat") or {}
+            return 200, {"ok": True, "document": got.get("document"), "ask": got.get("ask") or [],
+                         "said": got.get("said") or "", "delta": delta,
+                         "removed_hats": list(hat.get("removed_hats") or []),
+                         "dropped_rm": list(hat.get("dropped_rm") or []),
+                         "warnings": [str(w) for w in hat.get("warnings") or []]}
+
+        def _compose_graph_job(self, body):
+            """``POST /jobs {kind: blender, op: compose_graph, plan, out, room?}``
+            → «Componi un .blend dal grafo»: the files the plan fetches from the
+            room (``plan.fetch``: sha256 → ``<project>/em_cache/files/…``) are
+            fetched first by the bridge, checked against their sha256 — the
+            room's token stays here —, then EM Tools composes the plan in an
+            EMPTY Blender (``blend_compose.compose_from_graph``), saved as
+            ``out``: a new .blend, never over a file."""
+            import em_blender as BL
+            import em_optimize as O
+            blender = str(body.get("blender") or "") or BL.current()
+            if not blender or not os.path.isfile(blender):
+                self._fail(400, "Blender is not here: choose it in Settings › Add-ons")
+                return
+            plan = body.get("plan") if isinstance(body.get("plan"), dict) else None
+            if not plan or not plan.get("ok") or not isinstance(plan.get("items"), list) or not plan["items"]:
+                self._fail(400, "compose_graph wants the plan (POST /graph/compose-plan) with something to compose")
+                return
+            # resolved as the disk will (/tmp → /private/tmp): the roots are realpath'd
+            out_path = _real_dest(os.path.abspath(os.path.expanduser(str(body.get("out") or ""))))
+            if not out_path.lower().endswith(".blend") or os.path.exists(out_path):
+                self._fail(400, "the working .blend must be a new .blend file")
+                return
+            if not _fs_inside_roots(os.path.dirname(out_path)):
+                self._fail(403, "outside the bridge's folders")
+                return
+            fetch, seen = [], set()
+            for f in plan.get("fetch") or []:
+                if not isinstance(f, dict) or not f.get("sha256") or not f.get("to") or f["to"] in seen:
+                    continue
+                seen.add(f["to"])
+                to = _real_dest(os.path.abspath(str(f["to"])))
+                if os.sep + "em_cache" + os.sep not in to or not _fs_inside_roots(os.path.dirname(os.path.dirname(to))):
+                    self._fail(403, f"a file of the room would go outside the project's cache: {to}")
+                    return
+                fetch.append({"sha256": str(f["sha256"]), "to": to})
+            room = body.get("room") if isinstance(body.get("room"), dict) else None
+            if fetch and not (room and room.get("base") and room.get("room_id")):
+                self._fail(400, "the plan fetches files from the room, and no room was given")
+                return
+            size = sum(int((i.get("entry") or {}).get("size_bytes") or 0) for i in plan["items"]
+                       if isinstance((i.get("entry") or {}).get("size_bytes"), (int, float)))
+
+            def target(job):
+                fetched = []
+                for k, f in enumerate(fetch):
+                    job.stage = "room"
+                    job.progress = 0.5 * k / max(1, len(fetch))
+                    got = _room_fetch(room, f["sha256"], f["to"])
+                    fetched.append(got)
+                    job.say(f"{os.path.basename(f['to'])}: {'already here' if got.get('already') else 'from the room'}")
+                run = BL.run_op(job, blender, {"op": "compose_graph", "plan": plan, "out": out_path}, "")
+                return {"op": "compose_graph", "out": out_path, "seconds": run["seconds"], "peak_mb": run["peak_mb"],
+                        "fetched": len([x for x in fetched if not x.get("already")]),
+                        "fetched_bytes": sum(int(x.get("bytes") or 0) for x in fetched if not x.get("already")),
+                        "result": run["result"] or {}}
+
+            job = O.submit("blender", {"op": "compose_graph", "sources": [out_path]}, target, heavy=True,
+                           estimate_mb=BL.memory_mb("prepare", size),
+                           label=f"Blender · compose from the graph · {os.path.basename(out_path)}")
+            self._json({"ok": True, "job": job.id, "fetch": len(fetch)}, 202)
+
         def _blend_open(self, body):
             """``POST /blend/open {blend, doc_path?, sidecar?}`` → Blender WITH
             its interface on the .blend, EM Tools on the em.json open in
@@ -4132,6 +4394,9 @@ def make_handler(api):
             import em_optimize as O
             if str(body.get("op") or "") in ("inventory", "blend_apply", "compose"):
                 self._officina_job(body)
+                return
+            if str(body.get("op") or "") == "compose_graph":
+                self._compose_graph_job(body)
                 return
             try:
                 plan = self._blender_plan(body)

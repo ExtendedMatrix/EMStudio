@@ -90,7 +90,7 @@ const FILE_ORDER = ["new", "newProject", "openProject", "reorderProject", "close
   "save", "saveAs", "saveAll", "pin", "—",
   "import▸", "import/importGraphml", "import/importMapping",
   "export▸", "export/exportSvg", "export/exportTtl", "integrate", "relocate", "collect", "—",
-  "createRoom", "bringIntoRoom"];
+  "createRoom", "bringIntoRoom", "consolidate", "composeFromGraph"];
 
 for (const platform of ["web", "mac", "win", "linux"]) {
   // the page

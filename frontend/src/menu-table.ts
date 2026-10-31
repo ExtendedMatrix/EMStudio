@@ -142,6 +142,10 @@ export const MENUS: MenuDef[] = [
       sep,
       cmd("createRoom", "room.createItem", "btn-create-room", { title: "room.createItemTitle" }),
       cmd("bringIntoRoom", "room.bringItem", "btn-bring-into-room", { title: "room.bringItemTitle" }),
+      // MICRO-BLEND-OFFICINA-3 · two actions, not one (E.D.): what a viewer will
+      // find, model by model, and a working .blend composed from the graph
+      cmd("consolidate", "cons.menu", "btn-consolidate", { title: "cons.menuTitle" }),
+      cmd("composeFromGraph", "gcomp.menu", "btn-compose-graph", { title: "gcomp.menuTitle" }),
       // Windows and Linux: Quit at the bottom of File, as is the custom there
       // (the Mac has it in the EMStudio menu; the web closes its tab)
       { ...sep, only: ["win", "linux"] } as SepRow,

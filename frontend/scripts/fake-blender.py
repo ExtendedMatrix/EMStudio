@@ -134,7 +134,7 @@ elif op == "blend_apply":
     if A.get("save"):
         open(blend, "a").write("\n# saved by a background Blender\n")
     say("RESULT", {"ok": True, "op": op, "result": {"done": ["%s: %s" % (r.get("name"), r.get("action")) for r in rows
-                                                              if r.get("action") in ("relink_texture", "unpack_texture") + graph_acts],
+                                                              if r.get("action") in ("relink_texture", "unpack_texture", "update_version") + graph_acts],
                                                      "failed": [], "refused": [],
                                                      "saved": bool(A.get("save")), "em_folder": A.get("em_folder"),
                                                      "em_json": A.get("em_json"), "delta": delta}})
@@ -147,3 +147,20 @@ elif op == "compose":
     say("RESULT", {"ok": True, "op": op, "result": {"out": A["out"], "linked": sum(len(s["objects"]) for s in plan["sources"]
                                                                                    if s["how"] == "link"),
                                                      "files": len(plan["sources"])}})
+elif op == "compose_graph":
+    # MICRO-BLEND-OFFICINA-3 · EM Tools' blend_compose.compose_graph on
+    # s3Dgraphy's compose_from_graph plan, in an EMPTY Blender: each item's
+    # source must be on this computer by now (the bridge fetched the room's)
+    assert not blend, "compose_graph runs in an empty Blender"
+    plan = A["plan"]
+    assert not os.path.exists(A["out"]), "never over a file"
+    missing = [i["source"]["file"] for i in plan["items"] if i["source"]["how"] in ("import", "fetch")
+               and not os.path.isfile(i["source"]["file"])]
+    if missing:
+        say("RESULT", {"ok": False, "error": "not on this computer: %s" % ", ".join(missing)}); sys.exit(1)
+    open(A["out"], "w").write("BLENDER-v502 composed from the graph\n" + json.dumps(
+        [{"name": i["name"], "how": i["source"]["how"], "tags": i["tags"]} for i in plan["items"]]))
+    say("RESULT", {"ok": True, "op": op, "result": {"out": A["out"], "objects": len(plan["items"]),
+        "tagged": sum(1 for i in plan["items"] if i.get("tags", {}).get("em_rm_node_id")),
+        "imported": sum(1 for i in plan["items"] if i["source"]["how"] in ("import", "fetch")),
+        "linked": sum(1 for i in plan["items"] if i["source"]["how"] == "link")}})
