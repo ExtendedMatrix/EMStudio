@@ -127,8 +127,47 @@ try {
   v = await until(r.j.job);
   const res = v.result?.result ?? {};
   ok(v.state === "done" && v.heavy && res.saved && readFileSync(blend, "utf8") !== before, "…heavy, applied and saved");
-  ok(res.refused?.includes("Architrave"), "a graph-changing action is not done in the background: said");
+  // MICRO-BLEND-OFFICINA-2 (point 4) · the graph's actions are done in the
+  // background too, on a COPY of the graph beside the em.json, and the delta
+  // comes back for EMStudio to apply in one undo step
+  ok(!res.refused?.length && res.done?.includes("Architrave: export_master"), "export as master: done in the background now");
   ok(res.em_folder === `${fsroot}/EM`, "the graph's relative urls start from the em.json's folder");
+  ok(res.em_json?.startsWith(`${fsroot}/EM/.emstudio-officina-`), `the copy of the graph sits beside the em.json (${res.em_json})`);
+  ok(!existsSync(res.em_json ?? "/nope"), "…and is gone after the job");
+  ok(JSON.parse(readFileSync(docPath, "utf8")).graphs.g.nodes.length === 3, "the em.json open in EMStudio is never written");
+  ok(res.delta?.nodes_added?.[0]?.id === "res.Architrave" && res.delta?.edges_added?.length === 1, "the delta: the master's node and its edge");
+
+  // ── level 50: a working .blend for a profile
+  ok(h.bridge_level >= 50, `the bridge is at level 50 (${h.bridge_level})`);
+  r = await post("/blend/compose-plan", { blend, inventory: inv, profile: "webxr", how: "link" });
+  ok(r.status === 200 && r.j.ok, "/blend/compose-plan answers");
+  const plan = r.j.plan ?? {};
+  ok(r.j.out === `${fsroot}/SB/GreatTemple_webxr.blend`, `the default path, beside the .blend (${r.j.out})`);
+  ok(plan.skipped?.some((x) => x.name === "GT16.SU001"), "a proxy is not needed by webXR");
+  ok(plan.sources?.length === 1 && plan.sources[0].file === blend && plan.sources[0].objects.includes("Architrave"), "the objects from the file that holds them");
+  ok((r.j.profiles ?? []).includes("modelling"), "the profiles, «modelling» among them");
+  writeFileSync(`${fsroot}/SB/GreatTemple_modelling.blend`, "taken");
+  r = await post("/blend/compose-plan", { blend, inventory: inv, profile: "modelling", how: "append", only_needed: false });
+  ok(r.j.out === `${fsroot}/SB/GreatTemple_modelling-2.blend` && r.j.plan?.how === "append", "never over a file: -2");
+  ok(r.j.plan?.missing?.some((x) => x.name === "ME_PODIO"), "everything: the RB mesh whose library is missing is said");
+  r = await post("/blend/compose-plan", { blend, profile: "webxr" });
+  ok(r.status === 400, "no inventory: refused with why");
+  r = await post("/jobs", { kind: "blender", op: "compose", blend, plan, out: `${fsroot}/SB/GreatTemple.blend` });
+  ok(r.status === 400, "compose over an existing file: refused");
+  r = await post("/jobs", { kind: "blender", op: "compose", blend, plan, out: `${fsroot}/SB/GreatTemple_webxr.blend` });
+  ok(r.status === 202, "compose: a job");
+  v = await until(r.j.job);
+  ok(v.state === "done" && v.heavy && v.result?.result?.out === `${fsroot}/SB/GreatTemple_webxr.blend`
+     && existsSync(`${fsroot}/SB/GreatTemple_webxr.blend`), "…composed in an empty Blender, written where asked");
+
+  // ── D5: where a master goes
+  mkdirSync(`${fsroot}/SB/Podio`, { recursive: true });
+  r = await post("/blend/master-place", { doc_path: docPath, container: "podio", blend });
+  ok(r.j.ok && r.j.rule === "container" && r.j.folder === `${fsroot}/SB/Podio/master`, `a container with a folder: its master/ (${r.j.folder})`);
+  r = await post("/blend/master-place", { doc_path: docPath, container: "Reconstruction II AC", blend });
+  ok(r.j.rule === "fallback" && r.j.folder === `${fsroot}/EM/_master/Reconstruction II AC`, `no folder: _master/ beside the em.json (${r.j.folder})`);
+  r = await post("/blend/master-place", { doc_path: docPath, container: "SB", registered: `${fsroot}/else` });
+  ok(r.j.rule === "registered" && r.j.folder === `${fsroot}/else`, "a registered master is respected");
 
   // ── open in Blender: not twice
   present(false);

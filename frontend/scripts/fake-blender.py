@@ -114,11 +114,36 @@ elif op == "inventory":
         "images": [{"name": "t.jpg", "filepath": "//t.jpg", "abspath": os.path.join(here, "t.jpg"), "packed": True,
                     "exists": False, "source": "FILE"}]}})
 elif op == "blend_apply":
+    # MICRO-BLEND-OFFICINA-2 · the graph's actions too, on a COPY of the graph
+    # beside the em.json; what they added comes back as a delta
     rows = A.get("rows") or []
+    graph_acts = ("export_master", "register_version", "register_resource")
+    delta = {"nodes_added": [], "nodes_changed": [], "edges_added": []}
+    em_dir = os.path.dirname(A.get("em_json") or "")
+    for r in rows:
+        if r.get("action") == "export_master":
+            folder = r.get("master_folder") or os.path.join(em_dir, "..", "SB", "master")
+            delta["nodes_added"].append({"id": "res.%s" % r.get("name"), "node_type": "resource", "name": r.get("name"),
+                                         "data": {"url": "../SB/master/%s.gltf" % r.get("name"), "tier": "master",
+                                                  "folder": folder, "copy_beside": em_dir}})
+            delta["edges_added"].append({"id": "rm_has_%s" % r.get("name"), "edge_type": "has_linked_resource",
+                                         "source": "Architrave_model", "target": "res.%s" % r.get("name")})
+        elif r.get("action") == "register_version":
+            delta["nodes_added"].append({"id": "v.%s" % r.get("name"), "node_type": "resource",
+                                         "data": {"level": r.get("level") or "manual-?"}})
     if A.get("save"):
         open(blend, "a").write("\n# saved by a background Blender\n")
     say("RESULT", {"ok": True, "op": op, "result": {"done": ["%s: %s" % (r.get("name"), r.get("action")) for r in rows
-                                                              if r.get("action") in ("relink_texture", "unpack_texture")],
-                                                     "failed": [], "refused": [r.get("name") for r in rows
-                                                                               if r.get("action") in ("export_master",)],
-                                                     "saved": bool(A.get("save")), "em_folder": A.get("em_folder")}})
+                                                              if r.get("action") in ("relink_texture", "unpack_texture") + graph_acts],
+                                                     "failed": [], "refused": [],
+                                                     "saved": bool(A.get("save")), "em_folder": A.get("em_folder"),
+                                                     "em_json": A.get("em_json"), "delta": delta}})
+elif op == "compose":
+    # MICRO-BLEND-OFFICINA-2 · EM Tools' blend_compose on s3Dgraphy's plan, in an EMPTY Blender
+    assert not blend, "compose runs in an empty Blender"
+    plan = A["plan"]
+    assert not os.path.exists(A["out"]), "never over a file"
+    open(A["out"], "w").write("BLENDER-v502 composed\n" + json.dumps(plan["sources"]))
+    say("RESULT", {"ok": True, "op": op, "result": {"out": A["out"], "linked": sum(len(s["objects"]) for s in plan["sources"]
+                                                                                   if s["how"] == "link"),
+                                                     "files": len(plan["sources"])}})

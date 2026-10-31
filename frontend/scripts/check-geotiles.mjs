@@ -164,7 +164,7 @@ const O = { origin: "http://localhost:5173" };
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${B}/health`)).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 150)); }
   const health = await (await fetch(`${B}/health`)).json();
-  eq(health.bridge_level, 49, "the bridge's level: 49 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root; 40 /geo/tileset-frame; 41 /web-meta; 42 /project-tree, /fs/optimize; 43 /addons, /jobs, /graph/add-version; 44 /fs/tileset, the tileset job; 45 /blender, the Blender jobs; 46 /optimize/profiles, /optimize/diagnose, /optimize/versions; 47 the profiles with E.D.'s names, per-row params, Node.js an add-on; 48 the .blend as a folder; 49 /geo/fit-points, /geo/parse-points)");
+  eq(health.bridge_level, 50, "the bridge's level: 50 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root; 40 /geo/tileset-frame; 41 /web-meta; 42 /project-tree, /fs/optimize; 43 /addons, /jobs, /graph/add-version; 44 /fs/tileset, the tileset job; 45 /blender, the Blender jobs; 46 /optimize/profiles, /optimize/diagnose, /optimize/versions; 47 the profiles with E.D.'s names, per-row params, Node.js an add-on; 48 the .blend as a folder; 49 /geo/fit-points, /geo/parse-points; 50 /blend/compose-plan, /blend/master-place, compose, the background delta)");
   // MICRO-INGRESSO-ASSET-1 · the frame by points: s3Dgraphy's rototranslation
   // through the bridge (no pyproj), the nodes the graph holds, a file of points
   {

@@ -38,6 +38,10 @@ export interface SyncSettings {
    *  session, because a token on disk outlives the reason it was issued. */
   hubUrl: string;
   hubRoom: string;
+  /** MICRO-BLEND-OFFICINA-2 · «Selezione sincronizzata con Blender»: the
+   *  objects of a .blend opened as a folder follow Blender's selection and
+   *  send theirs (on unless turned off) */
+  blendSelection?: boolean;
   /** MICRO-DOVE-CHI-MENU p.3/p.5 · the nodes this computer knows (Settings ▸
    *  Connections), `hubUrl` being the active one. Born from `hubUrl` for a
    *  settings file written before the list existed. */

@@ -1836,7 +1836,15 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: when ``crs`` and ids are given) and ``POST /geo/parse-points`` (the points
 #: of a total station's or a CSV file, by ``text`` or ``path``; with
 #: ``local`` the pairs by name). Neither needs pyproj.
-BRIDGE_LEVEL = 49   # 30 also = /validate
+#: 50 = MICRO-BLEND-OFFICINA-2: ``POST /blend/compose-plan`` (a working
+#: .blend for a profile: s3Dgraphy's ``blend_room.compose_plan``, the default
+#: path never over a file) and ``POST /jobs {kind: blender, op: compose}``
+#: (EM Tools' ``blend_compose`` in an empty Blender); ``POST
+#: /blend/master-place`` (D5); ``{op: blend_apply}`` in the background now
+#: also exports masters and registers versions/resources on a COPY of the
+#: graph beside the em.json and returns the ``delta``; ``/blend/open`` takes
+#: ``readonly`` (held in the room by someone else).
+BRIDGE_LEVEL = 50   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3159,6 +3167,24 @@ def make_handler(api):
                 import em_blender as BL
                 out = BL.choose(str((body or {}).get("path") or ""))
                 self._json({**BL.state(), **out}, 200 if out.get("ok") else 400)
+            elif route in ("/blend/compose-plan", "/blend/master-place"):
+                # MICRO-BLEND-OFFICINA-2 · s3Dgraphy's blend_room: the plan of a
+                # working .blend for a profile; where a master goes (D5)
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                try:
+                    from s3dgraphy.resources import blend_room as BR  # noqa: F401
+                except ImportError as exc:
+                    self._fail(501, f"this s3dgraphy has no blend_room: {exc}")
+                    return
+                fn = self._compose_plan if route == "/blend/compose-plan" else self._master_place
+                status, out = fn(body if isinstance(body, dict) else {})
+                self._json(out, status)
             elif route == "/blend/open":
                 if not self._fs_gate():
                     return
@@ -3944,11 +3970,37 @@ def make_handler(api):
                                 "confirm first", "session": rule}, 409)
                     return
             em_json = ""
-            if doc is not None:
-                fd, em_json = tempfile.mkstemp(prefix="emstudio-officina-", suffix=".em.json")
+            if doc is not None and op != "compose":
+                # the COPY of the graph a background Blender works on. For
+                # «Apply» it sits BESIDE the em.json open in EMStudio (hidden,
+                # removed at the end), so what EM Tools writes relative to it —
+                # a master's url, a version's — holds for the original too;
+                # Blender never writes the original (MICRO-BLEND-OFFICINA-2, 4)
+                beside = os.path.dirname(str(body.get("doc_path") or "")) if op == "blend_apply" else ""
+                if beside and not os.path.isdir(beside):
+                    beside = ""
+                fd, em_json = tempfile.mkstemp(prefix=".emstudio-officina-", suffix=".em.json",
+                                               dir=beside or None)
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     json.dump(doc, fh)
             args = {"op": op}
+            run_blend = blend
+            if op == "compose":
+                # «Compose a .blend for…» (point 2): s3Dgraphy's plan, EM Tools'
+                # hands, an EMPTY Blender saved as ``out`` — never over a file
+                plan = body.get("plan") if isinstance(body.get("plan"), dict) else None
+                out_path = os.path.abspath(os.path.expanduser(str(body.get("out") or "")))
+                if not plan or not plan.get("sources"):
+                    self._fail(400, "compose wants the plan (POST /blend/compose-plan)")
+                    return
+                if not out_path.lower().endswith(".blend") or os.path.exists(out_path):
+                    self._fail(400, "the working .blend must be a new .blend file")
+                    return
+                if not _fs_inside_roots(os.path.dirname(out_path)):
+                    self._fail(403, "outside the bridge's folders")
+                    return
+                args.update({"plan": plan, "out": out_path})
+                run_blend = ""
             if op == "blend_apply":
                 args.update({"rows": [r for r in body.get("rows") or [] if isinstance(r, dict)],
                              "em_json": em_json, "em_folder": em_folder, "save": True,
@@ -3958,7 +4010,7 @@ def make_handler(api):
             def target(job):
                 job.stage = os.path.basename(blend)
                 try:
-                    run = BL.run_op(job, blender, args, blend, timeout=900 if op == "inventory" else 4 * 3600)
+                    run = BL.run_op(job, blender, args, run_blend, timeout=900 if op == "inventory" else 4 * 3600)
                 finally:
                     if em_json:
                         try:
@@ -3967,7 +4019,7 @@ def make_handler(api):
                             pass
                 res = run["result"] or {}
                 out = {"op": op, "blend": blend, "seconds": run["seconds"], "peak_mb": run["peak_mb"]}
-                if op == "blend_apply":
+                if op in ("blend_apply", "compose"):
                     out["result"] = res
                     return out
                 inv = BF.normalize(res)
@@ -3979,13 +4031,69 @@ def make_handler(api):
                     chk["nodes"] = BF.node_states(chk)
                     out["check"] = chk
                 return out
-            what = {"inventory": "the .blend as a folder", "blend_apply": "apply to the .blend"}[op]
-            heavy = op == "blend_apply"
+            what = {"inventory": "the .blend as a folder", "blend_apply": "apply to the .blend",
+                    "compose": "compose a working .blend"}[op]
+            heavy = op in ("blend_apply", "compose")
             job = O.submit("blender", {"op": op, "sources": [blend]}, target, heavy=heavy,
                            estimate_mb=BL.memory_mb("objects" if op == "inventory" else "prepare",
                                                     os.path.getsize(blend)),
                            label=f"Blender · {what} · {os.path.basename(blend)}")
             self._json({"ok": True, "job": job.id, "session": rule}, 202)
+
+        def _compose_plan(self, body):
+            """``POST /blend/compose-plan {blend, inventory, profile, how,
+            only_needed, names?}`` → s3Dgraphy's ``blend_room.compose_plan`` on
+            the inventory the page holds, plus the working .blend's default
+            path beside the .blend (``<stem>_<profile>.blend``, ``-2``… never
+            over a file) and the profiles."""
+            from s3dgraphy.resources import blend_room as BR
+            blend, err = self._blend_of(body)
+            if err:
+                return 400, {"ok": False, "error": err}
+            inv = body.get("inventory")
+            if not isinstance(inv, dict) or not isinstance(inv.get("objects"), list):
+                return 400, {"ok": False, "error": "the .blend's inventory is wanted (read it as a folder first)"}
+            profile = str(body.get("profile") or "modelling")
+            how = "append" if body.get("how") == "append" else "link"
+            names = body.get("names") if isinstance(body.get("names"), list) else None
+            try:
+                plan = BR.compose_plan(inv, profile, how=how, only_needed=body.get("only_needed", True) is not False,
+                                       names=names)
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            stem = os.path.splitext(blend)[0]
+            out = f"{stem}_{profile}.blend"
+            n = 2
+            while os.path.exists(out):
+                out = f"{stem}_{profile}-{n}.blend"
+                n += 1
+            return 200, {"ok": True, "plan": plan, "out": out, "profiles": list(BR.PROFILE_KINDS),
+                         "kinds": {k: list(v) for k, v in BR.PROFILE_KINDS.items()}}
+
+        def _master_place(self, body):
+            """``POST /blend/master-place {doc_path, container, branch?,
+            registered?, blend?}`` → s3Dgraphy's ``blend_room.master_place``
+            (D5): ``master/`` in the container's folder, ``_master/<container>/``
+            beside the em.json when it has none, a registered master respected."""
+            from s3dgraphy.resources import blend_room as BR
+            from s3dgraphy.resources import blend_folder as BF
+            doc_path = str(body.get("doc_path") or "")
+            em_folder = os.path.dirname(doc_path) if doc_path else ""
+            root = ""
+            try:
+                from s3dgraphy.project_tree import find_project_root
+                root = find_project_root(doc_path or str(body.get("blend") or "")) or ""
+            except Exception:  # noqa: BLE001
+                root = ""
+            if not root and em_folder:
+                root = os.path.dirname(em_folder)
+            branch = str(body.get("branch") or "") or (BF.branch_of(str(body.get("blend") or ""), root)
+                                                         if body.get("blend") else "")
+            got = BR.master_place(project_root=root, em_folder=em_folder or root,
+                                  container=str(body.get("container") or ""), branch=branch,
+                                  registered=str(body.get("registered") or ""))
+            return 200, {"ok": True, **got, "versions": BR.versions_place(got["folder"]),
+                         "root": root, "branch": branch}
 
         def _blend_open(self, body):
             """``POST /blend/open {blend, doc_path?, sidecar?}`` → Blender WITH
@@ -4007,7 +4115,8 @@ def make_handler(api):
             if em_json:
                 full, e2 = self._fs_resolve(os.path.abspath(os.path.expanduser(em_json)), want="file")
                 em_json = full if not e2 else ""
-            out = BL.open_gui(blender, blend, em_json, bool(body.get("sidecar", True)))
+            ro = body.get("readonly") if isinstance(body.get("readonly"), dict) else None
+            out = BL.open_gui(blender, blend, em_json, bool(body.get("sidecar", True)), ro)
             out["session"] = rule
             return 200, out
 
@@ -4021,7 +4130,7 @@ def make_handler(api):
             import tempfile
             import em_blender as BL
             import em_optimize as O
-            if str(body.get("op") or "") in ("inventory", "blend_apply"):
+            if str(body.get("op") or "") in ("inventory", "blend_apply", "compose"):
                 self._officina_job(body)
                 return
             try:

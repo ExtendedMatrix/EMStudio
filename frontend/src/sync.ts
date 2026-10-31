@@ -45,6 +45,10 @@ export interface HostInfo {
    * when the question is "may I act on your scene".
    */
   accepts_commands?: boolean;
+  /** MICRO-BLEND-OFFICINA-2 · the room keeps the leases of the .blend files
+   *  (`hold` / `holds` frames, stratigraph-server). An older server says
+   *  nothing: no `hold` is sent to it. */
+  holds?: boolean;
   /**
    * P5 · what this client may do in the room, decided by the SERVER.
    *
@@ -212,6 +216,11 @@ export interface SyncCallbacks {
   onLayout?: (body: LayoutPayload, graphId?: string) => void;
   /** P4.3 · the room roster / awareness changed (relay only) */
   onPresence?: (message: Record<string, unknown>) => void;
+  /** MICRO-BLEND-OFFICINA-2 · the room's leases of the .blend files (D7, D8):
+   *  the whole list, after each change and at the door */
+  onHolds?: (message: Record<string, unknown>) => void;
+  /** …and a `hold` of mine the room refused (held by somebody else) */
+  onHoldRefused?: (message: Record<string, unknown>) => void;
   /** P4.3 · SOMEBODY ELSE selected something. Awareness, never my selection. */
   onPeerSelect?: (message: Record<string, unknown>) => void;
   /** P4.3 · the hub answered one of MY operations (applied, or stale) */
@@ -524,6 +533,11 @@ export class SyncClient {
         // P4.3 · awareness, never gated by the sync direction: knowing who is in
         // the room is not an echo of anybody's work.
         this.cb?.onPresence?.(payload);
+      } else if (type === "holds") {
+        // a lease is awareness too: who has a .blend open is never gated
+        this.cb?.onHolds?.(payload);
+      } else if (type === "hold_refused") {
+        this.cb?.onHoldRefused?.(payload);
       } else if (type === "op_result") {
         this.cb?.onOpResult?.(payload);
       } else if (type === "command_result") {
@@ -614,6 +628,20 @@ export class SyncClient {
    *
    * Returns false when there is no connection, so the caller can say so.
    */
+  /** MICRO-BLEND-OFFICINA-2 · take, renew or release the lease of a .blend in
+   *  the room (`key`: its path relative to the project). Sent only when the
+   *  room said it keeps leases (`host_info.holds`); false when not sent. */
+  sendHold(action: "take" | "renew" | "release", key: string, host: string, force = false): boolean {
+    if (!this.connected || !this.ws) return false;
+    try {
+      this.ws.send(JSON.stringify(envelope("hold", { action, key, host, client: "emstudio",
+                                                     ...(force ? { force: true } : {}) })));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   sendCommand(msg: object): boolean {
     if (!this.connected) return false;
     try {

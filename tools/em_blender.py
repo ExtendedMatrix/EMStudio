@@ -446,17 +446,52 @@ def inventory():
     return out
 
 
-#: what a BACKGROUND Blender may do to a .blend: the actions that change only
-#: the .blend. Those that change the graph (export a master, register a
-#: version or a resource) go to the open Blender, whose EM Tools holds it
+#: what a BACKGROUND Blender may do to a .blend. Round 1 kept here only the
+#: actions that change the .blend alone; MICRO-BLEND-OFFICINA-2 (point 4)
+#: adds those that change the GRAPH (export as master, register as a version
+#: or a new resource): the graph they change is a COPY of EMStudio's, and what
+#: they added comes back as a DELTA that EMStudio applies to its live graph in
+#: one undo step — Blender never writes the em.json open in EMStudio
 BACKGROUND_ACTIONS = ("relink_texture", "relink_library", "unpack_texture", "take_epochs_from_graph",
-                      "restore_from_master")
+                      "restore_from_master", "export_master", "register_version", "register_resource")
+
+
+def graph_payloads(graph):
+    """{node id: payload}, {edge id: payload} as em.json writes them
+    (s3Dgraphy's exporter), to tell what an action added or changed."""
+    from s3dgraphy.exporter.emjson_exporter import _node_payload, _edge_payload
+    nodes = {}
+    for n in getattr(graph, "nodes", []) or []:
+        try:
+            nodes[n.node_id] = _node_payload(n)
+        except Exception:  # noqa: BLE001 — one odd node never stops the delta
+            pass
+    edges = {}
+    for e in getattr(graph, "edges", []) or []:
+        try:
+            edges[e.edge_id] = _edge_payload(e)
+        except Exception:  # noqa: BLE001
+            pass
+    return nodes, edges
+
+
+def graph_delta(before, after):
+    """What the actions did to the graph: nodes added, nodes whose payload
+    changed (a master's url, its datablock), edges added."""
+    bn, be = before
+    an, ae = after
+    dump = lambda x: json.dumps(x, sort_keys=True, default=str)
+    return {"nodes_added": [p for i, p in an.items() if i not in bn],
+            "nodes_changed": [p for i, p in an.items() if i in bn and dump(p) != dump(bn[i])],
+            "edges_added": [p for i, p in ae.items() if i not in be]}
 
 
 def blend_apply():
     """«Apply» the ticked rows of «Check against the graph» in this background
     Blender, then save — only if the file did not change since it was read
-    (``read_mtime``): never a second save over somebody's."""
+    (``read_mtime``): never a second save over somebody's. The graph is a
+    copy (``em_json``, beside the original so its relative urls hold); what
+    the actions added to it comes back as ``delta``."""
     BO = officina()
     rows = [r for r in (A.get("rows") or []) if isinstance(r, dict)]
     mine = [r for r in rows if r.get("action") in BACKGROUND_ACTIONS]
@@ -471,8 +506,13 @@ def blend_apply():
         em.active_file_index = 0
         getattr(bpy.ops, "import").em_emjson(file_index=0)
         graph, _doc, _f = BO.active_graph_doc(bpy.context)
+    needs_graph = [r for r in mine if r.get("action") in ("export_master", "register_version", "register_resource")]
+    if needs_graph and graph is None:
+        raise RuntimeError("these actions change the graph: open the em.json in EMStudio first")
+    before = graph_payloads(graph) if graph is not None else ({}, {})
     say("PROGRESS", {"stage": "apply", "done": 0, "total": len(mine) or 1})
     out = BO.apply_rows(bpy.context, graph, mine, A.get("em_json") or "", em_folder=A.get("em_folder") or "")
+    delta = graph_delta(before, graph_payloads(graph)) if graph is not None else {}
     saved = False
     if out["done"] and A.get("save"):
         path = bpy.data.filepath
@@ -483,7 +523,31 @@ def blend_apply():
         saved = True
     say("PROGRESS", {"stage": "apply", "done": len(mine) or 1, "total": len(mine) or 1})
     return {"done": out["done"], "failed": out["failed"], "refused": refused, "saved": saved,
-            "blend": bpy.data.filepath}
+            "blend": bpy.data.filepath, "delta": delta}
+
+
+def compose():
+    """«Compose a .blend for…» (MICRO-BLEND-OFFICINA-2, point 2): EM Tools'
+    ``blend_compose.compose`` on s3Dgraphy's plan (``blend_room.compose_plan``),
+    in an empty Blender, saved as ``out`` — never over a file that exists."""
+    em_name, _ = module_with(None, ".graph_origins")
+    if not em_name:
+        raise RuntimeError("EM Tools is not loaded in this Blender")
+    pkg = em_name.rsplit(".graph_origins", 1)[0]
+    try:
+        BC = importlib.import_module(pkg + ".sync_manager.blend_compose")
+    except ImportError:
+        raise RuntimeError("this EM Tools cannot compose a .blend (blend_compose): update EM Tools")
+    out = A.get("out") or ""
+    if not out or os.path.exists(out):
+        raise RuntimeError("the working .blend would go over a file that exists: %s" % out)
+    plan = A.get("plan") or {}
+    say("PROGRESS", {"stage": "compose", "done": 0, "total": 1})
+    res = BC.compose(plan, out, save=True)
+    say("PROGRESS", {"stage": "compose", "done": 1, "total": 1})
+    res = dict(res or {})
+    res.setdefault("out", out)
+    return {k: v for k, v in res.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
 
 
 try:
@@ -491,7 +555,7 @@ try:
     op = A.get("op") or "probe"
     res = {"probe": probe, "objects": objects, "lod_set": lod_set, "atlas": atlas, "prepare": prepare,
            "measure": measure, "apply_use": apply_use, "inventory": inventory,
-           "blend_apply": blend_apply}[op]()
+           "blend_apply": blend_apply, "compose": compose}[op]()
     say("RESULT", {"ok": True, "op": op, "seconds": round(time.time() - t0, 2), "result": res})
 except Exception as exc:
     traceback.print_exc()
@@ -652,6 +716,13 @@ def _em_open():
                 row.graphml_path = _A["em_json"]
             em.active_file_index = [r.graphml_path for r in em.graphml_files].index(_A["em_json"])
             getattr(bpy.ops, "import").em_emjson(file_index=em.active_file_index)
+        if _A.get("readonly"):
+            # D7 · held in the room by someone else: read only here, a save
+            # becomes a new version with this person's name (EM Tools'
+            # blend_room.readonly_save_name). EM Tools reads it from here.
+            os.environ["EM_BLEND_READONLY"] = json.dumps(_A["readonly"])
+            if hasattr(bpy.ops.em, "blend_open_readonly"):
+                bpy.ops.em.blend_open_readonly(holder=json.dumps(_A["readonly"]))
         if _A.get("sidecar") and hasattr(bpy.ops.em, "set_mode"):
             bpy.ops.em.set_mode(mode="sidecar")
     except Exception as exc:
@@ -661,25 +732,29 @@ bpy.app.timers.register(_em_open, first_interval=1.0)
 '''
 
 
-def open_command(blender: str, blend: str, em_json: str = "", sidecar: bool = True) -> list:
+def open_command(blender: str, blend: str, em_json: str = "", sidecar: bool = True,
+                 readonly=None) -> list:
     """Blender WITH its interface on ``blend``, joined to EMStudio as a sidecar
     of the graph open there (``em_json``: the document's own file — EM Tools
     reads it, nothing is copied)."""
-    expr = OPEN_EXPR % json.dumps({"em_json": em_json, "sidecar": bool(sidecar)})
+    expr = OPEN_EXPR % json.dumps({"em_json": em_json, "sidecar": bool(sidecar), "readonly": readonly or None})
     return [blender, blend, "--python-expr", expr]
 
 
-def open_gui(blender: str, blend: str, em_json: str = "", sidecar: bool = True) -> dict:
+def open_gui(blender: str, blend: str, em_json: str = "", sidecar: bool = True, readonly=None) -> dict:
     """Start it, detached: EMStudio does not wait for (nor end) the person's
     Blender."""
-    cmd = open_command(blender, blend, em_json, sidecar)
+    cmd = open_command(blender, blend, em_json, sidecar, readonly)
     kw: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if sys.platform == "win32":
         kw["creationflags"] = 0x00000008 | 0x00000200   # DETACHED_PROCESS | NEW_PROCESS_GROUP
     else:
         kw["start_new_session"] = True
+    if readonly:
+        kw["env"] = dict(os.environ, EM_BLEND_READONLY=json.dumps(readonly))
     p = subprocess.Popen(cmd, **kw)
-    return {"ok": True, "pid": p.pid, "blend": blend, "em_json": em_json, "sidecar": bool(sidecar)}
+    return {"ok": True, "pid": p.pid, "blend": blend, "em_json": em_json, "sidecar": bool(sidecar),
+            "readonly": readonly or None}
 
 
 def _sha256(path: str) -> str:

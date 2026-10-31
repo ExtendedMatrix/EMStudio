@@ -734,6 +734,9 @@ import {
 import { currentPlatform } from "./menu-table";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
 import { blendLabel, filterChoices, flatten, STATE_SIGN, type BlendFilters, type BlendFolder, type BlendState, type CheckRow } from "./blend-folder";
+import { applyGraphDelta, COMPOSE_PROFILES, fileKey, idsOfObject, LEASE_RENEW_S, leaseFor, leaseLabel,
+         manualLevel, mayRelease, mayWrite, objectsOfIds, recipeLine, recipesOf, SelectionGate,
+         type DeltaStore, type GraphDelta, type Lease } from "./blend-room";
 import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, removalLines, versionsOf,
   type Diagnosis, type UseProfile, type VersionOnDisk, type RowParams, groupsOf, rowsOf, groupTicked, tickGroup,
   paramsFor, profileWords } from "./use-diagnosis";
@@ -1422,6 +1425,20 @@ function renderSidecarDetail(): void {
       : getSyncUrl().replace(/^wss?:\/\//, ""),
   });
   sidecarDetail.innerHTML = "";
+  // MICRO-BLEND-OFFICINA-2 · the room's leases, a click lists them (D7, D8)
+  if (sync.inRoom) {
+    const hs = document.createElement("span");
+    hs.className = "sd-seg sd-holds";
+    hs.dataset.action = "room-holds";
+    const k = document.createElement("span");
+    k.className = "sd-k";
+    k.textContent = "🔒";
+    hs.append(k, document.createTextNode(hostInfo.holds ? String(roomHolds.length) : "—"));
+    hs.title = hostInfo.holds ? t("hold.title") : t("hold.serverOld");
+    hs.style.cursor = "pointer";
+    hs.onclick = () => { void showRoomHolds(); };
+    sidecarDetail.appendChild(hs);
+  }
   for (const s of segs) {
     const seg = document.createElement("span");
     seg.className = "sd-seg";
@@ -4616,6 +4633,17 @@ function renderNameStrip(): void {
     d.textContent = ` ${bs.sign}`;
     d.title = bs.title;
     ctx.appendChild(d);
+  }
+  // MICRO-BLEND-OFFICINA-2 (D2) · the detail recipes kept on its document:
+  // what was asked in Blender, regenerated identical by whoever opens it
+  const rb = detailRecipesBlock(n.id);
+  if (rb) {
+    const chip = document.createElement("span");
+    chip.className = "ns-recipes";
+    chip.dataset.recipes = rb.dataset.recipes ?? "";
+    chip.textContent = ` ◫ ${tn("recipes.count", Number(rb.dataset.recipes ?? 0))}`;
+    chip.title = [...rb.querySelectorAll(".detail-recipe")].map((x) => x.textContent).join("\n") + "\n" + t("recipes.hint");
+    ctx.appendChild(chip);
   }
 }
 // MICRO-PULIZIA p.1 · the dot beside the name is Save, for the mouse and for Tab
@@ -9539,6 +9567,12 @@ function connectToHub(url: string, room: string, token: string | null): void {
       }
       renderHubRoster();
     },
+    onHolds: (message) => onRoomHolds(message),
+    onHoldRefused: (message) => {
+      const h = (message.holder ?? null) as Lease | null;
+      myHolds.delete(String(message.key ?? ""));
+      toast(t("hold.refused", { key: String(message.key ?? ""), label: h ? leaseLabel(h, getLocale() === "it" ? "it" : "en") : String(message.reason ?? "") }));
+    },
     onPresence: (message) => {
       // `reducePresence` folds a FRAME (it switches on `type`); what arrives
       // here is the payload, because WIRE 2 hands the body to the callback and
@@ -13860,7 +13894,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 49;   // 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 50;   // 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -14447,6 +14481,8 @@ btnSync.addEventListener("click", () => {
   const syncUrl = getSyncUrl();
   sync.connect(syncUrl, {
     onSelect: (id, ids) => {
+      // MICRO-BLEND-OFFICINA-2 · …and on the objects of a .blend read as a folder
+      if (blendSelGate.enabled) blendSelectFromIds(ids?.length ? ids : id ? [id] : []);
       // selection arrived from the peer → reflect it without echoing back
       applyingRemoteSelect = true;
       if (ids && ids.length > 1) {
@@ -34521,9 +34557,14 @@ async function startJob(body: Record<string, unknown>, label: string): Promise<B
   const j = await r.json().catch(() => ({})) as { ok?: boolean; job?: string; error?: string };
   if (r.status === 404 && !j.job) { toast(t("files.optOldBridge")); return null; }
   if (!j.ok || !j.job) { toast(t("files.optFailed", { why: String(j.error ?? r.status) })); return null; }
+  return trackJob(j.job, String(body.kind), label);
+}
+
+/** a job the bridge already started, followed like the others */
+function trackJob(id: string, kind: string, label: string): BgJob {
   let settle!: (x: BgJob) => void;
   const done = new Promise<BgJob>((res) => { settle = res; });
-  const job: BgJob = { id: j.job, kind: String(body.kind), label, state: "queued", progress: 0, stage: "",
+  const job: BgJob = { id, kind, label, state: "queued", progress: 0, stage: "",
     next: 0, lines: [], done, settle };
   bgJobs.set(job.id, job);
   paintJobs();
@@ -40972,13 +41013,27 @@ function openBlendAsFolder(win: Win, blend: string): void {
 /** «Open in Blender»: with its interface, EM Tools on the em.json open here,
  *  its Sidecar started — or said when a Blender has it open already. */
 async function openInBlender(blend: string): Promise<void> {
+  // MICRO-BLEND-OFFICINA-2 (D7) · held in the room by somebody else: opened
+  // READ-ONLY, and a save there becomes a new version with this person's name
+  const held = holdOf(blend);
+  const me = hubMyAuthor() ?? "";
+  const mode = held ? mayWrite(held, me, thisHost()) : "free";
+  let readonly: Record<string, unknown> | null = null;
+  if (mode === "readonly" || mode === "mine_elsewhere") {
+    if (!await askConfirm(t("hold.openReadonly", { label: leaseLabel(held, getLocale() === "it" ? "it" : "en") }))) return;
+    readonly = { ...held, person_here: me };
+  }
   try {
     const r = await fetch(`${await bridgeUrl()}/blend/open`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blend, doc_path: currentFilePath ?? "" }) });
+      body: JSON.stringify({ blend, doc_path: currentFilePath ?? "", ...(readonly ? { readonly } : {}) }) });
     const j = await r.json().catch(() => ({})) as { ok?: boolean; already?: boolean; error?: string };
     if (r.status === 404) { toast(t("blend.oldBridge")); return; }
     if (!j.ok) { toast(t("blend.openFailed", { why: String(j.error ?? r.status) })); return; }
-    toast(j.already ? t("blend.alreadyOpen", { name: baseName(blend) }) : t("blend.opened", { name: baseName(blend) }));
+    toast(j.already ? t("blend.alreadyOpen", { name: baseName(blend) })
+      : readonly ? t("hold.openedReadonly", { name: baseName(blend) }) : t("blend.opened", { name: baseName(blend) }));
+    // the lease: taken in the room for the Blender this session opened, renewed
+    // while it has the file open (its presence), released when it closes
+    if (!readonly && !j.already && mode === "free") takeHold(blend);
   } catch { toast(t("storage.bridgeDown")); }
 }
 
@@ -40988,6 +41043,16 @@ async function openInBlender(blend: string): Promise<void> {
 async function applyBlendRows(blend: string, rows: CheckRow[]): Promise<void> {
   const ticked = rows.filter((r) => r.tick && r.action && r.action !== "leave");
   if (!ticked.length) { toast(t("blend.nothingTicked")); return; }
+  // MICRO-BLEND-OFFICINA-2 · D5 and D6 said to EM Tools with each row: where
+  // the master goes (s3Dgraphy's master_place) and the manual level
+  const cont = useState.container.get(blend) ?? "";
+  for (const r of ticked as (CheckRow & { master_folder?: string; level?: string })[]) {
+    if (r.action === "export_master" && cont) {
+      const pl = await masterPlace(cont, blend);
+      if (pl) { r.master_folder = pl.folder; logInfo(t("blend.masterPlace", { name: r.name, folder: pl.folder, say: pl.say })); }
+    }
+    if (r.action === "register_version" && r.master) r.level = nextManualLevel(r.master);
+  }
   const send = async (confirm: boolean) => {
     const r = await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: "blender", op: "blend_apply", blend, rows: ticked, confirm,
@@ -41014,8 +41079,23 @@ async function applyBlendRows(blend: string, rows: CheckRow[]): Promise<void> {
   }
   if (!a.j.ok || !a.j.job) { toast(t("blend.applyFailed", { why: String(a.j.error ?? a.status) })); return; }
   toast(t("blend.applying", { name: baseName(blend) }));
-  // the job is the bridge's: its line appears in the jobs list; read again when done
-  setTimeout(() => { void readBlendFolder(blend, true); }, 1500);
+  // MICRO-BLEND-OFFICINA-2 (point 4) · the background Blender may now change
+  // the GRAPH too (export as master, register a version / a resource) on a
+  // copy: what it added comes back as a delta, applied here in ONE undo step.
+  // In a room that keeps leases the .blend is held while it works.
+  const key = blendKey(blend);
+  const held = roomKeepsHolds() && !holdOf(blend);
+  if (held) sync.sendHold("take", key, thisHost());
+  const job = trackJob(a.j.job, "blender", t("blend.applying", { name: baseName(blend) }));
+  const end = await job.done;
+  if (held) sync.sendHold("release", key, thisHost());
+  if (end.state !== "done") { toast(t("blend.applyFailed", { why: jobText(end) })); logWarn(jobText(end)); return; }
+  const res = ((end.result as { result?: { done?: string[]; failed?: string[]; refused?: string[]; delta?: GraphDelta } })?.result) ?? {};
+  for (const f of res.failed ?? []) logWarn(f);
+  if (res.refused?.length) logWarn(t("blend.refusedInBackground", { names: res.refused.join(", ") }));
+  const said = applyBlendDelta(res.delta);
+  logInfo(t("blend.appliedBackground", { n: String(res.done?.length ?? 0), name: baseName(blend) }) + (said ? ` · ${said}` : ""));
+  void readBlendFolder(blend, true);
 }
 
 /** EM Tools' «Prepare in EMStudio»: the Archive on the .blend, its
@@ -41030,6 +41110,372 @@ async function openBlendPrepare(blend: string, container: string): Promise<void>
   if (container) useState.container.set(blend, container);
   await filesTakeDrop(st, "optimize", [blend]);
   toast(t("blend.prepareFromBlender", { name: baseName(blend), container: container || "—" }));
+}
+
+
+// ── MICRO-BLEND-OFFICINA-2 · the .blend in the room ─────────────────────────
+// (E.D.'s answers of 31 Oct 2026). A working .blend composed for a profile;
+// the selection of a .blend's objects following Blender's and back, with no
+// loop; the graph delta of a background Blender applied in one undo step; the
+// LEASE of a .blend in the room («aperto da ‹persona› su ‹computer› dalle
+// ‹ora›», 15 min without a sign, released by hand with a confirmation); the
+// detail recipes on a document. The rules are s3Dgraphy's `blend_room`
+// (through the bridge, or mirrored in blend-room.ts and checked against it).
+
+/** the leases the room keeps (`holds` frames); empty out of a room */
+let roomHolds: Lease[] = [];
+/** the .blend files whose lease THIS session took (key → path): renewed while
+ *  a Blender on this computer has them open, released when it closes */
+const myHolds = new Map<string, string>();
+let holdTimer: ReturnType<typeof setInterval> | null = null;
+
+/** the room keeps leases: it said so at the door (`host_info.holds`) */
+function roomKeepsHolds(): boolean {
+  return !!sync.inRoom && !!hostInfo.holds;
+}
+
+function thisHost(): string {
+  return (getSettings() as unknown as { machine?: string }).machine
+    || (typeof navigator !== "undefined" ? (navigator.platform || "") : "");
+}
+
+function blendKey(blend: string): string {
+  return fileKey(blend, currentFilePath ? projectRootOf(currentFilePath) : paths.dirname(paths.dirname(blend)));
+}
+
+/** the live lease of a .blend in the room, or null */
+function holdOf(blend: string): Lease | null {
+  if (!sync.inRoom) return null;
+  return leaseFor(roomHolds, blendKey(blend));
+}
+
+/** What the row and the folder say of who has a .blend: the room's lease, else
+ *  the local presence («in Blender su questo computer»). */
+function holdLine(blend: string): string {
+  const l = holdOf(blend);
+  if (l) {
+    const mine = hubMyAuthor() && l.person === hubMyAuthor();
+    return leaseLabel(l, getLocale() === "it" ? "it" : "en") + (mine ? ` · ${t("hold.mine")}` : ` · ${t("hold.readonly")}`);
+  }
+  const ses = blendFolders.get(blend)?.data?.session;
+  if (ses?.live) return t("hold.localSession");
+  if (sync.inRoom && !hostInfo.holds) return t("hold.serverOld");
+  return "";
+}
+
+function takeHold(blend: string): void {
+  if (!roomKeepsHolds()) return;
+  const key = blendKey(blend);
+  if (sync.sendHold("take", key, thisHost())) {
+    myHolds.set(key, blend);
+    if (!holdTimer) holdTimer = setInterval(() => { void renewHolds(); }, LEASE_RENEW_S * 1000);
+  }
+}
+
+function releaseHold(key: string, force = false): void {
+  if (sync.sendHold("release", key, thisHost(), force)) myHolds.delete(key);
+}
+
+/** every minute: a lease of mine is renewed while a Blender on this computer
+ *  has the .blend open (its presence is the sign), released when it closed */
+async function renewHolds(): Promise<void> {
+  if (!roomKeepsHolds()) { myHolds.clear(); if (holdTimer) { clearInterval(holdTimer); holdTimer = null; } return; }
+  for (const [key, blend] of [...myHolds]) {
+    let live = false;
+    try {
+      const r = await fetch(`${await bridgeUrl()}/blend/session?path=${encodeURIComponent(blend)}`);
+      live = !!((await r.json().catch(() => ({}))) as { live?: boolean }).live;
+    } catch { live = true; /* the bridge is busy: not a reason to drop it */ }
+    if (live) sync.sendHold("renew", key, thisHost());
+    else releaseHold(key);
+  }
+}
+
+function onRoomHolds(msg: Record<string, unknown>): void {
+  roomHolds = Array.isArray(msg.holds) ? (msg.holds as Lease[]) : [];
+  renderSidecarDetail();
+  renderStorage();
+}
+
+/** «Prenotazioni»: the room's leases, each with «Rilascia…» for its holder or
+ *  the room's owner, after a confirmation (D8). */
+async function showRoomHolds(): Promise<void> {
+  const body = document.createElement("div");
+  body.className = "holds-list";
+  if (!roomKeepsHolds()) {
+    body.textContent = t("hold.serverOld");
+  } else if (!roomHolds.length) {
+    body.textContent = t("hold.none");
+  }
+  const me = hubMyAuthor() ?? "";
+  for (const l of roomHolds) {
+    const row = document.createElement("div");
+    row.className = "holds-row";
+    row.dataset.key = l.key;
+    const txt = document.createElement("span");
+    txt.textContent = `${l.key} — ${leaseLabel(l, getLocale() === "it" ? "it" : "en")}`;
+    row.appendChild(txt);
+    if (mayRelease(l, me, String(hostInfo.role ?? ""))) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ghost";
+      b.dataset.action = "hold-release";
+      b.textContent = t("hold.release");
+      b.onclick = async () => {
+        const mine = l.person === me;
+        if (!await askConfirm(mine ? t("hold.releaseMine", { key: l.key })
+                                   : t("hold.releaseOther", { key: l.key, who: l.display || l.person }), { danger: !mine })) return;
+        releaseHold(l.key, !mine);
+        row.remove();
+      };
+      row.appendChild(b);
+    }
+    body.appendChild(row);
+  }
+  await openDialog({ title: t("hold.title"), body, cancel: null, ok: t("hold.close") });
+}
+
+// ── selection: the objects of a .blend ↔ Blender ────────────────────────────
+
+const blendSelGate = new SelectionGate(1.0, getSettings().sync.blendSelection !== false);
+/** the objects of each .blend picked in its folder view (by Blender or here) */
+const blendPicked = new Map<string, Set<string>>();
+
+function proxyNames(): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const n of store?.doc.graph.nodes ?? []) if (n.name) m.set(String(n.name), n.id);
+  return m;
+}
+
+function blendObjIds(blend: string, name: string): string[] {
+  const f = blendFolders.get(blend)?.data;
+  const o = f?.inventory.objects.find((x) => x.name === name);
+  if (!o) return [];
+  const ids = idsOfObject(o, proxyNames());
+  const cr = f?.check?.rows.find((x) => x.object === name);
+  for (const i of [cr?.rm, cr?.unit, cr?.master]) if (i && !ids.includes(i)) ids.push(i);
+  return ids;
+}
+
+/** a row of the folder view picked: highlighted, and its ids sent to Blender */
+function pickBlendObject(blend: string, name: string, add: boolean): void {
+  const set = add ? new Set(blendPicked.get(blend) ?? []) : new Set<string>();
+  if (add && set.has(name)) set.delete(name); else set.add(name);
+  blendPicked.set(blend, set);
+  const ids = [...set].flatMap((n) => blendObjIds(blend, n));
+  if (ids.length && sync.connected && !sync.inRoom && blendSelGate.shouldSend(ids)) sync.sendSelect(ids[ids.length - 1], ids);
+  renderStorage();
+}
+
+/** Blender's selection arrived: the matching objects of every .blend read as
+ *  a folder are picked (never sent back: the gate) */
+function blendSelectFromIds(ids: string[]): void {
+  if (!blendSelGate.shouldApply(ids)) return;
+  blendSelGate.markApplied(ids);
+  let changed = false;
+  const names = proxyNames();
+  for (const [blend, cur] of blendFolders) {
+    const objs = cur.data?.inventory.objects;
+    if (!objs) continue;
+    const got = objectsOfIds(objs, ids, names);
+    const before = [...(blendPicked.get(blend) ?? [])].join("\u0001");
+    if (got.join("\u0001") !== before) { blendPicked.set(blend, new Set(got)); changed = true; }
+  }
+  if (changed) renderStorage();
+}
+
+function setBlendSelection(on: boolean): void {
+  const s0 = getSettings();
+  saveSettings({ ...s0, sync: { ...s0.sync, blendSelection: on } });
+  blendSelGate.enabled = on;
+  renderStorage();
+}
+
+// ── «Componi un .blend per…» ────────────────────────────────────────────────
+
+interface ComposePlanAnswer {
+  ok?: boolean; error?: string; out?: string; profiles?: string[];
+  plan?: { say: string; how: string; sources: { file: string; how: string; objects: string[] }[];
+           objects: unknown[]; skipped: unknown[]; missing: { name: string; file: string }[] };
+}
+
+async function composePlan(blend: string, profile: string, how: string, onlyNeeded: boolean): Promise<ComposePlanAnswer> {
+  const inv = blendFolders.get(blend)?.data?.inventory;
+  if (!inv) return { ok: false, error: t("bcomp.readFirst") };
+  try {
+    const r = await fetch(`${await bridgeUrl()}/blend/compose-plan`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blend, inventory: inv, profile, how, only_needed: onlyNeeded }) });
+    if (r.status === 404) return { ok: false, error: t("blend.oldBridge") };
+    return await r.json().catch(() => ({ ok: false, error: String(r.status) })) as ComposePlanAnswer;
+  } catch { return { ok: false, error: t("storage.bridgeDown") }; }
+}
+
+/** The dialog: profile, link / append, only what is needed / everything, the
+ *  output path (beside the .blend, never over a file); the plan shown before;
+ *  then EM Tools composes it in a background Blender. */
+async function composeBlendDialog(blend: string): Promise<void> {
+  if (!blendFolders.get(blend)?.data) {
+    await readBlendFolder(blend, false);
+    if (!blendFolders.get(blend)?.data) { toast(t("bcomp.readFirst")); return; }
+  }
+  const body = document.createElement("div");
+  body.className = "compose-dialog";
+  const prof = document.createElement("select");
+  prof.dataset.compose = "profile";
+  for (const k of COMPOSE_PROFILES) {
+    const o = document.createElement("option");
+    o.value = k;
+    o.textContent = t(`bcomp.p.${k}`);
+    prof.appendChild(o);
+  }
+  const how = document.createElement("select");
+  how.dataset.compose = "how";
+  for (const [v, l] of [["link", t("bcomp.link")], ["append", t("bcomp.append")]]) {
+    const o = document.createElement("option"); o.value = v; o.textContent = l; how.appendChild(o);
+  }
+  const need = document.createElement("select");
+  need.dataset.compose = "need";
+  for (const [v, l] of [["needed", t("bcomp.needed")], ["all", t("bcomp.all")]]) {
+    const o = document.createElement("option"); o.value = v; o.textContent = l; need.appendChild(o);
+  }
+  const out = document.createElement("input");
+  out.type = "text";
+  out.dataset.compose = "out";
+  out.style.width = "100%";
+  let outTouched = false;
+  out.oninput = () => { outTouched = true; };
+  const preview = document.createElement("div");
+  preview.className = "compose-preview";
+  preview.dataset.compose = "preview";
+  const lab = (text: string, el: HTMLElement) => {
+    const l = document.createElement("label");
+    l.className = "compose-field";
+    l.append(text + " ", el);
+    return l;
+  };
+  body.append(lab(t("bcomp.profile"), prof), lab(t("bcomp.how"), how), lab(t("bcomp.what"), need),
+              lab(t("bcomp.out"), out), preview);
+  const got: { last: ComposePlanAnswer | null } = { last: null };
+  const refresh = async () => {
+    preview.textContent = "…";
+    const last = got.last = await composePlan(blend, prof.value, how.value, need.value === "needed");
+    preview.innerHTML = "";
+    if (!last.ok || !last.plan) { preview.textContent = last.error ?? "—"; return; }
+    if (!outTouched && last.out) out.value = last.out;
+    const say = document.createElement("p");
+    say.dataset.composeSay = last.plan.say;
+    say.textContent = last.plan.say;
+    preview.appendChild(say);
+    const ul = document.createElement("ul");
+    for (const src of last.plan.sources) {
+      const li = document.createElement("li");
+      li.dataset.file = src.file;
+      li.textContent = `${src.how} · ${paths.basename(src.file)} — ${tn("blend.objects", src.objects.length)}`;
+      li.title = src.objects.join(", ");
+      ul.appendChild(li);
+    }
+    preview.appendChild(ul);
+    for (const m of last.plan.missing ?? []) {
+      const p2 = document.createElement("p");
+      p2.className = "compose-missing";
+      p2.textContent = t("bcomp.missing", { name: m.name, file: m.file });
+      preview.appendChild(p2);
+    }
+  };
+  for (const el of [prof, how, need]) el.onchange = () => { void refresh(); };
+  void refresh();
+  const ans = await openDialog({ title: t("bcomp.title", { name: baseName(blend) }), body, ok: t("bcomp.go") });
+  if (!ans.ok) return;
+  const last = got.last;
+  if (!last?.ok || !last.plan) { toast(t("bcomp.noPlan")); return; }
+  const target = out.value.trim();
+  if (!target) return;
+  const job = await startJob({ kind: "blender", op: "compose", blend, plan: last.plan, out: target },
+                             t("bcomp.job", { name: paths.basename(target) }));
+  if (!job) return;
+  const end = await job.done;
+  if (end.state !== "done") { toast(t("bcomp.failed", { why: jobText(end) })); logWarn(jobText(end)); return; }
+  const m = t("bcomp.done", { name: paths.basename(target), say: last.plan.say });
+  toast(m);
+  logInfo(m);
+  renderStorage();
+}
+
+// ── the delta of a background Blender ───────────────────────────────────────
+
+function applyBlendDelta(delta: GraphDelta | undefined | null): string {
+  if (!store || !delta) return "";
+  if (!(delta.nodes_added?.length || delta.nodes_changed?.length || delta.edges_added?.length)) return "";
+  const st = store;
+  const ds: DeltaStore = {
+    batch: (fn) => st.batch(fn),
+    node: (id) => st.node(id) as { id: string; data?: Record<string, unknown> } | undefined,
+    addNode: (n) => st.addNode(n as unknown as Parameters<typeof st.addNode>[0]),
+    updateNode: (id, patch) => st.updateNode(id, patch as Parameters<typeof st.updateNode>[1]),
+    addEdge: (a, b, ty, at, id) => st.addEdge(a, b, ty, at, id),
+    hasEdge: (id) => st.doc.graph.edges.some((e) => e.id === id),
+  };
+  const got = applyGraphDelta(ds, delta);
+  const line = t("blend.deltaApplied", { added: String(got.added), changed: String(got.changed), edges: String(got.edges) });
+  if (got.skipped.length) logWarn(t("blend.deltaSkipped", { ids: got.skipped.join(", ") }));
+  toastUndo(line, st);
+  refreshInspector();
+  return line;
+}
+
+/** the next manual level of a master's versions (D6), from the graph */
+function nextManualLevel(masterId: string): string {
+  const levels: string[] = [];
+  for (const e of store?.doc.graph.edges ?? []) {
+    if (e.target === masterId || e.source === masterId) {
+      const other = store!.node(e.source === masterId ? e.target : e.source) as { data?: Record<string, unknown> } | undefined;
+      const lv = other?.data?.level ?? other?.data?.lod_level;
+      if (typeof lv === "string") levels.push(lv);
+    }
+  }
+  return manualLevel(levels);
+}
+
+/** where a master goes (D5), asked of s3Dgraphy through the bridge */
+async function masterPlace(container: string, blend = ""): Promise<{ folder: string; rule: string; say: string } | null> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}/blend/master-place`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_path: currentFilePath ?? "", container, blend }) });
+    const j = await r.json().catch(() => ({})) as { ok?: boolean; folder?: string; rule?: string; say?: string };
+    return j.ok && j.folder ? { folder: j.folder, rule: j.rule ?? "", say: j.say ?? "" } : null;
+  } catch { return null; }
+}
+
+/** the recipes of detail kept on a document (D2): one line each */
+function detailRecipesBlock(nodeId: string): HTMLElement | null {
+  const n = store?.node(nodeId) as { data?: Record<string, unknown> } | undefined;
+  let rs = recipesOf(n?.data);
+  if (!rs.length && store) {
+    // a resource: the recipes of its document
+    for (const e of store.doc.graph.edges) {
+      if (e.target === nodeId && e.edge_type === "has_linked_resource") {
+        rs = recipesOf((store.node(e.source) as { data?: Record<string, unknown> } | undefined)?.data);
+        if (rs.length) break;
+      }
+    }
+  }
+  if (!rs.length) return null;
+  const box = document.createElement("div");
+  box.className = "detail-recipes";
+  box.dataset.recipes = String(rs.length);
+  const h = document.createElement("b");
+  h.textContent = t("recipes.title");
+  h.title = t("recipes.hint");
+  box.appendChild(h);
+  for (const r of rs) {
+    const p2 = document.createElement("div");
+    p2.className = "detail-recipe";
+    p2.dataset.key = r.key;
+    p2.textContent = recipeLine(r);
+    p2.title = `${r.source} · ${r.document}${r.at ? ` · ${r.at}` : ""}`;
+    box.appendChild(p2);
+  }
+  return box;
 }
 
 function blendStateOfNode(id: string): { sign: string; state: string; title: string } | null {
@@ -41070,7 +41516,19 @@ function blendFolderCentre(win: Win, blend: string): HTMLElement {
   bar.append(back, title,
     btn(t("blend.check"), "blend-check", () => { void readBlendFolder(blend, true); }, store ? (cur.busy ? t("blend.busy") : undefined) : t("blend.checkNeedsDoc")),
     btn(t("blend.reread"), "blend-reread", () => { void readBlendFolder(blend, false); }, cur.busy ? t("blend.busy") : undefined),
-    btn(t("blend.openInBlender"), "blend-open-blender", () => { void openInBlender(blend); }));
+    btn(t("blend.openInBlender"), "blend-open-blender", () => { void openInBlender(blend); }),
+    btn(t("bcomp.menu"), "blend-compose", () => { void composeBlendDialog(blend); }, cur.busy ? t("blend.busy") : undefined));
+  // MICRO-BLEND-OFFICINA-2 · «Selezione sincronizzata con Blender»
+  const syncSel = document.createElement("label");
+  syncSel.className = "blend-sync-sel";
+  syncSel.title = t("blend.syncSelHint");
+  const syncCb = document.createElement("input");
+  syncCb.type = "checkbox";
+  syncCb.dataset.action = "blend-sync-selection";
+  syncCb.checked = blendSelGate.enabled;
+  syncCb.onchange = () => setBlendSelection(syncCb.checked);
+  syncSel.append(syncCb, " " + t("blend.syncSel"));
+  bar.appendChild(syncSel);
   centre.appendChild(bar);
   const line = document.createElement("div");
   line.className = "storage-status blend-line";
@@ -41083,7 +41541,10 @@ function blendFolderCentre(win: Win, blend: string): HTMLElement {
                                         missing: String(c.textures.missing ?? 0) })];
     if (f.check) said.push(f.check.sentence + (f.check.offline ? ` · ${t("blend.offline", { at: f.check.as_of })}` : ""));
     if (f.session?.live) said.push(f.session.dirty ? t("blend.openDirty") : t("blend.openClean"));
+    const hl = holdLine(blend);
+    if (hl && !(f.session?.live && hl === t("hold.localSession"))) said.push(hl);
     line.textContent = said.join(" · ");
+    if (holdOf(blend)) line.dataset.hold = holdOf(blend)!.person;
     line.dataset.blendLine = "1";
   }
   centre.appendChild(line);
@@ -41151,6 +41612,8 @@ function blendFolderCentre(win: Win, blend: string): HTMLElement {
       ic.title = t(`blend.kind.${o.kind}`);
       meta.textContent = o.triangles ? tn("blend.tris", o.triangles) : o.type.toLowerCase();
       el.dataset.object = o.name;
+      if (blendPicked.get(blend)?.has(o.name)) { el.classList.add("selected"); el.dataset.picked = "1"; }
+      el.addEventListener("click", (e) => { pickBlendObject(blend, o.name, e.shiftKey || e.metaKey || e.ctrlKey); });
       const cr = f.check?.rows.find((x) => x.object === o.name);
       if (cr) el.title = [cr.why, ...(cr.notes ?? [])].filter(Boolean).join(" · ");
       el.append(ic, nm, st, meta);
@@ -41306,6 +41769,16 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
       tag.title = blendFolders.get(entry.path)?.data?.check?.sentence ?? t("blend.labelTitle");
       name.after(tag);
     }
+    // MICRO-BLEND-OFFICINA-2 (D7) · who has it open, in the room
+    const hold = holdOf(entry.path);
+    if (hold) {
+      const ht = document.createElement("span");
+      ht.className = "storage-blend-hold";
+      ht.dataset.hold = hold.person;
+      ht.textContent = "🔒";
+      ht.title = leaseLabel(hold, getLocale() === "it" ? "it" : "en");
+      name.after(ht);
+    }
   }
   // CAMPAGNA · a stamped file (or folder) carries the little seal, which opens
   // the card; the sidecar row stays the plain file it is
@@ -41431,6 +41904,7 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
     item(t("blend.check"), "blend-check", () => { void readBlendFolder(entry.path, true).then(() => openBlendAsFolder(win, entry.path)); },
          store ? undefined : t("blend.checkNeedsDoc"));
     item(t("blend.openInBlender"), "blend-open-blender", () => { void openInBlender(entry.path); });
+    item(t("bcomp.menu"), "blend-compose", () => { void composeBlendDialog(entry.path); });
   }
   // MICRO-INGRESSO-ASSET-1 · THE DOOR (V1 = C): «Fai entrare…» on a file, the
   // picked files, a folder; the room is the large dialog (V1 = A)
@@ -41846,10 +42320,14 @@ async function runIngress(s: IngressState): Promise<{ ok: boolean; lines: string
   // «Apri in Blender» offered — the object stays «only in the .blend».
   for (const [blend, objs] of groupBy(blendExports, (x) => x.blend)) {
     const live = !!blendFolders.get(blend)?.data?.session?.live && sync.connected && !!hostInfo.accepts_commands;
-    if (live) {
+    // MICRO-BLEND-OFFICINA-2 (point 4) · no Blender has it open: a background
+    // Blender exports it after a confirmation (applyBlendRows asks), the graph
+    // delta lands here in one undo step
+    const nobody = !blendFolders.get(blend)?.data?.session?.live;
+    if (live || nobody) {
       void applyBlendRows(blend, objs.map((o) => ({ key: o.object, object: o.object, name: o.object, action: "export_master", tick: true,
         actions: ["export_master", "leave"], state: "only_here", sign: "○" } as unknown as CheckRow)));
-      lines.push(t("ingress.lineBlendSent", { n: String(objs.length), blend: baseName(blend) }));
+      lines.push(t(live ? "ingress.lineBlendSent" : "ingress.lineBlendBackground", { n: String(objs.length), blend: baseName(blend) }));
     } else {
       lines.push(t("ingress.lineBlendOnly", { names: objs.map((o) => o.object).join(", "), blend: baseName(blend) }));
       void askConfirm(t("ingress.askOpenBlender", { blend: baseName(blend) })).then((yes) => { if (yes) void openInBlender(blend); });
