@@ -1560,7 +1560,8 @@ def _variant_write(item: dict, params: dict, tool: dict, job=None) -> dict:
     if item.get("error") or item.get("exists"):
         return {**item, "state": "error" if item.get("error") else "exists"}
     os.makedirs(os.path.dirname(item["path"]), exist_ok=True)
-    cmd = O.gltfpack_command(tool["path"], item["source"], item["path"], params)
+    cmd = O.gltfpack_command(tool["path"], item["source"], item["path"],
+                             {**params, "threads": int(getattr(job, "threads", 0) or 0)})
     t0 = _time.time()
     if job:
         job.say(" ".join([os.path.basename(cmd[0])] + cmd[1:]))
@@ -1973,7 +1974,14 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: proposal per target, the study's textures once, the totals against the
 #: bands), the versions' files measured on this computer with a cache by
 #: sha256 kept between calls.
-BRIDGE_LEVEL = 53   # 30 also = /validate
+#: 54 = MICRO-CODA-MULTICORE: a scheduler in place of the one heavy job at a
+#: time — each job (each file of a tileset batch) declares its tool, cores,
+#: memory and the files it reads and writes, and starts when cores and memory
+#: are free under the ceiling, an instance of its tool is free and no other
+#: touches its files; ``GET /jobs/scheduler`` (also in ``GET /jobs``) says it,
+#: ``POST /jobs {step: share, share: all | half | one}`` sets how much of the
+#: machine the queue uses; a job's view says why it waits (``wait``).
+BRIDGE_LEVEL = 54   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -2831,13 +2839,18 @@ def make_handler(api):
                 import em_optimize as O
                 self._json({"ok": True, "addons": O.all_addons(), "platform": O.platform_key(),
                             "folder": str(O.addons_dir()), "machine": O.machine()})
+            elif route == "/jobs/scheduler":
+                # MICRO-CODA-MULTICORE · the scheduler: per tool, the cores and
+                # memory in use against the ceiling, who waits and why
+                import em_optimize as O
+                self._json(O.SCHED.view())
             elif route == "/jobs":
                 # MICRO-OTTIMIZZA-1 · one job (its new lines since N), or them all
                 import em_optimize as O
                 q = urllib.parse.parse_qs(parsed.query)
                 jid = (q.get("id") or [""])[0]
                 if not jid:
-                    self._json({"ok": True, "jobs": O.listing()})
+                    self._json({"ok": True, "jobs": O.listing(), "scheduler": O.SCHED.view()})
                 else:
                     job = O.get(jid)
                     if job is None:
@@ -3673,7 +3686,9 @@ def make_handler(api):
                     items.append(it)
             combined = self._tileset_combined(body, items) if body.get("combine") else None
             ceiling = O.memory_ceiling_mb()
-            workers = max(1, min(4, (os.cpu_count() or 4) // 4))
+            # MICRO-CODA-MULTICORE · as many side by side as the scheduler
+            # lets Obj2Tiles run (shared with the other batches)
+            workers = O.SCHED.budget()["tools"]["obj2tiles"]["max"]
             val = O.validator_tool()
             node = O.node_tool()
             return {"ok": True, "tool": tool, "items": items, "recognized": recognized, "combined": combined,
@@ -3728,6 +3743,15 @@ def make_handler(api):
             ``{kind: "pack3tz", folder, root?}`` · ``{kind: "addon", id,
             step: install}`` → 202 ``{job}``; ``{step: "cancel", id}``."""
             import em_optimize as O
+            if body.get("step") == "share":
+                # MICRO-CODA-MULTICORE · «quanto della macchina usare»
+                share = str(body.get("share") or "")
+                if share not in O.SHARES:
+                    self._fail(400, f"share is one of {', '.join(O.SHARES)}")
+                    return
+                O.SCHED.set_share(share)
+                self._json(O.SCHED.view())
+                return
             if body.get("step") == "cancel":
                 ok = O.cancel(str(body.get("id") or ""), body.get("item"))
                 self._json({"ok": ok} if ok else {"ok": False, "error": "no such job"}, 200 if ok else 404)
@@ -3789,8 +3813,13 @@ def make_handler(api):
                         done.append(_variant_write(item, params, tool, job))
                         job.result = {"tool": tool, "outputs": done, "parameters": _variant_parameters(params)}
                     return {"tool": tool, "outputs": done, "parameters": _variant_parameters(params)}
+                live = [p for p in planned if not p.get("error") and not p.get("exists")]
                 job = O.submit("variants", {"sources": [p["source"] for p in planned], **params}, target,
-                               label=f"gltfpack · {params['destination']}")
+                               label=f"gltfpack · {params['destination']}",
+                               tool="ktx2" if params.get("ktx2") else "gltfpack",
+                               estimate_mb=max([O.gltfpack_memory_mb(p.get("bytes_in") or 0, bool(params.get("ktx2")))
+                                                for p in live] or [0]) or None,
+                               reads=[p["source"] for p in live], writes=[p["path"] for p in live])
                 self._json({"ok": True, "job": job.id}, 202)
             elif kind == "pack3tz":
                 if not body.get("folder"):
@@ -3803,7 +3832,9 @@ def make_handler(api):
                     if status != 200:
                         raise RuntimeError(payload.get("error") or status)
                     return payload
-                job = O.submit("pack3tz", {"folder": str(body["folder"])}, target, label=".3tz")
+                folder = str(body["folder"]).rstrip("/\\")
+                job = O.submit("pack3tz", {"folder": str(body["folder"])}, target, label=".3tz",
+                               tool="pack", reads=[folder], writes=[folder + ".3tz"])
                 self._json({"ok": True, "job": job.id}, 202)
             elif kind == "addon":
                 aid = str(body.get("id") or "")
@@ -3814,7 +3845,8 @@ def make_handler(api):
                     self._json({"ok": True, "addon": O.remove(aid)})
                     return
                 job = O.submit("addon", {"id": aid}, lambda j: O.install(aid, j),
-                               label=f"{O.ADDONS[aid]['name']} {O.addon_state(aid)['version'] or ''}".strip())
+                               label=f"{O.ADDONS[aid]['name']} {O.addon_state(aid)['version'] or ''}".strip(),
+                               tool="addon", writes=[str(O.addons_dir() / aid)])
                 self._json({"ok": True, "job": job.id}, 202)
             else:
                 self._fail(400, f"unknown job kind {kind!r}")
@@ -4029,7 +4061,7 @@ def make_handler(api):
                 return {"ok": False, "error": (err[1] if err else "a .blend is wanted")}
             plan = {"ok": True, "op": op, "blender": blender, "blend": blend, "object": "",
                     "source": blend, "outputs": [], "heavy": op == "apply_use",
-                    "estimate_mb": BL.memory_mb("objects" if op == "measure" else "prepare",
+                    "estimate_mb": BL.memory_mb("objects" if op == "measure" else "prepare_blend",
                                                 os.path.getsize(blend)),
                     "ceiling_mb": O.memory_ceiling_mb()}
             if op == "apply_use":
@@ -4075,7 +4107,9 @@ def make_handler(api):
             what = {"measure": "measure for a use", "apply_use": "prepare for a use"}[op]
             job = O.submit("blender", {"op": op, "sources": [plan["blend"]]}, target,
                            heavy=plan["heavy"], estimate_mb=plan["estimate_mb"],
-                           label=f"Blender · {what} · {os.path.basename(plan['blend'])}")
+                           label=f"Blender · {what} · {os.path.basename(plan['blend'])}",
+                           tool="blender" if op == "apply_use" else "blender_read", reads=[plan["blend"]],
+                           writes=[o["path"] for o in plan.get("outputs") or [] if o.get("path")])
             self._json({"ok": True, "job": job.id, "plan": plan}, 202)
 
         # ── MICRO-BLEND-OFFICINA-1 · the .blend as a folder, checked ─────────
@@ -4211,7 +4245,11 @@ def make_handler(api):
             job = O.submit("blender", {"op": op, "sources": [blend]}, target, heavy=heavy,
                            estimate_mb=BL.memory_mb("objects" if op == "inventory" else "prepare",
                                                     os.path.getsize(blend)),
-                           label=f"Blender · {what} · {os.path.basename(blend)}")
+                           label=f"Blender · {what} · {os.path.basename(blend)}",
+                           # blend_apply saves the .blend: it writes it; compose writes a new one
+                           tool="blender" if heavy else "blender_read",
+                           reads=[blend] if op != "blend_apply" else [],
+                           writes=[blend] if op == "blend_apply" else [out_path] if op == "compose" else [])
             self._json({"ok": True, "job": job.id, "session": rule}, 202)
 
         def _compose_plan(self, body):
@@ -4580,6 +4618,7 @@ def make_handler(api):
                         "result": run["result"] or {}}
 
             job = O.submit("blender", {"op": "compose_graph", "sources": [out_path]}, target, heavy=True,
+                           tool="blender", writes=[out_path],
                            estimate_mb=BL.memory_mb("prepare", size),
                            label=f"Blender · compose from the graph · {os.path.basename(out_path)}")
             self._json({"ok": True, "job": job.id, "fetch": len(fetch)}, 202)
@@ -4717,6 +4756,11 @@ def make_handler(api):
             name = os.path.basename(plan.get("source") or plan.get("blend") or blender)
             job = O.submit("blender", {"op": op, "sources": [plan.get("source") or plan.get("blend") or ""]}, target,
                            heavy=plan["heavy"], estimate_mb=plan["estimate_mb"],
+                           # a probe asks nothing (no file, a few seconds); the
+                           # objects of a .blend read it; the ways write versions
+                           tool=None if op == "probe" else "blender_read" if op == "objects" else "blender",
+                           reads=[x for x in (plan.get("source"), plan.get("blend")) if x],
+                           writes=[o["path"] for o in plan.get("outputs") or [] if o.get("path")],
                            label=f"Blender · {what}" + (f" · {name}" if op != "probe" else ""))
             self._json({"ok": True, "job": job.id, "plan": plan}, 202)
 

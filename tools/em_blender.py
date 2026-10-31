@@ -626,8 +626,10 @@ def runner_path() -> str:
     return str(p)
 
 
-def command(blender: str, args: dict, blend: str = "") -> list:
-    cmd = [blender, "-b"]
+def command(blender: str, args: dict, blend: str = "", threads: int = 0) -> list:
+    """``threads`` (MICRO-CODA-MULTICORE): the cores the scheduler gave this
+    instance, ``--threads N`` before the file (0: Blender takes them all)."""
+    cmd = [blender] + (["--threads", str(int(threads))] if threads else []) + ["-b"]
     if blend:
         cmd.append(blend)
     return cmd + ["--python-exit-code", "1", "--python", runner_path(), "--", json.dumps(args)]
@@ -707,7 +709,17 @@ def memory_mb(op: str, bytes_in: int, texture_bytes: int = 0) -> int:
     mb_in = max(0, bytes_in) / (1024 * 1024)
     tex = max(0, texture_bytes) / (1024 * 1024)
     if op == "objects":
-        return 600
+        # a .blend opened to read it (MICRO-CODA-MULTICORE, measured on
+        # Templu Mare: GreatTemple_2026_v2.blend 126 MB → 1.374 MB,
+        # TempluMare_2021.blend 514 MB → 2.201 MB); 600 without a file
+        return int(1100 + 2.5 * mb_in) if mb_in else 600
+    if op == "prepare_blend":
+        # «Prepare for a use» on ONE master inside a .blend (MICRO-CODA-
+        # MULTICORE, measured on Templu Mare: GreatTemple_2026_v2.blend 126 MB
+        # → 4,0–4,4 GB, TempluMare_2021.blend 514 MB → 8,0–9,1 GB); the rule
+        # below, made on an OBJ, said 5,7 and 21 GB — a whole .blend is not
+        # the object prepared
+        return int(3200 + 12.5 * mb_in)
     base = 700 + 40 * mb_in + 6 * tex
     return int(base * (1.2 if op == "lod_set" else 1.0))
 
@@ -716,7 +728,7 @@ def run_op(job, blender: str, args: dict, blend: str = "", timeout: float = 4 * 
     """One Blender operation as the job's process: progress from the runner's and
     3DSC's lines, cancel ends Blender, a Blender silent for 20 minutes is killed.
     → the runner's result (raises on failure)."""
-    cmd = command(blender, args, blend)
+    cmd = command(blender, args, blend, threads=int(getattr(job, "threads", 0) or 0))
     job.say(" ".join([os.path.basename(cmd[0])] + [c if len(c) < 200 else c[:200] + "…" for c in cmd[1:]]))
     result: dict = {}
 

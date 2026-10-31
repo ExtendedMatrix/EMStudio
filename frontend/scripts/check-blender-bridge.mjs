@@ -164,12 +164,19 @@ try {
   r = await post("/jobs", { kind: "blender", op: "lod_set", source: `${fsroot}/RB/LOD1/OB_fail.obj` });
   v = await until(get, r.j.job);
   ok(v.state === "failed" && /asked to fail/.test(v.error ?? ""), "a Blender error is the job's answer, said");
+  // MICRO-CODA-MULTICORE · «one at a time» (Settings): the second waits and
+  // says why; with «all» (the default) two Blender run side by side
+  await post("/jobs", { step: "share", share: "one" });
   const slow = await post("/jobs", { kind: "blender", op: "lod_set", source: `${fsroot}/RB/LOD1/OB_slow.obj` });
   await sleep(800);
   const second = await post("/jobs", { kind: "blender", op: "atlas", source: `${fsroot}/RB/LOD1/OB_fail.obj` });
   await sleep(600);
   const w = (await get(`/jobs?id=${second.j.job}`)).j;
-  ok(w.state === "queued" && w.stage === "waiting", "a second heavy Blender job waits for the first");
+  ok(w.state === "queued" && w.wait?.code === "one", "«one at a time»: a second Blender job waits for the first, and says why");
+  await post("/jobs", { step: "share", share: "all" });
+  await sleep(500);
+  const w2 = (await get(`/jobs?id=${second.j.job}`)).j;
+  ok(w2.state !== "queued", `«all»: it starts beside the first (${w2.state})`);
   const t0 = Date.now();
   await post("/jobs", { step: "cancel", id: slow.j.job });
   v = await until(get, slow.j.job, 10000);

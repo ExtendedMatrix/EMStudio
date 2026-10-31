@@ -13914,7 +13914,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 53;   // 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 54;   // 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -34585,6 +34585,8 @@ async function loadAddons(force = false): Promise<AddonState[] | null> {
 interface BgJob extends JobView { next: number; lines: string[]; result?: unknown; error?: string | null;
   /** MICRO-OTTIMIZZA-2 · a batch's files, each with its state, share and cancel */
   items?: JobItemView[];
+  /** MICRO-CODA-MULTICORE · the queue's item that started it */
+  owner?: string;
   done: Promise<BgJob>; settle: (j: BgJob) => void }
 const bgJobs = new Map<string, BgJob>();
 let bgTimer: ReturnType<typeof setTimeout> | null = null;
@@ -34592,6 +34594,7 @@ let bgTimer: ReturnType<typeof setTimeout> | null = null;
 /** `POST /jobs` → the job, followed until it ends (the promise). Null when the
  *  bridge refuses it (its reason toasted) or is older than level 43. */
 async function startJob(body: Record<string, unknown>, label: string): Promise<BgJob | null> {
+  await pushQueueShare();
   let r: Response;
   try {
     r = await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -34609,6 +34612,8 @@ function trackJob(id: string, kind: string, label: string): BgJob {
   const done = new Promise<BgJob>((res) => { settle = res; });
   const job: BgJob = { id, kind, label, state: "queued", progress: 0, stage: "",
     next: 0, lines: [], done, settle };
+  // MICRO-CODA-MULTICORE · the queue's item whose call is starting: its job
+  if (ownerNow) { job.owner = ownerNow.id; ownerNow.release(); ownerNow = null; }
   bgJobs.set(job.id, job);
   paintJobs();
   pollJobs();
@@ -34625,7 +34630,7 @@ function pollJobs(): void {
       try {
         const r = await fetch(`${await bridgeUrl()}/jobs?id=${encodeURIComponent(job.id)}&since=${job.next}`, { cache: "no-store" });
         const v = await r.json().catch(() => ({})) as { state?: string; progress?: number; stage?: string; lines?: string[];
-          next?: number; result?: unknown; error?: string | null; items?: JobItemView[] };
+          next?: number; result?: unknown; error?: string | null; items?: JobItemView[]; wait?: JobView["wait"] };
         if (r.status === 404) { job.state = "failed"; job.error = t("files.jobLost"); }
         else {
           if (v.state && v.state !== job.state) changed = true;
@@ -34636,13 +34641,19 @@ function pollJobs(): void {
           job.next = v.next ?? job.next;
           job.result = v.result;
           job.error = v.error;
+          if (v.wait !== undefined && JSON.stringify(v.wait) !== JSON.stringify(job.wait ?? null)) changed = true;
+          job.wait = v.wait ?? null;
           if (v.items?.length) job.items = v.items;
         }
       } catch { /* the bridge is busy: asked again */ }
       if (!jobRunning(job)) { changed = true; job.settle(job); }
     }
     paintJobs();
-    if (changed) renderStorage();
+    // MICRO-CODA-MULTICORE · the scheduler said again, the queue painted and
+    // pumped (an item whose job waited may let the next one go)
+    if (live.length) await loadScheduler();
+    if (changed) { paintQueue(); pumpQueue(); renderStorage(); }
+    else paintSchedLine();
     if ([...bgJobs.values()].some(jobRunning)) pollJobs();
   }, 600);
 }
@@ -34704,6 +34715,7 @@ function paintJobs(): void {
  *  ended. */
 function jobItemText(it: JobItemView): string {
   const name = it.name ?? baseName(it.source);
+  if (it.state === "queued" && it.wait?.code) return `${name} · ${waitWords(it.wait)}`;
   if (it.state === "running") return `${name} · ${t(`files.tilesStage.${it.stage || "decimation"}`, undefined, it.stage ?? "")} ${Math.round(it.progress * 100)}%`;
   return `${name} · ${t(`files.tilesItem.${it.state}`, undefined, it.state)}${it.state === "refused" && it.stage ? ` — ${it.stage}` : ""}`;
 }
@@ -34719,6 +34731,7 @@ function confirmInline(el: HTMLElement, ask: string): boolean {
 }
 
 function jobText(job: BgJob): string {
+  if (job.state === "queued" && job.wait?.code) return `${t("files.jobQueued", { what: job.label })} — ${waitWords(job.wait)}`;
   if (job.state === "queued") return t("files.jobQueued", { what: job.label });
   if (job.state === "running") return jobLine(job);
   if (job.state === "done") return t("files.jobDone", { what: job.label });
@@ -34982,6 +34995,16 @@ function paintAddonsSettings(): void {
     sum.dataset.enough = enough.join(",");
     sum.append(" ", tabTip(t("settings.addonsEnoughTip")));
     host.appendChild(sum);
+    // MICRO-CODA-MULTICORE · how much of the machine the queue uses
+    const qh = document.createElement("h5");
+    qh.className = "settings-sub";
+    qh.textContent = t("settings.queueShare");
+    host.append(qh, queueShareControl("settings-queue-share"), tabLead(t("settings.queueShareHint"), "settings-hint"));
+    const sl = document.createElement("small");
+    sl.className = "settings-hint";
+    sl.dataset.alSched = "";
+    host.appendChild(sl);
+    void pushQueueShare().then(loadScheduler).then(paintSchedLine);
     const fits = list.filter((a) => a.fit?.ok !== false), not = list.filter((a) => a.fit?.ok === false);
     // the recommended first, then the optional, then what is not needed
     const rank = (a: AddonState): number => ({ recommended: 0, optional: 1, not_needed: 2, not_here: 3 })[adv.get(a.id)?.code ?? "optional"];
@@ -36117,7 +36140,13 @@ async function landSurveyTileset(win: Win, c: TsCombinedOut, outs: TsOut[], tool
 /** The .3tz as a VERSION of its model in the open graph (level «tiles»), with
  *  its checksum — without it the Viewer draws the resource as missing — and
  *  the root geometric error, the measure s3Dgraphy keeps for a tileset. */
-async function registerTileset(o: TsOut, params: Record<string, unknown>, toolVersion: string,
+/** MICRO-CODA-MULTICORE · one registration at a time: the queue's items end side by side */
+function registerTileset(o: TsOut, params: Record<string, unknown>, toolVersion: string,
+                               sources: string[] | null = null): Promise<string | null> {
+  return serialRegister(() => registerTilesetNow(o, params, toolVersion, sources));
+}
+
+async function registerTilesetNow(o: TsOut, params: Record<string, unknown>, toolVersion: string,
                                sources: string[] | null = null): Promise<string | null> {
   if (!store?.doc) return t("files.optNoGraph");
   const me = currentIdentity();
@@ -36219,7 +36248,14 @@ async function stampDerived(source: string | string[], out: { path: string; sha2
 /** A variant registered as a VERSION of its asset in the open graph (s3Dgraphy's
  *  `api.add_version` through the bridge): the version resource and its
  *  `lod_generation` step, inserted as one step of undo. → why not, or null. */
-async function registerVersion(o: OptOut, pre: Pick<OptimizePreset, "lod" | "destination" | "use">, params: Record<string, unknown>, toolVersion: string,
+/** MICRO-CODA-MULTICORE · one registration at a time: the queue's items end side by side */
+function registerVersion(o: OptOut, pre: Pick<OptimizePreset, "lod" | "destination" | "use">, params: Record<string, unknown>, toolVersion: string,
+                               how: { technique: string; tool: string; software: { name: string; version: string }[] } | null = null,
+                               masterId = "", primitives?: Record<string, number>): Promise<string | null> {
+  return serialRegister(() => registerVersionNow(o, pre, params, toolVersion, how, masterId, primitives));
+}
+
+async function registerVersionNow(o: OptOut, pre: Pick<OptimizePreset, "lod" | "destination" | "use">, params: Record<string, unknown>, toolVersion: string,
                                how: { technique: string; tool: string; software: { name: string; version: string }[] } | null = null,
                                masterId = "", primitives?: Record<string, number>): Promise<string | null> {
   if (!store?.doc) return t("files.optNoGraph");
@@ -42235,11 +42271,97 @@ function texturesTable(ans: AL.AssetListAnswer): HTMLElement {
 
 // ── the one queue, always alive (Run / Pausa), shared with Ottimizza ───────
 
+/** MICRO-CODA-MULTICORE · the graph's writes of the queue's results go one at
+ *  a time (each asks the bridge on the graph as it is after the one before). */
+let registerChain: Promise<unknown> = Promise.resolve();
+function serialRegister<T>(f: () => Promise<T>): Promise<T> {
+  const p = registerChain.then(f, f);
+  registerChain = p.catch(() => undefined);
+  return p;
+}
+
 const assetQueue: AL.QueueItem[] = [];
 const queueCalls = new Map<string, () => Promise<void>>();
 let queueMode: AL.QueueMode = (() => { try { return localStorage.getItem(ASSET_QUEUE_MODE_KEY) === "pause" ? "pause" : "run"; } catch { return "run"; } })();
 /** true while the queue itself calls one of Ottimizza's actions: then it runs */
 let queueDirect = false;
+
+// MICRO-CODA-MULTICORE · more items in flight; the bridge's scheduler decides
+// cores, memory, instances per tool and files. Each item's jobs are its own:
+// the starts go one at a time through a gate, and the job tracked while an
+// item holds it is that item's (`trackJob`).
+const QUEUE_SHARE_KEY = "emstudio.queueShare";
+let queueShare: AL.QueueShare = (() => { try { const v = localStorage.getItem(QUEUE_SHARE_KEY); return (AL.QUEUE_SHARES as readonly string[]).includes(v ?? "") ? v as AL.QueueShare : "all"; } catch { return "all"; } })();
+let queueSharePushed = "";
+interface SchedView { share: AL.QueueShare; budget: { cores: number; memory_mb: number; one: boolean };
+  machine: { performance_cores: number; memory_mb: number }; used: { cores: number; memory_mb: number };
+  peak: { cores: number; memory_mb: number; running: number };
+  tools: Record<string, { running: number; max: number; cores: number }>;
+  running: { tool: string; label: string; cores: number; memory_mb: number; job: string | null }[];
+  waiting: { tool: string; label: string; cores: number; memory_mb: number; job: string | null; why?: { code: string; other?: string } }[] }
+let schedView: SchedView | null = null;
+let ownerNow: { id: string; release: () => void } | null = null;
+let ownerGate: Promise<void> = Promise.resolve();
+const queueStarting = new Set<string>();
+
+/** «quanto della macchina usare» told to the bridge (once per bridge and
+ *  choice; a bridge older than 54 says nothing and keeps its own). */
+async function pushQueueShare(): Promise<void> {
+  const base = await bridgeUrl().catch(() => "");
+  if (!base || queueSharePushed === `${base}|${queueShare}`) return;
+  try {
+    const r = await fetch(`${base}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ step: "share", share: queueShare }) });
+    // said once per bridge and choice, also to a bridge older than 54 (it refuses: asked no more)
+    queueSharePushed = `${base}|${queueShare}`;
+    if (r.ok) schedView = await r.json() as SchedView;
+  } catch { /* the bridge is down: said elsewhere */ }
+}
+
+async function loadScheduler(): Promise<void> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}/jobs/scheduler`, { cache: "no-store" });
+    if (r.ok) schedView = await r.json() as SchedView;
+  } catch { /* asked again at the next poll */ }
+}
+
+function setQueueShare(v: AL.QueueShare): void {
+  queueShare = v;
+  try { localStorage.setItem(QUEUE_SHARE_KEY, v); } catch { /* off */ }
+  void pushQueueShare().then(() => { paintQueue(); pumpQueue(); });
+  paintQueue();
+}
+
+/** A call of the queue's item `it` that starts a job: one start at a time
+ *  (the gate), the job tracked meanwhile is the item's; the gate opens at that
+ *  job, or when the call ends without one. */
+async function owned<T>(it: AL.QueueItem, f: () => Promise<T>): Promise<T> {
+  const prev = ownerGate;
+  let open!: () => void;
+  ownerGate = new Promise<void>((res) => { open = res; });
+  queueStarting.add(it.id);
+  await prev;
+  let opened = false;
+  const release = (): void => { if (opened) return; opened = true; queueStarting.delete(it.id); if (ownerNow?.id === it.id) ownerNow = null; open(); };
+  ownerNow = { id: it.id, release };
+  try { return await f(); } finally { release(); }
+}
+
+/** The items of the queue the page may send now (`AL.nextToRun`): the slots
+ *  from the share and the scheduler's cores; held while one item is starting
+ *  or its job waits at the bridge. */
+function queueRoom(): AL.QueueRoom {
+  const mine = new Set(assetQueue.filter((x) => x.state === "running").map((x) => x.id));
+  const held = queueStarting.size + [...bgJobs.values()].filter((j) => j.owner && mine.has(j.owner) && j.state === "queued").length;
+  return { slots: AL.queueSlots(queueShare, schedView?.budget.cores), held };
+}
+
+/** A reason in words: «aspetta memoria», «aspetta Blender libero»… */
+function waitWords(w: { code: string; other?: string }): string {
+  const other = w.other ?? "";
+  if (w.code === "tool") return t("al.wait.tool", { tool: t(`al.stool.${other}`, undefined, other) });
+  return t(`al.wait.${w.code}`, { other: other ? ` (${other})` : "" }, w.code);
+}
 
 function queueAdd(items: AL.QueueItem[]): void {
   AL.enqueue(assetQueue, items);
@@ -42258,35 +42380,43 @@ function viaQueue(label: string, run: () => Promise<void>): boolean {
 }
 
 function pumpQueue(): void {
-  const it = AL.nextToRun(assetQueue, queueMode);
+  const it = AL.nextToRun(assetQueue, queueMode, queueRoom());
   if (!it) return;
   it.state = "running";
+  // starting until its first job is at the bridge (`owned`), or it ends
+  queueStarting.add(it.id);
   paintQueue();
   void (async () => {
     try {
       const call = queueCalls.get(it.id);
-      const why = call ? await runJudged(call) : await runAssetItem(it);
+      const why = call ? await runJudged(call, it) : await runAssetItem(it);
       it.state = why === null ? "done" : "failed";
       if (why) { it.note = why; logWarn(`${it.label}: ${why}`); }
     } catch (e) { it.state = "failed"; it.note = String((e as Error).message ?? e); }
+    queueStarting.delete(it.id);
     queueCalls.delete(it.id);
     if (it.from === "list" && it.state === "done") void askAssetList();
     paintQueue();
     renderStorage();
     pumpQueue();
   })();
+  // the next one too, when there is room: the start of this one holds it
+  // until its job is at the bridge (`queueRoom`), then the poll pumps again
+  pumpQueue();
 }
 
 /** One of Ottimizza's ways run by the queue, judged by its job: none started
  *  (the bridge refused it, an add-on missing — its toast said why) or one that
  *  ended otherwise than done → its words; null when done. */
-async function runJudged(f: () => Promise<void>): Promise<string | null> {
+async function runJudged(f: () => Promise<void>, it: AL.QueueItem): Promise<string | null> {
   const before = new Set(bgJobs.keys());
-  queueDirect = true;
-  let p: Promise<void>;
-  try { p = f(); } finally { queueDirect = false; }
-  await p;
-  const mine = [...bgJobs.values()].filter((j) => !before.has(j.id));
+  await owned(it, () => {
+    queueDirect = true;
+    let p: Promise<void>;
+    try { p = f(); } finally { queueDirect = false; }
+    return p;
+  });
+  const mine = [...bgJobs.values()].filter((j) => !before.has(j.id) && j.owner === it.id);
   if (!mine.length) return t("al.noJob");
   const bad = mine.find((j) => j.state !== "done");
   return bad ? jobText(bad) : null;
@@ -42329,10 +42459,18 @@ function queuePanel(): HTMLElement {
   }
   h.append(hb, seg);
   box.appendChild(h);
+  // MICRO-CODA-MULTICORE · how much of the machine, and the scheduler's line
+  box.appendChild(queueShareControl("al-share"));
+  const sl = document.createElement("small");
+  sl.className = "al-sched files-hint";
+  sl.dataset.alSched = "";
+  box.appendChild(sl);
   const list = document.createElement("div");
   list.className = "al-jobs";
   box.appendChild(list);
   paintQueueInto(list);
+  paintSchedLine();
+  if (!schedView) void pushQueueShare().then(loadScheduler).then(paintSchedLine);
   const jobs = jobRows(["variants", "blender", "tileset"]);
   if (jobs) box.appendChild(jobs);
   return box;
@@ -42340,6 +42478,9 @@ function queuePanel(): HTMLElement {
 
 function paintQueueInto(list: HTMLElement): void {
   list.textContent = "";
+  const room = queueRoom();
+  const full = queueMode === "run" && (room.held > 0 || assetQueue.filter((x) => x.state === "running").length >= room.slots);
+  const firstHeld = full ? assetQueue.find((x) => x.state === "waiting")?.id ?? "" : "";
   // few words in Ottimizza (its rule): «Vuota», the sentence in the tooltip
   if (!assetQueue.length) { const e = document.createElement("small"); e.className = "al-empty"; e.textContent = t("al.queueEmptyShort"); e.title = t("al.queueEmpty"); list.appendChild(e); return; }
   for (const it of assetQueue) {
@@ -42356,6 +42497,10 @@ function paintQueueInto(list: HTMLElement): void {
     l.textContent = it.label;
     l.title = it.note || it.label;
     r.append(s, l);
+    // MICRO-CODA-MULTICORE · why it waits: at the bridge (its job, a file of
+    // its batch), or here, the first in line while the room is full
+    const w = AL.waitOf(it, [...bgJobs.values()].filter((j) => j.owner === it.id && jobRunning(j)), it.id === firstHeld);
+    if (w) { const ws = document.createElement("small"); ws.className = "al-wait"; ws.dataset.wait = w.code; ws.textContent = ` ${waitWords(w)}`; r.appendChild(ws); }
     if (it.state === "waiting") {
       for (const [d, g] of [[-1, "↑"], [1, "↓"]] as const) {
         const b = document.createElement("button");
@@ -42388,7 +42533,48 @@ function paintQueueInto(list: HTMLElement): void {
   }
 }
 
+/** The share in a segmented control (the queue's panel, Settings): all of
+ *  the machine, half, one job at a time. */
+function queueShareControl(cls: string): HTMLElement {
+  const seg = document.createElement("span");
+  seg.className = `files-seg ${cls}`;
+  seg.dataset.queueShare = "";
+  seg.title = t("al.shareTitle");
+  const lab = document.createElement("small");
+  lab.textContent = `${t("al.share")} `;
+  seg.appendChild(lab);
+  for (const v of AL.QUEUE_SHARES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.action = `queue-share-${v}`;
+    b.textContent = t(`al.share.${v}`);
+    b.setAttribute("aria-pressed", String(queueShare === v));
+    b.onclick = () => setQueueShare(v);
+    seg.appendChild(b);
+  }
+  return seg;
+}
+
+/** «Blender 2/3 · Obj2Tiles 1/3 · core 9/11 · memoria 6,1/38,4 GB · 2 in attesa» */
+function schedLine(v: SchedView): string {
+  const tools = Object.entries(v.tools).filter(([, x]) => x.running).map(([k, x]) => `${t(`al.stool.${k}`, undefined, k)} ${x.running}/${x.max}`);
+  return t("al.sched", { tools: tools.length ? `${tools.join(" · ")} · ` : "", cu: String(v.used.cores), cb: String(v.budget.cores),
+    mu: formatMb(v.used.memory_mb, getLocale()), mb: formatMb(v.budget.memory_mb, getLocale()),
+    waiting: v.waiting.length ? ` · ${t("al.schedWaiting", { n: String(v.waiting.length) })}` : "" });
+}
+
+function paintSchedLine(): void {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-al-sched]")) {
+    el.textContent = schedView ? schedLine(schedView) : "";
+    el.title = schedView ? [t("al.schedTitle", { cores: String(schedView.machine.performance_cores), memory: formatMb(schedView.machine.memory_mb, getLocale()) }),
+      ...schedView.waiting.map((w) => `⧗ ${w.label} — ${w.why ? waitWords(w.why) : ""}`)].join("\n") : "";
+  }
+  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-queue-share] [data-action^='queue-share-']"))
+    b.setAttribute("aria-pressed", String(b.dataset.action === `queue-share-${queueShare}`));
+}
+
 function paintQueue(): void {
+  paintSchedLine();
   for (const el of document.querySelectorAll<HTMLElement>("[data-al-queue] .al-jobs")) paintQueueInto(el);
   for (const el of document.querySelectorAll<HTMLElement>("[data-al-queue] .files-sec-h small")) {
     const n = assetQueue.filter((x) => x.state === "waiting" || x.state === "running").length;
@@ -42413,19 +42599,19 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   if (src.kind === "none") return t("al.noSource");
   if (it.tool === "tileset") {
     if (src.kind !== "files") return t("al.noMesh");
-    return runJudged(() => runTileset(win, [src.path], 1));
+    return runJudged(() => runTileset(win, [src.path], 1), it);
   }
   if (src.kind === "files") {
     const from = a.versions.find((v) => v.id === src.version);
     const ratio = it.tool === "ktx2" ? 1 : it.triangles && from?.triangles ? Math.min(1, it.triangles / from.triangles) : base.ratio;
     const pre: OptimizePreset = { ...base, ratio, texturePx: it.texture ?? 0, ktx2: !!it.ktx2, meshopt: true };
-    return runJudged(() => runOptimize(win, pre, [src.path], 0));
+    return runJudged(() => runOptimize(win, pre, [src.path], 0), it);
   }
   // a master inside a .blend: EM Tools' «Prepare for a use» in a background
   // Blender (the profiles first: the version registered declares their uses)
   if (!useState.profiles) await loadUseProfiles();
-  const job = await startJob({ kind: "blender", op: "measure", blend: src.path, objects: src.block ? [src.block] : [] },
-    t("files.useMeasuring", { name: src.block || baseName(src.path) }));
+  const job = await owned(it, () => startJob({ kind: "blender", op: "measure", blend: src.path, objects: src.block ? [src.block] : [] },
+    t("files.useMeasuring", { name: src.block || baseName(src.path) })));
   if (!job) return t("al.blenderNo");
   const end = await job.done;
   if (end.state !== "done") return jobText(end);
@@ -42446,7 +42632,7 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   }
   prepareCtx.set(src.path, { master: src.version, model: a.id, name: src.block || a.name, profile });
   useState.measured.set(useKey([], src.path), m as never);
-  return runJudged(() => applyUse(src.path, d, ids, src.block || a.name, levelFor(d, ids), params));
+  return runJudged(() => applyUse(src.path, d, ids, src.block || a.name, levelFor(d, ids), params), it);
 }
 
 /** A row clicked: on the right, Ottimizza on that asset (the version it
@@ -42597,7 +42783,13 @@ async function archiveStates(): Promise<void> {
  *  but a background Blender has no graph (EM Tools says «not registered»):
  *  registered here, as gltfpack's are, on the master «Prepara» named — or the
  *  one the graph says is the model inside that .blend. */
-async function registerUseVersion(blend: string, profile: string, model: string, level: string,
+/** MICRO-CODA-MULTICORE · one registration at a time: the queue's items end side by side */
+function registerUseVersion(blend: string, profile: string, model: string, level: string,
+                                  res: { entry?: string; bytes?: number; measured?: { triangles?: number } }): Promise<void> {
+  return serialRegister(() => registerUseVersionNow(blend, profile, model, level, res));
+}
+
+async function registerUseVersionNow(blend: string, profile: string, model: string, level: string,
                                   res: { entry?: string; bytes?: number; measured?: { triangles?: number } }): Promise<void> {
   if (!store || !res.entry) return;
   const ctx = prepareCtx.get(blend);
@@ -42614,7 +42806,7 @@ async function registerUseVersion(blend: string, profile: string, model: string,
   if (!master) { logWarn(t("files.useNotRegistered", { name, why: t("files.useNoMaster") })); return; }
   const prof = useState.profiles?.find((p) => p.id === profile) as (UseProfile & { uses?: string[]; destination?: string }) | undefined;
   const sha = await bridgeChecksum(res.entry);
-  const why = await registerVersion({ source: blend, path: res.entry, name, sha256: sha ?? undefined, bytes: res.bytes,
+  const why = await registerVersionNow({ source: blend, path: res.entry, name, sha256: sha ?? undefined, bytes: res.bytes,
     facts: undefined } as unknown as OptOut,
     { lod: level, destination: prof?.destination ?? profile, use: prof?.uses ?? [] },
     { profile, model, level }, "", { technique: "prepare_for_use", tool: "EM Tools · Prepare for a use",

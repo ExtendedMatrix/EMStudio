@@ -350,11 +350,15 @@ export function formatMb(mb: number, locale = "it"): string {
 
 /** A file of a batch job, as its row says it: its name, its stage, its share. */
 export interface JobItemView { source: string; name?: string | null; state: string; progress: number; stage?: string;
-  estimate_mb?: number | null; cancel?: boolean }
+  estimate_mb?: number | null; cancel?: boolean;
+  /** MICRO-CODA-MULTICORE · why the file waits for its Obj2Tiles */
+  wait?: { code: string; other?: string; say?: string } | null }
 export const jobItemOpen = (i: JobItemView): boolean => i.state === "queued" || i.state === "running";
 
 /** A background job as the status line says it: its label, its share done. */
-export interface JobView { id: string; kind: string; label: string; state: string; progress: number; stage?: string }
+export interface JobView { id: string; kind: string; label: string; state: string; progress: number; stage?: string;
+  /** MICRO-CODA-MULTICORE · why it waits at the bridge's scheduler */
+  wait?: { code: string; other?: string; say?: string } | null }
 export function jobLine(j: JobView): string {
   const pct = j.state === "running" ? ` ${Math.round(Math.max(0, Math.min(1, j.progress)) * 100)}%` : "";
   return `${j.label}${j.stage ? ` · ${j.stage}` : ""}${pct}`;

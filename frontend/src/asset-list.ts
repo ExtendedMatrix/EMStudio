@@ -271,8 +271,20 @@ export interface QueueItem {
    *  actions carry only their label (their call is the page's) */
   asset_id?: string; asset?: string; target?: TargetKey; tool?: Tool; triangles?: number | null; texture?: number | null;
   ktx2?: boolean; from?: "list" | "optimize"; job?: string;
+  /** MICRO-CODA-MULTICORE · why it waits (the bridge's scheduler, or its turn
+   *  in the page): a code of `WAIT_CODES` and who it waits for */
+  wait?: { code: WaitCode; other?: string } | null;
 }
 export type QueueMode = "run" | "pause";
+/** «quanto della macchina usare»: all of it, half, one job at a time */
+export type QueueShare = "all" | "half" | "one";
+export const QUEUE_SHARES: readonly QueueShare[] = ["all", "half", "one"];
+export const WAIT_CODES = ["file", "alone", "one", "tool", "turn", "memory", "cores", "page"] as const;
+export type WaitCode = typeof WAIT_CODES[number];
+/** What the page may send now: `slots` items in flight at most, `held` the
+ *  ones sent that wait at the bridge (or are still starting) — while one
+ *  waits there, the next stays here, so ↑ ↓ keep their meaning. */
+export interface QueueRoom { slots: number; held: number }
 
 let seq = 0;
 export function queueId(): string { return `q${Date.now().toString(36)}${(seq++).toString(36)}`; }
@@ -306,11 +318,41 @@ export function enqueue(q: QueueItem[], items: readonly QueueItem[]): QueueItem[
   return q;
 }
 
-/** The item to start now: in Run, the first waiting one when none runs; in
- *  Pausa, none (they pile up and start when Run is back). */
-export function nextToRun(q: readonly QueueItem[], mode: QueueMode): QueueItem | null {
-  if (mode !== "run" || q.some((x) => x.state === "running")) return null;
+/** The item to start now (MICRO-CODA-MULTICORE): in Run, the first waiting
+ *  one while fewer than `room.slots` run and none of those sent waits at the
+ *  bridge — the bridge's scheduler decides cores, memory, instances and
+ *  files; one slot is the old «one at a time». In Pausa, none (they pile up
+ *  and start when Run is back). */
+export function nextToRun(q: readonly QueueItem[], mode: QueueMode, room: QueueRoom = { slots: 1, held: 0 }): QueueItem | null {
+  if (mode !== "run") return null;
+  if (q.filter((x) => x.state === "running").length >= Math.max(1, room.slots) || room.held > 0) return null;
   return q.find((x) => x.state === "waiting") ?? null;
+}
+
+/** How many items the page keeps in flight: one for «un lavoro alla volta»,
+ *  else the cores the bridge's scheduler may use (each item takes at least
+ *  one), 4 while the bridge has not said it. */
+export function queueSlots(share: QueueShare, cores?: number | null): number {
+  if (share === "one") return 1;
+  return Math.max(1, Math.floor(cores ?? 4));
+}
+
+/** The reason an item waits, from its job at the bridge (`wait` of the job
+ *  view, or of a tileset batch's file) — or its turn in the page. */
+export function waitOf(it: QueueItem, jobs: readonly { state: string; wait?: { code: string; other?: string } | null;
+  items?: readonly { state: string; wait?: { code: string; other?: string } | null }[] }[], held: boolean): QueueItem["wait"] {
+  if (it.state === "waiting") return held ? { code: "page" } : null;
+  if (it.state !== "running") return null;
+  const known = (w?: { code: string; other?: string } | null): QueueItem["wait"] =>
+    w && (WAIT_CODES as readonly string[]).includes(w.code) ? { code: w.code as WaitCode, ...(w.other ? { other: w.other } : {}) } : null;
+  for (const j of jobs) {
+    if (j.state === "queued" && known(j.wait)) return known(j.wait);
+    if (j.state === "running" && j.items?.length && !j.items.some((r) => r.state === "running")) {
+      const w = j.items.map((r) => r.state === "queued" ? known(r.wait) : null).find(Boolean);
+      if (w) return w;
+    }
+  }
+  return null;
 }
 
 /** «togli»: a waiting item leaves the queue (a running one is cancelled by

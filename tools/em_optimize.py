@@ -685,9 +685,264 @@ class _Cancelled(Exception):
 
 _LOCK = threading.RLock()
 _JOBS: dict = {}
-#: one heavy job at a time (a tileset of the next round); light ones in parallel
-_HEAVY = threading.Semaphore(1)
 _KEEP_DONE = 20
+
+
+# ── the scheduler (MICRO-CODA-MULTICORE, E.D. 31 Oct 2026) ──────────────────
+# In place of the one heavy semaphore: each process a job starts declares its
+# tool, its cores, its memory and the files it reads and writes (a NEED); it
+# starts when there are cores and memory free under the machine's ceiling, an
+# instance of its tool free, and no other running process touches its files.
+# The decision is the pure :func:`plan_start`; :class:`Scheduler` holds the
+# tickets and wakes them.
+
+#: per tool: how many instances side by side and the cores each takes, as a
+#: function of the cores the queue may use (``C``). On E.D.'s Mac (12
+#: performance cores + 4, 64 GB): C = 11 → Blender 3 × 3 threads, Obj2Tiles
+#: 3 × 2, KTX2 2 × 4 threads, gltfpack 8 × 1.
+TOOLS = {
+    "blender": {"max": lambda c: max(1, min(4, c // 3)), "cores": lambda c: max(2, c // max(1, min(4, c // 3)))},
+    "blender_read": {"max": lambda c: 2, "cores": lambda c: 1},
+    "obj2tiles": {"max": lambda c: max(1, min(4, c // 3)), "cores": lambda c: 2},
+    "ktx2": {"max": lambda c: max(1, min(3, c // 4)), "cores": lambda c: min(4, max(1, c))},
+    "gltfpack": {"max": lambda c: max(1, min(8, c)), "cores": lambda c: 1},
+    "pack": {"max": lambda c: 2, "cores": lambda c: 1},
+    "addon": {"max": lambda c: 2, "cores": lambda c: 0},
+}
+#: «quanto della macchina usare»: all of it, half, one process at a time
+SHARES = ("all", "half", "one")
+
+
+def performance_cores() -> int:
+    """The cores a heavy tool should count on: on a Mac with two kinds, the
+    performance ones (``hw.perflevel0.physicalcpu``); elsewhere the processors
+    this process may run on."""
+    if sys.platform == "darwin":
+        try:
+            n = int(subprocess.run(["/usr/sbin/sysctl", "-n", "hw.perflevel0.physicalcpu"], capture_output=True,
+                                   text=True, timeout=3).stdout.strip() or 0)
+            if n > 0:
+                return n
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        return max(1, os.cpu_count() or 1)
+
+
+def budget(share: str, cores: int, memory_mb: int) -> dict:
+    """What the queue may use (pure): ``cores`` the performance cores less one
+    for the interface, ``memory_mb`` the ceiling (60 % of the memory); «half»
+    halves both, «one» lets one process run at a time. → ``{share, cores,
+    memory_mb, one, tools: {tool: {max, cores}}}``."""
+    share = share if share in SHARES else "all"
+    c = max(1, cores - 1)
+    mem = int(memory_mb)
+    if share == "half":
+        c, mem = max(1, c // 2), mem // 2
+    tools = {k: {"max": 1 if share == "one" else int(v["max"](c)), "cores": int(v["cores"](c))} for k, v in TOOLS.items()}
+    return {"share": share, "cores": c, "memory_mb": mem, "one": share == "one", "tools": tools}
+
+
+def _norm(path: str) -> str:
+    try:
+        return os.path.normcase(os.path.realpath(os.path.abspath(str(path)))).rstrip("/\\")
+    except (OSError, ValueError):
+        return str(path)
+
+
+def _touch(a: str, b: str) -> bool:
+    """The same file, or one inside the other (a tileset's folder and its part)."""
+    return a == b or a.startswith(b + os.sep) or b.startswith(a + os.sep)
+
+
+def _clash(n: dict, m: dict) -> bool:
+    """Two needs touch the same file: one writes what the other reads or
+    writes. Two readers of one .blend go together (a background Blender never
+    saves it unless it says it writes it)."""
+    nw, nr, mw, mr = n.get("writes") or (), n.get("reads") or (), m.get("writes") or (), m.get("reads") or ()
+    return any(_touch(a, b) for a in nw for b in (*mw, *mr)) or any(_touch(a, b) for a in nr for b in mw)
+
+
+def plan_start(waiting: list, running: list, bud: dict) -> list:
+    """Who starts now (pure). ``waiting`` in the queue's order and ``running``:
+    needs ``{tool, cores, memory_mb, reads, writes, label}``. → one entry per
+    waiting need: ``None`` (it starts: counted at once for the ones after it)
+    or why not ``{code, other?}``:
+
+    - ``file`` — a process running, or one before it in the queue, touches
+      its file (it waits that one: two jobs on the same file never together);
+    - ``alone`` — it alone passes the ceiling and starts when nothing runs,
+      or one such runs now;
+    - ``one`` — «un lavoro alla volta»;
+    - ``tool`` — every instance of its tool is busy;
+    - ``turn`` — one before it waits for cores or memory: it keeps its turn;
+    - ``memory`` / ``cores`` — not enough free under the ceiling."""
+    run = list(running)
+    out = []
+    blocked_res = None
+    ahead: list = []
+    for n in waiting:
+        why = None
+        lim = (bud.get("tools") or {}).get(n.get("tool")) or {"max": 1 << 30}
+        cores, mem = int(n.get("cores") or 0), int(n.get("memory_mb") or 0)
+        alone = cores > bud["cores"] or mem > bud["memory_mb"]
+        other = next((r for r in run if _clash(n, r)), None) or next((a for a in ahead if _clash(n, a)), None)
+        if other is not None:
+            why = {"code": "file", "other": other.get("label") or ""}
+        elif any(r.get("alone") for r in run):
+            why = {"code": "alone", "other": next(r for r in run if r.get("alone")).get("label") or ""}
+        elif alone and run:
+            why = {"code": "alone"}
+        elif bud.get("one") and run:
+            why = {"code": "one", "other": run[0].get("label") or ""}
+        elif sum(1 for r in run if r.get("tool") == n.get("tool")) >= lim["max"]:
+            why = {"code": "tool", "other": n.get("tool")}
+        elif blocked_res is not None and (cores or mem):
+            why = {"code": "turn", "other": blocked_res.get("label") or ""}
+        elif not alone and mem and sum(int(r.get("memory_mb") or 0) for r in run) + mem > bud["memory_mb"]:
+            why = {"code": "memory"}
+        elif not alone and cores and sum(int(r.get("cores") or 0) for r in run) + cores > bud["cores"]:
+            why = {"code": "cores"}
+        if why is None:
+            run.append({**n, "alone": alone})
+        else:
+            ahead.append(n)
+            if why["code"] in ("memory", "cores", "alone") and blocked_res is None:
+                blocked_res = n
+        out.append(why)
+    return out
+
+
+#: the reasons in words (the page says them in its language from ``code``)
+WAIT_SAY = {"file": "waits for the same file", "alone": "waits to run alone (over the ceiling)",
+            "one": "waits: one job at a time", "tool": "waits for a free instance of its tool",
+            "turn": "waits its turn", "memory": "waits for memory", "cores": "waits for free cores"}
+
+
+class Scheduler:
+    """The tickets: :meth:`enter` (in order, at once), :meth:`wait` (blocks
+    until :func:`plan_start` lets it start, or the cancel), :meth:`release`."""
+
+    def __init__(self, share: str = "all", cores=None, memory_mb=None):
+        self.cond = threading.Condition(threading.RLock())
+        self.share = share if share in SHARES else "all"
+        self._cores = cores
+        self._memory = memory_mb
+        self.waiting: list = []      # [ticket]
+        self.running: dict = {}      # id → ticket
+        self.seq = 0
+        self.peak = {"cores": 0, "memory_mb": 0, "running": 0}
+
+    def budget(self) -> dict:
+        return budget(self.share, self._cores if self._cores else performance_cores(),
+                      self._memory if self._memory else memory_ceiling_mb())
+
+    def need(self, tool: str, *, cores=None, memory_mb=0, reads=(), writes=(), label: str = "", job=None) -> dict:
+        bud = self.budget()
+        lim = bud["tools"].get(tool) or {"cores": 1}
+        return {"tool": tool, "cores": int(lim["cores"] if cores is None else cores), "memory_mb": int(memory_mb or 0),
+                "reads": [_norm(p) for p in reads if p], "writes": [_norm(p) for p in writes if p],
+                "label": label, "job": job}
+
+    def enter(self, need: dict) -> dict:
+        with self.cond:
+            self.seq += 1
+            t = {**need, "id": self.seq, "state": "waiting", "why": None, "since": time.time()}
+            self.waiting.append(t)
+            self._pump()
+            return t
+
+    def wait(self, t: dict, cancelled=lambda: False) -> dict:
+        with self.cond:
+            while t["state"] == "waiting":
+                if cancelled():
+                    self.waiting.remove(t)
+                    t["state"] = "cancelled"
+                    self._pump()
+                    raise _Cancelled()
+                self.cond.wait(0.25)
+            return t
+
+    def release(self, t: dict):
+        with self.cond:
+            if t["state"] == "waiting":
+                self.waiting.remove(t)
+            self.running.pop(t["id"], None)
+            t["state"] = "ended"
+            self._pump()
+
+    def set_share(self, share: str):
+        with self.cond:
+            self.share = share if share in SHARES else "all"
+            self._pump()
+
+    def _pump(self):
+        bud = self.budget()
+        whys = plan_start(self.waiting, list(self.running.values()), bud)
+        for t, why in list(zip(self.waiting, whys)):
+            t["why"] = why
+            if why is None:
+                self.waiting.remove(t)
+                t["state"] = "running"
+                t["alone"] = t["cores"] > bud["cores"] or t["memory_mb"] > bud["memory_mb"]
+                t["started"] = time.time()
+                self.running[t["id"]] = t
+        used_c = sum(x["cores"] for x in self.running.values())
+        used_m = sum(x["memory_mb"] for x in self.running.values())
+        self.peak = {"cores": max(self.peak["cores"], used_c), "memory_mb": max(self.peak["memory_mb"], used_m),
+                     "running": max(self.peak["running"], len(self.running))}
+        for t in self.waiting:
+            job, row = t.get("job"), t.get("row")
+            if t["why"]:
+                said = {**t["why"], "say": WAIT_SAY.get(t["why"]["code"], "")}
+                if row is not None:
+                    row["wait"] = said
+                elif job is not None:
+                    job.wait = said
+        self.cond.notify_all()
+
+    def view(self) -> dict:
+        """What the queue's panel shows: per tool how many run against its
+        maximum, the cores and memory in use against the ceiling, who waits
+        and why."""
+        with self.cond:
+            bud = self.budget()
+            run = list(self.running.values())
+            tools = {k: {"running": sum(1 for r in run if r["tool"] == k), "max": v["max"], "cores": v["cores"]}
+                     for k, v in bud["tools"].items()}
+            show = lambda t: {"tool": t["tool"], "label": t["label"], "cores": t["cores"], "memory_mb": t["memory_mb"],
+                              "job": t["job"].id if t.get("job") is not None else None,
+                              **({"why": t["why"], "say": WAIT_SAY.get((t["why"] or {}).get("code"), "")}
+                                 if t["state"] == "waiting" else {"since": t.get("started")})}
+            return {"ok": True, "share": bud["share"], "shares": list(SHARES),
+                    "budget": {"cores": bud["cores"], "memory_mb": bud["memory_mb"], "one": bud["one"]},
+                    "machine": {"performance_cores": self._cores or performance_cores(), "memory_mb": memory_total_mb()},
+                    "used": {"cores": sum(r["cores"] for r in run), "memory_mb": sum(r["memory_mb"] for r in run)},
+                    "peak": dict(self.peak), "tools": tools,
+                    "running": [show(t) for t in run], "waiting": [show(t) for t in self.waiting]}
+
+
+SCHED = Scheduler(os.environ.get("EM_QUEUE_SHARE") or "all")
+
+
+class lease:
+    """``with lease(need, cancelled, on_wait):`` a process under the
+    scheduler: waits its turn, runs, gives its place back."""
+
+    def __init__(self, need: dict, cancelled=lambda: False, sched=None):
+        self.sched = sched or SCHED
+        self.ticket = self.sched.enter(need)
+        self.cancelled = cancelled
+
+    def __enter__(self):
+        self.sched.wait(self.ticket, self.cancelled)
+        return self.ticket
+
+    def __exit__(self, *exc):
+        self.sched.release(self.ticket)
+        return False
 
 
 class Job:
@@ -712,6 +967,13 @@ class Job:
         #: a batch's rows (MICRO-OTTIMIZZA-2): one per file, its own state,
         #: progress and cancel
         self.items: list = []
+        #: MICRO-CODA-MULTICORE · what it asks the scheduler (None: it asks
+        #: nothing, or its files ask one by one), why it waits, the threads
+        #: its tool may use
+        self.need = None
+        self.ticket = None
+        self.wait = None
+        self.threads = 0
 
     def say(self, line: str, echo: bool = True):
         with _LOCK:
@@ -751,17 +1013,19 @@ class Job:
                     "lines": self.lines[since:], "next": len(self.lines),
                     "result": self.result, "error": self.error,
                     "items": [{k: v for k, v in it.items()} for it in self.items],
+                    "wait": self.wait if self.state == "queued" else None,
+                    "tool": (self.need or {}).get("tool"), "cores": (self.need or {}).get("cores"),
                     "created": self.created, "started": self.started, "ended": self.ended}
 
 
 def _run(job: Job, target):
-    gate = _HEAVY if job.heavy else None
-    if gate:
-        if not gate.acquire(blocking=False):
-            job.stage = "waiting"
-            job.say("waiting for the heavy job before it")
-            gate.acquire()
+    ticket = job.ticket
     try:
+        if ticket is not None:
+            if ticket["state"] == "waiting":
+                job.say(f"waiting: {WAIT_SAY.get((ticket['why'] or {}).get('code'), '')}")
+            SCHED.wait(ticket, job.cancel.is_set)
+            job.wait = None
         if job.cancel.is_set():
             raise _Cancelled()
         job.state = "running"
@@ -781,12 +1045,25 @@ def _run(job: Job, target):
         job.say(f"failed: {exc}")
     finally:
         job.ended = time.time()
-        if gate:
-            gate.release()
+        if ticket is not None:
+            SCHED.release(ticket)
 
 
-def submit(kind: str, params: dict, target, *, heavy: bool = False, estimate_mb=None, label: str = "") -> Job:
+def submit(kind: str, params: dict, target, *, heavy: bool = False, estimate_mb=None, label: str = "",
+           tool=None, cores=None, reads=(), writes=()) -> Job:
+    """A job in the background. ``tool`` (MICRO-CODA-MULTICORE): the tool its
+    process is an instance of — it then waits the scheduler (cores, memory
+    ``estimate_mb``, an instance free, ``reads`` / ``writes`` not touched by
+    another); None: it asks nothing (a probe, a batch whose files ask one by
+    one)."""
     job = Job(kind, params, heavy=heavy, estimate_mb=estimate_mb, label=label)
+    if tool:
+        job.need = SCHED.need(tool, cores=cores, memory_mb=estimate_mb or 0, reads=reads, writes=writes,
+                              label=job.label)
+        job.need.pop("job", None)
+        job.threads = job.need["cores"]
+        # entered here, not in the thread: the queue keeps the order of the calls
+        job.ticket = SCHED.enter({**job.need, "job": job})
     with _LOCK:
         finished = [j for j in _JOBS.values() if j.state in ("done", "failed", "cancelled")]
         for old in sorted(finished, key=lambda j: j.created)[:-_KEEP_DONE]:
@@ -864,6 +1141,9 @@ def gltfpack_command(tool: str, source: str, out: str, p: dict) -> list:
         cmd.append("-tc")
         if p.get("texture_px"):
             cmd += ["-tl", str(int(p["texture_px"]))]
+        # MICRO-CODA-MULTICORE · the threads the scheduler gave the KTX2 job
+        if int(p.get("threads") or 0) > 1:
+            cmd += ["-tj", str(int(p["threads"]))]
     return cmd
 
 
@@ -968,6 +1248,14 @@ def tileset_memory_mb(obj_bytes: int, texture_bytes: int) -> int:
     MB; this says 589, 1.294, 2.182 and 16.580."""
     mb = 1024 * 1024
     return int(400 + 24 * (max(0, obj_bytes) / mb) ** 0.95 + 5 * max(0, texture_bytes) / mb)
+
+
+def gltfpack_memory_mb(bytes_in: int, ktx2: bool = False) -> int:
+    """The memory a gltfpack variant asks, said before it starts (MICRO-CODA-
+    MULTICORE), on the cautious side: 150 MB, plus 6 × the glb in MB (its
+    geometry unpacked, simplified and written), plus 600 MB when the textures
+    become KTX2 (images decoded and BasisU's encoders, one per thread)."""
+    return int(150 + 6 * max(0, bytes_in) / (1024 * 1024) + (600 if ktx2 else 0))
 
 
 def memory_total_mb() -> int:
@@ -1418,9 +1706,10 @@ def compose_tileset(folder: str, parts: list) -> dict:
 def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: int, workers: int,
                       combine: dict = None) -> dict:
     """The batch: each OBJ → its tileset folder → the validator → the .3tz
-    (``pack(folder) → result``), MORE PROCESSES SIDE BY SIDE as long as their
-    estimates stay under ``ceiling_mb`` together (never past it; one that alone
-    passes it is refused before it starts), at most ``workers``. Each item has
+    (``pack(folder) → result``), MORE PROCESSES SIDE BY SIDE under the
+    scheduler (MICRO-CODA-MULTICORE: cores, memory and Obj2Tiles' instances
+    shared with every other job; one that alone passes ``ceiling_mb`` is
+    refused before it starts; ``workers`` is kept for the callers). Each item has
     its own state, progress and cancel (``job.items``); the job's progress is
     their mean. A process that stalls is tried once more.
 
@@ -1432,8 +1721,6 @@ def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: in
     job.items = [{"source": it["source"], "name": it.get("name"), "state": "queued", "progress": 0.0,
                   "stage": "", "estimate_mb": it.get("estimate_mb"), "cancel": False} for it in items]
     results: list = [None] * len(items)
-    running: dict = {}
-    lock = threading.Lock()
 
     def refresh():
         with _LOCK:
@@ -1443,9 +1730,24 @@ def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: in
             job.stage = f"{done}/{len(job.items)}" + (f" · {live[0]['name']}" if len(live) == 1 else
                                                      f" · {len(live)} in parallel" if live else "")
 
+    tickets: dict = {}
+
     def one(i: int):
         it, row = items[i], job.items[i]
+        t = tickets[i]
         try:
+            try:
+                SCHED.wait(t, lambda: row["cancel"] or job.cancel.is_set())
+            except _Cancelled:
+                results[i] = {**it, "state": "cancelled"}
+                row.update(state="cancelled", progress=1.0)
+                row.pop("wait", None)
+                refresh()
+                return
+            row.pop("wait", None)
+            used = SCHED.view()["used"]
+            job.say(f"{it.get('name')}: started ({it.get('estimate_mb')} MB asked, "
+                    f"{used['memory_mb']} of {SCHED.budget()['memory_mb']} MB in use)")
             res = _tileset_one(job, it, row, tool, None if combine else pack, refresh)
         except _Cancelled:
             res = {**it, "state": "cancelled"}
@@ -1454,11 +1756,11 @@ def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: in
             res = {**it, "state": "failed", "error": str(exc)}
             row["state"] = "failed"
             job.say(f"{it.get('name')}: {exc}")
+        finally:
+            SCHED.release(t)
         results[i] = res
         row["progress"] = 1.0
         refresh()
-        with lock:
-            running.pop(i, None)
         job.result = {"tool": tool, "outputs": [r for r in results if r], "ceiling_mb": ceiling_mb}
 
     pending = list(range(len(items)))
@@ -1475,33 +1777,19 @@ def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: in
             job.items[i].update(state="refused", progress=1.0, stage=msg)
             job.say(f"{it.get('name')}: {msg}")
             pending.remove(i)
+    # MICRO-CODA-MULTICORE · each file an Obj2Tiles of its own under the
+    # scheduler: entered in order at once, with the files of other batches and
+    # the other tools (``workers`` is no longer a cap of its own: Obj2Tiles'
+    # maximum is the scheduler's)
+    for i in pending:
+        it = items[i]
+        need = SCHED.need("obj2tiles", memory_mb=it.get("estimate_mb") or 0, reads=[it["source"]],
+                          writes=[it.get("folder") or ""], label=f"Obj2Tiles · {it.get('name')}")
+        tickets[i] = SCHED.enter({**need, "job": job, "row": job.items[i]})
     refresh()
-    threads = []
-    while pending or running:
-        if job.cancel.is_set():
-            for row in job.items:
-                row["cancel"] = True
-        with lock:
-            used = sum(items[k].get("estimate_mb") or 0 for k in running)
-            nxt = pending[0] if pending else None
-            fits = nxt is not None and len(running) < workers and (
-                not running or used + (items[nxt].get("estimate_mb") or 0) <= ceiling_mb)
-            if fits and job.items[nxt]["cancel"]:
-                pending.pop(0)
-                results[nxt] = {**items[nxt], "state": "cancelled"}
-                job.items[nxt].update(state="cancelled", progress=1.0)
-                refresh()
-                continue
-            if fits:
-                pending.pop(0)
-                running[nxt] = True
-                th = threading.Thread(target=one, args=(nxt,), daemon=True)
-                threads.append(th)
-                th.start()
-                job.say(f"{items[nxt].get('name')}: started ({items[nxt].get('estimate_mb')} MB asked, "
-                        f"{used + (items[nxt].get('estimate_mb') or 0)} of {ceiling_mb} MB in use)")
-                continue
-        time.sleep(0.2)
+    threads = [threading.Thread(target=one, args=(i,), daemon=True) for i in pending]
+    for th in threads:
+        th.start()
     for th in threads:
         th.join()
     out = [r for r in results if r]
