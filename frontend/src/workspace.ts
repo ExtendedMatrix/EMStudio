@@ -100,9 +100,11 @@ export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "graphs"];
 /** The backends a Storage («File») window can show: the disk, the files of the
  *  active graph (MICRO-CONTENTS-2: «Dove sono i file» in a home of its own),
  *  and the room's S3 store
- *  (`s3Panel`: delivery, lots, derivation). AUDIT C · it said «NOT connected
+ *  (`s3Panel`: delivery, lots, derivation); and the study's ASSETS
+ *  (MICRO-ARCHIVE-ASSET: Archive › Asset, the list with versions and textures,
+ *  `assetListView`). AUDIT C · it said «NOT connected
  *  (phase 2)», which stopped being true when the panel was implemented. */
-export const STORAGE_MODES = ["filesystem", "graphfiles", "s3"] as const;
+export const STORAGE_MODES = ["filesystem", "graphfiles", "s3", "assets"] as const;
 
 /** How a Viewer window shows its collection: one item at a time, or all of it.
  *  Same collection either way — the Mode is the reading, not the content. */

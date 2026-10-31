@@ -653,6 +653,37 @@ def _sha256_memo(path):
     return hit
 
 
+#: MICRO-ARCHIVE-ASSET · the measures of the versions' glTF / glb by the
+#: file's sha256 (and its path, for a .gltf whose textures sit beside it):
+#: measured once, kept between calls — a list asked again is immediate.
+_MEASURE_MEMO = {}
+
+
+def _measure_by_sha(resolved):
+    """A ``measure`` for s3Dgraphy's ``consolidate`` / ``asset_list`` from the
+    resolver's answers on this computer: each version's .glb / .gltf measured
+    (``measure_gltf``) once per sha256 (``_sha256_memo``: by path, size and
+    time), the result kept in ``_MEASURE_MEMO``."""
+    from s3dgraphy.resources.use_profiles import measure_gltf
+    paths = {str(r.get("id")): r.get("path") for r in resolved or [] if r.get("path")}
+
+    def measure(entry):
+        path = paths.get(str(entry.get("id")))
+        if not path or not os.path.isfile(path) or not path.lower().endswith((".glb", ".gltf")):
+            return None
+        try:
+            key = (_sha256_memo(path), path if path.lower().endswith(".gltf") else "")
+        except OSError:
+            return None
+        if key not in _MEASURE_MEMO:
+            try:
+                _MEASURE_MEMO[key] = measure_gltf(path)
+            except Exception:  # noqa: BLE001 — unreadable: the graph's estimate
+                _MEASURE_MEMO[key] = None
+        return _MEASURE_MEMO[key]
+    return measure
+
+
 def _before_after_now(handler, GC, graph, objs, body, em_folder):
     """``graph_compose.before_after`` with the sha256 of TODAY of the versions
     the objects show (MICRO-CONSOLIDA-2: a version modified after its stamp is
@@ -1936,7 +1967,13 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: /graph/tileset-master`` («Dichiara il master…» of a tileset: its
 #: candidates, the meshes declared, or «non disponibile» with a note) answer
 #: a DELTA, as /graph/tileset-whole.
-BRIDGE_LEVEL = 52   # 30 also = /validate
+#: 53 = MICRO-ARCHIVE-ASSET: ``POST /assets/list`` (Archive › Asset, the
+#: list in place of the dialog «Consolida per…»: s3Dgraphy's ``asset_list``,
+#: each asset with its versions and their textures, the state and the
+#: proposal per target, the study's textures once, the totals against the
+#: bands), the versions' files measured on this computer with a cache by
+#: sha256 kept between calls.
+BRIDGE_LEVEL = 53   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3278,7 +3315,7 @@ def make_handler(api):
                 status, out = fn(body if isinstance(body, dict) else {})
                 self._json(out, status)
             elif route in ("/consolidate", "/graph/compose-plan", "/graph/before-after", "/graph/tileset-whole",
-                           "/graph/register-new-version", "/graph/tileset-master"):
+                           "/graph/register-new-version", "/graph/tileset-master", "/assets/list"):
                 # MICRO-BLEND-OFFICINA-3 · s3Dgraphy's consolidate and
                 # graph_compose: «Consolida per…», «Componi un .blend dal
                 # grafo», the before/after of the check, the tileset «Intero»
@@ -3304,7 +3341,8 @@ def make_handler(api):
                       "/graph/before-after": self._before_after,
                       "/graph/tileset-whole": self._tileset_whole,
                       "/graph/register-new-version": self._register_new_version,
-                      "/graph/tileset-master": self._tileset_master}[route]
+                      "/graph/tileset-master": self._tileset_master,
+                      "/assets/list": self._asset_list}[route]
                 try:
                     status, out = fn(body)
                 except ValueError as exc:
@@ -4305,6 +4343,33 @@ def make_handler(api):
                                 states=states, in_room=bool(body.get("in_room")), **extra)
             out["platforms"] = [{"id": k, "label": v.get("label"), "label_it": v.get("label_it")}
                                 for k, v in C.PLATFORMS.items()]
+            out["resolved_here"] = here
+            return 200, {"ok": True, **out}
+
+        def _asset_list(self, body):
+            """``POST /assets/list {doc, doc_path?, states? | resolved?, in_room?,
+            models?, measure?}`` → s3Dgraphy's ``asset_list`` (Archive › Asset,
+            MICRO-ARCHIVE-ASSET): each asset with its versions and textures,
+            state and proposal per target, the study's textures once, the
+            totals. The files on this computer measured (a cache by sha256)
+            and verified against their stamps. Nothing is written."""
+            try:
+                from s3dgraphy.resources import asset_list as AL
+            except ImportError as exc:
+                return 501, {"ok": False, "error": f"this s3dgraphy has no asset_list "
+                                                   f"(s3dgraphy ≥ 1.6.0.dev82 is needed): {exc}"}
+            from s3dgraphy.resources import consolidate as C
+            graph, em_folder = self._graph_of(body)
+            res, here = self._resolved_for(graph, body, em_folder)
+            states = {str(r["id"]): str(r.get("state") or "") for r in res if r.get("state")}
+            models = body.get("models") if isinstance(body.get("models"), list) else None
+            extra = {}
+            if body.get("measure", True) is not False:
+                disk = self._disk_resolved(graph, body, em_folder)
+                extra = {"measure": _measure_by_sha(disk), "changed": C.changed_from(disk)}
+                for r in disk:
+                    states.setdefault(str(r.get("id")), str(r.get("state") or ""))
+            out = AL.asset_list(graph, models=models, states=states, in_room=bool(body.get("in_room")), **extra)
             out["resolved_here"] = here
             return 200, {"ok": True, **out}
 

@@ -46,8 +46,19 @@
  *  link names no room» — into `logWarn`, i.e. the app's console, not in front of
  *  whoever had pressed the button. Measured in Chrome on 4 September. */
 export type Handoff =
-  | { kind: "room"; server: string; room: string; node?: string }
-  | { kind: "study"; catalog: string; study: string; node?: string };
+  | { kind: "room"; server: string; room: string; node?: string; view?: HandoffView }
+  | { kind: "study"; catalog: string; study: string; node?: string; view?: HandoffView };
+
+/** MICRO-ARCHIVE-ASSET · `&view=assets[&target=web]`: the place to land on in
+ *  EMStudio once the study is open — Archive › Asset, the target chosen (EM
+ *  Tools' «Open in EMStudio › Archive › Asset»). Any other view is ignored, as
+ *  an unknown key is. */
+export interface HandoffView { view: "assets"; target?: "mobile" | "web" | "desk" | "arch" }
+export function viewOf(url: URL): HandoffView | undefined {
+  if ((url.searchParams.get("view") || "").trim() !== "assets") return undefined;
+  const tg = (url.searchParams.get("target") || "").trim();
+  return ["mobile", "web", "desk", "arch"].includes(tg) ? { view: "assets", target: tg as HandoffView["target"] } : { view: "assets" };
+}
 
 /** E4 · `&node=<id>`: the unit to land on once the room or the study is open —
  *  selected, in the Inspector, the view centred on it (E.D., 4 Oct 2026). It
@@ -150,7 +161,8 @@ export function parseHandoff(link: string): Handoff {
         + "deployment's configuration, never from whoever built the link.");
     }
     const node = nodeOf(url);
-    return node ? { kind: "study", catalog, study, node } : { kind: "study", catalog, study };
+    const view = viewOf(url);
+    return { kind: "study", catalog, study, ...(node ? { node } : {}), ...(view ? { view } : {}) };
   }
 
   // A ROOM.
@@ -167,7 +179,8 @@ export function parseHandoff(link: string): Handoff {
     else throw new HandoffError("the link names no server");
   }
   const node = nodeOf(url);
-  return node ? { kind: "room", server, room, node } : { kind: "room", server, room };
+  const view = viewOf(url);
+  return { kind: "room", server, room, ...(node ? { node } : {}), ...(view ? { view } : {}) };
 }
 
 /** A handoff on THIS page's URL, if there is one.

@@ -347,9 +347,13 @@ def emtools_pd():
         # ALIASES: the profiles before E.D.'s names) is replaced by the
         # bridge's, so both speak of the same profiles
         if mine and os.path.isfile(mine) and not hasattr(UP, "ALIASES"):
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("s3dgraphy.resources.use_profiles", mine)
-            UP = importlib.util.module_from_spec(spec)
+            # `import importlib.util` here made `importlib` a LOCAL of the whole
+            # function: with this branch not taken the last line failed
+            # (UnboundLocalError) — every «Prepare for a use» on a .blend
+            # whose Blender bundles a current s3dgraphy (MICRO-ARCHIVE-ASSET)
+            from importlib import util as _ilu
+            spec = _ilu.spec_from_file_location("s3dgraphy.resources.use_profiles", mine)
+            UP = _ilu.module_from_spec(spec)
             spec.loader.exec_module(UP)
             sys.modules["s3dgraphy.resources.use_profiles"] = UP
             import s3dgraphy.resources as R
@@ -371,7 +375,15 @@ def picked():
                 names = [e.name for e in c.mesh_names]
     if names:
         objs = [bpy.data.objects.get(n) for n in names]
-        return [o for o in objs if o is not None and o.type == "MESH"]
+        found = [o for o in objs if o is not None and o.type == "MESH"]
+        # MICRO-ARCHIVE-ASSET · a master is registered by its datablock
+        # (`blend://…#Mesh/ME_PODIO_LOD0`): a name that is no object is the
+        # mesh the objects show
+        missing = {n for n, o in zip(names, objs) if o is None}
+        if missing:
+            found += [o for o in bpy.data.objects if o.type == "MESH" and o.data is not None
+                      and o.data.name in missing and o not in found]
+        return found
     return [o for o in bpy.context.scene.objects if o.type == "MESH" and o.data is not None and len(o.data.polygons)]
 
 
