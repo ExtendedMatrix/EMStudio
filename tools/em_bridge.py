@@ -634,6 +634,54 @@ def _inside(child, parent):
         return False
 
 
+#: MICRO-CONSOLIDA-2 · sha256 of the files already hashed, by (real path,
+#: size, mtime): «Consolida per…» and the check verify every version's file
+#: against its stamp, and a file hashed once is not hashed again until it changes
+_SHA_MEMO = {}
+
+
+def _sha256_memo(path):
+    st = os.stat(path)
+    key = (os.path.realpath(path), st.st_size, st.st_mtime_ns)
+    hit = _SHA_MEMO.get(key)
+    if hit is None:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        hit = _SHA_MEMO[key] = h.hexdigest()
+    return hit
+
+
+def _before_after_now(handler, GC, graph, objs, body, em_folder):
+    """``graph_compose.before_after`` with the sha256 of TODAY of the versions
+    the objects show (MICRO-CONSOLIDA-2: a version modified after its stamp is
+    said); an s3dgraphy without ``files_now`` gives the before/after as before."""
+    want = set()
+    for o in objs or []:
+        props = (o.get("tags") or o.get("props") or {}) if isinstance(o, dict) else {}
+        if props.get("em_version_id"):
+            want.add(str(props["em_version_id"]))
+    files_now = {}
+    if want:
+        try:
+            from s3dgraphy.project_tree import find_project_root
+            from s3dgraphy.resources import locate as L
+            root = find_project_root(em_folder) if em_folder else None
+            for e in L.entries_of(graph):
+                if e["id"] in want:
+                    r = L.resolve(e, project_root=root, base_dirs=[em_folder] if em_folder else [],
+                                  hasher=_sha256_memo, verify=True)
+                    if r.get("changed"):
+                        files_now[e["id"]] = str(r.get("sha256_now") or "")
+        except Exception:  # noqa: BLE001 — no radar, the before/after stays
+            files_now = {}
+    try:
+        return GC.before_after(graph, objs, files_now=files_now)
+    except TypeError:
+        return GC.before_after(graph, objs)
+
+
 def _real_dest(path):
     """A destination that may not exist yet, resolved as the disk will: its
     nearest existing folder through `realpath` (a link, `/tmp` → `/private/tmp`
@@ -1879,7 +1927,16 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: in the background; ``POST /graph/tileset-whole`` (a tileset as the level
 #: «Intero» of a container under its document, as a delta; several documents
 #: → ``ask``).
-BRIDGE_LEVEL = 51   # 30 also = /validate
+#: 52 = MICRO-CONSOLIDA-2: ``/consolidate`` measures the versions' files on
+#: this computer (the real textures, the same image once in the scene) and
+#: says the files modified after their stamp (each file hashed once, kept by
+#: path, size and time); lightness by default (s3Dgraphy's ``web_choice``);
+#: ``/graph/before-after`` says a version modified after its stamp; ``POST
+#: /graph/register-new-version`` («Registra come nuova versione») and ``POST
+#: /graph/tileset-master`` («Dichiara il master…» of a tileset: its
+#: candidates, the meshes declared, or «non disponibile» with a note) answer
+#: a DELTA, as /graph/tileset-whole.
+BRIDGE_LEVEL = 52   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3220,7 +3277,8 @@ def make_handler(api):
                 fn = self._compose_plan if route == "/blend/compose-plan" else self._master_place
                 status, out = fn(body if isinstance(body, dict) else {})
                 self._json(out, status)
-            elif route in ("/consolidate", "/graph/compose-plan", "/graph/before-after", "/graph/tileset-whole"):
+            elif route in ("/consolidate", "/graph/compose-plan", "/graph/before-after", "/graph/tileset-whole",
+                           "/graph/register-new-version", "/graph/tileset-master"):
                 # MICRO-BLEND-OFFICINA-3 · s3Dgraphy's consolidate and
                 # graph_compose: «Consolida per…», «Componi un .blend dal
                 # grafo», the before/after of the check, the tileset «Intero»
@@ -3244,7 +3302,9 @@ def make_handler(api):
                     return
                 fn = {"/consolidate": self._consolidate, "/graph/compose-plan": self._graph_compose_plan,
                       "/graph/before-after": self._before_after,
-                      "/graph/tileset-whole": self._tileset_whole}[route]
+                      "/graph/tileset-whole": self._tileset_whole,
+                      "/graph/register-new-version": self._register_new_version,
+                      "/graph/tileset-master": self._tileset_master}[route]
                 try:
                     status, out = fn(body)
                 except ValueError as exc:
@@ -4099,7 +4159,8 @@ def make_handler(api):
                     try:
                         from s3dgraphy.resources import graph_compose as GC
                         from s3dgraphy import api as _api
-                        chk["before_after"] = GC.before_after(_api.load_emjson(doc)[0], inv.get("objects") or [])
+                        chk["before_after"] = _before_after_now(None, GC, _api.load_emjson(doc)[0],
+                                                                inv.get("objects") or [], {}, em_folder)
                     except ImportError:
                         chk["before_after_missing"] = "s3dgraphy ≥ 1.6.0.dev80"
                     except Exception as exc:  # noqa: BLE001 — the check stands without it
@@ -4203,6 +4264,26 @@ def make_handler(api):
                                     on_node=_room_probe(body.get("room")))
             return res, True
 
+        def _disk_resolved(self, graph, body, em_folder, ids=None):
+            """The resolver on THIS computer only (no room), each file found
+            hashed and verified against its stamp (``verify``): the paths to
+            measure and the files modified after their stamp. ``ids``: only
+            those resources. The hashes are kept by path, size and time."""
+            from s3dgraphy.project_tree import find_project_root
+            from s3dgraphy.resources import locate as L
+            folders = [em_folder] if em_folder else []
+            folders += [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
+            root = str(body.get("project_root") or "") or next(
+                (r for r in (find_project_root(f) for f in folders) if r), None)
+            kw = dict(project_root=root, base_dirs=folders, hasher=_sha256_memo)
+            try:
+                if ids is None:
+                    return L.resolve_graph(graph, verify=True, **kw)
+                want = set(ids)
+                return [L.resolve(e, verify=True, **kw) for e in L.entries_of(graph) if e["id"] in want]
+            except TypeError:          # an s3dgraphy without verify
+                return L.resolve_graph(graph, **kw) if ids is None else []
+
         def _consolidate(self, body):
             """``POST /consolidate {doc, doc_path?, platform, states? | resolved?,
             in_room?, models?}`` → s3Dgraphy's ``consolidate``: one row per
@@ -4214,8 +4295,14 @@ def make_handler(api):
             res, here = self._resolved_for(graph, body, em_folder)
             states = {str(r["id"]): str(r.get("state") or "") for r in res if r.get("state")}
             models = body.get("models") if isinstance(body.get("models"), list) else None
+            extra = {}
+            if hasattr(C, "measure_from_disk") and body.get("measure", True) is not False:
+                # MICRO-CONSOLIDA-2 · the files on this computer measured, and
+                # verified against their stamps (hashed once per path/size/time)
+                disk = self._disk_resolved(graph, body, em_folder)
+                extra = {"measure": C.measure_from_disk(disk), "changed": C.changed_from(disk)}
             out = C.consolidate(graph, str(body.get("platform") or "heriverse"), models=models,
-                                states=states, in_room=bool(body.get("in_room")))
+                                states=states, in_room=bool(body.get("in_room")), **extra)
             out["platforms"] = [{"id": k, "label": v.get("label"), "label_it": v.get("label_it")}
                                 for k, v in C.PLATFORMS.items()]
             out["resolved_here"] = here
@@ -4253,17 +4340,92 @@ def make_handler(api):
                          "profiles": [{"id": k, "label_it": GC.LABELS_IT.get(k, k)} for k in GC.WORK_PROFILES]}
 
         def _before_after(self, body):
-            """``POST /graph/before-after {doc, objects}`` → for each object that
+            """``POST /graph/before-after {doc, doc_path?, objects}`` → for each object that
             carries the graph's tags (``{name, props}`` of the inventory) the
             version in the scene, the last in the graph, who and when, the
             action (s3Dgraphy's ``graph_compose.before_after``)."""
             from s3dgraphy.resources import graph_compose as GC
-            graph, _f = self._graph_of(body)
+            graph, em_folder = self._graph_of(body)
             objs = [o for o in body.get("objects") or [] if isinstance(o, dict)]
-            rows = GC.before_after(graph, objs)
+            rows = _before_after_now(self, GC, graph, objs, body, em_folder)
             return 200, {"ok": True, "rows": rows,
                          "counts": {k: sum(1 for r in rows if r["state"] == k)
-                                    for k in ("aligned", "newer", "revised", "unknown")}}
+                                    for k in ("aligned", "newer", "revised", "modified", "unknown")}}
+
+        def _delta_of(self, graph, fn):
+            """Run ``fn`` on the graph (a copy of the page's) and answer what
+            changed as a DELTA the page applies in one undo step."""
+            from s3dgraphy import api
+            before_n = {n.node_id for n in graph.nodes}
+            before_e = {getattr(e, "edge_id", None) for e in graph.edges}
+            before_d = {n.node_id: json.dumps(getattr(n, "data", None) or {}, sort_keys=True, default=str)
+                        for n in graph.nodes}
+            got = fn()
+            after_e = {getattr(e, "edge_id", None) for e in graph.edges}
+            after_n = {n.node_id for n in graph.nodes}
+            projected = api.graph_to_emjson(graph)
+            g = projected["graph"] if "graph" in projected else projected
+            changed = [n for n in g["nodes"] if n.get("id") in before_n
+                       and json.dumps(n.get("data") or {}, sort_keys=True, default=str) != before_d.get(n.get("id"))]
+            return got, {"nodes_added": [n for n in g["nodes"] if n.get("id") not in before_n],
+                         "edges_added": [e for e in g["edges"] if e.get("id") not in before_e],
+                         "edges_removed": sorted(x for x in before_e - after_e if x),
+                         "nodes_removed": sorted(before_n - after_n),
+                         "nodes_changed": [{"id": n["id"], "data": n.get("data") or {}} for n in changed]}
+
+        def _register_new_version(self, body):
+            """``POST /graph/register-new-version {doc, resource_id,
+            checksum_now?, doc_path?}`` → «Registra come nuova versione»: the
+            version's file was modified after its stamp; a revision at the same
+            level with today's sha256 (s3Dgraphy's ``register_new_version``),
+            answered as a delta. Without ``checksum_now`` the file is hashed
+            here."""
+            from s3dgraphy.resources import graph_compose as GC
+            graph, em_folder = self._graph_of(body)
+            rid = str(body.get("resource_id") or "")
+            now = str(body.get("checksum_now") or "")
+            size = None
+            if not now:
+                got = self._disk_resolved(graph, body, em_folder, ids=[rid])
+                hit = next((r for r in got if r.get("changed")), None)
+                if hit is None:
+                    return 409, {"ok": False, "error": "the file is not modified after its stamp (or not here)"}
+                now = str(hit.get("sha256_now") or "")
+                try:
+                    size = os.path.getsize(hit["path"])
+                except OSError:
+                    size = None
+            try:
+                got, delta = self._delta_of(graph, lambda: GC.register_new_version(
+                    graph, rid, checksum=now, size_bytes=size, author=str(body.get("author") or "") or None))
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            return 200, {"ok": True, "version_id": got.get("version_id"), "level": got.get("level"),
+                         "revises": got.get("revises"), "delta": delta}
+
+        def _tileset_master(self, body):
+            """``POST /graph/tileset-master {doc, tileset_id, container_id?,
+            sources? | unavailable?}`` → the master of a tileset: with neither,
+            what it is (``tileset_master``) and the candidates (the meshes of
+            the container's members); with ``sources`` (resource ids) the
+            ``tiling`` step from them, with ``unavailable`` the note — as a
+            delta."""
+            from s3dgraphy.resources import graph_compose as GC
+            graph, _f = self._graph_of(body)
+            tid = str(body.get("tileset_id") or "")
+            cid = str(body.get("container_id") or "") or None
+            srcs = [str(x) for x in body.get("sources") or [] if str(x)]
+            note = str(body.get("unavailable") or "").strip()
+            try:
+                if not srcs and not note:
+                    return 200, {"ok": True, "master": GC.tileset_master(graph, tid),
+                                 "candidates": GC.master_candidates(graph, tid, cid)}
+                got, delta = self._delta_of(graph, lambda: GC.declare_tileset_master(
+                    graph, tid, srcs, unavailable=note or None, author=str(body.get("author") or "") or None))
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            return 200, {"ok": True, "said": got.get("say_it") or "", "declared": got.get("declared"),
+                         "master": GC.tileset_master(graph, tid), "delta": delta}
 
         def _tileset_whole(self, body):
             """``POST /graph/tileset-whole {doc, tileset_id, container_id,

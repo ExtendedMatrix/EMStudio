@@ -739,6 +739,7 @@ import { applyGraphDelta, COMPOSE_PROFILES, fileKey, idsOfObject, LEASE_RENEW_S,
          type DeltaStore, type GraphDelta, type Lease } from "./blend-room";
 import { applyWholeDelta, composeCounts, documentsReaching, PLATFORMS as CONS_PLATFORMS, prepareSource, presetForProfile,
          rowActions, rowsShown, statesOf, STATUS_SIGN as CONS_SIGN, updateRows, versionLine, WORK_PROFILES,
+         modifiedRows, othersLine, whyKey,
          type BeforeAfter, type ComposeGraphPlan, type ConsolidateAnswer, type ConsolidateRow, type Finding,
          type WholeDelta } from "./consolidate";
 import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, removalLines, versionsOf,
@@ -13900,7 +13901,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 51;   // 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 52;   // 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -41594,6 +41595,8 @@ async function consolidateDialog(): Promise<void> {
       else if (k === "check") void checkFiles().then(refresh);
       else if (k === "find") { closeDialogOf(body); void relocateFiles(); }
       else if (k === "stamp") { closeDialogOf(body); if (f.action.resource_id) select(f.action.resource_id); }
+      else if (k === "register_new_version") void registerNewVersion(String(f.action.resource_id ?? ""), String(f.action.checksum_now ?? "")).then(refresh);
+      else if (k === "declare_master") void declareTilesetMaster(String(f.action.tileset_id ?? ""), String(f.action.container_id ?? r.id)).then(refresh);
     };
     return b;
   };
@@ -41611,6 +41614,9 @@ async function consolidateDialog(): Promise<void> {
       p.className = `cons-total ${ans.totals[k].ok ? "" : "files-warn"}`;
       p.dataset.consTotal = k;
       p.textContent = `${CONS_SIGN.sufficient} ${ans.totals[k].say_it}`;
+      const pc = ans.totals[k].gpu_bytes_per_copy;
+      if (k === "platform" && pc && ans.totals[k].shared_textures)
+        p.title = t("cons.perCopy", { mb: Math.round(pc / 1048576).toLocaleString(getLocale()) });
       tot.appendChild(p);
     }
     const st = ans.counts.status;
@@ -41638,6 +41644,15 @@ async function consolidateDialog(): Promise<void> {
       v.className = "cons-versions";
       v.textContent = `${t("cons.base")}: ${versionLine(r.base, loc)} · ${t("cons.best", { platform: ans!.platform.label_it })}: ${versionLine(r.best ?? (r.loaded_is === "master" ? r.loaded : null), loc)}`;
       el.append(sign, nm, v);
+      // MICRO-CONSOLIDA-2 · what the web loads, and why (lightness by default)
+      if (whyKey(r)) {
+        const w = document.createElement("span");
+        w.className = "cons-loads";
+        w.dataset.consWhy = r.loaded_why ?? "";
+        w.textContent = `${t("cons.loads")}: ${versionLine(r.loaded, loc)} — ${t(whyKey(r))}`;
+        w.title = r.loaded_say ?? "";
+        el.appendChild(w);
+      }
       const fl = document.createElement("ul");
       fl.className = "cons-findings";
       for (const f of r.findings) {
@@ -41901,8 +41916,9 @@ function beforeAfterBox(blend: string, f: BlendFolder): HTMLElement | null {
   const n = (k: string) => String(ba.filter((r) => r.state === k).length);
   const cnt = document.createElement("p");
   cnt.className = "files-hint";
-  cnt.dataset.baCounts = JSON.stringify({ aligned: +n("aligned"), newer: +n("newer"), revised: +n("revised"), unknown: +n("unknown") });
-  cnt.textContent = t("ba.counts", { aligned: n("aligned"), newer: n("newer"), revised: n("revised"), unknown: n("unknown") });
+  cnt.dataset.baCounts = JSON.stringify({ aligned: +n("aligned"), newer: +n("newer"), revised: +n("revised"), modified: +n("modified"), unknown: +n("unknown") });
+  cnt.textContent = t("ba.counts", { aligned: n("aligned"), newer: n("newer"), revised: n("revised"), unknown: n("unknown") })
+    + (+n("modified") ? " · " + t("ba.modifiedCount", { n: n("modified") }) : "");
   box.appendChild(cnt);
   const ticks = blendUpdateTicks.get(blend) ?? new Set<string>();
   blendUpdateTicks.set(blend, ticks);
@@ -41921,9 +41937,22 @@ function beforeAfterBox(blend: string, f: BlendFolder): HTMLElement | null {
     here.textContent = r.here ? t("ba.here", { v: r.here.level || r.here.name, who: r.here.made_say }) : r.say_it;
     const late = document.createElement("span");
     late.className = "blend-ba-latest";
-    late.textContent = r.latest && r.state !== "aligned" ? t("ba.latest", { v: r.latest.level || r.latest.name, who: r.latest.made_say }) : "";
+    late.textContent = r.latest && r.state !== "aligned" && r.state !== "modified" ? t("ba.latest", { v: r.latest.level || r.latest.name, who: r.latest.made_say })
+      : r.state === "modified" ? t("ba.modified")
+      : othersLine(r) ? t("ba.others", { v: othersLine(r) }) : "";
     row.title = r.say_it;
     row.append(nm, here, late);
+    const mr = modifiedRows([r])[0];
+    if (mr) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ghost";
+      b.dataset.action = "register-new-version";
+      b.textContent = t("ba.registerNew");
+      b.title = mr.say_it;
+      b.onclick = () => { void registerNewVersion(mr.resource_id, mr.checksum_now); };
+      row.append(b);
+    }
     const u = upd.find((x) => x.name === r.name);
     if (u) {
       const cb = document.createElement("input");
@@ -41953,6 +41982,73 @@ function tickedUpdates(blend: string, f: BlendFolder): CheckRow[] {
   if (!ticks?.size) return [];
   return updateRows(ba, (id) => fileStateOf(id)?.path ?? "").filter((u) => ticks.has(u.name))
     .map((u) => ({ ...u, tick: true }) as unknown as CheckRow);
+}
+
+/** MICRO-CONSOLIDA-2 · «Registra come nuova versione»: the version's file
+ *  was modified after its stamp; s3Dgraphy registers a revision at the same
+ *  level with today's sha256 (the bridge's /graph/register-new-version), the
+ *  study takes it as a delta in one undo step. */
+async function registerNewVersion(resourceId: string, checksumNow: string): Promise<void> {
+  const st = store;
+  if (!st || !resourceId || refuseReadOnly()) return;
+  const ok = await openDialog({ title: t("ba.registerNew"), message: t("cons.registerNewAsk", { name: String(st.node(resourceId)?.name ?? resourceId) }),
+    ok: t("ba.registerNew"), kind: "register-new-version" });
+  if (!ok.ok) return;
+  const j = await postGraph<{ version_id?: string; level?: string; delta?: GraphDelta }>("/graph/register-new-version",
+    { doc: st.doc, doc_path: currentFilePath ?? "", resource_id: resourceId, ...(checksumNow ? { checksum_now: checksumNow } : {}) });
+  if (!j.ok || !j.delta) { toast(t("cons.registerNewFailed", { why: String(j.error ?? j.status) })); return; }
+  applyBlendDelta(j.delta);
+  logInfo(t("cons.registerNewDone", { level: j.level ?? "", id: j.version_id ?? "" }), [resourceId, j.version_id ?? ""]);
+  buildScenes(); draw(); refreshSurfaces("scene"); refreshInspector();
+}
+
+/** MICRO-CONSOLIDA-2 · «Dichiara il master…» of a tileset: the meshes of the
+ *  container's members (the candidates s3Dgraphy gives), or «non
+ *  disponibile» with a note that stays in the graph. Not blocking. */
+async function declareTilesetMaster(tilesetId: string, containerId: string): Promise<void> {
+  const st = store;
+  if (!st || !tilesetId || refuseReadOnly()) return;
+  type Ans = { master?: { declared: boolean; say_it: string }; candidates?: { id: string; name: string; model: string }[];
+               said?: string; delta?: GraphDelta };
+  const q = await postGraph<Ans>("/graph/tileset-master", { doc: st.doc, tileset_id: tilesetId, container_id: containerId });
+  if (!q.ok) { toast(t("cons.masterFailed", { why: String(q.error ?? q.status) })); return; }
+  const bx = document.createElement("div");
+  bx.className = "cons-master";
+  const say = document.createElement("p");
+  say.className = "files-hint";
+  say.textContent = q.master?.say_it ?? "";
+  bx.appendChild(say);
+  const list = document.createElement("div");
+  list.className = "cons-master-list";
+  const boxes: HTMLInputElement[] = [];
+  for (const c of q.candidates ?? []) {
+    const l = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = true; cb.value = c.id; cb.dataset.masterSource = c.id;
+    boxes.push(cb);
+    l.append(cb, ` ${c.name}`);
+    list.appendChild(l);
+  }
+  if (!boxes.length) list.appendChild(Object.assign(document.createElement("p"), { className: "files-hint", textContent: t("cons.masterNoCandidates") }));
+  const ul = document.createElement("label");
+  const un = document.createElement("input");
+  un.type = "checkbox"; un.dataset.masterUnavailable = "1";
+  const note = document.createElement("input");
+  note.type = "text"; note.placeholder = t("cons.masterNote"); note.dataset.masterNote = "1";
+  ul.append(un, ` ${t("cons.masterUnavailable")} `, note);
+  bx.append(list, ul);
+  const a = await openDialog({ title: t("cons.masterTitle", { name: String(st.node(containerId)?.name ?? containerId) }), body: bx,
+    ok: t("cons.masterDeclare"), kind: "tileset-master" });
+  if (!a.ok) return;
+  const sources = un.checked ? [] : boxes.filter((b) => b.checked).map((b) => b.value);
+  if (!un.checked && !sources.length) { toast(t("cons.masterNone")); return; }
+  if (un.checked && !note.value.trim()) { toast(t("cons.masterNoteWanted")); return; }
+  const j = await postGraph<Ans>("/graph/tileset-master", { doc: st.doc, tileset_id: tilesetId, container_id: containerId,
+    ...(un.checked ? { unavailable: note.value.trim() } : { sources }) });
+  if (!j.ok || !j.delta) { toast(t("cons.masterFailed", { why: String(j.error ?? j.status) })); return; }
+  applyBlendDelta(j.delta);
+  logInfo(j.said ?? "", [containerId, tilesetId]);
+  buildScenes(); draw(); refreshSurfaces("scene"); refreshInspector();
 }
 
 /** MICRO-BLEND-OFFICINA-3 (4) · the tileset as the level «Intero» of a

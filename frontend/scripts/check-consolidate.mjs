@@ -32,6 +32,7 @@ const freePort = () => new Promise((res) => { const s = createServer(); s.listen
 // ── the page's functions ────────────────────────────────────────────────────
 const bundle = await esbuild.build({ entryPoints: [`${SRC}consolidate.ts`], bundle: true, format: "esm", write: false });
 const C = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
+const SHA0 = "sha256:" + "a".repeat(64);
 const row = (status, findings) => ({ id: "x", name: "x", kind: "rm", base: null, best: null, loaded: null, findings, presence: [], status });
 const F = (level, code, action) => ({ level, code, say_it: code, action });
 const rows = [row("ok", []), row("necessary", [F("necessary", "no_base", { kind: "prepare", profile: "mobile_webxr" }),
@@ -61,6 +62,21 @@ const got = C.applyWholeDelta(store, { nodes_added: [], nodes_removed: ["old"], 
                 { id: "D01_h_ts", source: "D01", target: "ts", edge_type: "has_linked_resource" },
                 { id: "x", source: "nope", target: "ts", edge_type: "has_linked_resource" }] });
 ok(store.undo === 1 && got.added === 2 && got.removed === 2 && got.skipped[0] === "x", "the tileset's delta in one undo step");
+// MICRO-CONSOLIDA-2 · the radar, the other levels, why the web loads it, the new gestures
+const baM = [{ name: "Col", state: "modified", here: { level: "lod0" }, latest: null, others: [],
+               action: { kind: "register_new_version", resource_id: "v0", checksum_now: SHA0 }, say_it: "modificata dopo il timbro" },
+             { name: "Ok", state: "aligned", here: { level: "lod0" }, latest: null,
+               others: [{ level: "lod1", level_say: "lod1 · mobile webXR" }], action: {}, say_it: "" }];
+const mod = C.modifiedRows(baM);
+ok(mod.length === 1 && mod[0].resource_id === "v0" && mod[0].checksum_now === SHA0, "«Registra come nuova versione» for a file modified after its stamp");
+ok(C.othersLine(baM[1]) === "lod1 · mobile webXR" && C.othersLine(baM[0]) === "", "another level: said, not an update");
+ok(C.updateRows(baM).length === 0, "neither is an «Aggiorna»");
+ok(C.whyKey({ loaded_why: "lightest" }) === "cons.why.lightest" && C.whyKey({}) === "", "why the web loads it");
+const rr = row("opportune", [F("opportune", "modified_after_stamp", { kind: "register_new_version", resource_id: "a" }),
+  F("opportune", "modified_after_stamp", { kind: "register_new_version", resource_id: "b" }),
+  F("opportune", "tileset_master", { kind: "declare_master", tileset_id: "t", container_id: "g" })]);
+ok(JSON.stringify(C.rowActions(rr).map((a) => a.kind)) === JSON.stringify(["register_new_version", "register_new_version", "declare_master"]),
+   "one «Registra» per version, «Dichiara il master…»");
 
 // ── the bridge ──────────────────────────────────────────────────────────────
 if (!existsSync(PY)) {
@@ -130,7 +146,7 @@ const until = async (id, ms = 60000) => {
 };
 try {
   const h = await (await fetch(`${B}/health`, { headers: H })).json();
-  ok(h.bridge_level >= 51, `the bridge is at level 51 (${h.bridge_level})`);
+  ok(h.bridge_level >= 52, `the bridge is at level 52 (${h.bridge_level})`);
   const c = (await post("/consolidate", { doc, doc_path: docPath, platform: "heriverse" })).j;
   const by = Object.fromEntries((c.rows ?? []).map((r) => [r.id, r]));
   ok(c.ok && c.counts?.rms === 2 && c.counts?.without_base === 2, `two RMs, none with the base (${c.say_it})`);
@@ -158,13 +174,40 @@ try {
   ok(roomPlan.plan.fetch.length === 1 && roomPlan.plan.fetch[0].to.includes("/em_cache/files/"), "from the room: fetched by sha256 into em_cache/files");
   const noRoom = await post("/jobs", { kind: "blender", op: "compose_graph", plan: roomPlan.plan, out: `${fsroot}/EM/R.blend` });
   ok(noRoom.status === 400, "a plan that fetches wants the room");
-  const ba = (await post("/graph/before-after", { doc, objects: [
+  const ba = (await post("/graph/before-after", { doc, doc_path: docPath, objects: [
     { name: "Muro", props: { em_rm_node_id: "rm_muro", em_version_id: "muro.lod0", em_asset_id: "muro" } },
     { name: "Podio", props: { em_rm_node_id: "rm_podio", em_version_id: "podio.lod0" } }, { name: "Lamp", props: {} }] })).j;
   const m = ba.rows?.find((r) => r.name === "Muro");
-  ok(ba.rows?.length === 2 && m.state === "newer" && m.action.resource_id === "muro.manual" && m.latest.made_say.includes("2026-10-31 09:00"),
-     "before/after: the last registered, who and when");
-  ok(ba.counts.aligned === 1, "podio aligned");
+  // MICRO-CONSOLIDA-2 · the version by hand for desktop realtime is ANOTHER level of the lod0 for Heriverse
+  ok(ba.rows?.length === 2 && m.state === "aligned" && m.others?.[0]?.id === "muro.manual" && m.others[0].made_say.includes("2026-10-31 09:00"),
+     `before/after: another level is another version, not an update (${m?.say_it})`);
+  // podio's file on disk is not the bytes stamped (SHA("1")): modified after its stamp
+  const pm = ba.rows?.find((r) => r.name === "Podio");
+  ok(pm?.state === "modified" && pm.action.kind === "register_new_version" && ba.counts.modified === 1,
+     `before/after: a file modified after its stamp (${pm?.say_it})`);
+  const cm = (await post("/consolidate", { doc, doc_path: docPath, platform: "heriverse" })).j;
+  const cpod = cm.rows.find((r) => r.id === "rm_podio");
+  ok(cpod.findings.some((f) => f.code === "modified_after_stamp" && f.action.checksum_now?.startsWith("sha256:")),
+     "Consolida says it too, with today's sha256");
+  ok(typeof cpod.loaded_why === "string" && cpod.loaded_why !== "", `why the web loads it (${cpod.loaded_why})`);
+  const rn = (await post("/graph/register-new-version", { doc, doc_path: docPath, resource_id: "podio.lod0" })).j;
+  ok(rn.ok && rn.level === "lod0" && rn.revises === "podio.lod0" && rn.delta.nodes_added.some((n) => n.id === rn.version_id)
+     && rn.delta.edges_added.some((e) => e.edge_type === "was_revision_of" || e.target === "podio.lod0"),
+     `«Registra come nuova versione»: a revision at lod0, as a delta (${rn.version_id})`);
+  const doc3 = JSON.parse(JSON.stringify(doc));
+  doc3.graphs.g.edges.push({ id: "grp_t", source: "grp", target: "tiles", edge_type: "has_linked_resource" });
+  const tq = (await post("/graph/tileset-master", { doc: doc3, tileset_id: "tiles", container_id: "grp" })).j;
+  ok(tq.ok && tq.master.declared === false && tq.candidates.map((c) => c.id).sort().join() === "muro,podio",
+     "«Dichiara il master…»: the container's meshes offered");
+  const td = (await post("/graph/tileset-master", { doc: doc3, tileset_id: "tiles", container_id: "grp", sources: ["podio", "muro"] })).j;
+  ok(td.ok && td.declared && td.master.sources.length === 2 && td.delta.nodes_added.some((n) => n.data?.dtc_kind === "tiling"),
+     `the master declared as a tiling step (${td.said})`);
+  const tu = (await post("/graph/tileset-master", { doc: doc3, tileset_id: "tiles", unavailable: "perdute" })).j;
+  ok(tu.ok && !tu.declared && tu.delta.nodes_changed.some((n) => n.id === "tiles" && n.data.master_unavailable === "perdute"),
+     "«non disponibile»: the note in the graph, as a delta");
+  const ct = (await post("/consolidate", { doc: doc3, doc_path: docPath, platform: "heriverse", models: ["grp"] })).j;
+  ok(ct.rows?.[0]?.findings.some((f) => f.code === "tileset_master" && f.action.kind === "declare_master"),
+     "a container of a tileset alone: «opportuno: dichiara il master»");
   const w = (await post("/graph/tileset-whole", { doc, tileset_id: "tiles", container_id: "grp" })).j;
   ok(w.ok && w.document === "D01" && w.delta.edges_added.length === 2, `the tileset under D.01 (${w.said})`);
   const doc2 = JSON.parse(JSON.stringify(doc));
@@ -183,6 +226,11 @@ try {
     console.log(`  · ${tc.totals?.platform?.say_it}`);
     console.log(`  · ${tc.totals?.floor?.say_it}`);
     ok(tc.counts?.rms === 97 && tc.counts?.with_base === 1 && tc.counts?.without_base === 96, "Templu Mare: 97 RMs, 1 with the base, 96 without");
+    const tp0 = tc.totals?.platform ?? {};
+    console.log(`  · best everywhere: ${tc.totals?.best_everywhere?.say_it}`);
+    ok(tp0.measured >= 90 && tp0.shared_textures > 0 && tp0.gpu_bytes < 1024 ** 3,
+       `Templu Mare: measured, shared textures once, ${Math.round(tp0.gpu_bytes / 1048576)} MB of GPU`);
+    ok(tc.counts?.loaded?.lightest > 0 && tc.counts?.tileset_master === 1, "Templu Mare: light by default, the tileset's master asked");
     const tpl = (await post("/graph/compose-plan", { doc: tdoc, doc_path: tp, profile: "modelling" })).j;
     console.log(`  · compose from the graph: ${tpl.plan?.say_it} → ${tpl.out}`);
     ok(tpl.plan?.items.length === 98, "Templu Mare: 97 models + the Survey2015 tileset");

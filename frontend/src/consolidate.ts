@@ -20,8 +20,12 @@ export type Level = "necessary" | "recommended" | "opportune" | "sufficient" | "
 export const LEVELS: readonly Level[] = ["necessary", "recommended", "opportune", "sufficient", "presence"];
 
 export interface ActionData {
-  kind?: "prepare" | "upload" | "disk" | "check" | "find" | "stamp" | "" | string;
+  kind?: "prepare" | "upload" | "disk" | "check" | "find" | "stamp" | "register_new_version" | "declare_master" | "" | string;
   profile?: string; model?: string; asset_id?: string; resource_id?: string; checksum?: string;
+  /** MICRO-CONSOLIDA-2: the sha256 of the file today («modificata dopo il timbro») */
+  checksum_now?: string;
+  /** MICRO-CONSOLIDA-2: «Dichiara il master…» of a tileset */
+  tileset_id?: string; container_id?: string;
 }
 export interface Finding { level: Level; code: string; say_it: string; action: ActionData }
 export interface VersionSummary {
@@ -29,22 +33,31 @@ export interface VersionSummary {
   url: string; checksum: string; size_bytes: number | null; triangles: number | null; gpu_bytes: number | null;
   ktx2: boolean | null; files: { id: string; path: string; url: string; checksum: string; size_bytes: number | null }[];
   tileset: boolean; use_served?: string;
+  /** MICRO-CONSOLIDA-2: measured from the file (real textures), the biggest side, a tileset's note */
+  measured?: boolean; texture_side?: number | null; note?: string;
 }
 export interface Presence { which: "base" | "best"; id: string; name: string; ok: boolean; state: string; action: string; say_it: string }
 export interface ConsolidateRow {
   id: string; name: string; kind: "rm" | "container";
   base: VersionSummary | null; best: VersionSummary | null; loaded: VersionSummary | null;
-  loaded_is?: "best" | "base" | "master" | "";
+  loaded_is?: "best" | "base" | "lighter" | "master" | "";
+  /** MICRO-CONSOLIDA-2: why the web loads it (s3Dgraphy `web_choice`) */
+  loaded_why?: "scene_light" | "simple" | "light" | "lightest" | "best" | "tileset" | "master" | "";
+  loaded_say?: string;
+  tileset_master?: { declared: boolean; sources: { id: string; name: string }[]; unavailable: string; say_it: string };
   findings: Finding[]; presence: Presence[]; status: Level | "ok";
 }
 export interface Totals {
   profile: string; download_bytes: number; gpu_bytes: number; triangles: number; unknown: number;
   streamed: number; shared: number; ok: boolean; over: string[]; say_it: string;
+  /** MICRO-CONSOLIDA-2: each file's own copy of its textures; textures shared; measured / estimated versions */
+  gpu_bytes_per_copy?: number; shared_textures?: number; measured?: number; estimated?: number;
 }
 export interface ConsolidateAnswer {
   ok?: boolean; error?: string;
   platform: { id: string; label: string; label_it: string; profile: string; uses: string[] };
-  in_room: boolean; rows: ConsolidateRow[]; totals: { platform: Totals; floor: Totals };
+  in_room: boolean; rows: ConsolidateRow[]; totals: { platform: Totals; floor: Totals; best_everywhere?: Totals };
+  scene_light?: boolean;
   counts: { models: number; rms: number; containers: number; with_base: number; without_base: number; with_best: number;
             master_loaded: number; to_upload: number; unchecked: number; missing_files: number; status: Record<string, number> };
   say_it: string; platforms?: { id: string; label: string; label_it: string }[]; resolved_here?: boolean;
@@ -82,14 +95,21 @@ export function rowActions(row: ConsolidateRow): { kind: string; finding: Findin
   const seen = new Set<string>();
   for (const f of row.findings) {
     const k = String(f.action?.kind ?? "");
-    if (!k || seen.has(k)) continue;
+    if (!k || (seen.has(k) && k !== "prepare" && k !== "register_new_version")) continue;
     // two «prepare» with different profiles (the floor and the platform's) are two buttons
-    const key = k === "prepare" ? `${k}:${f.action.profile ?? ""}` : k;
+    const key = k === "prepare" ? `${k}:${f.action.profile ?? ""}`
+      : k === "register_new_version" ? `${k}:${f.action.resource_id ?? ""}` : k;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ kind: k, finding: f });
   }
   return out;
+}
+
+/** MICRO-CONSOLIDA-2 · why the web loads what a row loads (lightness by
+ *  default), as an i18n key: `cons.why.<loaded_why>`, or "" before dev81. */
+export function whyKey(r: ConsolidateRow): string {
+  return r.loaded_why ? `cons.why.${r.loaded_why}` : "";
 }
 
 /** One line for a version: «lod3 · 3,7 MB · 53.364 tri». */
@@ -163,10 +183,27 @@ export function composeCounts(p: ComposeGraphPlan | null | undefined): Record<st
 
 // ── «Controlla col grafo»: the before/after, «Aggiorna» ─────────────────────
 
-export interface VersionView { id: string; name: string; level: string; checksum: string; made: Record<string, unknown>; made_say: string }
+export interface VersionView { id: string; name: string; level: string; level_say?: string; checksum: string; made: Record<string, unknown>; made_say: string }
 export interface BeforeAfter {
-  name: string; state: "aligned" | "newer" | "revised" | "unknown"; here: VersionView | null; latest: VersionView | null;
-  action: { kind?: string; resource_id?: string }; say_it: string;
+  name: string; state: "aligned" | "newer" | "revised" | "modified" | "unknown"; here: VersionView | null; latest: VersionView | null;
+  /** MICRO-CONSOLIDA-2: later versions at OTHER levels — another version, not an update */
+  others?: VersionView[];
+  action: { kind?: string; resource_id?: string; checksum_now?: string }; say_it: string;
+}
+
+/** MICRO-CONSOLIDA-2 · the objects whose version's file was modified after
+ *  its stamp: «Registra come nuova versione» (the bridge's
+ *  /graph/register-new-version, a revision at the same level, applied to the
+ *  study as a delta). */
+export function modifiedRows(ba: readonly BeforeAfter[]): { name: string; resource_id: string; checksum_now: string; say_it: string }[] {
+  return ba.filter((r) => r.state === "modified" && r.action?.kind === "register_new_version" && r.action.resource_id)
+    .map((r) => ({ name: r.name, resource_id: String(r.action.resource_id), checksum_now: String(r.action.checksum_now ?? ""), say_it: r.say_it }));
+}
+
+/** «also lod1 · mobile webXR: another version, not an update» — or "". */
+export function othersLine(r: BeforeAfter): string {
+  const o = (r.others ?? []).map((x) => x.level_say || x.level || x.name).filter(Boolean);
+  return o.length ? o.slice(0, 3).join(", ") : "";
 }
 
 /** The rows «Aggiorna» adds to the check's «Applica»: one per object whose
