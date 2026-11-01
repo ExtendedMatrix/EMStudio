@@ -375,6 +375,15 @@ export interface QueueItem {
   /** MICRO-CODA-VISTA-2 · a form without one geometry: split, each copy its
    *  own item (how many were made) — never «cancelled» */
   split?: number;
+  /** MICRO-GIA-FATTI · what was decided ONCE for a file already in versions/
+   *  (the dialog of «Applica e metti in coda», or a gesture in bulk): «use» —
+   *  when the run meets the file it is registered as it is and the item is
+   *  done; «replace» — made again over it (`replace` from the start). None:
+   *  «già fatto prima» waits for its row's gesture. */
+  decide?: "use" | "replace" | null;
+  /** MICRO-GIA-FATTI · the file was written while the race of 1 Nov could
+   *  touch it (`raceExposed`): said beside it, «Sostituisci» by default */
+  exposed?: boolean;
 }
 /** MICRO-CODA-VISTA p.4 · who cancelled an item: the person (from the queue,
  *  the status bar's chip, Ottimizza's bar), the bridge restarted (its job
@@ -537,15 +546,17 @@ export function itemTone(it: Pick<QueueItem, "state" | "block"> & Partial<Pick<Q
  *  (cancelled too: nothing made), fatti — MICRO-CODA-VISTA-2: «già fatto
  *  prima» (the file is there) and «diviso» (its copies queued) are «fatti»,
  *  never «falliti». */
-export type QueueFilter = "all" | "running" | "waiting" | "failed" | "done";
-export const QUEUE_FILTERS: readonly QueueFilter[] = ["all", "running", "waiting", "failed", "done"];
+export type QueueFilter = "all" | "running" | "waiting" | "failed" | "done" | "before";
+/** MICRO-GIA-FATTI · «già fatto prima» also a filter of its own (they stay
+ *  counted among «fatti»): its rows resolved together */
+export const QUEUE_FILTERS: readonly QueueFilter[] = ["all", "running", "waiting", "failed", "done", "before"];
 export function queueFilter(q: readonly QueueItem[], f: QueueFilter): QueueItem[] {
   if (f === "all") return [...q];
-  const want = { running: ["run"], waiting: ["wait", "block"], failed: ["fail", "off"], done: ["ok", "before", "split"] }[f];
+  const want = { running: ["run"], waiting: ["wait", "block"], failed: ["fail", "off"], done: ["ok", "before", "split"], before: ["before"] }[f];
   return q.filter((x) => want.includes(itemTone(x)));
 }
 export function queueCounts(q: readonly QueueItem[]): Record<QueueFilter, number> {
-  const out = { all: q.length, running: 0, waiting: 0, failed: 0, done: 0 } as Record<QueueFilter, number>;
+  const out = { all: q.length, running: 0, waiting: 0, failed: 0, done: 0, before: 0 } as Record<QueueFilter, number>;
   for (const f of QUEUE_FILTERS) if (f !== "all") out[f] = queueFilter(q, f).length;
   return out;
 }
@@ -592,6 +603,83 @@ export function retryItem(q: QueueItem[], id: string): QueueItem[] {
   it.started = undefined; it.ended = undefined; it.made = undefined; it.phase = undefined; it.progress = undefined;
   it.before = null; it.split = undefined;
   return q;
+}
+
+// ── MICRO-GIA-FATTI · «già fatto prima» decided once, and in bulk ───────────
+// E.D. (1 Nov 20:38, lab.30): «seleziona tutto» → «Applica e metti in coda»;
+// the 25 KTX2 made, but the forms repeated, the 10 RB meshes, Tetto1 and the
+// two Column_entrance ended «≡ già fatto prima» (files of an earlier round in
+// versions/, not registered) and stayed: «27 / 98 coperti», a click per row.
+// Now the question is asked ONCE, when the gesture finds them, with the count.
+
+/** A file already in versions/ that an item would write. */
+export interface Found { id: string; path: string; name: string; registered: boolean; exposed: boolean; asset?: string; mtime?: number }
+/** The answer of the one question: all used as they are, all made again, as
+ *  marked (the exposed ones made again, the others used), or row by row. */
+export type BeforeHow = "use" | "replace" | "marked" | "rows";
+
+/** What each item will do with its file: «use», «replace», or null (its row
+ *  decides). Items not foreseen (`others`, their file met only at the run:
+ *  nobody saw them in the list) follow only «use them all» — registering a
+ *  file as it is takes nothing away; a file nobody saw is never written over
+ *  without its row's gesture. */
+export function beforeDecisions(found: readonly Pick<Found, "id" | "exposed">[], how: BeforeHow,
+                                others: readonly string[] = []): Map<string, "use" | "replace" | null> {
+  const out = new Map<string, "use" | "replace" | null>();
+  for (const f of found)
+    out.set(f.id, how === "rows" ? null : how === "marked" ? (f.exposed ? "replace" : "use") : how);
+  for (const id of others) if (!out.has(id)) out.set(id, how === "use" ? "use" : null);
+  return out;
+}
+
+/** The default of each file: «Sostituisci» for one the race may have touched,
+ *  «Usa» for the others — and the answer that matches it. */
+export function beforeDefault(found: readonly Pick<Found, "exposed">[]): { use: number; replace: number; how: BeforeHow } {
+  const replace = found.filter((f) => f.exposed).length;
+  const use = found.length - replace;
+  return { use, replace, how: replace && use ? "marked" : replace ? "replace" : "use" };
+}
+
+/** MICRO-GIA-FATTI · the race of 1 Nov (MICRO-CODA-VISTA's reconstruction):
+ *  «Prepara per un uso» kept its context by .blend; with the queue in
+ *  parallel the items of the SAME .blend in flight together took each other's
+ *  master — the files of `GreatTemple_2026_v2.blend` ended between 15:04 and
+ *  15:10 UTC (Column_shadow.035 ×10 … Porta2, Tempio_4, Tetto1). Fixed at
+ *  16:05 UTC (prepareKey by .blend AND object). The bridge keeps no job
+ *  history and a stamp says only the end: which jobs overlapped cannot be
+ *  read from the files, so the race is declared here as it was found. */
+export const RACES: readonly { blend: string; from: number; to: number }[] = [
+  { blend: "GreatTemple_2026_v2.blend", from: Date.parse("2026-11-01T15:04:00Z"), to: Date.parse("2026-11-01T15:10:00Z") },
+];
+/** A file «Prepara per un uso» made from `blend`, written at `mtime` (s):
+ *  inside a race → exposed (its content may be right, its registration was
+ *  not to be trusted: E.D. wants it made again by default). gltfpack's
+ *  variants never were. */
+export function raceExposed(f: { blend?: string; mtime?: number | null }, races = RACES): boolean {
+  if (!f.blend || f.mtime == null) return false;
+  const name = f.blend.split(/[\\/]/).pop() ?? "";
+  const ms = f.mtime * 1000;
+  return races.some((r) => r.blend === name && ms >= r.from && ms <= r.to);
+}
+
+/** s3Dgraphy's `version_file_name` (use_profiles): `<model>@<level>-<destination>.glb`
+ *  (`.gltf` for a profile packed `gltf_separate` — on disk a folder of that
+ *  name without `.gltf` —, `.stl` for a print) */
+export function versionFileName(model: string, level: string, destination: string, packaging = "glb"): string {
+  const safe = model.replace(/[^\p{L}\p{N}_.-]+/gu, "_").replace(/^_+|_+$/g, "") || "model";
+  const ext = ({ gltf_separate: "gltf", stl: "stl" } as Record<string, string>)[packaging] ?? "glb";
+  return `${safe}@${level}-${destination}.${ext}`;
+}
+/** The names «Prepara per un uso» may give an item's file, the likelier
+ *  first: lod1 when it decimates (the diagnosis' level), else lod0. */
+export function useFileNames(model: string, destination: string, it: Pick<QueueItem, "tool" | "triangles">, packaging = "glb"): string[] {
+  const dec = (it.tool === "decimate_bake" || it.tool === "instance") && !!it.triangles;
+  return (dec ? ["lod1", "lod0"] : ["lod0", "lod1"]).map((l) => versionFileName(model, l, destination, packaging));
+}
+
+/** The items «già fatto prima» (among `ids`, or all) */
+export function beforeItems(q: readonly QueueItem[], ids?: ReadonlySet<string>): QueueItem[] {
+  return q.filter((x) => itemTone(x) === "before" && (!ids || ids.has(x.id)));
 }
 
 /** MICRO-CODA-VISTA p.6 · the key of the budget's ONE computation: the answer,

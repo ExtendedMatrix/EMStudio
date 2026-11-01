@@ -43,15 +43,21 @@ export interface DialogOptions {
   kind?: string;
   /** refuse OK while this says why (the field's value given) */
   validate?: (value: string) => string | null;
+  /** MICRO-GIA-FATTI · more answers than yes / no: each a button between
+   *  Cancel and OK (`data-dialog-choice`), answering `ok` with its key; OK
+   *  stays the default (Enter), its `choice` undefined */
+  choices?: { key: string; label: string; title?: string }[];
 }
 
 export interface DialogAnswer {
   ok: boolean;
   /** the field's value (trimmed only by the caller), "" without a field */
   value: string;
+  /** the key of one of `choices`, when that button answered */
+  choice?: string;
 }
 
-interface Trace { kind: string; message: string; ok: boolean; value: string }
+interface Trace { kind: string; message: string; ok: boolean; value: string; choice?: string }
 
 function trace(): Trace[] {
   const w = window as unknown as { __EM_DIALOGS__?: Trace[] };
@@ -114,6 +120,16 @@ export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
       cancelBtn.textContent = o.cancel ?? t("common.cancel");
       foot.appendChild(cancelBtn);
     }
+    const chosen: HTMLButtonElement[] = [];
+    for (const c of o.choices ?? []) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.dialogChoice = c.key;
+      b.textContent = c.label;
+      if (c.title) b.title = c.title;
+      foot.appendChild(b);
+      chosen.push(b);
+    }
     const okBtn = document.createElement("button");
     okBtn.type = "button";
     okBtn.className = o.danger ? "primary danger" : "primary";
@@ -124,7 +140,7 @@ export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
     back.appendChild(card);
 
     let done = false;
-    const close = (ok: boolean): void => {
+    const close = (ok: boolean, choice?: string): void => {
       if (done) return;
       const value = field?.value ?? "";
       if (ok && o.validate) {
@@ -134,9 +150,9 @@ export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
       done = true;
       document.removeEventListener("keydown", onKey, true);
       back.remove();
-      trace().push({ kind: back.dataset.appDialog!, message: o.message ?? o.title ?? "", ok, value });
+      trace().push({ kind: back.dataset.appDialog!, message: o.message ?? o.title ?? "", ok, value, ...(choice ? { choice } : {}) });
       if (before && before.isConnected) before.focus();
-      resolve({ ok, value });
+      resolve({ ok, value, ...(choice ? { choice } : {}) });
     };
     // capture, so a canvas's own Enter/Escape never sees a key meant for the
     // dialog; everything else the dialog swallows too — it is modal
@@ -161,6 +177,7 @@ export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
       }
     };
     okBtn.addEventListener("click", () => close(true));
+    for (const b of chosen) b.addEventListener("click", () => close(true, b.dataset.dialogChoice));
     cancelBtn?.addEventListener("click", () => close(false));
     back.addEventListener("mousedown", (e) => { if (e.target === back && o.cancel !== null) close(false); });
     document.body.appendChild(back);

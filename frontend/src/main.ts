@@ -2872,6 +2872,9 @@ window.__EM_SCENE__ = () => {
   // MICRO-CODA-VISTA-2 · Archive's view by its tab (the Mode), for the checks
   archiveView: (k: string) => { const w = windowsOf().find((x) => x.type === "storage"); if (w) setArchiveView(w, k as "files"); },
   queueItems: () => assetQueue.map((x) => ({ ...x })),
+  /** MICRO-GIA-FATTI · the answer's own state of each asset for a target (not the queue's) */
+  assetCells: (k: AL.TargetKey) => (assetUi.ans?.assets ?? []).map((a) => ({ id: a.id, name: a.name, state: a.targets[k]?.state ?? "",
+    why: a.targets[k]?.why ?? "", versions: a.versions.filter((v) => !v.master).map((v) => v.name) })),
   logTail: (n = 20) => logEntries().slice(-n).map((e) => `${e.level} ${e.message}`),
   needSigner: (op: who.SignOp) => needSigner(op, () => { (window as unknown as { __whoResumed?: string }).__whoResumed = op; }),
   whoFacts: () => whoFacts(),
@@ -36923,6 +36926,16 @@ async function runOptimize(win: Win, pre: OptimizePreset, sources: string[], est
     itemBefore.set(end.owner, { path: o.path!, name: baseName(o.path!), registered: versionRegistered(o.path!) });
     beforeUse.set(end.owner, async () => {
       const sha = await bridgeChecksum(o.path!);
+      // MICRO-GIA-FATTI p.3 · a file taken as it is, without its stamp:
+      // stamped as derived from its source (when the source is stamped — in
+      // the graph too, by its normalized path), saying it was found, not made
+      const had = await readStamp(stampPathFor(o.path!)).catch(() => null);
+      if (!had) {
+        const why = await stampDerivedWhy(o.source, { path: o.path!, sha256: sha ?? undefined }, { kind: "lod_generation", technique: "decimation",
+          parameters: { ...params, found_in_versions: true }, software: [{ name: "gltfpack", version }] })
+          .catch((e: unknown) => String((e as Error)?.message ?? e));
+        if (why) logWarn(`${baseName(o.path!)}: ${t("files.optNotStampedWhy", { why })}`);
+      }
       return registerVersion({ ...o, sha256: sha ?? undefined } as OptOut, pre, params, version);
     });
     renderStorage();
@@ -42576,8 +42589,22 @@ function assetListView(win: Win): HTMLElement {
     const shapeLabel = (s2: AL.Shape, k: AL.TargetKey, p: AL.Proposal): string =>
       `${t("al.shape", { n: String(s2.assets.length) })} ${s2.assets[0].name}… → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}${p.triangles ? ` ${fmtN(p.triangles)} tri` : ""}`;
     const oneLabel = (a: AL.AssetRow, k: AL.TargetKey, p: AL.Proposal): string => `${a.name} → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}`;
-    const toQueue = (items: AL.QueueItem[]): void => {
+    const toQueue = async (items: AL.QueueItem[]): Promise<void> => {
       if (!items.length) { toast(t("al.nothingToQueue")); renderStorage(); return; }
+      // MICRO-GIA-FATTI · the files already in versions/ looked for FIRST,
+      // and asked about ONCE (Annulla: nothing queued, the plan stays)
+      if (gfBusy) return;
+      gfBusy = true;
+      toast(t("al.gf.looking"));
+      let found: AL.Found[] = [];
+      try { found = await foundBefore(items); } finally { gfBusy = false; }
+      if (found.length) {
+        const how = await askBefore(found);
+        if (!how) { renderStorage(); return; }
+        decideItems(items, found, how, items.map((x) => x.id));
+        const m = t("al.gf.decided", { n: String(found.length), how: t(`al.gf.how.${how}`) });
+        logInfo(m);
+      }
       const before = assetQueue.length;
       queueAdd(items);
       AL.unplan(assetUi.plan, items);
@@ -42599,7 +42626,7 @@ function assetListView(win: Win): HTMLElement {
     prop.disabled = !n;
     prop.onclick = () => {
       AL.applyProposal(assetUi.plan, ans.assets, assetUi.sel, targets, { shapes: shapesOf(ans).list, bands });
-      toQueue(AL.selectionItems(ans.assets, shapesOf(ans).list, assetUi.sel, targets, assetUi.plan, bands, { shape: shapeLabel, one: oneLabel }));
+      void toQueue(AL.selectionItems(ans.assets, shapesOf(ans).list, assetUi.sel, targets, assetUi.plan, bands, { shape: shapeLabel, one: oneLabel }));
     };
     const or = document.createElement("span");
     or.className = "files-hint";
@@ -42647,8 +42674,20 @@ function assetListView(win: Win): HTMLElement {
     go.textContent = pending.length ? tn("al.enqueuePlan", pending.length) : t("al.enqueue");
     go.title = t("al.enqueueTitle");
     go.disabled = !pending.length;
-    go.onclick = () => toQueue(AL.planItems(ans.assets, shapesOf(ans).list, targets, assetUi.plan, bands, assetQueue, { shape: shapeLabel, one: oneLabel }));
+    go.onclick = () => void toQueue(AL.planItems(ans.assets, shapesOf(ans).list, targets, assetUi.plan, bands, assetQueue, { shape: shapeLabel, one: oneLabel }));
     sheet.append(info, prop, or, tri, tex, kL, tool, set, go);
+    // MICRO-GIA-FATTI · the selection's rows «già fatto prima», resolved together
+    const selB4 = n ? selectedBefore(ans, targets) : [];
+    if (selB4.length) {
+      const rb = document.createElement("button");
+      rb.type = "button";
+      rb.dataset.action = "al-resolve-before";
+      rb.dataset.n = String(selB4.length);
+      rb.textContent = `${t("al.gf.resolve")} (${selB4.length})`;
+      rb.title = t("al.gf.resolveTitle");
+      rb.onclick = () => void resolveBeforeAsked(selB4);
+      sheet.appendChild(rb);
+    }
     // MICRO-TESTATA-CLOUD · the selection's files in the cloud
     const selCloud = n ? AL.cloudOf(ans.assets.filter((a) => assetUi.sel.has(a.id))) : null;
     if (selCloud?.paths.length) {
@@ -43724,6 +43763,10 @@ function pumpQueue(): void {
     queueCalls.delete(it.id);
     queueChanged();
     if (it.cancel?.by === "split") splitShapeItem(it);
+    // MICRO-GIA-FATTI · decided once («Usa»): the file there registered as
+    // it is, the item done — no row left to click
+    if (it.state === "failed" && it.before && it.decide === "use")
+      void useWhatIsThere(it, { quiet: true }).then((ok) => { if (ok) askAssetListSoon(); });
     if (it.from === "list" && it.state === "done") void askAssetList();
     paintQueue();
     queueRepaint();
@@ -43777,9 +43820,19 @@ function setQueueMode(m: AL.QueueMode): void {
 // done, a red «!» with the short reason when it failed (a click → its row in
 // the view). ONE vocabulary of signs (asset-list.ts `SIGNS`).
 
-const queueUi = { filter: "all" as AL.QueueFilter, lit: "", litShown: "", scroll: { top: 0, left: 0 } };
+const queueUi = { filter: "all" as AL.QueueFilter, lit: "", litShown: "", scroll: { top: 0, left: 0 },
+  /** MICRO-GIA-FATTI · the rows «già fatto prima» ticked, resolved together */
+  sel: new Set<string>() };
 /** an item added, removed or ended: the ONE moment the budget is computed again */
 let queueEpoch = 0;
+/** MICRO-GIA-FATTI · the files already there being looked for (one gesture at a time) */
+let gfBusy = false;
+/** the answer asked again once after a burst of files used as they are */
+let gfAskTimer: ReturnType<typeof setTimeout> | null = null;
+function askAssetListSoon(): void {
+  if (gfAskTimer) clearTimeout(gfAskTimer);
+  gfAskTimer = setTimeout(() => { gfAskTimer = null; void askAssetList(); }, 1200);
+}
 /** MICRO-CODA-VISTA-2 p.5 · an item whose file was already in versions/ (by
  *  item id, until its run is judged), and how to register that file as it is
  *  («Usa quello che c'è»: the call that would have registered the new one) */
@@ -43847,7 +43900,8 @@ function itemOutcome(it: AL.QueueItem, firstHeld = false): string {
   if (it.state === "done") return it.made ? t("al.out.made", { file: it.made }) : t("al.qs.done");
   // MICRO-CODA-VISTA-2 p.5 · never «failed» / «cancelled» for these two
   if (it.state === "failed" && it.before)
-    return t(it.before.registered ? "al.out.beforeReg" : "al.out.beforeNotReg", { file: it.before.name });
+    return t(it.before.registered ? "al.out.beforeReg" : "al.out.beforeNotReg", { file: it.before.name })
+      + (it.exposed ? ` · ${t("al.gf.exposed")}` : "");
   if (it.state === "cancelled" && it.cancel?.by === "split") return tn("al.out.split", it.split ?? 0);
   if (it.state === "failed") return it.note || t("al.qs.failed");
   if (it.state === "cancelled") return cancelWords(it.cancel);
@@ -43881,14 +43935,26 @@ function toneSign(tone: AL.ItemTone): HTMLElement {
 /** «Usa quello che c'è»: the file already in versions/ becomes the item's
  *  outcome — registered first as a version of its asset when the graph does
  *  not have it (the same registration the new file would have had). */
-async function useWhatIsThere(it: AL.QueueItem): Promise<void> {
+async function useWhatIsThere(it: AL.QueueItem, opts: { quiet?: boolean } = {}): Promise<boolean> {
   const b4 = it.before;
-  if (!b4) return;
+  if (!b4) return false;
+  // MICRO-GIA-FATTI · once per item: the queue's own «Usa» and a gesture in
+  // bulk meeting on the same item never register its file twice
+  const going = usingNow.get(it.id);
+  if (going) return going;
+  const run = useWhatIsThereNow(it, b4, opts);
+  usingNow.set(it.id, run);
+  try { return await run; } finally { usingNow.delete(it.id); }
+}
+const usingNow = new Map<string, Promise<boolean>>();
+async function useWhatIsThereNow(it: AL.QueueItem, b4: NonNullable<AL.QueueItem["before"]>, opts: { quiet?: boolean }): Promise<boolean> {
+  // MICRO-GIA-FATTI · said once for many (the bulk's own line), not per file
+  const say = (m: string, warn = false): void => { if (!opts.quiet) toast(m); if (warn) logWarn(m); else logInfo(m); };
   if (!versionRegistered(b4.path)) {
     const reg = beforeUse.get(it.id);
-    if (!reg) { toast(t("al.before.useNoWay", { file: b4.name })); return; }
+    if (!reg) { say(t("al.before.useNoWay", { file: b4.name }), true); return false; }
     const why = await reg().catch((e: unknown) => String((e as Error)?.message ?? e));
-    if (why || !versionRegistered(b4.path)) { const m = t("al.before.useFailed", { file: b4.name, why: why || t("files.useNoMaster") }); toast(m); logWarn(m); return; }
+    if (why || !versionRegistered(b4.path)) { say(t("al.before.useFailed", { file: b4.name, why: why || t("files.useNoMaster") }), true); return false; }
   }
   beforeUse.delete(it.id);
   it.state = "done";
@@ -43896,12 +43962,217 @@ async function useWhatIsThere(it: AL.QueueItem): Promise<void> {
   it.before = null;
   it.ended = Date.now();
   queueChanged();
-  const m = t("al.before.used", { file: b4.name });
-  toast(m);
-  logInfo(m);
-  if (it.from === "list") void askAssetList();
+  say(t("al.before.used", { file: b4.name }));
+  if (it.from === "list" && !opts.quiet) void askAssetList();
   paintQueue();
   queueRepaint();
+  return true;
+}
+
+// ── MICRO-GIA-FATTI · «già fatto prima» decided ONCE, and in bulk ──────────
+// E.D. (1 Nov 20:38, lab.30): «seleziona tutto» → «Applica e metti in coda»;
+// the forms, the 10 RB meshes, Tetto1, the two Column_entrance ended «≡ già
+// fatto prima» and stayed there, «27 / 98 coperti»: a click per row. Now the
+// gesture looks first, asks once with the count (the files the race of 1 Nov
+// may have touched marked, «Sostituisci» by default for them, «Usa» for the
+// others); the queue resolves them by itself when it meets them; what is left
+// is resolved together — in «Coda» (selection, the filter «già fatto prima»)
+// and in Asset (the two gestures on the row, «Risolvi i già fatti…»).
+
+/** The files the items would write that are already in versions/ — asked of
+ *  the bridge before anything runs: gltfpack's own plan (`/fs/optimize`, a
+ *  dry run: where each variant goes, whether it is there) and, for «Prepara
+ *  per un uso», s3Dgraphy's canonical names in the .blend's versions/ (its
+ *  level is the diagnosis': lod1 and lod0 looked for, the likelier first). A
+ *  form is foreseen by its first copy, like its run. Each with its time (the
+ *  folder's listing) and whether the race of 1 Nov could have touched it. */
+async function foundBefore(items: readonly AL.QueueItem[]): Promise<AL.Found[]> {
+  const ans = assetUi.ans;
+  if (!ans || !items.length) return [];
+  if (!useState.profiles) await loadUseProfiles().catch(() => undefined);
+  const lists = new Map<string, Promise<FsListing | null>>();
+  const entryOf = async (path: string): Promise<FsListing["entries"][number] | null> => {
+    const dir = paths.dirname(path);
+    let l = lists.get(dir);
+    if (!l) { l = fsList(dir).catch(() => null); lists.set(dir, l); }
+    return (await l)?.entries.find((e) => e.name === baseName(path)) ?? null;
+  };
+  const out: AL.Found[] = [];
+  const say = (it: AL.QueueItem): string => it.shape ? `${t("al.shape", { n: String(it.asset_ids?.length ?? 0) })} ${it.asset ?? ""}` : it.asset ?? it.label;
+  // gltfpack: one dry run per level and destination, its sources together
+  const byPre = new Map<string, { pre: OptimizePreset; its: { it: AL.QueueItem; path: string }[] }>();
+  for (const it of items) {
+    const a = ans.assets.find((x) => x.id === it.asset_id);
+    if (!a || !it.tool || !it.target || it.tool === "keep" || it.tool === "tileset") continue;
+    const src = AL.sourceFor(a, it.tool, (id) => fileStateOf(id)?.path ?? "");
+    if (src.kind === "files") {
+      const pre = itemPreset(it, a, src.version);
+      const k = `${pre.lod}|${pre.destination}`;
+      const g = byPre.get(k) ?? { pre, its: [] };
+      g.its.push({ it, path: src.path });
+      byPre.set(k, g);
+    } else if (src.kind === "blend") {
+      const prof = useState.profiles?.find((p) => p.id === ITEM_PROFILE[it.target!]);
+      if (!prof || prof.packaging === "stl") continue;
+      const folder = paths.join(paths.dirname(paths.normalize(paths.toPosix(src.path))), "versions");
+      for (const file of AL.useFileNames(src.block || a.name, prof.destination, it, prof.packaging)) {
+        // a glTF packed apart is a folder (the bridge's path drops `.gltf`)
+        const name = file.endsWith(".gltf") ? file.slice(0, -5) : file;
+        const path = paths.join(folder, name);
+        const e = await entryOf(path);
+        if (!e) continue;
+        out.push({ id: it.id, path, name, registered: versionRegistered(path), asset: say(it), mtime: e.mtime,
+                   exposed: AL.raceExposed({ blend: src.path, mtime: e.mtime }) });
+        break;
+      }
+    }
+  }
+  for (const { pre, its } of byPre.values()) {
+    for (let i = 0; i < its.length; i += 64) {
+      const part = its.slice(i, i + 64);
+      let outs: OptOut[] = [];
+      try {
+        const r = await fetch(`${await bridgeUrl()}/fs/optimize`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sources: part.map((x) => x.path), preset: pre.id, lod: pre.lod, destination: pre.destination,
+            ratio: pre.ratio, texture_px: pre.texturePx, ktx2: pre.ktx2, meshopt: pre.meshopt, quantize: pre.meshopt, dry_run: true }) });
+        outs = ((await r.json().catch(() => ({}))) as { outputs?: OptOut[] }).outputs ?? [];
+      } catch { outs = []; }
+      // the plan answers in the order of the sources asked
+      part.forEach((x, j) => {
+        const o = outs[j] as (OptOut & { exists?: boolean; name?: string }) | undefined;
+        if (!o?.exists || !o.path) return;
+        out.push({ id: x.it.id, path: o.path, name: o.name ?? baseName(o.path), registered: versionRegistered(o.path), asset: say(x.it), exposed: false });
+      });
+    }
+  }
+  return out;
+}
+
+/** The ONE question: «N file esistono già in versions/» — the list (each with
+ *  its asset, whether the graph has it, ⚠ when the race may have touched it,
+ *  and what its default is), and the answers: as marked (the default, OK),
+ *  use them all (registered), replace them all, decide row by row. → the
+ *  answer, or null (Annulla: nothing queued). */
+async function askBefore(found: readonly AL.Found[]): Promise<AL.BeforeHow | null> {
+  const d = AL.beforeDefault(found);
+  const body = document.createElement("div");
+  body.className = "al-gf";
+  body.dataset.alGf = String(found.length);
+  if (d.replace) {
+    const p = document.createElement("p");
+    p.className = "files-hint al-gf-race";
+    p.textContent = tn("al.gf.raceHint", d.replace);
+    body.appendChild(p);
+  }
+  const ul = document.createElement("ul");
+  ul.className = "al-gf-list";
+  for (const f of found) {
+    const li = document.createElement("li");
+    li.dataset.alGfRow = f.id;
+    li.dataset.exposed = String(f.exposed);
+    const b = document.createElement("b");
+    b.textContent = `${f.exposed ? "⚠ " : `${AL.SIGNS.before} `}${f.name}`;
+    const small = document.createElement("small");
+    small.textContent = ` — ${[f.asset ?? "", t(f.registered ? "al.gf.reg" : "al.gf.notReg"),
+      f.exposed ? t("al.gf.exposed") : "", `${t("al.gf.default")} ${t(f.exposed ? "al.before.replace" : "al.before.use")}`].filter(Boolean).join(" · ")}`;
+    li.title = f.path;
+    li.append(b, small);
+    ul.appendChild(li);
+  }
+  body.appendChild(ul);
+  const useL = t("al.gf.useAll"), repL = t("al.gf.replaceAll"), rowsL = t("al.gf.rows");
+  const okL = d.how === "marked" ? t("al.gf.marked", { use: String(d.use), replace: String(d.replace) }) : d.how === "replace" ? repL : useL;
+  const choices = [
+    ...(d.how !== "use" ? [{ key: "use", label: useL, title: t("al.gf.useAllTitle") }] : []),
+    ...(d.how !== "replace" ? [{ key: "replace", label: repL, title: t("al.gf.replaceAllTitle") }] : []),
+    { key: "rows", label: rowsL, title: t("al.gf.rowsTitle") },
+  ];
+  const a = await openDialog({ kind: "made-before", title: t("al.gf.title"), message: tn("al.gf.ask", found.length), body, ok: okL, choices });
+  if (!a.ok) return null;
+  return (a.choice as AL.BeforeHow | undefined) ?? d.how;
+}
+
+/** The answer applied to the items: «replace» asks the bridge to write over
+ *  from the start, «use» registers the file when the run meets it; the
+ *  exposed ones keep their mark (the row says it). */
+function decideItems(items: readonly AL.QueueItem[], found: readonly AL.Found[], how: AL.BeforeHow, others: readonly string[] = []): void {
+  const dec = AL.beforeDecisions(found, how, others);
+  const exp = new Set(found.filter((f) => f.exposed).map((f) => f.id));
+  for (const it of items) {
+    if (!dec.has(it.id)) continue;
+    it.decide = dec.get(it.id) ?? null;
+    it.replace = it.decide === "replace";
+    it.exposed = exp.has(it.id);
+  }
+}
+
+/** The queue's items «già fatto prima» on the rows selected in Asset (for the
+ *  targets shown; a form's item once) */
+function selectedBefore(ans: AL.AssetListAnswer, targets: readonly AL.TargetKey[]): AL.QueueItem[] {
+  const out = new Map<string, AL.QueueItem>();
+  for (const a of ans.assets) {
+    if (!assetUi.sel.has(a.id)) continue;
+    for (const k of targets) { const it = AL.cellItem(assetQueue, a.id, k); if (it && AL.itemTone(it) === "before") out.set(it.id, it); }
+  }
+  return [...out.values()];
+}
+
+/** «Risolvi i già fatti…»: the same ONE question as «Applica e metti in
+ *  coda» on items already ended «già fatto prima» (their file's time read
+ *  from its folder, for the race), then resolved together. */
+async function resolveBeforeAsked(its: readonly AL.QueueItem[]): Promise<void> {
+  const mine = its.filter((x) => AL.itemTone(x) === "before" && x.before);
+  if (!mine.length) return;
+  const lists = new Map<string, Promise<FsListing | null>>();
+  const found: AL.Found[] = [];
+  for (const it of mine) {
+    const b4 = it.before!;
+    const dir = paths.dirname(b4.path);
+    let l = lists.get(dir);
+    if (!l) { l = fsList(dir).catch(() => null); lists.set(dir, l); }
+    const e = (await l)?.entries.find((x) => x.type === "file" && x.name === b4.name);
+    const a = assetUi.ans?.assets.find((x) => x.id === it.asset_id);
+    const src = a && it.tool ? AL.sourceFor(a, it.tool, (id) => fileStateOf(id)?.path ?? "") : null;
+    const exposed = it.exposed || AL.raceExposed({ blend: src?.kind === "blend" ? src.path : undefined, mtime: e?.mtime });
+    it.exposed = exposed;
+    found.push({ id: it.id, path: b4.path, name: b4.name, registered: versionRegistered(b4.path), exposed,
+                 asset: it.shape ? `${t("al.shape", { n: String(it.asset_ids?.length ?? 0) })} ${it.asset ?? ""}` : it.asset ?? it.label, mtime: e?.mtime });
+  }
+  const how = await askBefore(found);
+  if (!how || how === "rows") return;
+  const dec = AL.beforeDecisions(found, how);
+  const use = mine.filter((x) => dec.get(x.id) === "use");
+  const rep = mine.filter((x) => dec.get(x.id) === "replace");
+  if (rep.length) await resolveBefore(rep, "replace", false);
+  if (use.length) await resolveBefore(use, "use");
+  assetUi.sel.clear();
+  renderStorage();
+}
+
+/** The items «già fatto prima» resolved together: «use» registers each file
+ *  as it is (one at a time, one line said for all), «replace» puts each back
+ *  in the queue to be made again over its file (asked ONCE for all). */
+async function resolveBefore(its: readonly AL.QueueItem[], how: "use" | "replace", ask = true): Promise<void> {
+  const mine = its.filter((x) => AL.itemTone(x) === "before");
+  if (!mine.length) return;
+  if (how === "replace") {
+    if (ask && !(await askConfirm(tn("al.gf.replaceAsk", mine.length, { files: mine.slice(0, 8).map((x) => x.before!.name).join("\n")
+      + (mine.length > 8 ? "\n…" : "") }), { danger: true }))) return;
+    for (const it of mine) { AL.retryItem(assetQueue, it.id); it.replace = true; it.decide = "replace"; }
+    queueChanged(); applyBlocks(); paintQueue(); pumpQueue(); queueRepaint();
+    const m = tn("al.gf.replacing", mine.length);
+    toast(m); logInfo(m);
+    return;
+  }
+  let used = 0;
+  const failed: string[] = [];
+  for (const it of mine) {
+    if (await useWhatIsThere(it, { quiet: true })) used++; else failed.push(it.before?.name ?? it.label);
+  }
+  const m = tn("al.gf.used", used) + (failed.length ? ` · ${tn("al.gf.useFailedN", failed.length)}` : "");
+  toast(m);
+  logInfo(m);
+  if (used) askAssetListSoon();
 }
 
 /** The gestures of an item: the block's own (Timbra, Installa…), Riprova,
@@ -44184,7 +44455,7 @@ const AL_QCOLS = ["state", "asset", "target", "tool", "progress", "time", "outco
 function queueRowSig(it: AL.QueueItem, held: boolean): string {
   return JSON.stringify([it.state, AL.itemTone(it), it.block?.code ?? "", it.state === "running" ? "" : itemOutcome(it, held),
     it.asset ?? it.label, it.target ?? "", it.tool ?? "", it.state === "running", queueUi.lit === it.id,
-    it.before?.registered ?? null, it.block?.addon ?? "", it.block?.path ?? ""]);
+    it.before?.registered ?? null, it.block?.addon ?? "", it.block?.path ?? "", queueUi.sel.has(it.id), !!it.exposed]);
 }
 
 function paintQueueView(host: HTMLElement): void {
@@ -44214,11 +44485,14 @@ function paintQueueView(host: HTMLElement): void {
     if (b.textContent !== words) b.textContent = words;
     b.dataset.n = String(counts[f]);
     b.setAttribute("aria-pressed", String(queueUi.filter === f));
+    // MICRO-GIA-FATTI · «già fatto prima» shown while there is one
+    b.hidden = f === "before" && !counts.before && queueUi.filter !== "before";
   }
   const ended = assetQueue.some((x) => !["waiting", "running"].includes(x.state));
   const clr = fl.querySelector<HTMLElement>("[data-action='queue-clear']");
   if (ended && !clr) fl.appendChild(clearEndedButton());
   if (!ended && clr) clr.remove();
+  paintQueueBulk(fl);
   fl.hidden = !assetQueue.length;
   // MICRO-CODA-VISTA-2 p.3 · empty: one sentence the whole width, no table
   const rows = AL.queueFilter(assetQueue, queueUi.filter);
@@ -44255,6 +44529,43 @@ function paintQueueView(host: HTMLElement): void {
   }
 }
 
+/** MICRO-GIA-FATTI · «Usa quelli che ci sono (n)» · «Sostituisci (n)»: on the
+ *  rows «già fatto prima» ticked — none ticked: those the filter shows. Written
+ *  again only when its words change. */
+function paintQueueBulk(fl: HTMLElement): void {
+  const b4 = AL.beforeItems(assetQueue);
+  for (const id of [...queueUi.sel]) if (!b4.some((x) => x.id === id)) queueUi.sel.delete(id);
+  let bulk = fl.querySelector<HTMLElement>(":scope > [data-al-qbulk]");
+  if (!b4.length) { bulk?.remove(); return; }
+  if (!bulk) { bulk = document.createElement("span"); bulk.className = "al-qbulk"; bulk.dataset.alQbulk = ""; fl.appendChild(bulk); }
+  const its = queueUi.sel.size ? b4.filter((x) => queueUi.sel.has(x.id)) : AL.queueFilter(b4, queueUi.filter);
+  const sig = JSON.stringify([queueUi.sel.size, its.map((x) => x.id)]);
+  if (bulk.dataset.sig === sig) return;
+  bulk.dataset.sig = sig;
+  bulk.textContent = "";
+  const lead = document.createElement("small");
+  lead.className = "files-hint";
+  lead.textContent = queueUi.sel.size ? tn("al.gf.selected", queueUi.sel.size) : `${AL.SIGNS.before} ${t("al.tone.before")}:`;
+  const btn = (action: string, text: string, title: string, f: () => void): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.action = action;
+    b.dataset.n = String(its.length);
+    b.textContent = text;
+    b.title = title;
+    b.disabled = !its.length;
+    b.onclick = f;
+    return b;
+  };
+  const use = btn("queue-before-use", `${t("al.gf.useN")} (${its.length})`, t("al.gf.useAllTitle"), () => {
+    const these = [...its]; queueUi.sel.clear(); void resolveBefore(these, "use");
+  });
+  const rep = btn("queue-before-replace", `${t("al.before.replace")} (${its.length})`, t("al.gf.replaceAllTitle"), () => {
+    const these = [...its]; void resolveBefore(these, "replace").then(() => { queueUi.sel.clear(); paintQueue(); });
+  });
+  bulk.append(lead, use, rep);
+}
+
 /** One row of «Coda», written into its own `tr` (kept: its place, its hover). */
 function queueRowInto(tr: HTMLTableRowElement, it: AL.QueueItem, held: boolean): void {
   const tone = AL.itemTone(it);
@@ -44266,6 +44577,17 @@ function queueRowInto(tr: HTMLTableRowElement, it: AL.QueueItem, held: boolean):
     const td = document.createElement("td"); td.className = cls; if (title) td.title = title; tr.appendChild(td); return td;
   };
   const st = c("al-qstate", t(`al.tone.${tone}`));
+  // MICRO-GIA-FATTI · a row «già fatto prima» can be ticked (resolved together)
+  if (tone === "before") {
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.alQsel = it.id;
+    cb.checked = queueUi.sel.has(it.id);
+    cb.title = t("al.gf.tick");
+    cb.onclick = (e) => e.stopPropagation();
+    cb.onchange = () => { if (cb.checked) queueUi.sel.add(it.id); else queueUi.sel.delete(it.id); paintQueue(); };
+    st.append(cb, " ");
+  }
   st.append(toneSign(tone), ` ${t(`al.tone.${tone}`)}`);
   const name = it.shape ? `${t("al.shape", { n: String(it.asset_ids?.length ?? 0) })} ${it.asset ?? ""}` : it.asset ?? it.label;
   const an = c("al-qasset", it.label);
@@ -44343,6 +44665,22 @@ function cellRunInto(td: HTMLTableCellElement, it: AL.QueueItem | null, cellOk: 
   line.title = why;
   go(line);
   td.appendChild(line);
+  // MICRO-GIA-FATTI · on the row itself, the two gestures
+  if (tone === "before" && it.before) {
+    const hands = document.createElement("div");
+    hands.className = "al-before-hands";
+    for (const [how, words] of [["use", t("al.before.use")], ["replace", t("al.before.replace")]] as const) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ghost al-fix";
+      b.dataset.action = `al-before-${how}`;
+      b.textContent = words;
+      b.title = t(how === "use" ? (it.before.registered ? "al.before.useTitleReg" : "al.before.useTitle") : "al.before.replaceTitle", { file: it.before.name });
+      b.onclick = (e) => { e.stopPropagation(); void resolveBefore([it], how); };
+      hands.appendChild(b);
+    }
+    td.appendChild(hands);
+  }
   return false;
 }
 
@@ -44360,6 +44698,8 @@ function splitShapeItem(it: AL.QueueItem): void {
     { one: (a, k, p) => `${a.name} → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}` });
   const names = ans.assets.filter((a) => ids.has(a.id)).map((a) => a.name).join(", ");
   it.split = items.length;
+  // MICRO-GIA-FATTI · the copies inherit what was decided for their form
+  for (const x of items) { x.decide = it.decide ?? null; x.replace = it.decide === "replace"; x.exposed = it.exposed; }
   const m = t("al.shapeSplitSaid", { names, n: String(items.length) });
   toast(m);
   logInfo(m);
@@ -44422,6 +44762,17 @@ function paintQueue(): void {
   paintRunBars();
 }
 
+/** the use profile of a target */
+const ITEM_PROFILE: Readonly<Record<AL.TargetKey, string>> = { mobile: "mobile_webxr", web: "webxr", desk: "desktop_realtime", arch: "archive" };
+/** gltfpack's preset for a list item on a file of its asset (its profile's,
+ *  the ratio to the triangles asked, the texture side, KTX2) */
+function itemPreset(it: AL.QueueItem, a: AL.AssetRow, version: string): OptimizePreset {
+  const base = OPTIMIZE_PRESETS.find((p) => p.id === presetForProfile(ITEM_PROFILE[it.target!])) ?? OPTIMIZE_PRESETS[0];
+  const from = a.versions.find((v) => v.id === version);
+  const ratio = it.tool === "ktx2" ? 1 : it.triangles && from?.triangles ? Math.min(1, it.triangles / from.triangles) : base.ratio;
+  return { ...base, ratio, texturePx: it.texture ?? 0, ktx2: !!it.ktx2, meshopt: true };
+}
+
 /** What a list item does when its turn comes: the tool on the asset's
  *  source (asset-list.ts `sourceFor`), through Ottimizza's own ways — each
  *  result a stamped version registered in the graph. → null, or why not. */
@@ -44431,8 +44782,7 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   const win = windowsOf().find((w) => w.type === "storage");
   if (!win) return t("blend.prepareNoArchive");
   const src = AL.sourceFor(a, it.tool, (id) => fileStateOf(id)?.path ?? "");
-  const profile = { mobile: "mobile_webxr", web: "webxr", desk: "desktop_realtime", arch: "archive" }[it.target];
-  const base = OPTIMIZE_PRESETS.find((p) => p.id === presetForProfile(profile)) ?? OPTIMIZE_PRESETS[0];
+  const profile = ITEM_PROFILE[it.target];
   if (it.tool === "keep") return null;
   if (src.kind === "none") return t("al.noSource");
   it.phase = "make";
@@ -44441,9 +44791,7 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
     return runJudged(() => runTileset(win, [src.path], 1), it);
   }
   if (src.kind === "files") {
-    const from = a.versions.find((v) => v.id === src.version);
-    const ratio = it.tool === "ktx2" ? 1 : it.triangles && from?.triangles ? Math.min(1, it.triangles / from.triangles) : base.ratio;
-    const pre: OptimizePreset = { ...base, ratio, texturePx: it.texture ?? 0, ktx2: !!it.ktx2, meshopt: true };
+    const pre = itemPreset(it, a, src.version);
     return runJudged(() => runOptimize(win, pre, [src.path], 0), it);
   }
   // a master inside a .blend: EM Tools' «Prepare for a use» in a background

@@ -324,6 +324,64 @@ ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk o
      "the budget's key: the same answer, epoch and plan → the same (no recount on a repaint)");
 }
 
+// ── MICRO-GIA-FATTI · «già fatto prima» decided once, and in bulk ─────────
+{
+  const it = (id, state, o = {}) => ({ id, label: id, state, note: "", from: "list", target: "mobile", tool: "decimate_bake", asset_id: id, ...o });
+  const F = (id, exposed) => ({ id, path: `/p/SB/versions/${id}@lod1-mobile.glb`, name: `${id}@lod1-mobile.glb`, registered: false, exposed });
+  // p.1 · ONE question with the count: the default of each file and the answer
+  const found = [F("RB1", false), F("RB2", false), F("Col", true), F("Tetto1", true)];
+  const d = A.beforeDefault(found);
+  ok(d.use === 2 && d.replace === 2 && d.how === "marked", `the default: «Usa» ${d.use}, «Sostituisci» ${d.replace} (the exposed ones) → «${d.how}»`);
+  ok(A.beforeDefault([F("a", false)]).how === "use" && A.beforeDefault([F("a", true)]).how === "replace", "none exposed → «Usa»; all exposed → «Sostituisci»");
+  const mk = A.beforeDecisions(found, "marked", ["RB1", "RB2", "Col", "Tetto1", "K1"]);
+  ok(mk.get("RB1") === "use" && mk.get("Col") === "replace" && mk.get("Tetto1") === "replace" && mk.get("K1") === null,
+     "as marked: the RB used, the exposed made again; one not foreseen left to its row");
+  const all = A.beforeDecisions(found, "use", ["K1"]);
+  const rp = A.beforeDecisions(found, "replace", ["K1"]);
+  const rows = A.beforeDecisions(found, "rows", ["K1"]);
+  ok([...all.values()].every((x) => x === "use") && rp.get("Col") === "replace" && rp.get("K1") === null && [...rows.values()].every((x) => x === null),
+     "«Usa» for all (a file not foreseen too: nothing is taken away); «Sostituisci» only the files shown; «riga per riga» none");
+  // the race of 1 Nov: GreatTemple_2026_v2.blend, 15:04–15:10 UTC; the RB .blend in sequence, gltfpack never
+  const s = (iso) => Date.parse(iso) / 1000;
+  ok(A.raceExposed({ blend: "/x/SB/GreatTemple_2026_v2.blend", mtime: s("2026-11-01T15:05:00Z") })
+     && A.raceExposed({ blend: "C:\\x\\SB\\GreatTemple_2026_v2.blend", mtime: s("2026-11-01T15:09:21Z") }),
+     "Column_shadow.035 (15:05) and Tetto1 (15:09) of the SB .blend: exposed");
+  ok(!A.raceExposed({ blend: "/x/RB/RB_2026.blend", mtime: s("2026-11-01T15:06:23Z") })
+     && !A.raceExposed({ blend: "/x/SB/GreatTemple_2026_v2.blend", mtime: s("2026-11-01T17:11:30Z") })
+     && !A.raceExposed({ blend: undefined, mtime: s("2026-11-01T15:05:00Z") }) && !A.raceExposed({ blend: "/x/SB/GreatTemple_2026_v2.blend" }),
+     "an RB mesh, Column_entrance after the fix (17:11), a gltfpack variant, a time unknown: not exposed");
+  // the names «Prepara per un uso» gives (s3Dgraphy's version_file_name), the likelier first
+  ok(A.versionFileName("Tetto1_BAKE_SM_Tetto1_BAKE", "lod1", "mobile") === "Tetto1_BAKE_SM_Tetto1_BAKE@lod1-mobile.glb"
+     && A.versionFileName("a b/c", "lod0", "realtime") === "a_b_c@lod0-realtime.glb", "the canonical name (unsafe characters → _)");
+  ok(A.useFileNames("M", "mobile", { tool: "decimate_bake", triangles: 10 })[0] === "M@lod1-mobile.glb"
+     && A.useFileNames("M", "mobile", { tool: "instance", triangles: null })[0] === "M@lod0-mobile.glb", "decimating → lod1 first, else lod0");
+  // p.2 · the filter «già fatto prima», still among «fatti»
+  const b4 = (id, o = {}) => it(id, "failed", { before: { path: `/p/${id}.glb`, name: `${id}.glb`, registered: false }, ...o });
+  const q = [b4("RB1"), b4("RB2"), it("f", "failed"), it("d", "done"), it("w", "waiting")];
+  const c = A.queueCounts(q);
+  ok(c.before === 2 && c.done === 3 && c.failed === 1 && A.queueFilter(q, "before").map((x) => x.id).join() === "RB1,RB2"
+     && A.QUEUE_FILTERS.includes("before"), `the filter «già fatto prima» (${c.before}), counted among «fatti» too (${c.done})`);
+  ok(A.beforeItems(q, new Set(["RB2", "f"])).map((x) => x.id).join() === "RB2", "the ticked ones that are «già fatto prima»");
+  // p.3 · after «Usa»: the row ✓ and «coperti» up (the item done, its file the outcome)
+  const used = { ...q[0], state: "done", before: null, made: "RB1@lod1-mobile.glb", ended: 5000 };
+  ok(A.itemTone(used) === "ok" && A.itemGesture(used) === null, "after «Usa»: ✓, no gesture left");
+  const qd = [{ id: "u1", label: "", state: "failed", note: "", asset_id: "Column1", target: "mobile", tool: "decimate_bake", triangles: 10, texture: 512, ktx2: true,
+    before: { path: "/p/C.glb", name: "C.glb", registered: false }, ended: 2000 }];
+  const was = A.sceneCount(list, "mobile", { queue: qd, after: true, answeredAt: 1000 });
+  const now = A.sceneCount(list, "mobile", { queue: [{ ...qd[0], state: "done", before: null, made: "C.glb", ended: 3000 }], after: true, answeredAt: 1000 });
+  ok(now.covered === was.covered + 1, `«coperti» up after «Usa» (${was.covered} → ${now.covered})`);
+  // the page's name is s3Dgraphy's (version_file_name), for the names of Templu Mare
+  if (existsSync(PY)) {
+    const { spawnSync } = await import("node:child_process");
+    const names = ["Tetto1_BAKE_SM_Tetto1_BAKE", "ME_EST_L_LOD0", "Column_shadow.035", "a b/c", "Pavimento_1_BAKE_SM_Pavimento_1_BAKE.001"];
+    const py = spawnSync(PY, ["-c", `import json,sys; sys.path.insert(0, ${JSON.stringify(`${S3D}src`)}); from s3dgraphy.resources import use_profiles as U; `
+      + `print(json.dumps([U.version_file_name(n, l, U.profile(p)) for n in ${JSON.stringify(names)} for (l, p) in (("lod1", "mobile_webxr"), ("lod0", "webxr"))]))`], { encoding: "utf8" });
+    const want = JSON.parse(py.stdout || "[]");
+    const got = names.flatMap((n) => [A.versionFileName(n, "lod1", "mobile"), A.versionFileName(n, "lod0", "aton-heriverse", "gltf_separate")]);
+    ok(want.length === got.length && want.every((x, i) => x === got[i]), `the page's names are s3Dgraphy's (${got.length}: ${got[0]} …)`);
+  }
+}
+
 // ── the bridge ──────────────────────────────────────────────────────────────
 if (!existsSync(PY)) {
   console.log(`asset-list: ${checks} page checks; no s3Dgraphy venv — bridge SKIPPED`);

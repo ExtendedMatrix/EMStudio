@@ -11182,6 +11182,15 @@ tr.al-covered-row > td { color: var(--text-faint); }
 .al-qempty { margin: 0; padding: 18px 12px; width: 100%; box-sizing: border-box; color: var(--text-muted); font-size: 13px; border-bottom: 1px solid var(--border); }
 .al-qtable tr.lit > td { background: var(--accent-soft, rgba(80, 140, 255, .15)); }
 .al-qfilters .files-seg button[data-n="0"] { opacity: .6; }
+/* MICRO-GIA-FATTI · «già fatto prima» decided once, and in bulk */
+.al-qbulk { display: inline-flex; gap: 6px; align-items: center; margin-left: 12px; }
+.al-before-hands { display: flex; gap: 4px; margin: 2px 0; }
+.al-before-hands button { font-size: 11px; padding: 1px 6px; }
+.al-gf-list { max-height: 46vh; overflow: auto; margin: 6px 0; padding-left: 18px; font-size: 12px; }
+.al-gf-list li[data-exposed="true"] b { color: var(--warn, #b26a00); }
+.al-gf-race { margin: 4px 0; }
+.app-dialog[data-app-dialog="made-before"] .modal-card { max-width: min(860px, 92vw); }
+.app-dialog[data-app-dialog="made-before"] .modal-foot { flex-wrap: wrap; }
 .al-mis { flex: 0 0 auto; margin: 4px 8px; padding: 4px 8px; border-radius: 4px; }
 .al-mis ul { margin: 2px 0 0 16px; padding: 0; font-size: 11px; max-height: 96px; overflow: auto; }
 .al-shapeless { color: var(--text-faint); }
