@@ -189,6 +189,14 @@ async function rootPath() {
 // ── the cases ───────────────────────────────────────────────────────────────
 const results = [];
 const cases = [];
+// MICRO-TESTATA-CLOUD · the status bar's «who» is a state: its click opens the
+// chip's menu at the top right, whose Autore section leads to «Chi sei»
+async function openWhoPanel(p) {
+  await p.click("#footer-identity");
+  await p.waitForSelector("#who-menu", { timeout: 5000 });
+  await p.evaluate(() => document.querySelector('#who-menu [data-who="author-set"], #who-menu [data-who="author-verify"], #who-menu [data-who="author-panel"]')?.click());
+}
+
 const test = (id, what, fn) => cases.push({ id, what, fn });
 
 /** Enter a folder of the Storage window by double-clicking its rows. */
@@ -4828,7 +4836,7 @@ test("W16.identity", "U13–U16, rifatto su DOVE-CHI-MENU p.4 · una sola verit�
   // node yet» and the way there), «This computer's identities…» opens Settings ▸
   // Identity filled from it
   const chip = await p.evaluate(() => document.getElementById("footer-identity").title);
-  await p.click("#footer-identity");
+  await openWhoPanel(p);
   await p.waitForTimeout(1500);
   const panel = await p.evaluate(() => ({ state: document.querySelector(".idpanel .idp-state")?.textContent ?? "",
     text: document.querySelector(".idpanel")?.textContent ?? "",
@@ -5791,7 +5799,7 @@ test("F8.node", "F8 (U17), rifatto su DOVE-CHI-MENU p.4/p.5 · «Chi sei» riman
   // are» sends to «Where you are» (entering a node is there); Settings ▸
   // Connections holds the nodes as a LIST, with no Room and no Sign in; every
   // «no node configured» opens it with the cursor in the address field
-  await p.click("#footer-identity");
+  await openWhoPanel(p);
   await p.waitForTimeout(600);
   const toWhere = await p.evaluate(() => !!document.querySelector("[data-idp-where]"));
   await p.click("[data-idp-where]");
@@ -5896,7 +5904,7 @@ const idPanel = (p) => p.evaluate(() => ({
 test("E1.orcid", "E1 · «Sign in with ORCID» sul desktop: ORCID si apre nel BROWSER DI SISTEMA (mai nella webview) col client di EMStudio e il ritorno https://extendedmatrix.org/orcid/callback/; la risposta torna per deep link org.extendedmatrix.emstudio:/orcid-return#…, è verificata (firma, nonce) e l'iD diventa verificato da orcid.org", async () => {
   const orcid = await fakeOrcid();
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriDesktop(), route: orcid.route });
-  await p.click("#footer-identity");
+  await openWhoPanel(p);
   await p.waitForFunction(() => document.querySelector('.idpanel [data-idp-way="orcid"]')?.dataset.idpReady === "true", null, { timeout: 8000 }).catch(() => {});
   const before = await idPanel(p);
   const href0 = await p.evaluate(() => location.href);
@@ -5912,7 +5920,7 @@ test("E1.orcid", "E1 · «Sign in with ORCID» sul desktop: ORCID si apre nel BR
     await p.evaluate((u) => window.__DEEPLINK__(u), `org.extendedmatrix.emstudio:/orcid-return#id_token=${tk}&state=${q("state")}`);
     await p.waitForTimeout(1200);
     chip = await p.evaluate(() => document.getElementById("footer-identity")?.title ?? "");
-    await p.click("#footer-identity");
+    await openWhoPanel(p);
     await p.waitForTimeout(500);
     after = await idPanel(p);
   }
@@ -5930,7 +5938,7 @@ test("E1.paste", "E1 · il ripiego: se lo schema non si apre, la pagina mostra l
   const orcid = await fakeOrcid();
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriDesktop(), route: orcid.route });
   const start = async () => {
-    await p.click("#footer-identity");
+    await openWhoPanel(p);
     await p.waitForFunction(() => document.querySelector('.idpanel [data-idp-way="orcid"]')?.dataset.idpReady === "true", null, { timeout: 8000 }).catch(() => {});
     await p.locator('.idpanel [data-idp-way="orcid"] button').click();
     await p.waitForTimeout(700);
@@ -5953,7 +5961,7 @@ test("E1.paste", "E1 · il ripiego: se lo schema non si apre, la pagina mostra l
   url = await start();
   const right = await orcid.token({ iss: "https://orcid.org", aud: url.searchParams.get("client_id"), sub: ORCID_ID, nonce: url.searchParams.get("nonce"), exp });
   await paste(`  #id_token=${right}&state=${url.searchParams.get("state")}  `);
-  await p.click("#footer-identity");
+  await openWhoPanel(p);
   await p.waitForTimeout(500);
   const after = await idPanel(p);
   await p.screenshot({ path: SHOT("e1-incolla") }).catch(() => {});
@@ -6119,7 +6127,7 @@ if (process.env.LIVE_NODE) test("E2.live", "E2 dal vivo · il nodo del dev stack
   await p.addInitScript(tauriDesktop());
   await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(BRIDGE)}`);
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 30000 });
-  await p.click("#footer-identity");
+  await openWhoPanel(p);
   await p.waitForFunction(() => document.querySelector('.idpanel [data-idp-way="nodepw"]')?.dataset.idpReady === "true", null, { timeout: 15000 }).catch(() => {});
   const before = await idPanel(p);
   await p.fill(".idpanel [data-idp-orcid]", ORCID_ID);           // dev's iD in the realm
@@ -6914,7 +6922,7 @@ test("DC4.who", "DOVE-CHI-MENU p.4 · «Chi sei» a destra della barra: dichiara
       return { state: c.dataset.identityState, border: getComputedStyle(c).borderTopStyle, mark: !!c.querySelector(".id-node-mark"),
         title: c.title, last: [...document.querySelectorAll("#statusbar .sb-zone")].pop()?.dataset.zone, errors: 0 }; });
     if (k === "declared") {
-      await p.click("#footer-identity");
+      await openWhoPanel(p);
       await p.waitForTimeout(600);
       seen.panel = await p.evaluate(() => ({ buttons: [...document.querySelectorAll(".idpanel button")].map((b) => b.textContent) }));
     }
@@ -11882,7 +11890,9 @@ test("AR13.survey", "MICRO-OTTIMIZZA-3 p.3 · più mesh, un solo tileset: due OB
 test("AR12.blender", "MICRO-OTTIMIZZA-3 · Blender come seconda via, dietro il suo interruttore «sperimentale»: acceso, il bridge trova Blender e lo interroga (un lavoro leggero) e la scheda dice in parole che cosa c'è e che cosa manca — EM Tools che non si carica perché le sue librerie sono per Python 3.11 e questo Blender ha Python 3.13, 3D Survey Collection con il suo set di LOD; l'atlante ricotto di un modello (OB_CUBO_LOD1@atlas.glb); le esperienze col motore Blender + 3DSC: tre livelli RB/versions/‹modello›@lodN-realtime.glb, la memoria detta prima; il set di LOD come lavoro, i glb nella cartella delle versioni; spento, la sezione lo dice", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab12");
-  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  // MICRO-TESTATA-CLOUD · a version made is signed: the queue waits for an author
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000,
+    init: { "emstudio.identities": JSON.stringify({ current: "0000-0002-1825-0097", known: [{ orcid: "0000-0002-1825-0097", name: "Josiah", surname: "Carberry", verified: false }] }) } });
   await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
   await p.waitForTimeout(2500);
   await p.locator(`.files-pl[data-place="${pr}/RB"]`).first().click();

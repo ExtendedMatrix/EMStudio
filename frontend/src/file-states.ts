@@ -6,6 +6,8 @@
 export interface FileState {
   id: string; name: string; state: string; path: string; sha256: string; note: string;
   node_type: string;
+  /** MICRO-TESTATA-CLOUD · `in_cloud`: where the placeholder is (never read) */
+  cloud_path?: string;
 }
 
 /** S1 · a row of the Storage list (s3Dgraphy `storage_rows`): what a file IS

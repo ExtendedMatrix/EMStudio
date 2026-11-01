@@ -28,7 +28,7 @@ for (const id of Object.keys(list)) {
   checks += 2;
 }
 const files = Object.keys(list).filter((k) => k.startsWith("file.")).map((k) => k.slice(5)).sort();
-assert.deepEqual(files, ["both", "empty_copy", "missing", "on_disk", "on_node", "reference_only"],
+assert.deepEqual(files, ["both", "empty_copy", "in_cloud", "missing", "on_disk", "on_node", "reference_only"],
   "the file states are the resolver's");
 checks++;
 

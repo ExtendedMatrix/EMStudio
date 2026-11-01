@@ -17,6 +17,7 @@ export const TONES: Record<string, Tone> = {
   "file.reference_only": "muted",
   "file.missing": "bad",
   "file.empty_copy": "warn",
+  "file.in_cloud": "info",   // MICRO-TESTATA-CLOUD · here as a placeholder, its bytes in the cloud
   "node.reachable": "ok",
   "node.unreachable": "bad",
   "node.global": "info",

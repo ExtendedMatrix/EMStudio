@@ -38,6 +38,10 @@ export interface VersionRow {
    *  compression (s3Dgraphy ≥ dev84; absent before: the shapes fall back on
    *  triangles and textures) */
   geometry_keys?: string[]; compression?: string;
+  /** MICRO-TESTATA-CLOUD · its file (or files) only in a cloud — OneDrive,
+   *  iCloud, Dropbox «online only» — never read by the bridge: the numbers
+   *  are the graph's; where they are and how many bytes (bridge ≥ 56) */
+  in_cloud?: boolean; cloud_paths?: string[]; cloud_bytes?: number;
 }
 export interface Proposal { tool: Tool; triangles: number | null; texture: number | null; ktx2: boolean; why: string }
 export interface TargetCell { state: TargetState; loads: string; why: string; proposal: Proposal; loaded_why?: string }
@@ -48,7 +52,7 @@ export interface AssetRow {
   findings: { level: string; code: string; say_it: string; action: Record<string, unknown> }[];
   loaded_why: string; loaded_say: string;
   tileset_master?: { declared: boolean; sources: { id: string; name: string }[]; unavailable: string; say_it: string } | null;
-  audit: { versions: number; stamped: number; files_missing: string[]; unchecked: number; modified_after_stamp: string[];
+  audit: { versions: number; stamped: number; files_missing: string[]; files_in_cloud?: string[]; unchecked: number; modified_after_stamp: string[];
            master_declared: boolean | null | undefined };
 }
 export interface StudyTexture {
@@ -65,7 +69,7 @@ export interface AssetListAnswer {
   targets: Record<TargetKey, { label: string; label_it: string; profile: string; uses: string[]; bands: Bands }>;
   tools: Tool[]; assets: AssetRow[]; textures: StudyTexture[]; totals: Record<TargetKey, SceneTotals>;
   counts: { assets: number; rms: number; containers: number; versions: number; textures: number; shared_textures: number;
-            measured: number; estimated: number; by_target: Record<TargetKey, Record<TargetState, number>> };
+            measured: number; estimated: number; in_cloud?: number; by_target: Record<TargetKey, Record<TargetState, number>> };
   say_it: string; resolved_here?: boolean;
 }
 
@@ -285,8 +289,10 @@ export interface QueueItem {
    *  its gesture): an add-on missing, the source not stamped, Blender off… */
   block?: Block | null;
 }
-export type BlockCode = "addon" | "unstamped" | "blender" | "no_source" | "no_blend" | "no_mesh" | "checking";
-export interface Block { code: BlockCode; addon?: string; path?: string }
+export type BlockCode = "addon" | "unstamped" | "blender" | "no_source" | "no_blend" | "no_mesh" | "checking" | "cloud" | "author";
+/** `cloud` (MICRO-TESTATA-CLOUD): the source is in the cloud, «da scaricare»
+ *  — `paths` and `bytes` are what «Scarica e misura» would download */
+export interface Block { code: BlockCode; addon?: string; path?: string; paths?: string[]; bytes?: number }
 export type QueueMode = "run" | "pause";
 /** «quanto della macchina usare»: all of it, half, one job at a time */
 export type QueueShare = "all" | "half" | "one";
@@ -740,4 +746,40 @@ export function sourceFor(a: AssetRow, tool: Tool, pathOf: (id: string) => strin
   if (file) return { kind: "files", path: file.p, block: "", version: file.v.id };
   if (blend && tool !== "tileset") return blend;
   return { kind: "none", path: "", block: "", version: "" };
+}
+
+// ── MICRO-TESTATA-CLOUD · files in the cloud, not downloaded ───────────────
+
+/** The files in the cloud of some assets (all their versions, or only
+ *  `versionIds`), each once, and their bytes → what «Scarica e misura» would
+ *  download: `{paths, bytes, versions}`. */
+export function cloudOf(assets: readonly AssetRow[], versionIds?: ReadonlySet<string>): { paths: string[]; bytes: number; versions: number } {
+  const seen = new Map<string, number>();
+  let versions = 0;
+  for (const a of assets) for (const v of a.versions) {
+    if (!v.in_cloud || (versionIds && !versionIds.has(v.id))) continue;
+    versions++;
+    const ps = v.cloud_paths ?? [];
+    // the bytes of a version are of its files together: shared out evenly
+    for (const p of ps) if (!seen.has(p)) seen.set(p, ps.length ? (v.cloud_bytes ?? 0) / ps.length : 0);
+  }
+  return { paths: [...seen.keys()], bytes: Math.round([...seen.values()].reduce((x, y) => x + y, 0)), versions };
+}
+
+/** An item whose source is in the cloud waits «da scaricare»: the source
+ *  the tool would take were every file here (`sourceFor` with the cloud's
+ *  places too) is a file in the cloud — a decimation that wants the master's
+ *  .blend waits for it, a gltfpack that wants the heaviest glTF waits for it,
+ *  instead of quietly starting from something else. A file in the cloud is
+ *  never read by itself: the gesture downloads it. */
+export function cloudBlock(a: AssetRow, tool: Tool, pathOf: (id: string) => string): Block | null {
+  if (tool === "keep") return null;
+  const cloudPath = new Map<string, VersionRow>();
+  for (const v of a.versions) for (const p of v.in_cloud ? v.cloud_paths ?? [] : []) cloudPath.set(p, v);
+  if (!cloudPath.size) return null;
+  const would = sourceFor(a, tool, (id) => pathOf(id) || (a.versions.find((v) => v.id === id && v.in_cloud)?.cloud_paths?.[0] ?? ""));
+  const v = cloudPath.get(would.path);
+  if (!v) return null;
+  const c = cloudOf([a], new Set([v.id]));
+  return { code: "cloud", paths: c.paths, bytes: c.bytes };
 }

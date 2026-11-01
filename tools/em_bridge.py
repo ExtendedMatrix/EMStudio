@@ -440,6 +440,64 @@ def _cloud_only(st) -> bool:
     return bool(attrs & _WIN_CLOUD_ATTRS) or bool(flags & _SF_DATALESS)
 
 
+#: MICRO-TESTATA-CLOUD · where a file whose st_blocks is 0 (size > 0) is a
+#: cloud placeholder too: the File Provider folders (OneDrive, Google Drive…),
+#: iCloud Drive, Dropbox. Outside them a 0-block file is a sparse one, read.
+_CLOUD_DIRS = ("/Library/CloudStorage/", "/Library/Mobile Documents/", "/Dropbox/", "\\OneDrive")
+
+
+#: MICRO-TESTATA-CLOUD · TESTS ONLY: ``EM_BRIDGE_FAKE_CLOUD=<regex>`` makes the
+#: files whose path matches it «in the cloud» (a simulated stat) until «Scarica»
+#: reads them; ``EM_BRIDGE_FAKE_CLOUD_DELAY`` seconds per file downloaded
+_FAKE_CLOUD = os.environ.get("EM_BRIDGE_FAKE_CLOUD") or ""
+_FAKE_HYDRATED = set()
+
+
+def _is_cloud_placeholder(path) -> bool:
+    """MICRO-TESTATA-CLOUD · a file whose bytes are only in a cloud (OneDrive,
+    iCloud, Dropbox «online only»), from a stat — never a read, which would
+    download it. macOS: SF_DATALESS, or 0 blocks for a size > 0 in a cloud
+    folder; Windows: OFFLINE / RECALL_ON_*; Linux: none (False)."""
+    if _FAKE_CLOUD and re.search(_FAKE_CLOUD, str(path)) and os.path.isfile(str(path)):
+        return os.path.realpath(str(path)) not in _FAKE_HYDRATED
+    try:
+        st = os.stat(_long_path(str(path)))
+    except (OSError, ValueError):
+        return False
+    import stat as _stat
+    if not _stat.S_ISREG(st.st_mode):
+        return False
+    if _cloud_only(st):
+        return True
+    blocks = getattr(st, "st_blocks", None)
+    return bool(blocks == 0 and st.st_size > 0 and any(d in str(path) for d in _CLOUD_DIRS))
+
+
+def _cloud_safe_hasher(hasher):
+    """A hasher that refuses a file in the cloud (the resolver says «not
+    hashed»), for an s3dgraphy whose resolver has no ``cloud``."""
+    def guarded(path):
+        if _is_cloud_placeholder(path):
+            raise OSError("in the cloud, not downloaded: not read")
+        return hasher(path)
+    return guarded
+
+
+def _resolve_cloud_safe(fn, *args, **kw):
+    """``fn`` (s3Dgraphy's ``resolve_files`` / ``resolve_graph`` /
+    ``resolve``) told which files are in the cloud (``cloud=``, s3dgraphy ≥
+    1.6.0.dev84: never read, state ``in_cloud``); an older one gets at least a
+    hasher that does not read them (its zero probe still reads 4 KB)."""
+    if kw.get("hasher") is not None:
+        kw["hasher"] = _cloud_safe_hasher(kw["hasher"])
+    try:
+        return fn(*args, cloud=_is_cloud_placeholder, **kw)
+    except TypeError as exc:
+        if "cloud" not in str(exc):
+            raise
+        return fn(*args, **kw)
+
+
 #: what the page says of a cloud-only file, instead of «not found»
 CLOUD_ONLY_MESSAGE = ("the file is in OneDrive (online only): download it, or make it "
                       "«always available on this device»")
@@ -672,6 +730,62 @@ def _asset_progress(token, phase, n=0, total=0):
         _ASSET_PROGRESS.pop(k, None)
 
 
+#: MICRO-TESTATA-CLOUD · «Scarica e misura»: the downloads asked by the page,
+#: by token — ``{state, n, total, bytes, bytes_total, current, errors,
+#: cancel}`` (``GET /fs/hydrate?token=``)
+_HYDRATE = {}
+
+
+def _hydrate_plan(paths):
+    """The files of ``paths`` that are in the cloud, each with its size (a
+    stat: nothing is read) → ``{files: [{path, bytes}], n, bytes}``."""
+    files, seen = [], set()
+    for raw in paths:
+        full = _short_path(os.path.realpath(_long_path(os.path.expanduser(str(raw)))))
+        if full in seen or not _is_cloud_placeholder(full):
+            continue
+        seen.add(full)
+        try:
+            size = os.stat(_long_path(full)).st_size
+        except OSError:
+            continue
+        files.append({"path": full, "bytes": size})
+    return {"files": files, "n": len(files), "bytes": sum(f["bytes"] for f in files)}
+
+
+def _hydrate_run(token, files):
+    """Download ``files`` by reading them through (the cloud's provider
+    fetches the bytes on the first read), one at a time; ``cancel`` is looked
+    at between chunks — a provider that fetches a whole file on the first
+    read finishes that file first."""
+    job = _HYDRATE[token]
+    for f in files:
+        if job["cancel"]:
+            break
+        job["current"] = os.path.basename(f["path"])
+        try:
+            complete = False
+            with open(_long_path(f["path"]), "rb") as fh:
+                while not job["cancel"]:
+                    chunk = fh.read(1 << 20)
+                    if not chunk:
+                        complete = True
+                        break
+                    job["bytes"] += len(chunk)
+            if complete and _FAKE_CLOUD:
+                import time as _t
+                _t.sleep(float(os.environ.get("EM_BRIDGE_FAKE_CLOUD_DELAY") or 0))
+                _FAKE_HYDRATED.add(os.path.realpath(f["path"]))
+            # read to its end: its bytes are here, even when a cancel came meanwhile
+            if complete:
+                job["n"] += 1
+                job["done_paths"].append(f["path"])
+        except OSError as exc:
+            job["errors"].append({"path": f["path"], "error": str(exc)})
+    job["current"] = ""
+    job["state"] = "cancelled" if job["cancel"] else "done"
+
+
 def _measure_by_sha(resolved, progress=None):
     """A ``measure`` for s3Dgraphy's ``consolidate`` / ``asset_list`` from the
     resolver's answers on this computer: each version's .glb / .gltf measured
@@ -687,6 +801,9 @@ def _measure_by_sha(resolved, progress=None):
         path = paths.get(str(entry.get("id")))
         if not path or not os.path.isfile(path) or not path.lower().endswith((".glb", ".gltf")):
             return None
+        # MICRO-TESTATA-CLOUD · never by itself on a file not downloaded
+        if _is_cloud_placeholder(path):
+            return None
         if progress is not None and path not in seen:
             seen.add(path)
             progress(len(seen), total)
@@ -701,6 +818,32 @@ def _measure_by_sha(resolved, progress=None):
                 _MEASURE_MEMO[key] = None
         return _MEASURE_MEMO[key]
     return measure
+
+
+def _cloud_paths_on_versions(graph, out, cloud):
+    """MICRO-TESTATA-CLOUD · each version of ``asset_list`` whose file (or
+    one of its files) is in the cloud gets ``in_cloud``, ``cloud_paths`` and
+    ``cloud_bytes`` (a stat), so the page can say «nel cloud» and ask
+    «Scarica e misura» for a row, a group or a selection."""
+    from s3dgraphy.resources import consolidate as C
+    for a in out.get("assets") or []:
+        for v in a.get("versions") or []:
+            try:
+                ids = [v["id"]] + [f["id"] for f in C._files(graph, {"id": v["id"], "url": v.get("url")})]
+            except Exception:  # noqa: BLE001
+                ids = [v["id"]]
+            paths = sorted({cloud[i] for i in ids if i in cloud})
+            if not paths:
+                continue
+            size = 0
+            for p in paths:
+                try:
+                    size += os.stat(_long_path(p)).st_size
+                except OSError:
+                    pass
+            v.update({"in_cloud": True, "state": "in_cloud", "cloud_paths": paths, "cloud_bytes": size})
+    out.setdefault("counts", {})["in_cloud"] = sum(1 for a in out.get("assets") or []
+                                                   for v in a.get("versions") or [] if v.get("in_cloud"))
 
 
 def _before_after_now(handler, GC, graph, objs, body, em_folder):
@@ -720,8 +863,9 @@ def _before_after_now(handler, GC, graph, objs, body, em_folder):
             root = find_project_root(em_folder) if em_folder else None
             for e in L.entries_of(graph):
                 if e["id"] in want:
-                    r = L.resolve(e, project_root=root, base_dirs=[em_folder] if em_folder else [],
-                                  hasher=_sha256_memo, verify=True)
+                    r = _resolve_cloud_safe(L.resolve, e, project_root=root,
+                                            base_dirs=[em_folder] if em_folder else [],
+                                            hasher=_sha256_memo, verify=True)
                     if r.get("changed"):
                         files_now[e["id"]] = str(r.get("sha256_now") or "")
         except Exception:  # noqa: BLE001 — no radar, the before/after stays
@@ -1211,8 +1355,8 @@ def _bucket_route(route, body):
         root = body.get("project_root") or None
         rows = []
         for graph in _graphs_of(body["doc"]):
-            part = api.resolve_files(graph, project_root=root, base_dirs=folders, cache_dirs=[],
-                                     hasher=lambda p: _sha256_path(p) if os.path.getsize(p) <= 512 << 20 else "")
+            part = _resolve_cloud_safe(api.resolve_files, graph, project_root=root, base_dirs=folders,
+                                       cache_dirs=[], hasher=lambda p: _sha256_path(p) if os.path.getsize(p) <= 512 << 20 else "")
             rows += api.bucket_alignment(graph, part, store, deep=bool(body.get("deep")),
                                          hasher=_sha256_path)
         tally = {}
@@ -1339,7 +1483,7 @@ def _files_route(route, body):
             caches.append(os.path.join(root, "em_cache", "files"))
         results, rows = [], []
         for graph, gname in zip(graphs, gnames):
-            part = api.resolve_files(graph, project_root=root, base_dirs=folders,
+            part = _resolve_cloud_safe(api.resolve_files, graph, project_root=root, base_dirs=folders,
                                      cache_dirs=caches,
                                      on_node=_room_probe(body.get("room")),
                                      hasher=lambda path: hashlib.sha256(
@@ -2004,7 +2148,13 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: token and ``GET /assets/progress?token=`` says where it is (the graph
 #: read, the files found, the files measured n/N, the textures) — the first
 #: opening of Archive › Asset on a large study is never a mute empty list.
-BRIDGE_LEVEL = 55   # 30 also = /validate
+#: 56 = MICRO-TESTATA-CLOUD: a file in OneDrive / iCloud / Dropbox «online
+#: only» is never read by the resolver (``cloud=``: state ``in_cloud``, not
+#: hashed, not measured — the graph's estimate); ``POST /fs/hydrate {paths,
+#: plan}`` says how many files and MB, ``{paths}`` downloads them (by token,
+#: ``GET /fs/hydrate?token=``), ``{cancel}`` stops; ``/assets/list``'s
+#: versions carry ``cloud_paths`` / ``cloud_bytes``.
+BRIDGE_LEVEL = 56   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -2862,6 +3012,17 @@ def make_handler(api):
                 import em_optimize as O
                 self._json({"ok": True, "addons": O.all_addons(), "platform": O.platform_key(),
                             "folder": str(O.addons_dir()), "machine": O.machine()})
+            elif route == "/fs/hydrate":
+                # MICRO-TESTATA-CLOUD · where a «Scarica e misura» is
+                if not self._fs_gate():
+                    return
+                q = urllib.parse.parse_qs(parsed.query)
+                job = _HYDRATE.get((q.get("token") or [""])[0])
+                if job is None:
+                    self._fail(404, "no such download (the bridge was restarted?)")
+                    return
+                self._json({"ok": True, **{k: v for k, v in job.items() if k != "cancel"},
+                            "cancelled": job["cancel"]})
             elif route == "/assets/progress":
                 # MICRO-ARCHIVE-ASSET-2 · where a POST /assets/list is
                 q = urllib.parse.parse_qs(parsed.query)
@@ -3055,6 +3216,40 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._fs_roots_edit(body)
+            elif route == "/fs/hydrate":
+                # MICRO-TESTATA-CLOUD · «Scarica e misura»: {paths, plan: true}
+                # says which are in the cloud and how many MB (a stat); {paths}
+                # downloads them (a thread, by token); {cancel: token} stops
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                body = body if isinstance(body, dict) else {}
+                if body.get("cancel"):
+                    job = _HYDRATE.get(str(body["cancel"]))
+                    if job is not None:
+                        job["cancel"] = True
+                    self._json({"ok": job is not None})
+                    return
+                asked = [str(x) for x in (body.get("paths") or []) if isinstance(x, str)][:20000]
+                inside = [p for p in asked
+                          if _fs_inside_roots(_short_path(os.path.realpath(_long_path(os.path.expanduser(p)))))]
+                plan = _hydrate_plan(inside)
+                plan["outside"] = len(asked) - len(inside)
+                if body.get("plan"):
+                    self._json({"ok": True, **plan})
+                    return
+                import threading
+                import uuid
+                token = uuid.uuid4().hex[:12]
+                _HYDRATE[token] = {"state": "running", "n": 0, "total": plan["n"], "bytes": 0,
+                                   "bytes_total": plan["bytes"], "current": "", "errors": [],
+                                   "done_paths": [], "cancel": False}
+                threading.Thread(target=_hydrate_run, args=(token, plan["files"]), daemon=True).start()
+                self._json({"ok": True, "token": token, **plan})
             elif route in ("/fs/doc", "/fs/probe", "/fs/onedrive", "/fs/collect"):
                 # MICRO-PERCORSI-WINDOWS · the open document's folders, and the
                 # state of its files (there, online only, missing)
@@ -3949,7 +4144,11 @@ def make_handler(api):
                 full = UP.versions_folder(full)
             elif os.path.basename(full.rstrip(os.sep)) != "versions" and os.path.isdir(os.path.join(full, "versions")):
                 full = os.path.join(full, "versions")
-            rows = UP.list_versions(full, model or None)
+            # MICRO-TESTATA-CLOUD · a version in the cloud is listed, not measured
+            try:
+                rows = UP.list_versions(full, model or None, cloud=_is_cloud_placeholder)
+            except TypeError:
+                rows = UP.list_versions(full, model or None)
             return 200, {"ok": True, "folder": full, "versions": rows}
 
         def _optimize_versions_remove(self, body):
@@ -4364,8 +4563,8 @@ def make_handler(api):
                 (r for r in (find_project_root(f) for f in folders) if r), None)
             caches = [d for d in ((os.path.join(root, ".em_cache"), os.path.join(root, "em_cache", "files"))
                                   if root else ()) if os.path.isdir(d)]
-            res = api.resolve_files(graph, project_root=root, base_dirs=folders, cache_dirs=caches,
-                                    on_node=_room_probe(body.get("room")))
+            res = _resolve_cloud_safe(api.resolve_files, graph, project_root=root, base_dirs=folders,
+                                      cache_dirs=caches, on_node=_room_probe(body.get("room")))
             return res, True
 
         def _disk_resolved(self, graph, body, em_folder, ids=None):
@@ -4381,10 +4580,13 @@ def make_handler(api):
                 (r for r in (find_project_root(f) for f in folders) if r), None)
             kw = dict(project_root=root, base_dirs=folders, hasher=_sha256_memo)
             try:
+                # MICRO-TESTATA-CLOUD · a file in the cloud is never read: not
+                # hashed, not measured — «in_cloud», estimated from the graph
                 if ids is None:
-                    return L.resolve_graph(graph, verify=True, **kw)
+                    return _resolve_cloud_safe(L.resolve_graph, graph, verify=True, **kw)
                 want = set(ids)
-                return [L.resolve(e, verify=True, **kw) for e in L.entries_of(graph) if e["id"] in want]
+                return [_resolve_cloud_safe(L.resolve, e, verify=True, **kw)
+                        for e in L.entries_of(graph) if e["id"] in want]
             except TypeError:          # an s3dgraphy without verify
                 return L.resolve_graph(graph, **kw) if ids is None else []
 
@@ -4434,6 +4636,7 @@ def make_handler(api):
             states = {str(r["id"]): str(r.get("state") or "") for r in res if r.get("state")}
             models = body.get("models") if isinstance(body.get("models"), list) else None
             extra = {}
+            disk = []
             if body.get("measure", True) is not False:
                 disk = self._disk_resolved(graph, body, em_folder)
                 _asset_progress(token, "measure", 0, len({r.get("path") for r in disk if str(r.get("path") or "").lower().endswith((".glb", ".gltf"))}))
@@ -4441,7 +4644,14 @@ def make_handler(api):
                          "changed": C.changed_from(disk)}
                 for r in disk:
                     states.setdefault(str(r.get("id")), str(r.get("state") or ""))
+            # MICRO-TESTATA-CLOUD · what this computer says now of a file in
+            # the cloud wins over a state the page sent (from an older look)
+            cloud = {str(r.get("id")): r["cloud_path"] for r in (disk if extra else []) if r.get("cloud_path")}
+            for rid in cloud:
+                states[rid] = "in_cloud"
             out = AL.asset_list(graph, models=models, states=states, in_room=bool(body.get("in_room")), **extra)
+            if cloud:
+                _cloud_paths_on_versions(graph, out, cloud)
             _asset_progress(token, "done", out.get("counts", {}).get("assets", 0), out.get("counts", {}).get("assets", 0))
             out["resolved_here"] = here
             return 200, {"ok": True, **out}

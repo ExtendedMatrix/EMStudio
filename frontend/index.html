@@ -183,6 +183,17 @@
                 data-i18n="strip.publish" data-i18n-title="strip.publishPhase2"
                 title="Publishing to a StratiGraph node arrives with phase 2">Publish…</button>
       </div>
+      <!-- MICRO-TESTATA-CLOUD · at the top right: the theme (☀ / ☾, remembered;
+           it follows the system until it is touched) and WHO YOU ARE — one chip
+           whose menu has two sections, Autore (who signs) and Nodo (the account
+           on the StratiGraph node). Drawn by main.ts (`renderWhoChip`). -->
+      <button id="ns-theme" class="ns-btn ns-icon" type="button" aria-pressed="false"
+              title="Theme" aria-label="Theme">☀</button>
+      <div id="ns-who" class="ns-who">
+        <button id="ns-who-chip" type="button" aria-haspopup="dialog" aria-expanded="false" data-dot="none">
+          <span class="who-av" aria-hidden="true">?</span><span class="who-name">Who signs?</span><span class="who-dot" aria-hidden="true"></span>
+        </button>
+      </div>
     </div>
     <main>
       <div id="tile-root">

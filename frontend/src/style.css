@@ -11158,3 +11158,133 @@ body:not(.tt-comfy) .tile-tablebody .mdl-rm .btn.sm { line-height: 16px; font-si
 .al-finding { margin: 2px 0; }
 .al-table tr.al-asset td:nth-child(2), .al-table tr.al-ver td:nth-child(2), .al-table tr.al-tex td:nth-child(2), .al-table tr.al-shape td:nth-child(2) { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
 .al-compare-versions td, .al-compare-versions th { font-size: 11px; padding: 2px 4px; }
+
+/* ── MICRO-TESTATA-CLOUD · the theme and «Chi sei» at the top right ───────── */
+#name-strip .ns-icon {
+  width: 30px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  flex: none;
+}
+#name-strip .ns-who { flex: none; }
+#ns-who-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  max-width: 220px;
+  padding: 0 10px 0 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 15px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font: 600 12.5px var(--font-sans);
+  cursor: pointer;
+}
+#ns-who-chip:hover { background: var(--bg-hover); }
+#ns-who-chip[aria-expanded="true"] { border-color: var(--accent); }
+#ns-who-chip .who-av {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: 700 10.5px var(--font-sans);
+  letter-spacing: .02em;
+  flex: none;
+}
+#ns-who-chip .who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#ns-who-chip .who-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  border: 2px solid var(--text-faint);
+  background: transparent;
+}
+#ns-who-chip[data-dot="author"] .who-dot { border-color: var(--warn); background: var(--warn); }
+#ns-who-chip[data-dot="node"] .who-dot { border-color: var(--ok); background: var(--ok); }
+#ns-who-chip[data-dot="mismatch"] .who-dot { border-color: var(--danger); background: var(--danger); }
+/* nobody signs: the chip asks it, visibly */
+#ns-who-chip[data-dot="none"] { border-style: dashed; border-color: var(--warn); }
+#ns-who-chip[data-dot="none"] .who-av { background: var(--warn-soft); color: var(--warn-ink, var(--warn)); }
+.who-menu {
+  position: fixed;
+  z-index: 1200;
+  width: min(360px, calc(100vw - 16px));
+  padding: 8px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
+  font-size: 12.5px;
+}
+.who-menu .who-why {
+  margin: 0 0 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: var(--text);
+  border: 1px solid var(--warn);
+}
+.who-menu .who-sect {
+  padding: 8px 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.who-menu .who-sect + .who-sect { margin-top: 8px; }
+.who-menu .who-sect.focus { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.who-menu h5 {
+  margin: 0 0 2px;
+  font: 700 11px var(--font-sans);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.who-menu .who-lead { margin: 0 0 6px; color: var(--text-muted); font-size: 11.5px; }
+.who-menu .who-line { margin: 2px 0 4px; overflow-wrap: anywhere; }
+.who-menu .who-line code { font: 11.5px var(--font-mono); color: var(--text-muted); }
+.who-menu .who-state { margin: 2px 0 6px; color: var(--text-muted); }
+.who-menu .who-none { color: var(--warn-ink, var(--warn)); }
+.who-menu .who-warn { color: var(--danger); }
+.who-menu .who-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.who-menu .who-acts button {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: 500 12px var(--font-sans);
+  cursor: pointer;
+}
+.who-menu .who-acts button:hover { background: var(--bg-hover); }
+.who-menu .who-acts button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.who-menu .who-tie { margin: 8px 2px 0; color: var(--text-faint); font-size: 11px; }
+
+/* ── MICRO-TESTATA-CLOUD · files in the cloud, not downloaded ─────────────── */
+.al-cloud { color: var(--accent-ink); font-size: 11.5px; white-space: nowrap; }
+td.al-cloud { color: var(--accent-ink); }
+.al-cloud-go {
+  padding: 0 6px;
+  height: 20px;
+  font-size: 11.5px;
+  border-radius: 4px;
+}
+.al-cloud-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-accent-soft);
+  color: var(--text);
+}
+.al-hydrate { margin-bottom: 8px; }
+.al-hydrate .files-hint { margin: 4px 0; }

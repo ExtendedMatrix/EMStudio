@@ -184,6 +184,7 @@ import {
   applyTheme,
   canvasFont,
   canvasTheme,
+  resolveMode,
   storeMode,
   whenCanvasFontsReady,
   storedMode,
@@ -408,6 +409,7 @@ import {
 import { guessKind, mightBeTileset, planDesktopDrop, positionsArePhysical, toCssPoint, TILESET_TARGETS } from "./desktop-drop";
 import * as paths from "./paths";
 import * as AL from "./asset-list";
+import * as who from "./who-chip";
 import { bridgeLevelVerdict, levelKey, type BridgeHealth } from "./bridge-level";
 import { classify, isDiskUrl, locatorOnDisk, missingCount, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
 import { collectedUrl, defaultRoots, outsideFiles, proposeDest, studyRootOf, totals, type CollectRoots, type CollectRow, type DocFile, type OutsideFile } from "./collect";
@@ -2212,7 +2214,36 @@ setThemeSel.addEventListener("change", () => {
 watchSystemTheme(() => {
   setThemeSel.value = storedMode();
   draw();
+  paintThemeButton();
 });
+// MICRO-TESTATA-CLOUD · ☀ / ☾ at the top right: the theme in force; a click
+// stores the other one (explicit: it stops following the system, and is
+// remembered between sessions). «Auto» stays in Settings › Theme.
+const themeBtn = document.getElementById("ns-theme") as HTMLButtonElement | null;
+function paintThemeButton(): void {
+  if (!themeBtn) return;
+  const mode = storedMode();
+  const now = resolveMode(mode);
+  const tg = who.themeToggle(mode, now);
+  themeBtn.textContent = tg.glyph;
+  themeBtn.dataset.theme = now;
+  themeBtn.dataset.mode = mode;
+  themeBtn.setAttribute("aria-pressed", String(now === "dark"));
+  themeBtn.title = t(tg.following ? "theme.btnFollowing" : "theme.btnChosen",
+    { now: t(now === "dark" ? "settings.themeDark" : "settings.themeLight"),
+      next: t(tg.next === "dark" ? "settings.themeDark" : "settings.themeLight") });
+  themeBtn.setAttribute("aria-label", themeBtn.title);
+}
+themeBtn?.addEventListener("click", () => {
+  const tg = who.themeToggle(storedMode(), resolveMode(storedMode()));
+  storeMode(tg.next);
+  applyTheme(tg.next);
+  setThemeSel.value = tg.next;
+  draw();
+  paintThemeButton();
+});
+setThemeSel.addEventListener("change", () => paintThemeButton());
+paintThemeButton();
 let verPop: HTMLDivElement | null = null;
 function closeVerPop(): void {
   verPop?.remove();
@@ -2867,7 +2898,18 @@ window.__EM_SCENE__ = () => {
   statusLine: () => modeIndicator.querySelector(".where-text")?.textContent ?? modeIndicator.textContent,
   /** P2 · the session's node token (what a sign-in would set), «Bring into a
    *  room…» itself, and the shelf as it stands */
-  useToken: (tok: string | null) => { hubToken = tok; },
+  /** MICRO-TESTATA-CLOUD · the gate of an operation that signs, as a test asks
+   *  it: true when it may go; false → the chip's menu, and `__whoResumed`
+   *  says the operation once it resumed */
+  needSigner: (op: who.SignOp) => needSigner(op, () => { (window as unknown as { __whoResumed?: string }).__whoResumed = op; }),
+  whoFacts: () => whoFacts(),
+  useToken: (tok: string | null) => {
+    hubToken = tok;
+    // MICRO-TESTATA-CLOUD · the chip at the top right follows (who the node says)
+    refreshIdentityChip();
+    const base = (getSettings().sync.hubUrl?.trim() || servingNode()).replace(/\/+$/, "");
+    if (tok && base) void askNodeWhoIAm(base);
+  },
   /** MICRO accesso · the session's access as the panel reads it — never the token */
   access: () => {
     const exp = tokenExpiry(hubToken);
@@ -9013,12 +9055,9 @@ async function bringIntoRoom(): Promise<void> {
   // THE CHEAP, LOCAL, CERTAIN REFUSAL FIRST: no document, no round trip
   // through an identity provider to learn it
   if (!store) { toast(t("room.bringNeedsDocument")); return; }
-  const blocked = whatBlocksTheGesture(Boolean(currentIdentity()), Boolean(hubToken));
-  if (blocked) {
-    toast(nextRungInvitation());
-    identityChipClicked();          // declare a signature, or sign in — its rung
-    return;
-  }
+  // MICRO-TESTATA-CLOUD · the author, then the node's login: the chip's menu
+  // on the right section, and the gesture resumes once done
+  if (whatBlocksTheGesture(Boolean(currentIdentity()), Boolean(hubToken)) && !needSigner("roomBring", () => void bringIntoRoom())) return;
   const name = await askRoomName(true);
   if (!name) return;
   const roomId = roomIdFromName(name);
@@ -9427,12 +9466,7 @@ function enterRoom(roomId: string): void {
  * a menu item.
  */
 async function createRoomHere(): Promise<string | null> {
-  const blocked = whatBlocksTheGesture(Boolean(currentIdentity()), Boolean(hubToken));
-  if (blocked) {
-    toast(nextRungInvitation());
-    identityChipClicked();          // declare a signature, or sign in — its rung
-    return null;
-  }
+  if (whatBlocksTheGesture(Boolean(currentIdentity()), Boolean(hubToken)) && !needSigner("roomCreate", () => void createRoomHere())) return null;
 
   const name = await askRoomName(false);
   if (!name) return null;
@@ -13914,7 +13948,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 55;   // 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 56;   // 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -15638,8 +15672,206 @@ function identitySentence(me: Identity | null = currentIdentity()): string {
   }
 }
 
+// ── MICRO-TESTATA-CLOUD · «Chi sei», at the top right of the name strip ────
+// ONE chip (initials, name, a dot) with a menu of TWO sections — Autore (who
+// signs stamps and paradata: name, ORCID → Settings › Identity) and Nodo (the
+// account on the StratiGraph node: sign in / out, the node, «Il mio spazio sul
+// nodo» → its console, only when signed in). «no author» and «On this
+// computer» stay in the status bar as STATE; the gesture is here. who-chip.ts
+// holds the rules; this draws them.
+
+function whoFacts(): who.WhoFacts {
+  const me = currentIdentity();
+  const st = identityState(me);
+  return {
+    author: me ? { name: [me.name, me.surname].filter(Boolean).join(" "), orcid: me.orcid,
+                   state: st === "verified" || st === "attested" ? st : "declared" } : null,
+    node: (getSettings().sync.hubUrl?.trim() || servingNode() || "").replace(/\/+$/, ""),
+    signedIn: !!hubToken,
+    nodeWho: nodeIdentity ? { name: nodeIdentity.name ?? "", orcid: nodeIdentity.orcid ?? "" } : null,
+    mismatch: nodeConfirmsTheSignature() === false,
+  };
+}
+
+function renderWhoChip(): void {
+  const chip = document.getElementById("ns-who-chip");
+  if (!chip) return;
+  const f = whoFacts();
+  const m = who.chipModel(f);
+  chip.dataset.dot = m.dot;
+  chip.querySelector(".who-av")!.textContent = m.initials;
+  chip.querySelector(".who-name")!.textContent = m.labelKey ? t(m.labelKey) : m.label;
+  const nodeLine = !f.node ? t("who.node.none")
+    : f.signedIn ? t("who.node.in", { node: hostOf(f.node), who: f.nodeWho?.name || f.nodeWho?.orcid || "" })
+    : t("who.node.out", { node: hostOf(f.node) });
+  chip.title = [f.author ? `${t("who.sect.author")}: ${m.label}${f.author.orcid ? ` · ${f.author.orcid}` : ""}` : t("who.noAuthorTitle"),
+                `${t("who.sect.node")}: ${nodeLine}`].join("\n");
+  chip.setAttribute("aria-label", chip.title);
+  const menu = document.getElementById("who-menu");
+  if (menu) paintWhoMenu(menu);
+  resumePendingSign();
+}
+
+function hostOf(url: string): string {
+  try { return new URL(url).host; } catch { return url; }
+}
+
+/** what an operation that signs was doing when the identity it needs was missing */
+let pendingSign: { op: who.SignOp; resume: () => void } | null = null;
+let whoMenuWhy = "";
+let whoMenuFocus: who.SignNeed | null = null;
+
+/**
+ * The gate of every operation that signs (E.D.: «firmare richiede un
+ * login»). Missing the author or the node's login: the chip's menu opens on
+ * the right section, saying what for — and the operation RESUMES BY ITSELF
+ * once the identity is there (`resumePendingSign`). Never a mute error.
+ */
+function needSigner(op: who.SignOp, resume: () => void): boolean {
+  const miss = who.missingFor(who.SIGN_NEEDS[op], whoFacts());
+  if (!miss) return true;
+  pendingSign = { op, resume };
+  logInfo(`identity: «${t(`who.op.${op}`)}» waits for ${miss === "author" ? "an author" : "a sign-in on the node"}`);
+  openWhoMenu(miss, t("who.why", { what: t(`who.op.${op}`), need: t(`who.need.${miss}`) }));
+  return false;
+}
+
+function resumePendingSign(): void {
+  const p = pendingSign;
+  if (!p || who.missingFor(who.SIGN_NEEDS[p.op], whoFacts())) return;
+  pendingSign = null;
+  whoMenuWhy = "";
+  closeWhoMenu();
+  toast(t("who.resumed", { what: t(`who.op.${p.op}`) }));
+  logInfo(`identity: «${t(`who.op.${p.op}`)}» resumes`);
+  setTimeout(p.resume, 0);
+}
+
+function closeWhoMenu(): void {
+  document.getElementById("who-menu")?.remove();
+  document.getElementById("ns-who-chip")?.setAttribute("aria-expanded", "false");
+  whoMenuFocus = null;
+}
+
+function openWhoMenu(focus: who.SignNeed | null = null, why = ""): void {
+  closeIdentityPanel();
+  closeWhoMenu();
+  whoMenuFocus = focus;
+  whoMenuWhy = why;
+  const chip = document.getElementById("ns-who-chip");
+  const menu = document.createElement("div");
+  menu.id = "who-menu";
+  menu.className = "who-menu";
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", t("who.menuTitle"));
+  document.body.appendChild(menu);
+  paintWhoMenu(menu);
+  chip?.setAttribute("aria-expanded", "true");
+  const r = chip?.getBoundingClientRect();
+  if (r) { menu.style.top = `${Math.round(r.bottom + 6)}px`; menu.style.right = `${Math.max(8, Math.round(innerWidth - r.right))}px`; }
+  (menu.querySelector<HTMLElement>(".who-sect.focus button") ?? menu.querySelector<HTMLElement>("button"))?.focus();
+}
+
+function paintWhoMenu(menu: HTMLElement): void {
+  const f = whoFacts();
+  menu.textContent = "";
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const btn = (key: string, label: string, run: () => void, primary = false): HTMLButtonElement => {
+    const b = el("button", primary ? "primary" : "ghost", label);
+    b.type = "button";
+    b.dataset.who = key;
+    b.onclick = () => run();
+    return b;
+  };
+  if (whoMenuWhy) { const w = el("p", "who-why", whoMenuWhy); w.dataset.whoWhy = ""; menu.appendChild(w); }
+
+  // 1 · AUTORE — who signs, on this computer
+  const a = el("section", `who-sect${whoMenuFocus === "author" ? " focus" : ""}`);
+  a.dataset.whoSect = "author";
+  a.appendChild(el("h5", undefined, t("who.sect.author")));
+  a.appendChild(el("p", "who-lead", t("who.sect.authorLead")));
+  const acts = el("div", "who-acts");
+  if (f.author) {
+    const line = el("div", "who-line");
+    line.appendChild(el("b", undefined, f.author.name || f.author.orcid));
+    if (f.author.orcid) { line.appendChild(document.createTextNode(" · ")); line.appendChild(el("code", undefined, f.author.orcid)); }
+    a.appendChild(line);
+    const st = el("p", "who-state", identitySentence());
+    st.dataset.whoState = f.author.state;
+    a.appendChild(st);
+    acts.appendChild(btn("author-edit", t("who.authorEdit"), () => { closeWhoMenu(); openSettings("settings-sect-identity"); }));
+    // the panel «Chi sei» (verify, the nodes it is accredited on, sign out)
+    if (f.author.state === "declared") acts.appendChild(btn("author-verify", t("who.authorVerify"), () => { closeWhoMenu(); openIdentityPanel(); }));
+    else acts.appendChild(btn("author-panel", t("who.authorPanel"), () => { closeWhoMenu(); openIdentityPanel(); }));
+  } else {
+    a.appendChild(el("p", "who-state who-none", t("who.noAuthor")));
+    acts.appendChild(btn("author-set", t("who.authorSet"), () => {
+      closeWhoMenu(); openIdentityPanel(undefined, { anchor: document.getElementById("ns-who-chip") }); }, true));
+  }
+  a.appendChild(acts);
+  menu.appendChild(a);
+
+  // 2 · NODO — the account on the StratiGraph node
+  const n = el("section", `who-sect${whoMenuFocus === "node" ? " focus" : ""}`);
+  n.dataset.whoSect = "node";
+  n.appendChild(el("h5", undefined, t("who.sect.node")));
+  n.appendChild(el("p", "who-lead", t("who.sect.nodeLead")));
+  const nacts = el("div", "who-acts");
+  if (!f.node) {
+    n.appendChild(el("p", "who-state who-none", t("who.node.none")));
+    nacts.appendChild(btn("node-choose", t("who.nodeChoose"), () => { closeWhoMenu(); openNodeSettings(); }, true));
+  } else if (f.signedIn) {
+    const line = el("div", "who-line");
+    line.appendChild(el("b", undefined, hostOf(f.node)));
+    line.appendChild(document.createTextNode(` · ${t("who.node.as", { who: f.nodeWho?.name || f.nodeWho?.orcid || "—" })}`));
+    n.appendChild(line);
+    if (f.mismatch) n.appendChild(el("p", "who-state who-warn", t("who.mismatch", {
+      node: f.nodeWho?.name || f.nodeWho?.orcid || "", author: f.author?.name || f.author?.orcid || "" })));
+    const space = who.mySpaceUrl(f);
+    if (space) nacts.appendChild(btn("my-space", t("who.mySpace"), () => {
+      closeWhoMenu();
+      logInfo(`identity: opening the node's console ${space}`);
+      if (isTauri()) void openInSystemBrowser(space); else window.open(space, "_blank", "noopener");
+    }, true));
+    nacts.appendChild(btn("node-out", t("who.nodeOut"), () => { closeWhoMenu(); void signOutOfNode(); }));
+  } else {
+    const line = el("div", "who-line");
+    line.appendChild(el("b", undefined, hostOf(f.node)));
+    line.appendChild(document.createTextNode(` · ${t("who.node.notIn")}`));
+    n.appendChild(line);
+    nacts.appendChild(btn("node-in", t("who.nodeIn"), () => {
+      closeWhoMenu(); void signIntoNode({ intent: "identity", loginHint: currentIdentity()?.orcid || undefined }); }, true));
+    nacts.appendChild(btn("node-choose", t("who.nodeOther"), () => { closeWhoMenu(); openNodeSettings(); }));
+  }
+  n.appendChild(nacts);
+  menu.appendChild(n);
+  menu.appendChild(el("p", "who-tie", t("who.tie")));
+}
+
+document.getElementById("ns-who-chip")?.addEventListener("click", () => {
+  if (document.getElementById("who-menu")) { closeWhoMenu(); return; }
+  openWhoMenu(currentIdentity() ? null : "author");
+});
+document.addEventListener("pointerdown", (e) => {
+  const m = document.getElementById("who-menu");
+  if (!m) return;
+  const tg = e.target as Node;
+  if (m.contains(tg) || document.getElementById("ns-who-chip")?.contains(tg)) return;
+  closeWhoMenu();
+}, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.getElementById("who-menu")) { closeWhoMenu(); document.getElementById("ns-who-chip")?.focus(); }
+});
+
 function refreshIdentityChip(): void {
   queueMicrotask(renderStatusLine);   // K1 · the access in the status line follows
+  renderWhoChip();                      // MICRO-TESTATA-CLOUD · the chip at the top right follows
+  setTimeout(queueAuthorChanged, 0);    // …and the queue's items waiting for an author
   const chip = document.getElementById("footer-identity");
   if (!chip) return;
   const identity = currentIdentity();
@@ -15782,40 +16014,9 @@ function nextRungInvitation(): string {
   }
 }
 
-function identityChipClicked(): void {
-  // INSTRUMENTED, and it stays: this chip is the one control whose job is to
-  // move a session up a rung, and a click that quietly does nothing is exactly
-  // the failure that is impossible to tell from a click that did something.
-  logInfo(`identity: chip clicked at rung «${identityRung()}»`);
-  switch (identityRung()) {
-    case "none":
-      // IDENTITÀ · the panel: three ways to say who you are, in their order
-      openIdentityPanel();
-      return;
-    case "signature":
-      // …unless the node has already answered with a different person: signing in
-      // again would produce the same answer. What has to change is one of the two
-      // names, and both live in Settings ▸ Identity.
-      if (nodeConfirmsTheSignature() === false) {
-        toast(t("ident.otherPersonNext", {
-          them: nodeIdentity!.name || nodeIdentity!.orcid || "",
-        }));
-        openSettings("settings-sect-identity");
-        return;
-      }
-      // a declared signature: the panel, where it is verified (a node, ORCID)
-      // or re-declared
-      openIdentityPanel();
-      return;
-    // MICRO-DOVE-CHI-MENU p.4 · the chip ALWAYS opens «Who you are»: the
-    // person, its state, the nodes it is accredited on. Entering and leaving
-    // a node is «Where you are» (one link away, in the panel)
-    case "identity":
-    case "presence":
-      openIdentityPanel();
-      return;
-  }
-}
+// MICRO-TESTATA-CLOUD · `identityChipClicked` (the footer chip's next rung)
+// went: the gesture is the chip's at the top right (`openWhoMenu`), the
+// status bar's chip says the state and opens that menu.
 
 /** DEV30 U15 · «Sign out · forget this identity»: the iD leaves this
  *  machine's list and nobody is current; the node's session (in memory) goes
@@ -16536,8 +16737,10 @@ document.getElementById("set-orcid-signout")?.addEventListener(
 document.getElementById("set-orcid")?.addEventListener("keydown", (e) => {
   if ((e as KeyboardEvent).key === "Enter") declareIdentityFromPanel();
 });
+// MICRO-TESTATA-CLOUD · the status bar says the state; the gesture is the
+// chip's at the top right (its menu, on the author's section)
 document.getElementById("footer-identity")?.addEventListener(
-  "click", identityChipClicked);
+  "click", () => openWhoMenu("author"));
 
 // ── SHELF1 · the wide list's own verbs ──────────────────────────────────────
 // MICRO-ARCHIVIO-1 · NOT restored from the browser any more: the shelf is the
@@ -16611,6 +16814,9 @@ function publishToStratiGraph(): void {
     toast(t("strip.publishPhase2"));
     return;
   }
+  // MICRO-TESTATA-CLOUD · publishing is written on a node: the author and the
+  // node's login first (the chip's menu), then it resumes
+  if (!needSigner("publish", publishToStratiGraph)) return;
   // B1 · «Who you are» opens beside the button that asked for it
   if (!requireVerifiedIdentity(btn)) return;
   // Verified, and still nothing to publish TO: the StratiGraph delivery
@@ -32345,6 +32551,7 @@ function fileHooks(): FileHooks {
     onRefilter: filesRefresh,
     onReveal: (f) => { void bridgeUrl().then((b) => revealFile(b, f.path)).catch((e) => toast(String(e.message ?? e))); },
     onRelink: (f) => { void relinkFile(f); },
+    onHydrate: (fs) => { void hydrateAndMeasure(fs.map((f) => f.cloud_path ?? "").filter(Boolean)); },
     onUpload: (fs) => { void uploadFiles(fs); },
     onKeep: (fs) => { void keepFiles(fs); },
     onReorder: () => { void reorderGesture(); },
@@ -38155,6 +38362,8 @@ async function toggleInput(entry: FsEntry, chosen: boolean): Promise<void> {
 async function doStamp(win: Win): Promise<void> {
   const draft = stampDraft;
   if (!draft || stampEmitting) return;
+  // MICRO-TESTATA-CLOUD · a stamp is signed: its author first, then it resumes
+  if (!needSigner("stamp", () => void doStamp(win))) return;
   stampEmitting = true;
   renderStorage();
   const started = performance.now();
@@ -41949,6 +42158,16 @@ function assetListView(win: Win): HTMLElement {
   say.dataset.alSay = "";
   say.textContent = ans.say_it;
   host.appendChild(say);
+  // MICRO-TESTATA-CLOUD · versions in the cloud: said, with the gesture for them all
+  const allCloud = AL.cloudOf(ans.assets);
+  if (allCloud.paths.length) {
+    const cn = document.createElement("p");
+    cn.className = "files-hint al-cloud-note";
+    cn.dataset.alCloud = String(allCloud.versions);
+    cn.textContent = `⤓ ${t("al.cloud.note", { v: fmtN(allCloud.versions), n: fmtN(allCloud.paths.length), mb: fmtMB(allCloud.bytes) })} `;
+    cn.appendChild(cloudButton(allCloud, "al-hydrate-all"));
+    host.appendChild(cn);
+  }
 
   // the tools: search, grouping, filter, the view, the bulk sheet
   const tools = document.createElement("div");
@@ -42082,6 +42301,13 @@ function assetListView(win: Win): HTMLElement {
       renderStorage();
     };
     sheet.append(info, prop, or, tri, tex, kL, tool, set, go);
+    // MICRO-TESTATA-CLOUD · the selection's files in the cloud
+    const selCloud = n ? AL.cloudOf(ans.assets.filter((a) => assetUi.sel.has(a.id))) : null;
+    if (selCloud?.paths.length) {
+      const cbtn = cloudButton(selCloud, "al-hydrate-sel");
+      cbtn.textContent = `${t("al.cloud.fetch")} (${fmtN(selCloud.paths.length)} · ${fmtMB(selCloud.bytes)} MB)`;
+      sheet.appendChild(cbtn);
+    }
   };
 
   // MICRO-ARCHIVE-ASSET-2 · the scroll is kept across every repaint (a row
@@ -42164,6 +42390,12 @@ function assetListView(win: Win): HTMLElement {
         const cnt = document.createElement("small");
         cnt.textContent = `(${g.assets.length}${g.todo ? ` · ${tn("al.toDo", g.todo)}` : ""})`;
         tn2.appendChild(cnt);
+        const gc = AL.cloudOf(g.assets);
+        if (gc.paths.length) {
+          const gb = cloudButton(gc, "al-hydrate-group");
+          gb.textContent = `⤓ ${tn("al.cloud.inGroup", gc.paths.length)}`;
+          tn2.append(" ", gb);
+        }
         const ttri = document.createElement("td");
         ttri.className = "n";
         ttri.textContent = fmtN(g.triangles);
@@ -42217,6 +42449,8 @@ function assetListView(win: Win): HTMLElement {
   // stays: its scroll, its rows opened, its selection), the row lit whole
   const paintSide = (): void => {
     side.textContent = "";
+    const hb = hydrateBox();
+    if (hb) side.appendChild(hb);
     side.appendChild(queuePanel());
     const a = assetUi.detail ? ans.assets.find((x) => x.id === assetUi.detail) : undefined;
     if (a) side.appendChild(assetDetail(win, a));
@@ -42480,6 +42714,16 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
   br.className = "al-branch";
   br.textContent = a.branch ? ` ${a.branch}` : "";
   tdn.appendChild(br);
+  // MICRO-TESTATA-CLOUD · «nel cloud»: its numbers are the graph's, and ⤓
+  const ac = AL.cloudOf([a]);
+  if (ac.paths.length) {
+    const cl = document.createElement("span");
+    cl.className = "al-cloud";
+    cl.dataset.alCloudRow = a.id;
+    cl.textContent = ` ⤓ ${t("al.cloud.badge")}`;
+    cl.title = t("al.cloud.badgeTitle", { v: fmtN(ac.versions), n: fmtN(ac.paths.length), mb: fmtMB(ac.bytes) });
+    tdn.append(cl, " ", cloudButton(ac, "al-hydrate-row", true));
+  }
   const ob = AL.overBand(v, b0);
   // MICRO-ARCHIVE-ASSET-2 · every cell says its whole text on the pointer
   // (a column too narrow truncates it)
@@ -42535,8 +42779,12 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
     if (x.modified_after_stamp) stv.textContent += ` · ${t("al.modified")}`;
     if (!x.stamped) stv.textContent += ` · ${t("al.unstamped")}`;
     const state = cell(x.state ? t(`al.file.${x.state}`, undefined, x.state.replace(/_/g, " ")) : t("al.file.unchecked"),
-      x.state === "missing" || x.state === "empty_copy" ? "over" : "");
+      x.state === "missing" || x.state === "empty_copy" ? "over" : x.in_cloud ? "al-cloud" : "");
     state.colSpan = targets.length;
+    if (x.in_cloud && x.cloud_paths?.length) {
+      state.title = t("al.cloud.versionTitle", { mb: fmtMB(x.cloud_bytes ?? 0), path: x.cloud_paths.join("\n") });
+      state.append(" ", cloudButton({ paths: x.cloud_paths, bytes: x.cloud_bytes ?? 0 }, "al-hydrate-version", true));
+    }
     vr.append(cell(""), name, cell(x.level_say), cell(fmtN(x.triangles), `n${obv.tri ? " over" : ""}`), cell(fmtMB(x.size_bytes)),
       cell(fmtMB(x.gpu_bytes) + (!x.measured && x.gpu_bytes != null ? "*" : ""), "n"),
       cell(x.texture_side ? String(x.texture_side) : "—", `n${obv.tex ? " over" : ""}`),
@@ -42824,9 +43072,18 @@ function itemSource(it: AL.QueueItem): { kind: "files" | "blend" | "none"; path:
 /** Each waiting item of the list judged again: blocked, or free to start. */
 function applyBlocks(): void {
   for (const it of assetQueue) {
+    // MICRO-TESTATA-CLOUD · every version made is stamped and registered in
+    // somebody's name: without an author it waits, saying so (never a
+    // version left unstamped in silence)
+    if (it.state === "waiting" && !currentIdentity()) { it.block = { code: "author" }; continue; }
+    if (it.block?.code === "author") it.block = null;
     if (it.state !== "waiting" || it.from !== "list" || !it.tool) continue;
     const src = itemSource(it);
     if (!src) { it.block = { code: "no_source" }; continue; }
+    // MICRO-TESTATA-CLOUD · a source in the cloud: «da scaricare», never read
+    const ca = assetUi.ans?.assets.find((x) => x.id === it.asset_id);
+    const cb = ca ? AL.cloudBlock(ca, it.tool, (id) => fileStateOf(id)?.path ?? "") : null;
+    if (cb) { it.block = cb; continue; }
     let stampUnknown = false;
     const b = AL.blockOf(it.tool, src, {
       addons: blockFacts?.addons ?? null, blender: blockFacts ? blockFacts.blender : true,
@@ -42837,7 +43094,8 @@ function applyBlocks(): void {
 
 /** The words of a block, and its gesture. */
 function blockWords(b: AL.Block): string {
-  return t(`al.block.${b.code}`, { addon: b.addon ?? "", file: b.path ? baseName(b.path) : "" });
+  return t(`al.block.${b.code}`, { addon: b.addon ?? "", file: b.path ? baseName(b.path) : "",
+    n: fmtN(b.paths?.length ?? 0), mb: fmtMB(b.bytes ?? 0) });
 }
 function blockGesture(it: AL.QueueItem, b: AL.Block): HTMLButtonElement | null {
   const btn = document.createElement("button");
@@ -42855,6 +43113,16 @@ function blockGesture(it: AL.QueueItem, b: AL.Block): HTMLButtonElement | null {
     btn.onclick = () => { void stampFromQueue(b.path!); };
     return btn;
   }
+  if (b.code === "author") {
+    btn.textContent = t("who.whoSigns");
+    btn.onclick = () => openWhoMenu("author", t("who.why", { what: t("who.op.derive"), need: t("who.need.author") }));
+    return btn;
+  }
+  if (b.code === "cloud" && b.paths?.length) {
+    const c = cloudButton({ paths: b.paths, bytes: b.bytes ?? 0 }, "queue-fix-cloud");
+    c.className = "ghost al-fix";
+    return c;
+  }
   if (b.code === "blender") {
     btn.textContent = t("al.fix.blender");
     btn.onclick = () => { addonFocus = "blender"; openSettings("settings-sect-addons"); };
@@ -42862,6 +43130,14 @@ function blockGesture(it: AL.QueueItem, b: AL.Block): HTMLButtonElement | null {
   }
   void it;
   return null;
+}
+
+/** MICRO-TESTATA-CLOUD · the author changed: the items waiting for one go */
+function queueAuthorChanged(): void {
+  if (!assetQueue.some((i) => i.block?.code === "author") || !currentIdentity()) return;
+  applyBlocks();
+  paintQueue();
+  pumpQueue();
 }
 
 /** «Timbra»: Archive on the source's file, the tab Timbro open on it; the
@@ -43327,6 +43603,131 @@ async function postGraph<T>(route: string, body: Record<string, unknown>): Promi
 /** The resolver's answers the Archive holds, asked first when it has none. */
 async function archiveStates(): Promise<void> {
   if (!fileStates().length && !filesChecking) await checkFiles();
+}
+
+// ── MICRO-TESTATA-CLOUD · files in the cloud, not downloaded ───────────────
+// A study in OneDrive / iCloud / Dropbox «online only»: the bridge never reads
+// such a file (reading it downloads it) — the list says «nel cloud», with the
+// graph's numbers; «Scarica e misura» (a row, a group, the selection, the
+// queue's waiting item) says how many files and MB before it starts, shows its
+// progress with «Annulla», then the Archive and the list are asked again.
+
+interface HydrateState { token: string; state: "running" | "done" | "cancelled"; n: number; total: number;
+  bytes: number; bytes_total: number; current: string; errors: { path: string; error: string }[] }
+let alHydrate: HydrateState | null = null;
+
+async function hydrateAndMeasure(want: string[]): Promise<void> {
+  if (!want.length) return;
+  if (alHydrate?.state === "running") { toast(t("al.cloud.busy")); return; }
+  const plan = await postGraph<{ n: number; bytes: number; outside: number }>("/fs/hydrate", { paths: want, plan: true });
+  if (!plan.ok) { toast(plan.status === 404 ? t("al.cloud.oldBridge") : String(plan.error ?? plan.status)); return; }
+  if (!plan.n) { toast(t("al.cloud.nothing")); await afterHydrate(); return; }
+  if (!(await askConfirm(t("al.cloud.ask", { n: fmtN(plan.n), mb: fmtMB(plan.bytes) })
+    + (plan.outside ? `\n${tn("al.cloud.outside", plan.outside)}` : ""), { ok: t("al.cloud.go"), kind: "hydrate" }))) return;
+  const go = await postGraph<{ token: string; n: number; bytes: number }>("/fs/hydrate", { paths: want });
+  if (!go.ok || !go.token) { toast(String(go.error ?? go.status)); return; }
+  alHydrate = { token: go.token, state: "running", n: 0, total: go.n, bytes: 0, bytes_total: go.bytes, current: "", errors: [] };
+  logInfo(t("al.cloud.started", { n: fmtN(go.n), mb: fmtMB(go.bytes) }));
+  paintHydrate();
+  while (alHydrate?.token === go.token && alHydrate.state === "running") {
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      const r = await fetch(`${await bridgeUrl()}/fs/hydrate?token=${go.token}`, { cache: "no-store" });
+      const j = await r.json() as Partial<HydrateState> & { ok?: boolean };
+      if (!j.ok) break;
+      alHydrate = { ...alHydrate, ...j, token: go.token } as HydrateState;
+    } catch { break; }
+    paintHydrate();
+  }
+  const end = alHydrate;
+  if (end?.token !== go.token) return;
+  if (end.state === "running") end.state = "cancelled";
+  const say = end.state === "done" ? t("al.cloud.done", { n: fmtN(end.n) }) : t("al.cloud.cancelled", { n: fmtN(end.n), of: fmtN(end.total) });
+  toast(say + (end.errors.length ? ` · ${tn("al.cloud.errors", end.errors.length)}` : ""));
+  logInfo(say);
+  for (const e of end.errors) logWarn(`${baseName(e.path)}: ${e.error}`);
+  paintHydrate();
+  await afterHydrate();
+}
+
+/** the files just downloaded: the Archive's resolver and the list asked again
+ *  (they are measured now: «Scarica e misura») */
+async function afterHydrate(): Promise<void> {
+  await checkFiles();
+  await askAssetList();
+  applyBlocks();
+  paintQueue();
+  pumpQueue();
+}
+
+async function cancelHydrate(): Promise<void> {
+  if (!alHydrate || alHydrate.state !== "running") return;
+  await postGraph("/fs/hydrate", { cancel: alHydrate.token });
+}
+
+/** the progress of a «Scarica e misura», above the queue */
+function hydrateBox(): HTMLElement | null {
+  const h = alHydrate;
+  if (!h) return null;
+  const box = document.createElement("section");
+  box.className = "files-sec al-hydrate";
+  box.dataset.alHydrate = h.state;
+  const head = document.createElement("div");
+  head.className = "files-sec-h";
+  const b = document.createElement("b");
+  b.textContent = h.state === "running" ? t("al.cloud.running", { n: fmtN(h.n), of: fmtN(h.total) })
+    : h.state === "done" ? t("al.cloud.done", { n: fmtN(h.n) }) : t("al.cloud.cancelled", { n: fmtN(h.n), of: fmtN(h.total) });
+  head.appendChild(b);
+  const grow = document.createElement("span");
+  grow.className = "grow";
+  head.appendChild(grow);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ghost";
+  if (h.state === "running") {
+    btn.dataset.action = "al-hydrate-cancel";
+    btn.textContent = t("al.cloud.cancel");
+    btn.onclick = () => { btn.disabled = true; void cancelHydrate(); };
+  } else {
+    btn.dataset.action = "al-hydrate-close";
+    btn.textContent = "×";
+    btn.title = t("al.cloud.close");
+    btn.onclick = () => { alHydrate = null; paintHydrate(); };
+  }
+  head.appendChild(btn);
+  box.appendChild(head);
+  const line = document.createElement("div");
+  line.className = "files-hint";
+  line.textContent = `${fmtMB(h.bytes)} / ${fmtMB(h.bytes_total)} MB${h.current ? ` · ${h.current}` : ""}`
+    + (h.errors.length ? ` · ${tn("al.cloud.errors", h.errors.length)}` : "");
+  const bar = document.createElement("div");
+  bar.className = "al-pbar";
+  const fill = document.createElement("i");
+  fill.style.width = `${h.bytes_total ? Math.min(100, Math.round((h.bytes / h.bytes_total) * 100)) : h.total ? Math.round((h.n / h.total) * 100) : 0}%`;
+  bar.appendChild(fill);
+  box.append(line, bar);
+  return box;
+}
+function paintHydrate(): void {
+  const old = document.querySelectorAll<HTMLElement>(".al-hydrate");
+  const side = document.querySelector<HTMLElement>(".al-side");
+  if (!old.length && side && alHydrate) { const b = hydrateBox(); if (b) side.prepend(b); return; }
+  for (const o of old) { const b = hydrateBox(); if (b) o.replaceWith(b); else o.remove(); }
+}
+
+/** «⤓ Scarica e misura» — the gesture beside a row, a group, the selection */
+function cloudButton(c: { paths: string[]; bytes: number }, action: string, short = false): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "ghost al-cloud-go";
+  b.dataset.action = action;
+  b.dataset.alCloudN = String(c.paths.length);
+  b.textContent = short ? "⤓" : t("al.cloud.fetch");
+  b.title = t("al.cloud.fetchTitle", { n: fmtN(c.paths.length), mb: fmtMB(c.bytes) });
+  b.setAttribute("aria-label", b.title);
+  b.disabled = alHydrate?.state === "running";
+  b.onclick = (e) => { e.stopPropagation(); void hydrateAndMeasure(c.paths); };
+  return b;
 }
 
 /** MICRO-ARCHIVE-ASSET · the dialog «Consolida per…» is gone (E.D.: unusable):

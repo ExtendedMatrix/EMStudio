@@ -17,6 +17,8 @@ export interface FileHooks {
   onUpload(fs: FileState[]): void;
   onKeep(fs: FileState[]): void;
   onReveal(f: FileState): void;
+  /** MICRO-TESTATA-CLOUD · «Scarica e misura» a file in the cloud */
+  onHydrate?(fs: FileState[]): void;
   onJump(id: string): void;
   onRefilter(): void;
   /** R2 · what a row says of a file: its name and its document's title */
@@ -62,13 +64,15 @@ export function noteText(note: string): string {
   if (note === "the graph does not say where the file is") return t("fs.note.noWhere");
   if ((m = /^the copy here is empty: (.+)$/s.exec(note))) return t("fs.note.emptyHere", { path: m[1] });
   if ((m = /^the bytes of (.+?) are zeros: /s.exec(note))) return t("fs.note.zeros", { name: m[1] });
+  if ((m = /^in the cloud, not downloaded: (.+?) — /s.exec(note))) return t("fs.note.inCloud", { name: m[1] });
+  if ((m = /^the copy here is in the cloud, not downloaded: (.+)$/s.exec(note))) return t("fs.note.inCloudHere", { path: m[1] });
   if ((m = /^(\d+) files, all here$/.exec(note))) return t("fs.note.allHere", { n: m[1] });
   if ((m = /^(\d+) of its (\d+) files: (\w+)$/.exec(note)))
     return t("fs.note.someOf", { k: m[1], n: m[2], state: stateSign(`file.${m[3]}`).label });
   return note;
 }
 
-const FILE_STATES = ["on_disk", "on_node", "both", "reference_only", "missing", "empty_copy"];
+const FILE_STATES = ["on_disk", "on_node", "both", "reference_only", "missing", "empty_copy", "in_cloud"];
 
 /** MICRO-CONTENTS-2 D16 · a use of a version («mobile_ar», «realtime») in words */
 function useLabel(u: string): string {
@@ -95,6 +99,7 @@ export function fileGestures(f: FileState, h: FileHooks): HTMLElement {
   if (f.state === "missing" || f.state === "empty_copy") add(t("fs.findHere"), "find", () => h.onRelink(f));
   if (f.state === "on_disk" && h.inRoom) add(t("fs.upload"), "upload", () => h.onUpload([f]));
   if (f.state === "on_node") add(t("fs.keep"), "keep", () => h.onKeep([f]), t("fs.keepHint"));
+  if (f.state === "in_cloud" && f.cloud_path && h.onHydrate) add(t("al.cloud.fetch"), "hydrate", () => h.onHydrate!([f]), t("fs.hydrateHint"));
   if (f.path) add(t("fs.reveal"), "reveal", () => h.onReveal(f));
   return box;
 }
