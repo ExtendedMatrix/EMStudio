@@ -657,20 +657,39 @@ def _sha256_memo(path):
 #: file's sha256 (and its path, for a .gltf whose textures sit beside it):
 #: measured once, kept between calls — a list asked again is immediate.
 _MEASURE_MEMO = {}
+#: MICRO-ARCHIVE-ASSET-2 · where each ``POST /assets/list`` is, by the page's
+#: token: ``{phase, n, total, at}`` (``GET /assets/progress``)
+_ASSET_PROGRESS = {}
 
 
-def _measure_by_sha(resolved):
+def _asset_progress(token, phase, n=0, total=0):
+    if not token:
+        return
+    import time as _t
+    _ASSET_PROGRESS[str(token)] = {"phase": phase, "n": int(n), "total": int(total), "at": _t.time()}
+    # the old ones go (a page that never asked again)
+    for k in [k for k, v in _ASSET_PROGRESS.items() if _t.time() - v["at"] > 600]:
+        _ASSET_PROGRESS.pop(k, None)
+
+
+def _measure_by_sha(resolved, progress=None):
     """A ``measure`` for s3Dgraphy's ``consolidate`` / ``asset_list`` from the
     resolver's answers on this computer: each version's .glb / .gltf measured
     (``measure_gltf``) once per sha256 (``_sha256_memo``: by path, size and
-    time), the result kept in ``_MEASURE_MEMO``."""
+    time), the result kept in ``_MEASURE_MEMO``. ``progress(n, total)``: told
+    at each file measured for the first time (MICRO-ARCHIVE-ASSET-2)."""
     from s3dgraphy.resources.use_profiles import measure_gltf
     paths = {str(r.get("id")): r.get("path") for r in resolved or [] if r.get("path")}
+    total = len({p for p in paths.values() if str(p).lower().endswith((".glb", ".gltf"))})
+    seen = set()
 
     def measure(entry):
         path = paths.get(str(entry.get("id")))
         if not path or not os.path.isfile(path) or not path.lower().endswith((".glb", ".gltf")):
             return None
+        if progress is not None and path not in seen:
+            seen.add(path)
+            progress(len(seen), total)
         try:
             key = (_sha256_memo(path), path if path.lower().endswith(".gltf") else "")
         except OSError:
@@ -1981,7 +2000,11 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: touches its files; ``GET /jobs/scheduler`` (also in ``GET /jobs``) says it,
 #: ``POST /jobs {step: share, share: all | half | one}`` sets how much of the
 #: machine the queue uses; a job's view says why it waits (``wait``).
-BRIDGE_LEVEL = 54   # 30 also = /validate
+#: 55 = MICRO-ARCHIVE-ASSET-2: ``POST /assets/list`` takes a ``progress``
+#: token and ``GET /assets/progress?token=`` says where it is (the graph
+#: read, the files found, the files measured n/N, the textures) — the first
+#: opening of Archive › Asset on a large study is never a mute empty list.
+BRIDGE_LEVEL = 55   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -2839,6 +2862,11 @@ def make_handler(api):
                 import em_optimize as O
                 self._json({"ok": True, "addons": O.all_addons(), "platform": O.platform_key(),
                             "folder": str(O.addons_dir()), "machine": O.machine()})
+            elif route == "/assets/progress":
+                # MICRO-ARCHIVE-ASSET-2 · where a POST /assets/list is
+                q = urllib.parse.parse_qs(parsed.query)
+                tok = (q.get("token") or [""])[0]
+                self._json({"ok": True, **(_ASSET_PROGRESS.get(tok) or {"phase": "", "n": 0, "total": 0})})
             elif route == "/jobs/scheduler":
                 # MICRO-CODA-MULTICORE · the scheduler: per tool, the cores and
                 # memory in use against the ceiling, who waits and why
@@ -4397,17 +4425,24 @@ def make_handler(api):
                 return 501, {"ok": False, "error": f"this s3dgraphy has no asset_list "
                                                    f"(s3dgraphy ≥ 1.6.0.dev82 is needed): {exc}"}
             from s3dgraphy.resources import consolidate as C
+            # MICRO-ARCHIVE-ASSET-2 · where it is, for the page that waits
+            token = str(body.get("progress") or "")
+            _asset_progress(token, "graph", 0, 0)
             graph, em_folder = self._graph_of(body)
+            _asset_progress(token, "resolve", 0, len(getattr(graph, "nodes", []) or []))
             res, here = self._resolved_for(graph, body, em_folder)
             states = {str(r["id"]): str(r.get("state") or "") for r in res if r.get("state")}
             models = body.get("models") if isinstance(body.get("models"), list) else None
             extra = {}
             if body.get("measure", True) is not False:
                 disk = self._disk_resolved(graph, body, em_folder)
-                extra = {"measure": _measure_by_sha(disk), "changed": C.changed_from(disk)}
+                _asset_progress(token, "measure", 0, len({r.get("path") for r in disk if str(r.get("path") or "").lower().endswith((".glb", ".gltf"))}))
+                extra = {"measure": _measure_by_sha(disk, progress=lambda n, t: _asset_progress(token, "measure", n, t)),
+                         "changed": C.changed_from(disk)}
                 for r in disk:
                     states.setdefault(str(r.get("id")), str(r.get("state") or ""))
             out = AL.asset_list(graph, models=models, states=states, in_room=bool(body.get("in_room")), **extra)
+            _asset_progress(token, "done", out.get("counts", {}).get("assets", 0), out.get("counts", {}).get("assets", 0))
             out["resolved_here"] = here
             return 200, {"ok": True, **out}
 

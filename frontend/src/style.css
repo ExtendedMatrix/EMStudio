@@ -11088,10 +11088,43 @@ body:not(.tt-comfy) .tile-tablebody .mdl-rm .btn.sm { line-height: 16px; font-si
 .al-table tr.al-asset { cursor: pointer; }
 .al-table tr.al-asset:hover td { background: var(--bg-hover); }
 .al-table tr.al-asset.sel td { background: var(--bg-accent-soft); }
-.al-table tr.al-asset.on td { box-shadow: inset 0 -1px 0 var(--accent), inset 0 1px 0 var(--accent); }
+.al-table tr.al-asset.on td { background: var(--bg-accent-soft); box-shadow: inset 0 -1px 0 var(--accent), inset 0 1px 0 var(--accent); color: var(--text); font-weight: 600; }
+/* MICRO-ARCHIVE-ASSET-2 · the row open in the detail: the whole row lit, a bar on its left */
+.al-table tr.al-asset.on td:first-child { box-shadow: inset 4px 0 0 var(--accent), inset 0 -1px 0 var(--accent), inset 0 1px 0 var(--accent); }
+.al-table tr.al-asset.on .al-name::before { content: "▶ "; color: var(--accent); }
+.al-detail-title { color: var(--accent-ink); font-size: 13px; }
+.al-detail-title::before { content: "▶ "; color: var(--accent); }
+/* the forms repeated: one row ×N, its copies under it */
+.al-table tr.al-shape td { background: var(--bg-subtle); font-weight: 600; }
+.al-table tr.al-shape .al-name { color: var(--info-ink); }
+.al-table tr.al-shape .al-shape-via { font-weight: 400; color: var(--text-muted); font-size: 11px; }
+.al-table tr.al-asset.al-in-shape td:nth-child(2) { padding-left: 22px; }
+.al-shape-prop select { max-width: 150px; }
+/* the coverage of a target, and its word */
+.al-cov { font-size: 11px; margin: 0 0 4px; color: var(--ok-ink); }
+.al-cov.over { color: var(--warn-ink); font-weight: 600; }
+.al-word-after { color: var(--text-muted); font-size: 11px; }
+.al-card[data-word="incomplete"] { border-color: var(--warn); }
+/* the first asking, in phases */
+.al-progress { margin: 24px auto; max-width: 520px; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel); font-size: 12px; }
+.al-phases { margin: 0 0 8px; padding-left: 20px; }
+.al-phases li { color: var(--text-faint); margin: 2px 0; }
+.al-phases li.done { color: var(--ok-ink); }
+.al-phases li.done::marker { content: "✓ "; }
+.al-phases li.now { color: var(--text); font-weight: 600; }
+.al-pbar { position: relative; height: 6px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; }
+.al-pbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; transition: width .2s; }
+.al-pbar.busy i { width: 30%; animation: al-slide 1.2s ease-in-out infinite; }
+@keyframes al-slide { 0% { left: -30%; } 100% { left: 100%; } }
+/* a blocked item: why, and its gesture */
+.al-job { flex-wrap: wrap; }
+.al-block { flex: 1 1 100%; padding-left: 16px; }
+.al-fix { margin-left: 16px; }
+.al-install { margin-left: 4px; }
 .al-table tr.al-ver td { color: var(--text-dim); }
 .al-table tr.al-ver td:nth-child(2) { padding-left: 24px; }
-.al-table tr.al-tex td { color: var(--text-muted); font-size: 11px; }
+.al-table tr.al-tex td { color: var(--text-dim); font-size: 11.5px; background: var(--bg-subtle); }
+.al-table tr.al-tex td.al-tex-fmt { font-weight: 600; letter-spacing: .02em; }
 .al-table tr.al-tex td:nth-child(2) { padding-left: 44px; }
 .al-tog { display: inline-block; width: 12px; color: var(--text-muted); cursor: pointer; }
 .al-branch, .al-table small { color: var(--text-faint); }
@@ -11123,5 +11156,5 @@ body:not(.tt-comfy) .tile-tablebody .mdl-rm .btn.sm { line-height: 16px; font-si
 .al-compare-versions td { white-space: normal; }
 .al-detail-tabs { margin: 6px 0; }
 .al-finding { margin: 2px 0; }
-.al-table tr.al-asset td:nth-child(2), .al-table tr.al-ver td:nth-child(2), .al-table tr.al-tex td:nth-child(2) { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.al-table tr.al-asset td:nth-child(2), .al-table tr.al-ver td:nth-child(2), .al-table tr.al-tex td:nth-child(2), .al-table tr.al-shape td:nth-child(2) { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
 .al-compare-versions td, .al-compare-versions th { font-size: 11px; padding: 2px 4px; }

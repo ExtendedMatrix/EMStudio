@@ -212,7 +212,7 @@ else {
   try {
     for (let i = 0; i < 120; i++) { try { await fetch(`${Bu}/health`); break; } catch { await sleep(250); } }
     const h = (await get("/health")).j;
-    ok(h.bridge_level === 54, `the bridge is at level 54 (${h.bridge_level})`);
+    ok(h.bridge_level >= 54, `the bridge is at level 54 or later (${h.bridge_level})`);
     const sv = (await get("/jobs/scheduler")).j;
     ok(sv.ok && sv.share === "all" && sv.budget.cores >= 1 && sv.tools.blender && sv.tools.obj2tiles, "GET /jobs/scheduler: the share, the budget, the tools");
     ok((await post("/jobs", { step: "share", share: "plenty" })).status === 400, "an unknown share refused");

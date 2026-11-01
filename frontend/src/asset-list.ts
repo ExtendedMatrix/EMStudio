@@ -34,6 +34,10 @@ export interface VersionRow {
   textures: TextureRow[]; texture_count: number | null; state: string;
   made: { by: string[]; orcid: string; at: string; tool: string; how: string }; made_say: string;
   modified_after_stamp: boolean; sha256_now: string; loaded_by: TargetKey[];
+  /** MICRO-ARCHIVE-ASSET-2 · the geometry keys of the file's meshes and its
+   *  compression (s3Dgraphy ≥ dev84; absent before: the shapes fall back on
+   *  triangles and textures) */
+  geometry_keys?: string[]; compression?: string;
 }
 export interface Proposal { tool: Tool; triangles: number | null; texture: number | null; ktx2: boolean; why: string }
 export interface TargetCell { state: TargetState; loads: string; why: string; proposal: Proposal; loaded_why?: string }
@@ -274,7 +278,15 @@ export interface QueueItem {
   /** MICRO-CODA-MULTICORE · why it waits (the bridge's scheduler, or its turn
    *  in the page): a code of `WAIT_CODES` and who it waits for */
   wait?: { code: WaitCode; other?: string } | null;
+  /** MICRO-ARCHIVE-ASSET-2 · a form repeated: ONE item for its N assets (one
+   *  mesh reduced + N instances), the key of the shape and its members */
+  shape?: string; asset_ids?: string[];
+  /** MICRO-ARCHIVE-ASSET-2 · why it cannot start (and stays, waiting, with
+   *  its gesture): an add-on missing, the source not stamped, Blender off… */
+  block?: Block | null;
 }
+export type BlockCode = "addon" | "unstamped" | "blender" | "no_source" | "no_blend" | "no_mesh" | "checking";
+export interface Block { code: BlockCode; addon?: string; path?: string }
 export type QueueMode = "run" | "pause";
 /** «quanto della macchina usare»: all of it, half, one job at a time */
 export type QueueShare = "all" | "half" | "one";
@@ -312,8 +324,16 @@ export function itemsFor(assets: readonly AssetRow[], sel: ReadonlySet<string>, 
 
 export function enqueue(q: QueueItem[], items: readonly QueueItem[]): QueueItem[] {
   for (const it of items) {
-    const i = it.asset_id ? q.findIndex((x) => x.state === "waiting" && x.asset_id === it.asset_id && x.target === it.target) : -1;
-    if (i >= 0) q[i] = it; else q.push(it);
+    // a form repeated stands for its members: their waiting items for the
+    // same target go, and the same shape again is replaced
+    const mine = new Set(it.asset_ids ?? (it.asset_id ? [it.asset_id] : []));
+    const same = (x: QueueItem): boolean => x.state === "waiting" && x.target === it.target
+      && ((!!it.shape && x.shape === it.shape) || (!!x.asset_id && mine.has(x.asset_id) && (!!it.shape || !x.shape)));
+    const i = mine.size ? q.findIndex(same) : -1;
+    if (i >= 0) {
+      q[i] = it;
+      for (let j = q.length - 1; j > i; j--) if (same(q[j])) q.splice(j, 1);
+    } else q.push(it);
   }
   return q;
 }
@@ -326,7 +346,8 @@ export function enqueue(q: QueueItem[], items: readonly QueueItem[]): QueueItem[
 export function nextToRun(q: readonly QueueItem[], mode: QueueMode, room: QueueRoom = { slots: 1, held: 0 }): QueueItem | null {
   if (mode !== "run") return null;
   if (q.filter((x) => x.state === "running").length >= Math.max(1, room.slots) || room.held > 0) return null;
-  return q.find((x) => x.state === "waiting") ?? null;
+  // MICRO-ARCHIVE-ASSET-2 · a blocked one stays, saying why; the next goes
+  return q.find((x) => x.state === "waiting" && !x.block) ?? null;
 }
 
 /** How many items the page keeps in flight: one for «un lavoro alla volta»,
@@ -396,39 +417,115 @@ export function plannedCost(p: Pick<Proposal, "triangles" | "texture" | "ktx2">,
            gpu_bytes: Math.round(px * (p.ktx2 ? 1 : 4) * MIP + tri * GEO_BYTES_PER_TRIANGLE) };
 }
 
-/** The scene of a target after the queue (the items not failed nor
- *  cancelled, and the plan not yet queued): a row with something planned
- *  counts its estimate, the others what they load today — a file once, a
- *  shared texture once. */
-export function totalsAfter(assets: readonly AssetRow[], target: TargetKey, plan: Plan, q: readonly QueueItem[]):
-  { triangles: number; download_bytes: number; gpu_bytes: number } {
-  let triangles = 0, dl = 0, gpu = 0;
-  const seen = new Set<string>(), seenTex = new Set<string>();
+/** MICRO-ARCHIVE-ASSET-2 · the lightest version of an asset a viewer could
+ *  fall back on when the target has none (never the master nor a tileset). */
+export function lightestVersion(a: AssetRow): VersionRow | null {
+  const vs = a.versions.filter((v) => !v.master && !v.tileset && v.triangles != null);
+  if (!vs.length) return null;
+  return [...vs].sort((x, y) => (x.triangles ?? 0) - (y.triangles ?? 0) || (x.size_bytes ?? 0) - (y.size_bytes ?? 0) || x.id.localeCompare(y.id))[0];
+}
+
+/** MICRO-ARCHIVE-ASSET-2 · how many assets have a version for the target
+ *  («1 / 97 coperti»): those it does not concern (`na`) are out of the count. */
+export interface Coverage { covered: number; total: number; missing: string[] }
+export function coverage(assets: readonly AssetRow[], target: TargetKey): Coverage {
+  let covered = 0, total = 0;
+  const missing: string[] = [];
   for (const a of assets) {
-    const item = [...q].reverse().find((x) => x.asset_id === a.id && x.target === target && x.state !== "failed" && x.state !== "cancelled" && x.state !== "done");
-    const p = item ? { triangles: item.triangles ?? null, texture: item.texture ?? null, ktx2: !!item.ktx2, tool: item.tool }
-      : plan.get(a.id)?.[target];
-    const cur = a.targets[target]?.loads ? a.versions.find((v) => v.id === a.targets[target].loads) ?? null : null;
-    if (p && p.tool && p.tool !== "keep" && p.tool !== "tileset") {
-      const c = plannedCost(p, cur ?? shownVersion(a, target));
-      triangles += c.triangles; dl += c.download_bytes; gpu += c.gpu_bytes;
-      continue;
-    }
-    if (!cur || cur.tileset) continue;
-    if (cur.checksum && seen.has(cur.checksum)) continue;
-    if (cur.checksum) seen.add(cur.checksum);
-    triangles += cur.triangles ?? 0;
-    dl += cur.size_bytes ?? 0;
-    if (cur.measured && cur.textures.length) {
-      gpu += Math.max(0, (cur.gpu_bytes ?? 0) - cur.textures.reduce((s, t) => s + t.gpu_bytes, 0));
-      for (const t of cur.textures) {
+    const c = a.targets[target];
+    if (!c || c.state === "na") continue;
+    total++;
+    if (c.loads && c.state !== "missing") covered++; else missing.push(a.id);
+  }
+  return { covered, total, missing };
+}
+
+/** download and GPU of an instance (its transform, in the file and on the GPU) */
+export const INSTANCE_BYTES = 64;
+
+export interface SceneCount {
+  triangles: number; download_bytes: number; gpu_bytes: number;
+  /** assets counted by an estimate: no version for the target (the lightest
+   *  existing, or their planned one), or a version still to make */
+  estimated: number; covered: number; total: number;
+  /** instances drawn from a mesh counted once */
+  instances: number;
+}
+
+/** The scene a viewer would load for a target — TODAY (`after` false): each
+ *  asset's version for it, and for the assets that have none the lightest
+ *  existing version (an estimate, counted in `estimated`); AFTER the queue:
+ *  the items not failed nor cancelled and the plan not yet queued count their
+ *  estimate — a form repeated ONE mesh plus its instances. A file once, a
+ *  shared texture once. */
+export function sceneCount(assets: readonly AssetRow[], target: TargetKey, o: { plan?: Plan; queue?: readonly QueueItem[]; after?: boolean } = {}): SceneCount {
+  const out: SceneCount = { triangles: 0, download_bytes: 0, gpu_bytes: 0, estimated: 0, covered: 0, total: 0, instances: 0 };
+  const seen = new Set<string>(), seenTex = new Set<string>(), shapes = new Set<string>();
+  const live = (o.queue ?? []).filter((x) => x.target === target && x.state !== "failed" && x.state !== "cancelled" && x.state !== "done");
+  const add = (v: VersionRow): void => {
+    if (v.tileset) return;
+    if (v.checksum && seen.has(v.checksum)) return;
+    if (v.checksum) seen.add(v.checksum);
+    out.triangles += v.triangles ?? 0;
+    out.download_bytes += v.size_bytes ?? 0;
+    if (v.measured && v.textures.length) {
+      out.gpu_bytes += Math.max(0, (v.gpu_bytes ?? 0) - v.textures.reduce((s, t) => s + t.gpu_bytes, 0));
+      for (const t of v.textures) {
         if (t.sha256 && seenTex.has(t.sha256)) continue;
         if (t.sha256) seenTex.add(t.sha256);
-        gpu += t.gpu_bytes;
+        out.gpu_bytes += t.gpu_bytes;
       }
-    } else gpu += cur.gpu_bytes ?? 0;
+    } else out.gpu_bytes += v.gpu_bytes ?? 0;
+  };
+  for (const a of assets) {
+    const cell = a.targets[target];
+    if (!cell || cell.state === "na") continue;
+    out.total++;
+    const cur = cell.loads && cell.state !== "missing" ? a.versions.find((v) => v.id === cell.loads) ?? null : null;
+    if (cur) out.covered++;
+    if (o.after) {
+      const item = [...live].reverse().find((x) => x.asset_id === a.id || (x.asset_ids ?? []).includes(a.id));
+      const p = item ? { triangles: item.triangles ?? null, texture: item.texture ?? null, ktx2: !!item.ktx2, tool: item.tool }
+        : o.plan?.get(a.id)?.[target];
+      if (p && p.tool && p.tool !== "keep" && p.tool !== "tileset") {
+        out.estimated++;
+        if (!cur) out.covered++;
+        if (item?.shape) {
+          // one mesh for the whole form, then an instance each
+          out.instances++;
+          out.download_bytes += INSTANCE_BYTES;
+          out.gpu_bytes += INSTANCE_BYTES;
+          if (shapes.has(item.shape)) continue;
+          shapes.add(item.shape);
+        }
+        const c = plannedCost(p, cur ?? shownVersion(a, target));
+        out.triangles += c.triangles; out.download_bytes += c.download_bytes; out.gpu_bytes += c.gpu_bytes;
+        continue;
+      }
+    }
+    if (cur) { add(cur); continue; }
+    out.estimated++;
+    const lv = lightestVersion(a);
+    if (lv) add(lv);
   }
-  return { triangles, download_bytes: dl, gpu_bytes: gpu };
+  return out;
+}
+
+/** The scene of a target after the queue (kept for its callers):
+ *  `sceneCount` with `after`. */
+export function totalsAfter(assets: readonly AssetRow[], target: TargetKey, plan: Plan, q: readonly QueueItem[]):
+  { triangles: number; download_bytes: number; gpu_bytes: number } {
+  return sceneCount(assets, target, { plan, queue: q, after: true });
+}
+
+/** The word of a target's card: «incompleto» while some asset has no version
+ *  for it (the count is then an estimate), else inside / outside the band, or
+ *  no band (the archive). */
+export type BudgetWord = "incomplete" | "in" | "out" | "none";
+export function budgetWord(cov: Pick<Coverage, "covered" | "total">, band: { ok: boolean }, b: Bands | undefined): BudgetWord {
+  if (cov.covered < cov.total) return "incomplete";
+  if (!b?.scene_triangles && !b?.scene_download_mb && !b?.scene_gpu_mb) return "none";
+  return band.ok ? "in" : "out";
 }
 
 /** Inside or outside the band: each of triangles, download, GPU against the
@@ -440,6 +537,166 @@ export function inBand(v: { triangles: number; download_bytes: number; gpu_bytes
   const dl = !!b?.scene_download_mb && v.download_bytes > b.scene_download_mb * MB;
   const gpu = !!b?.scene_gpu_mb && v.gpu_bytes > b.scene_gpu_mb * MB;
   return { ok: !tri && !dl && !gpu, tri, dl, gpu };
+}
+
+// ── MICRO-ARCHIVE-ASSET-2 · the forms repeated ────────────────────────────
+// Column_tempio1–6, Column_shadow1–38…: the same geometry and the same
+// textures, placed elsewhere. ONE mesh (reduced) and N instances (only their
+// transforms) — downloaded and on the GPU once.
+
+export interface Shape {
+  key: string; assets: AssetRow[];
+  /** the triangles of one copy (the heaviest version measured), its textures */
+  triangles: number | null; textures: string[];
+  /** how it was recognised: the geometry keys of the files (indices and UVs),
+   *  or — files compressed, or an s3Dgraphy before dev84 — the same triangles
+   *  and the same textures */
+  via: "geometry" | "triangles";
+}
+
+const texSet = (v: VersionRow): string => v.textures.map((t) => t.sha256).filter(Boolean).sort().join("+");
+
+/** The shape of an asset: the geometry keys of its heaviest version measured
+ *  with an uncompressed geometry, with its textures; else its heaviest
+ *  version's triangles with its textures. "" when nothing says it (no file
+ *  measured, no texture). */
+export function shapeKey(a: AssetRow): { key: string; via: Shape["via"]; v: VersionRow } | null {
+  if (a.kind !== "rm") return null;
+  const vs = a.versions.filter((v) => !v.master && !v.tileset && v.measured && (v.triangles ?? 0) > 0)
+    .sort((x, y) => (y.triangles ?? 0) - (x.triangles ?? 0) || x.id.localeCompare(y.id));
+  const g = vs.find((v) => v.geometry_keys?.length && !v.compression);
+  if (g) return { key: `g:${g.geometry_keys!.join(",")}|${texSet(g)}`, via: "geometry", v: g };
+  const v = vs.find((x) => x.textures.length);
+  if (v) return { key: `t:${v.triangles}|${texSet(v)}`, via: "triangles", v };
+  return null;
+}
+
+/** The forms repeated of a list: the shapes held by two assets or more,
+ *  heaviest first (triangles × copies). */
+export function repeatedShapes(assets: readonly AssetRow[]): Shape[] {
+  const by = new Map<string, { s: Shape }>();
+  for (const a of assets) {
+    const k = shapeKey(a);
+    if (!k) continue;
+    const e = by.get(k.key) ?? { s: { key: k.key, assets: [], triangles: k.v.triangles, textures: k.v.textures.map((t) => t.sha256), via: k.via } };
+    e.s.assets.push(a);
+    by.set(k.key, e);
+  }
+  return [...by.values()].map((e) => e.s).filter((s) => s.assets.length > 1)
+    .map((s) => ({ ...s, assets: [...s.assets].sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true })) }))
+    .sort((x, y) => (y.triangles ?? 0) * y.assets.length - (x.triangles ?? 0) * x.assets.length || x.key.localeCompare(y.key));
+}
+
+/** asset id → its form repeated */
+export function shapeIndex(shapes: readonly Shape[]): Map<string, Shape> {
+  const m = new Map<string, Shape>();
+  for (const s of shapes) for (const a of s.assets) m.set(a.id, s);
+  return m;
+}
+
+/** Already instanced for a target: its assets all load ONE file. */
+export function shapeShared(s: Shape, target: TargetKey): boolean {
+  const ck = s.assets.map((a) => a.versions.find((v) => v.id === a.targets[target]?.loads)?.checksum ?? "");
+  return ck.every((c) => c && c === ck[0]);
+}
+
+/** The ONE proposal of a form repeated for a target: a mesh reduced to the
+ *  band (when one copy is over it) and N instances; the texture side of the
+ *  band, KTX2 but for the desktop. The archive has none; a form already
+ *  instanced keeps it. */
+export function shapeProposal(s: Shape, target: TargetKey, b: Bands | undefined): Proposal {
+  const n = s.assets.length;
+  if (target === "arch" || shapeShared(s, target))
+    return { tool: "keep", triangles: null, texture: null, ktx2: false,
+             why: target === "arch" ? "l'archivio tiene i master" : `già una mesh sola per le ${n} copie` };
+  const obj = b?.object_triangles ?? null;
+  const tri = s.triangles;
+  const reduce = !!(obj && tri && tri > obj);
+  const to = reduce ? obj : tri;
+  return { tool: "instance", triangles: to, texture: b?.object_texture_side ?? null, ktx2: target !== "desk",
+           why: `${reduce ? `una mesh ridotta a ${to?.toLocaleString("it")} triangoli` : "una mesh sola"} + ${n} istanze (solo le trasformazioni): scaricata e in GPU una volta` };
+}
+
+/** The proposal of a form for a target: the person's (kept in the plan under
+ *  `shape:<key>`), else `shapeProposal`. */
+export function shapeProposalOf(s: Shape, target: TargetKey, b: Bands | undefined, plan: Plan): Proposal & { edited: boolean } {
+  const p = plan.get(`shape:${s.key}`)?.[target];
+  return p ? { ...p, edited: true } : { ...shapeProposal(s, target, b), edited: false };
+}
+
+/** «Metti in coda» for the forms whose copies are ALL selected: one item per
+ *  form and target (one mesh + N instances) — unless the person chose another
+ *  tool for the form, then its copies go one by one (`itemsFor`). → the items
+ *  and the assets they stand for. */
+export function shapeItemsFor(shapes: readonly Shape[], sel: ReadonlySet<string>, targets: readonly TargetKey[], plan: Plan,
+                              bands: Partial<Record<TargetKey, Bands>>,
+                              labelOf: (s: Shape, t: TargetKey, p: Proposal) => string = (s, t, p) => `${s.assets[0].name} ×${s.assets.length} → ${t} · ${p.tool}`):
+  { items: QueueItem[]; covered: Map<TargetKey, Set<string>> } {
+  const items: QueueItem[] = [];
+  const covered = new Map<TargetKey, Set<string>>(targets.map((t) => [t, new Set<string>()]));
+  for (const s of shapes) {
+    if (!s.assets.every((a) => sel.has(a.id))) continue;
+    for (const t of targets) {
+      const p = shapeProposalOf(s, t, bands[t], plan);
+      if (p.tool !== "instance") continue;
+      const rep = s.assets[0];
+      items.push({ id: queueId(), label: labelOf(s, t, p), state: "waiting", note: p.why, asset_id: rep.id, asset: rep.name,
+                   asset_ids: s.assets.map((a) => a.id), shape: s.key, target: t, tool: "instance",
+                   triangles: p.triangles, texture: p.texture, ktx2: p.ktx2, from: "list" });
+      for (const a of s.assets) covered.get(t)!.add(a.id);
+    }
+  }
+  return { items, covered };
+}
+
+// ── MICRO-ARCHIVE-ASSET-2 · what a tool needs on this computer ─────────────
+
+/** What an item's tool needs, from the kind of its source: gltfpack for a
+ *  glTF (its decimation, KTX2, meshopt), Blender for a master inside a .blend,
+ *  Obj2Tiles for a tileset; the instances of a form want the .blend (one mesh
+ *  linked N times, EM Tools' «Prepare for a use»). */
+export function toolNeeds(tool: Tool, kind: "files" | "blend" | "none"): { addon: string | null; blender: boolean; block: BlockCode | null } {
+  if (tool === "keep") return { addon: null, blender: false, block: null };
+  if (kind === "none") return { addon: null, blender: false, block: "no_source" };
+  if (tool === "tileset") return kind === "files" ? { addon: "obj2tiles", blender: false, block: null } : { addon: null, blender: false, block: "no_mesh" };
+  if (tool === "instance") return kind === "blend" ? { addon: null, blender: true, block: null } : { addon: null, blender: false, block: "no_blend" };
+  if (kind === "blend") return { addon: null, blender: true, block: null };
+  return { addon: "gltfpack", blender: false, block: null };
+}
+
+/** Why an item cannot start now, from what this computer has: the source,
+ *  the add-on, Blender, the stamp of the source (a variant is born stamped
+ *  as derived: its source first, Ottimizza's rule). null: it can start. */
+export function blockOf(tool: Tool, src: { kind: "files" | "blend" | "none"; path: string },
+                        have: { addons: ReadonlySet<string> | null; blender: boolean; stamped: (path: string) => boolean | null }): Block | null {
+  const n = toolNeeds(tool, src.kind);
+  if (n.block) return { code: n.block };
+  if (n.addon && have.addons && !have.addons.has(n.addon)) return { code: "addon", addon: n.addon };
+  if (n.blender && !have.blender) return { code: "blender" };
+  if (src.kind === "files" && tool !== "tileset" && have.stamped(src.path) === false) return { code: "unstamped", path: src.path };
+  return null;
+}
+
+// ── MICRO-ARCHIVE-ASSET-2 · the versions on disk of ONE asset ─────────────
+
+/** Of the files of a «versions» folder, those that are versions of this
+ *  asset — by the file its graph's versions point at (the path found on this
+ *  computer, else the url) — each with the version of the graph it is. */
+export function diskVersionsOf<R extends { name: string; path?: string; entry?: string; files?: string[] }>(
+  rows: readonly R[], a: AssetRow, pathOf: (id: string) => string): { row: R; version: VersionRow }[] {
+  const base = (p: string): string => (p.split("#")[0].split("?")[0].split(/[\\/]/).pop() ?? "").toLowerCase();
+  const by = new Map<string, VersionRow>();
+  for (const v of a.versions) {
+    if (v.master) continue;
+    for (const p of [pathOf(v.id), v.url]) if (p) by.set(base(p), v);
+  }
+  const out: { row: R; version: VersionRow }[] = [];
+  for (const r of rows) {
+    const names = [r.entry ?? "", r.path ?? "", r.name, ...(r.files ?? [])].map(base).filter(Boolean);
+    const v = names.map((n) => by.get(n)).find(Boolean);
+    if (v) out.push({ row: r, version: v });
+  }
+  return out;
 }
 
 // ── the textures view ───────────────────────────────────────────────────────

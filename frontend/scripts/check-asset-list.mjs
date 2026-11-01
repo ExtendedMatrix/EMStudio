@@ -114,6 +114,53 @@ ok(A.sourceFor(col1, "gltfpack", (id) => id === "Column1.v0" ? "/p/SB/versions/C
    && A.sourceFor(col1, "decimate_bake", (id) => id === "Column1.m" ? "/p/SB/G.blend" : "/p/v.glb").kind === "blend"
    && A.sourceFor(col1, "decimate_bake", () => "").kind === "none", "the source of a tool: a glTF for gltfpack, the master's .blend for Blender's bake, nothing said");
 
+// ── MICRO-ARCHIVE-ASSET-2 ──────────────────────────────────────────────────
+// 1 · the coverage: «dentro la fascia» with bases missing is false
+const covM = A.coverage(list, "mobile");
+ok(covM.covered === 1 && covM.total === 3 && covM.missing.join() === "Column1,Column2", `mobile: ${covM.covered} / ${covM.total} covered`);
+const nowM = A.sceneCount(list, "mobile");
+ok(nowM.estimated === 2 && nowM.triangles === 80 + 20 + 5 && nowM.covered === 1,
+   "the ones missing count their lightest version, as an estimate (said)");
+ok(A.budgetWord(nowM, A.inBand(nowM, BANDS.mobile), BANDS.mobile) === "incomplete"
+   && A.budgetWord(A.sceneCount(list, "web"), { ok: true }, BANDS.web) === "in"
+   && A.budgetWord({ covered: 1, total: 1 }, { ok: true }, { ...BANDS.arch, scene_triangles: null, scene_download_mb: null, scene_gpu_mb: null }) === "none", "«incompleto» while one misses, else inside / outside / no band");
+const qM = [{ id: "m1", label: "", state: "waiting", note: "", asset_id: "Column1", target: "mobile", tool: "decimate_bake", triangles: 10, texture: 512, ktx2: true }];
+const aftM = A.sceneCount(list, "mobile", { queue: qM, after: true });
+ok(aftM.covered === 2 && aftM.triangles === 10 + 20 + 5, `after the queue: the item counts its proposal (${aftM.covered} / ${aftM.total})`);
+// 2 · the forms repeated: one mesh + N instances
+const colG = (id, keys, comp = "") => asset(id, { family: "Col" }, [M(`${id}.m`), ver(`${id}.v0`, { triangles: 60, geometry_keys: keys, compression: comp,
+  textures: [tex("AO", 1024), tex("N", 1024)], texture_side: 1024, checksum: `sha256:${id}` })], { web: cell("todo", `${id}.v0`) });
+const shapesL = [colG("ColA1", ["g:1"]), colG("ColA2", ["g:1"]), colG("ColA3", ["g:1"]), colG("ColB1", ["g:2"]), colG("ColC1", ["g:9"], "draco"), colG("ColC2", ["g:8"], "draco")];
+const shp = A.repeatedShapes(shapesL);
+ok(shp.length === 2 && shp[0].assets.map((a) => a.id).join() === "ColA1,ColA2,ColA3" && shp[0].via === "geometry",
+   `the same geometry keys and textures: one form ×3 (${shp.map((s) => `${s.via}×${s.assets.length}`).join(", ")})`);
+ok(shp[1].via === "triangles" && shp[1].assets.length === 2, "compressed files: the same triangles and textures (said)");
+const sp = A.shapeProposal(shp[0], "web", BANDS.web);
+ok(sp.tool === "instance" && sp.triangles === 50 && sp.ktx2 && /3 istanze/.test(sp.why), `ONE proposal: ${sp.why}`);
+ok(A.shapeProposal(shp[0], "arch", BANDS.arch).tool === "keep", "the archive keeps its masters");
+const qS = [{ id: "s0", label: "", state: "waiting", note: "", asset_id: "ColA2", target: "web", tool: "decimate_bake", triangles: 50, texture: 512, ktx2: true, from: "list" }];
+const si = A.shapeItemsFor(shp, new Set(["ColA1", "ColA2", "ColA3", "ColB1"]), ["web"], new Map(), BANDS);
+ok(si.items.length === 1 && si.items[0].asset_ids.length === 3 && si.covered.get("web").size === 3, "«Metti in coda» with the copies all selected: ONE item for the form");
+A.enqueue(qS, si.items);
+ok(qS.length === 1 && qS[0].shape, "the form's item replaces its copies' items waiting");
+const beforeS = A.sceneCount(shapesL, "web");
+const aftS = A.sceneCount(shapesL, "web", { queue: qS, after: true });
+ok(aftS.instances === 3 && aftS.triangles === 50 + 60 + 60 + 60 && beforeS.triangles === 60 * 6,
+   `after: the mesh once + its instances (${beforeS.triangles} → ${aftS.triangles} tri, ${aftS.instances} instances)`);
+// 6 · 8 · what a tool needs: an item that cannot start stays, with why
+const have = { addons: new Set(["obj2tiles"]), blender: true, stamped: () => true };
+ok(A.blockOf("ktx2", { kind: "files", path: "/p/a.glb" }, have)?.addon === "gltfpack"
+   && A.blockOf("ktx2", { kind: "files", path: "/p/a.glb" }, { ...have, addons: new Set(["gltfpack"]), stamped: () => false })?.code === "unstamped"
+   && A.blockOf("decimate_bake", { kind: "blend", path: "/p/a.blend" }, { ...have, blender: false })?.code === "blender"
+   && A.blockOf("instance", { kind: "files", path: "/p/a.glb" }, have)?.code === "no_blend"
+   && A.blockOf("decimate_bake", { kind: "blend", path: "/p/a.blend" }, have) === null, "blocked: gltfpack missing, the source not stamped, no Blender, no .blend");
+const qB = [{ id: "b1", state: "waiting", label: "", note: "", block: { code: "addon", addon: "gltfpack" } }, { id: "b2", state: "waiting", label: "", note: "" }];
+ok(A.nextToRun(qB, "run", { slots: 2, held: 0 }).id === "b2" && qB.length === 2, "a blocked item stays in the queue; the next one starts");
+// 9 · the versions on disk of ONE asset
+const dv = A.diskVersionsOf([{ name: "Column1.glb", entry: "/p/SB/versions/Column1.glb" }, { name: "Other@lod1.glb", entry: "/p/SB/versions/Other@lod1.glb" }],
+  col1, (id) => id === "Column1.v0" ? "/p/SB/versions/Column1.glb" : "");
+ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk of this asset only, each with its version in the graph");
+
 // ── the bridge ──────────────────────────────────────────────────────────────
 if (!existsSync(PY)) {
   console.log(`asset-list: ${checks} page checks; no s3Dgraphy venv — bridge SKIPPED`);
@@ -156,8 +203,13 @@ const post = async (route, body) => {
 };
 try {
   const h = await (await fetch(`${B}/health`, { headers: H })).json();
-  ok(h.bridge_level >= 53, `the bridge is at level 53 (${h.bridge_level})`);
-  const a = (await post("/assets/list", { doc, doc_path: docPath })).j;
+  ok(h.bridge_level >= 55, `the bridge is at level 55 (${h.bridge_level})`);
+  // MICRO-ARCHIVE-ASSET-2 · the progress of a list asked, by its token
+  const prog = await (await fetch(`${B}/assets/progress?token=none`, { headers: H })).json();
+  ok(prog.ok && prog.phase === "", "GET /assets/progress answers (nothing for an unknown token)");
+  const a = (await post("/assets/list", { doc, doc_path: docPath, progress: "tk1" })).j;
+  const prog2 = await (await fetch(`${B}/assets/progress?token=tk1`, { headers: H })).json();
+  ok(prog2.phase === "done" && prog2.total === 1, `the progress said to the end (${prog2.phase} ${prog2.n}/${prog2.total})`);
   const pod = a.assets?.find((x) => x.id === "rm_podio");
   ok(a.ok && a.counts.assets === 1 && pod.containers[0].name === "Survey" && pod.branch === "SB", `one asset, its container and branch (${a.say_it})`);
   ok(pod.versions.length === 2 && pod.versions[0].master && pod.versions[1].loaded_by.includes("web"), "versions nested, the one the web loads said");
@@ -200,6 +252,27 @@ try {
     ok(tq.length === 87 && A.nextToRun(tq, "pause") === null && A.nextToRun(tq, "run") === tq[0],
        `87 in the queue; Pausa holds them, Run starts the first (mobile ${before.triangles} → ${aft2.triangles} tri after)`);
     ok(tl.assets.find((x) => x.kind === "container").targets.arch.state === "todo", "the audit: the tileset's master to declare");
+    // MICRO-ARCHIVE-ASSET-2 on Templu Mare
+    const tcov = A.coverage(tl.assets, "mobile");
+    const tnow = A.sceneCount(tl.assets, "mobile");
+    console.log(`  · mobile: ${tcov.covered} / ${tcov.total} covered, today ≈ ${tnow.triangles} tri (${tnow.estimated} estimated by their lightest)`);
+    ok(tcov.covered < tcov.total && A.budgetWord(tnow, A.inBand(tnow, tl.targets.mobile.bands), tl.targets.mobile.bands) === "incomplete",
+       `mobile is «incompleto» (${tcov.covered} / ${tcov.total}), not «dentro»`);
+    const tsh = A.repeatedShapes(tl.assets);
+    for (const s of tsh) console.log(`  · form ×${s.assets.length} (${s.via}, ${s.triangles} tri): ${s.assets.map((a) => a.name).join(" ")}`);
+    const temp = tsh.find((s) => s.assets.some((a) => a.name === "Column_tempio1"));
+    ok(tsh.length >= 3 && temp && temp.assets.filter((a) => /^Column_tempio\d$/.test(a.name)).length === 6 && temp.via === "geometry",
+       `Templu Mare: ${tsh.length} forms repeated; Column_tempio1–6 one form`);
+    ok(tsh.some((s) => s.assets.filter((a) => /^Column_shadow/.test(a.name)).length >= 10), "Column_shadow… gathered");
+    const all = new Set(tsh.flatMap((s) => s.assets.map((a) => a.id)));
+    for (const k of ["web", "mobile"]) {
+      const it = A.shapeItemsFor(tsh, all, [k], new Map(), { [k]: tl.targets[k].bands });
+      const b4 = A.sceneCount(tl.assets, k), af = A.sceneCount(tl.assets, k, { queue: A.enqueue([], it.items), after: true });
+      console.log(`  · ${k}: instancing the ${tsh.length} forms (${all.size} assets, ${it.items.length} items): ${b4.triangles} → ${af.triangles} tri, ${(b4.download_bytes / 1048576).toFixed(1)} → ${(af.download_bytes / 1048576).toFixed(1)} MB, GPU ${(b4.gpu_bytes / 1048576).toFixed(1)} → ${(af.gpu_bytes / 1048576).toFixed(1)} MB, covered ${b4.covered} → ${af.covered} / ${af.total}`);
+      ok(it.items.length === tsh.length && af.triangles < b4.triangles, `${k}: one item a form, the triangles fall`);
+    }
+    const sample = tl.assets.find((x) => x.name === "Column_tempio1").versions.find((v) => v.level === "lod0");
+    ok(Array.isArray(sample.geometry_keys) && sample.geometry_keys.length === 1, `a version says its geometry keys (${sample.geometry_keys})`);
   }
 } finally {
   bridge.kill();

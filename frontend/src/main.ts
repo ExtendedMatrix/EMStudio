@@ -13914,7 +13914,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 54;   // 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 55;   // 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -34891,19 +34891,7 @@ function addonCard(a: AddonState, compact: boolean, advice?: Advice): HTMLElemen
   const busy = [...bgJobs.values()].find((j) => j.kind === "addon" && jobRunning(j));
   const row = document.createElement("div");
   row.className = "files-addon-gestures";
-  const install = async (): Promise<void> => {
-    const job = await startJob({ kind: "addon", id: a.id }, `${a.name} ${a.version ?? ""}`.trim());
-    if (!job) return;
-    renderStorage();
-    const end = await job.done;
-    await loadAddons(true);
-    optPlans.clear();
-    tsPlans.clear();
-    if (end.state === "done") { const m = t("files.addonInstalled", { name: a.name, version: a.version ?? "" }); toast(m); logInfo(m); }
-    else logWarn(jobText(end));
-    renderStorage();
-    paintAddonsSettings();
-  };
+  const install = (): Promise<void> => installAddon(a);
   if (a.available && (!a.installed || a.upgradable)) {
     const go = document.createElement("button");
     go.type = "button";
@@ -34944,15 +34932,46 @@ function addonCard(a: AddonState, compact: boolean, advice?: Advice): HTMLElemen
   return box;
 }
 
+/** An add-on installed (or updated) as a job of the bridge; the plans that
+ *  waited for it asked again (Settings › Add-ons, and in line where it is
+ *  missing — MICRO-ARCHIVE-ASSET-2). */
+async function installAddon(a: AddonState): Promise<void> {
+  const job = await startJob({ kind: "addon", id: a.id }, `${a.name} ${a.version ?? ""}`.trim());
+  if (!job) return;
+  renderStorage();
+  const end = await job.done;
+  await loadAddons(true);
+  optPlans.clear();
+  tsPlans.clear();
+  if (end.state === "done") { const m = t("files.addonInstalled", { name: a.name, version: a.version ?? "" }); toast(m); logInfo(m); }
+  else logWarn(jobText(end));
+  if (blockFacts) await loadBlockFacts(true);
+  renderStorage();
+  paintAddonsSettings();
+  pumpQueue();
+}
+
 /** MICRO-OTTIMIZZA-3 p.2 · an add-on a tab needs and does not find: ONE line,
  *  with the way to Settings › Add-ons, where it is installed (its card says
  *  what it does, version, licence, source, and whether it suits this machine). */
 let addonFocus: string | null = null;
-function addonLink(id: string, why: string): HTMLElement {
+function addonLink(id: string, why: string, inline = true): HTMLElement {
   const p = document.createElement("p");
   p.className = "files-hint files-addon-link";
   p.dataset.addon = id;
   p.append(why, " ");
+  // MICRO-ARCHIVE-ASSET-2 · «Installa» in line (the same add-on as Settings)
+  if (inline) {
+    const inst = document.createElement("button");
+    inst.type = "button";
+    inst.className = "primary al-install";
+    inst.dataset.action = "addon-install-inline";
+    inst.dataset.addon = id;
+    inst.textContent = t("files.addonInstall");
+    inst.disabled = [...bgJobs.values()].some((j) => j.kind === "addon" && jobRunning(j));
+    inst.onclick = () => { inst.disabled = true; void installAddonById(id); };
+    p.append(inst, " ");
+  }
   const b = document.createElement("button");
   b.type = "button";
   b.className = "link";
@@ -35568,6 +35587,8 @@ function useDiagnosisView(win: Win, d: Diagnosis, key: string, profile: string, 
 }
 
 function useVersionsView(folder: string): HTMLElement {
+  // MICRO-ARCHIVE-ASSET-2 · in an asset's detail: only that asset's versions
+  if (alDetailAsset) return assetDiskVersions(folder, alDetailAsset);
   const box = document.createElement("div");
   box.className = "files-use-versions";
   const v = useState.versions.get(folder);
@@ -35616,6 +35637,69 @@ function useVersionsView(folder: string): HTMLElement {
   return box;
 }
 
+/** MICRO-ARCHIVE-ASSET-2 · «Versioni su disco» in an asset's detail (E.D.:
+ *  the whole folder with boxes of no apparent sense): only the versions of
+ *  THIS asset, each with its place in the graph, the boxes to «Elimina le
+ *  selezionate» (a confirmation first, the files and the graph's nodes said).
+ *  The whole folder stays in Ottimizza out of Archive › Asset. */
+function assetDiskVersions(folder: string, a: AL.AssetRow): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-use-versions al-disk-versions";
+  box.dataset.alDiskVersions = a.id;
+  const v = useState.versions.get(folder);
+  const hh = document.createElement("div");
+  hh.className = "files-sec-h";
+  const hb = document.createElement("b");
+  hb.textContent = t("al.diskVersions", { name: a.name });
+  hh.appendChild(hb);
+  const rl = document.createElement("button");
+  rl.type = "button";
+  rl.className = "ghost";
+  rl.dataset.action = "use-versions";
+  rl.textContent = t("files.useReload");
+  rl.onclick = () => { void loadUseVersions(folder); };
+  hh.append(" ", rl);
+  box.appendChild(hh);
+  if (!v) { void loadUseVersions(folder); box.appendChild(tabLead(t("files.useLoading"), "files-hint")); return box; }
+  const mine = AL.diskVersionsOf(v.rows, a, (id) => fileStateOf(id)?.path ?? "");
+  if (!mine.length) { box.appendChild(tabLead(t("al.diskVersionsNone", { folder: projectRelative(v.folder) }), "files-hint")); return box; }
+  const tbl = document.createElement("table");
+  tbl.className = "files-use-objects";
+  const head = tbl.insertRow();
+  for (const k of ["al.diskPick", "files.useVersion", "al.diskInGraph", "files.useTris", "files.useSize", "files.useStamp"])
+    head.insertCell().textContent = t(k);
+  for (const { row: r, version: gv } of mine) {
+    const tr = tbl.insertRow();
+    tr.dataset.alDiskVersion = r.name;
+    const c0 = tr.insertCell();
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = useState.gone.has(r.name);
+    cb.dataset.version = r.name;
+    cb.title = t("al.diskPickTitle");
+    cb.onchange = () => { if (cb.checked) useState.gone.add(r.name); else useState.gone.delete(r.name); renderStorage(); };
+    c0.appendChild(cb);
+    const inGraph = `${gv.level_say}${gv.loaded_by.length ? ` · ${t("al.loadedBy", { targets: gv.loaded_by.map((k) => t(`al.t.${k}`)).join(", ") })}` : ""}`;
+    for (const val of [r.name, inGraph, r.triangles?.toLocaleString() ?? "—", useMb(r.bytes), r.stamp ? "✓" : "—"]) {
+      const td = tr.insertCell();
+      td.textContent = val;
+      td.title = val;
+    }
+  }
+  box.appendChild(tbl);
+  const gone = mine.filter((x) => useState.gone.has(x.row.name)).map((x) => x.row.name);
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "danger";
+  del.dataset.action = "al-disk-remove";
+  del.textContent = t("al.diskRemove", { n: String(gone.length) });
+  del.title = t("al.diskRemoveTitle");
+  del.disabled = !gone.length;
+  del.onclick = () => { void removeUseVersions(v.folder, gone).then(() => askAssetList()); };
+  box.appendChild(del);
+  return box;
+}
+
 /** The variants' body (MICRO-OTTIMIZZA-1): the engine, the facts, the plan. */
 function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: OptimizePreset,
                            chosen: FsEntry[], models: FsEntry[]): void {
@@ -35629,10 +35713,14 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
   const sel = document.createElement("select");
   sel.dataset.action = "files-opt-engine";
   const today = enginesToday(blenderOn(), blenderState?.s?.probe);
+  // MICRO-ARCHIVE-ASSET-2 · «da installare» beside an engine whose program is not here
+  const gltfpackMissing = !!addonsState?.list && !addonsState.list.some((x) => x.id === "gltfpack" && x.installed);
+  if (!addonsState) void loadAddons().then(() => { if (sec.isConnected) renderStorage(); });
   for (const e of pre.engines) {
     const o = document.createElement("option");
     o.value = e;
-    o.textContent = t(`files.engine.${e}`) + (today.has(e) ? "" : ` — ${t("files.engineNeedsBlender")}`);
+    o.textContent = t(`files.engine.${e}`) + (!today.has(e) ? ` — ${t("files.engineNeedsBlender")}`
+      : e === "gltfpack" && gltfpackMissing ? ` — ${t("al.toInstall", { what: "gltfpack" })}` : "");
     o.selected = e === engine;
     sel.appendChild(o);
   }
@@ -35643,6 +35731,16 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
     renderStorage();
   };
   el.appendChild(sel);
+  if (engine === "gltfpack" && gltfpackMissing) {
+    const inst = document.createElement("button");
+    inst.type = "button";
+    inst.className = "primary al-install";
+    inst.dataset.action = "engine-install";
+    inst.textContent = t("al.installEngine", { what: "gltfpack" });
+    inst.disabled = [...bgJobs.values()].some((j) => j.kind === "addon" && jobRunning(j));
+    inst.onclick = () => { inst.disabled = true; void installAddonById("gltfpack"); };
+    el.append(" ", inst);
+  }
   eng.appendChild(el);
   // p.1 · why this engine, and what the destination does, in their ⓘ
   el.append(" ", tabTip(engine === pre.engine ? t(pre.whyKey) : t("files.optEngineChanged", { engine: t(`files.engine.${engine}`), default: t(`files.engine.${pre.engine}`) })));
@@ -35669,7 +35767,8 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
       slot.textContent = "";
       if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
       // p.2 · the add-on missing: one line, to Settings › Add-ons
-      if (!pl.tool) slot.appendChild(addonLink("gltfpack", t("files.optNoTool")));
+      // (its «Installa» is beside the engine above — MICRO-ARCHIVE-ASSET-2)
+      if (!pl.tool) slot.appendChild(addonLink("gltfpack", t("files.optNoTool"), !(engine === "gltfpack" && gltfpackMissing)));
       const table = document.createElement("table");
       table.className = "files-prev";
       const hr = document.createElement("tr");
@@ -41590,7 +41689,19 @@ const assetUi = {
   sort: "gpu" as AL.SortKey, desc: true, texSort: "uses" as AL.TexSort,
   open: new Set<string>(), openVer: new Set<string>(), expandAll: false, closedGroups: new Set<string>(),
   sel: new Set<string>(), plan: new Map() as AL.Plan, detail: "", detailTab: "optimize" as "optimize" | "info",
+  /** MICRO-ARCHIVE-ASSET-2 · the forms repeated opened; where the first
+   *  asking is (the phases, with their counters); the scroll of the list and
+   *  of the side, kept across every repaint */
+  openShapes: new Set<string>(),
+  progress: null as { phase: string; n: number; total: number } | null,
+  scroll: { top: 0, left: 0 }, sideScroll: 0,
 };
+/** MICRO-ARCHIVE-ASSET-2 · the forms repeated of the answer, once per answer */
+let alShapes: { ans: AL.AssetListAnswer | null; list: AL.Shape[]; index: Map<string, AL.Shape> } = { ans: null, list: [], index: new Map() };
+function shapesOf(ans: AL.AssetListAnswer): { list: AL.Shape[]; index: Map<string, AL.Shape> } {
+  if (alShapes.ans !== ans) { const list = AL.repeatedShapes(ans.assets); alShapes = { ans, list, index: AL.shapeIndex(list) }; }
+  return alShapes;
+}
 (() => {
   try {
     const v = JSON.parse(localStorage.getItem(ASSET_UI_KEY) ?? "{}") as Partial<{ target: AL.TargetKey; compare: boolean;
@@ -41633,14 +41744,89 @@ async function askAssetList(): Promise<void> {
   if (!store) return;
   assetUi.asking = true;
   assetUi.error = "";
+  // MICRO-ARCHIVE-ASSET-2 · the phases, with their counters: never a mute
+  // empty list on a large study (the first answer waits for the files measured)
+  const first = !assetUi.ans;
+  const nodes = store.doc.graph?.nodes?.length ?? 0;
+  assetUi.progress = { phase: "graph", n: nodes, total: nodes };
   renderStorage();
+  const token = `al${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  let polling = true;
+  const poll = async (): Promise<void> => {
+    while (polling) {
+      await new Promise((r) => setTimeout(r, 300));
+      if (!polling) break;
+      try {
+        const r = await fetch(`${await bridgeUrl()}/assets/progress?token=${token}`, { cache: "no-store" });
+        const j = await r.json().catch(() => ({})) as { phase?: string; n?: number; total?: number };
+        // the bridge's phases after the page's: never backwards (its «graph»
+        // and «resolve» are the page's own, already said)
+        const order = ["graph", "resolve", "measure", "textures"];
+        if (polling && j.phase && order.indexOf(j.phase) >= order.indexOf(assetUi.progress?.phase ?? "graph")
+            && (j.phase === "measure" || j.phase !== assetUi.progress?.phase)) {
+          assetUi.progress = { phase: j.phase, n: j.n ?? 0, total: j.total ?? 0 }; paintAssetProgress();
+        }
+      } catch { /* an old bridge: the phase stays */ }
+    }
+  };
   try {
+    if (!fileStates().length && !filesChecking) {
+      assetUi.progress = { phase: "resolve", n: 0, total: citedFilesOf(store) };
+      paintAssetProgress();
+    }
     await archiveStates();
+    if (assetUi.progress.phase === "graph") { assetUi.progress = { phase: "resolve", n: 0, total: citedFilesOf(store) }; paintAssetProgress(); }
+    void poll();
     const j = await postGraph<AL.AssetListAnswer>("/assets/list", { doc: store.doc, doc_path: currentFilePath ?? "",
-      states: statesOf(fileStates()), in_room: !!fileRoom() });
+      states: statesOf(fileStates()), in_room: !!fileRoom(), progress: token });
     if (!j.ok) { assetUi.error = j.status === 404 ? t("al.oldBridge") : String(j.error ?? j.status); assetUi.ans = null; }
     else { assetUi.ans = j; assetUi.docKey = assetDocKey(); }
-  } finally { assetUi.asking = false; renderStorage(); }
+  } finally { polling = false; assetUi.asking = false; assetUi.progress = null; renderStorage(); void first; }
+}
+
+/** The phase of the first asking, in words, with its counter and its bar
+ *  (indeterminate while the total is not known). */
+function assetProgressBox(): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "al-progress";
+  box.dataset.alProgress = "";
+  paintAssetProgressInto(box);
+  return box;
+}
+function paintAssetProgressInto(box: HTMLElement): void {
+  const pr = assetUi.progress;
+  box.textContent = "";
+  const steps = ["graph", "resolve", "measure", "textures"] as const;
+  const phase = pr?.phase === "measure" && pr.total > 0 && pr.n >= pr.total ? "textures" : pr?.phase ?? "graph";
+  box.dataset.phase = phase;
+  const ol = document.createElement("ol");
+  ol.className = "al-phases";
+  for (const k of steps) {
+    const li = document.createElement("li");
+    const i = steps.indexOf(k), cur = steps.indexOf(phase as typeof steps[number]);
+    li.className = i < cur ? "done" : i === cur ? "now" : "";
+    li.dataset.phase = k;
+    let words = t(`al.phase.${k}`);
+    if (k === phase && pr) {
+      if (k === "graph") words = t("al.phase.graphN", { n: fmtN(pr.n) });
+      else if (k === "resolve" && pr.total) words = t("al.phase.resolveN", { n: fmtN(pr.total) });
+      else if (k === "measure" && pr.total) words = t("al.phase.measureN", { n: fmtN(pr.n), of: fmtN(pr.total) });
+    }
+    li.textContent = words;
+    ol.appendChild(li);
+  }
+  const bar = document.createElement("div");
+  bar.className = "al-pbar";
+  const fill = document.createElement("i");
+  if (phase === "measure" && pr && pr.total) fill.style.width = `${Math.round((pr.n / pr.total) * 100)}%`;
+  else bar.classList.add("busy");
+  bar.appendChild(fill);
+  box.append(ol, bar);
+}
+function paintAssetProgress(): void {
+  const boxes = document.querySelectorAll<HTMLElement>("[data-al-progress]");
+  if (!boxes.length) { renderStorage(); return; }
+  for (const b of boxes) paintAssetProgressInto(b);
 }
 
 /** «File | Asset» at the top of Archive: the File window's two views. Asset
@@ -41746,7 +41932,8 @@ function assetListView(win: Win): HTMLElement {
   const ans = assetUi.ans;
   if (!ans || assetUi.docKey !== assetDocKey()) {
     if (!assetUi.asking && !assetUi.error) void askAssetList();
-    host.appendChild(storageEmpty(assetUi.error || t("al.asking")));
+    if (assetUi.error) host.appendChild(storageEmpty(assetUi.error));
+    else host.appendChild(assetProgressBox());
     return host;
   }
   const targets = assetTargets();
@@ -41852,7 +42039,7 @@ function assetListView(win: Win): HTMLElement {
     const tool = document.createElement("select");
     tool.dataset.al = "bulk-tool";
     { const o = document.createElement("option"); o.value = ""; o.textContent = t("al.tool"); tool.appendChild(o); }
-    for (const k of AL.TOOLS) { const o = document.createElement("option"); o.value = k; o.textContent = t(`al.tool.${k}`); tool.appendChild(o); }
+    for (const k of AL.TOOLS) { const o = document.createElement("option"); o.value = k; o.textContent = toolWords(k, null); tool.appendChild(o); }
     const kL = document.createElement("label");
     const ktx = document.createElement("input");
     ktx.type = "checkbox";
@@ -41878,21 +42065,37 @@ function assetListView(win: Win): HTMLElement {
     go.title = t("al.enqueueTitle");
     go.disabled = !n;
     go.onclick = () => {
-      const items = AL.itemsFor(ans.assets, assetUi.sel, targets, assetUi.plan,
-        (a, k, p) => `${a.name} → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}`);
+      // MICRO-ARCHIVE-ASSET-2 · a form repeated whose copies are all selected:
+      // ONE item (a mesh reduced + N instances); the others one by one
+      const sh = AL.shapeItemsFor(shapesOf(ans).list, assetUi.sel, targets, assetUi.plan, bands,
+        (s2, k, p) => `${t("al.shape", { n: String(s2.assets.length) })} ${s2.assets[0].name}… → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}${p.triangles ? ` ${fmtN(p.triangles)} tri` : ""}`);
+      const single = AL.itemsFor(ans.assets, assetUi.sel, targets, assetUi.plan,
+        (a, k, p) => `${a.name} → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}`)
+        .filter((it) => !sh.covered.get(it.target!)?.has(it.asset_id!));
+      const items = [...sh.items, ...single];
       if (!items.length) { toast(t("al.nothingToQueue")); return; }
       queueAdd(items);
-      for (const it of items) { const r = assetUi.plan.get(it.asset_id!); if (r) delete r[it.target!]; }
+      for (const it of single) { const r = assetUi.plan.get(it.asset_id!); if (r) delete r[it.target!]; }
       assetUi.sel.clear();
-      toast(tn("al.queued", items.length));
+      const blocked = items.filter((x) => x.block).length;
+      toast(tn("al.queued", items.length) + (blocked ? ` · ${tn("al.queuedBlocked", blocked)}` : ""));
       renderStorage();
     };
     sheet.append(info, prop, or, tri, tex, kL, tool, set, go);
   };
 
+  // MICRO-ARCHIVE-ASSET-2 · the scroll is kept across every repaint (a row
+  // clicked, a checkbox, the queue's end, the polls): never back to the top
+  tw.onscroll = () => { assetUi.scroll = { top: tw.scrollTop, left: tw.scrollLeft }; };
+  side.onscroll = () => { assetUi.sideScroll = side.scrollTop; };
+  const keepScroll = (): void => {
+    const put = (): void => { tw.scrollTop = assetUi.scroll.top; tw.scrollLeft = assetUi.scroll.left; side.scrollTop = assetUi.sideScroll; };
+    put();
+    requestAnimationFrame(put);
+  };
   const paintList = (): void => {
     tw.textContent = "";
-    if (assetUi.view === "textures") { tw.appendChild(texturesTable(ans)); return; }
+    if (assetUi.view === "textures") { tw.appendChild(texturesTable(ans)); keepScroll(); return; }
     const table = document.createElement("table");
     table.className = "al-table";
     table.dataset.alTable = "";
@@ -41974,7 +42177,26 @@ function assetListView(win: Win): HTMLElement {
         tb.appendChild(tr);
       }
       if (closed) continue;
-      for (const a of g.assets) assetRows(tb, a, targets, b0, shared, () => { paintList(); paintSheet(); });
+      // MICRO-ARCHIVE-ASSET-2 · the forms repeated of this group: ONE row
+      // «forma ripetuta ×N» at the place of its first copy, its copies under it
+      const { index } = shapesOf(ans);
+      const inGroup = new Map<string, AL.AssetRow[]>();
+      for (const a of g.assets) { const sh = index.get(a.id); if (sh) inGroup.set(sh.key, [...(inGroup.get(sh.key) ?? []), a]); }
+      for (const [k, v] of inGroup) inGroup.set(k, [...v].sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true })));
+      const drawn = new Set<string>();
+      const repaint = (): void => { paintList(); paintSheet(); };
+      for (const a of g.assets) {
+        const sh = index.get(a.id);
+        const mine = sh ? inGroup.get(sh.key) ?? [] : [];
+        if (sh && mine.length > 1) {
+          if (drawn.has(sh.key)) continue;
+          drawn.add(sh.key);
+          shapeRow(tb, sh, mine, targets, bands, repaint);
+          if (assetUi.openShapes.has(sh.key)) for (const m of mine) assetRows(tb, m, targets, b0, shared, repaint, true);
+          continue;
+        }
+        assetRows(tb, a, targets, b0, shared, repaint);
+      }
     }
     if (!groups.length) {
       const tr = document.createElement("tr");
@@ -41987,36 +42209,205 @@ function assetListView(win: Win): HTMLElement {
     }
     table.appendChild(tb);
     tw.appendChild(table);
+    keepScroll();
   };
   paintSheet();
   paintList();
-  side.appendChild(queuePanel());
-  const a = assetUi.detail ? ans.assets.find((x) => x.id === assetUi.detail) : undefined;
-  if (a) side.appendChild(assetDetail(win, a));
-  else { const p = document.createElement("p"); p.className = "files-hint"; p.textContent = t("al.detailHint"); side.appendChild(p); }
+  // MICRO-ARCHIVE-ASSET-2 · a row clicked repaints the side only (the table
+  // stays: its scroll, its rows opened, its selection), the row lit whole
+  const paintSide = (): void => {
+    side.textContent = "";
+    side.appendChild(queuePanel());
+    const a = assetUi.detail ? ans.assets.find((x) => x.id === assetUi.detail) : undefined;
+    if (a) side.appendChild(assetDetail(win, a));
+    else { const p = document.createElement("p"); p.className = "files-hint"; p.textContent = t("al.detailHint"); side.appendChild(p); }
+  };
+  alPick = (id: string): void => {
+    assetUi.detail = assetUi.detail === id ? "" : id;
+    for (const r of tw.querySelectorAll<HTMLElement>("tr.al-asset")) r.classList.toggle("on", r.dataset.alAsset === assetUi.detail);
+    assetUi.sideScroll = 0;
+    paintSide();
+  };
+  paintSide();
   return host;
 }
 
+/** MICRO-ARCHIVE-ASSET-2 · the row clicked (the view in place sets it) */
+let alPick: ((id: string) => void) | null = null;
+
+/** A tool in words, and «da installare» when what it needs is not on this
+ *  computer (`kind`: the source of the row; null in the bulk sheet, where
+ *  only the add-ons are said). */
+function toolWords(tool: AL.Tool, kind: "files" | "blend" | "none" | null): string {
+  const base = t(`al.tool.${tool}`);
+  const need = kind ? AL.toolNeeds(tool, kind) : AL.toolNeeds(tool, tool === "decimate_bake" || tool === "instance" ? "blend" : "files");
+  const have = blockFacts;
+  if (!have) return base;
+  if (need.addon && have.addons && !have.addons.has(need.addon)) return `${base} — ${t("al.toInstall", { what: need.addon })}`;
+  if (need.blender && !have.blender) return `${base} — ${t("al.toInstall", { what: "Blender" })}`;
+  return base;
+}
+
+/** MICRO-ARCHIVE-ASSET-2 · a form repeated: ONE row «forma ripetuta ×N» with
+ *  the numbers of one copy, its checkbox (all its copies), ▸ its copies, and
+ *  per target ONE proposal — a mesh reduced + N instances. */
+function shapeRow(tb: HTMLElement, sh: AL.Shape, mine: AL.AssetRow[], targets: AL.TargetKey[],
+                  bands: Record<AL.TargetKey, AL.Bands>, repaint: () => void): void {
+  const tr = document.createElement("tr");
+  tr.className = "al-shape";
+  tr.dataset.alShape = sh.key;
+  const td0 = document.createElement("td");
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.dataset.alShapeCheck = String(mine.length);
+  const n = mine.filter((a) => assetUi.sel.has(a.id)).length;
+  cb.checked = n === mine.length;
+  cb.indeterminate = n > 0 && n < mine.length;
+  cb.onchange = () => { for (const a of mine) { if (cb.checked) assetUi.sel.add(a.id); else assetUi.sel.delete(a.id); } repaint(); };
+  td0.appendChild(cb);
+  const tdn = document.createElement("td");
+  const open = assetUi.openShapes.has(sh.key);
+  const tog = document.createElement("span");
+  tog.className = "al-tog";
+  tog.dataset.alShapeOpen = sh.key;
+  tog.textContent = open ? "▾" : "▸";
+  tog.onclick = (e) => { e.stopPropagation(); if (open) assetUi.openShapes.delete(sh.key); else assetUi.openShapes.add(sh.key); repaint(); };
+  const nm = document.createElement("span");
+  nm.className = "al-name";
+  const first = mine[0].name, last = mine[mine.length - 1].name;
+  nm.textContent = `⧉ ${t("al.shape", { n: String(mine.length) })} · ${first}${mine.length > 1 ? ` … ${last}` : ""}`;
+  tdn.append(tog, " ", nm);
+  tdn.title = `${t(sh.via === "geometry" ? "al.shapeViaGeometry" : "al.shapeViaTriangles")}\n${mine.map((a) => a.name).join("\n")}`;
+  // already ONE file for the copies (for the target): its numbers, once;
+  // else the numbers of one copy, ×N
+  const sharedNow = AL.shapeShared({ ...sh, assets: mine }, assetUi.target);
+  const one = sharedNow ? AL.shownVersion(mine[0], assetUi.target) : AL.shapeKey(mine[0])?.v ?? null;
+  const c = (text: string, cls = "", title = ""): HTMLTableCellElement => {
+    const td = document.createElement("td"); td.className = cls; td.textContent = text; td.title = title || text; return td;
+  };
+  tr.append(td0, tdn,
+    c(one ? one.level_say : "—", "", t(sharedNow ? "al.shapeOneFile" : "al.shapeOneCopy")),
+    sharedNow ? c(one ? `${fmtN(one.triangles)} · ${t("al.shapeOneFileShort")}` : "—", "n", t("al.shapeOneFile"))
+      : c(one ? `${fmtN(one.triangles)} ×${mine.length}` : "—", "n", t("al.shapeTriTitle", { one: fmtN(one?.triangles), n: String(mine.length), all: fmtN((one?.triangles ?? 0) * mine.length) })),
+    c(fmtMB(one?.size_bytes)), c(fmtMB(one?.gpu_bytes), "n"),
+    c(one?.texture_side ? String(one.texture_side) : "—", "n"), c(String(one?.textures.length ?? 0), "n"),
+    c(t(sh.via === "geometry" ? "al.shapeSameGeometry" : "al.shapeSameTriangles"), "al-shape-via"));
+  for (const k of targets) tr.appendChild(shapeTargetCell(sh, k, bands[k], repaint));
+  tb.appendChild(tr);
+}
+
+/** The ONE proposal of a form for a target, editable: the tool (instances, or
+ *  «una per una» — then its copies go one by one), the triangles of the mesh,
+ *  the side, KTX2. */
+function shapeTargetCell(sh: AL.Shape, k: AL.TargetKey, b: AL.Bands | undefined, repaint: () => void): HTMLTableCellElement {
+  const td = document.createElement("td");
+  td.className = "al-target";
+  td.dataset.alCell = k;
+  const p = AL.shapeProposalOf(sh, k, b, assetUi.plan);
+  const queued = assetQueue.find((x) => x.shape === sh.key && x.target === k && (x.state === "waiting" || x.state === "running"));
+  if (queued) {
+    const q = document.createElement("span");
+    q.className = "al-queued";
+    q.textContent = `⧗ ${t("al.tool.instance")}`;
+    td.appendChild(q);
+    return td;
+  }
+  if (k === "arch" || (p.tool === "keep" && !p.edited)) {
+    const u = document.createElement("small");
+    u.textContent = p.why;
+    u.title = p.why;
+    td.appendChild(u);
+    return td;
+  }
+  const set = (field: "tool" | "triangles" | "texture" | "ktx2", v: string | number | boolean | null): void => {
+    const key = `shape:${sh.key}`;
+    const cur = { ...AL.shapeProposalOf(sh, k, b, assetUi.plan) } as AL.Proposal & { edited?: boolean };
+    delete cur.edited;
+    if (field === "tool") cur.tool = String(v) as AL.Tool;
+    else if (field === "ktx2") cur.ktx2 = !!v;
+    else cur[field] = v === "" || v === null ? null : Number(v);
+    assetUi.plan.set(key, { ...(assetUi.plan.get(key) ?? {}), [k]: cur });
+    repaint();
+  };
+  const box = document.createElement("span");
+  box.className = `al-prop al-shape-prop${p.edited ? " edited" : ""}`;
+  box.title = p.why;
+  box.onclick = (e) => e.stopPropagation();
+  const tool = document.createElement("select");
+  tool.dataset.alShapeProp = `${k}|tool`;
+  for (const [v, w] of [["instance", toolWords("instance", "blend")], ["keep", t("al.shapeEach")]] as const) {
+    const o = document.createElement("option"); o.value = v; o.textContent = w; tool.appendChild(o);
+  }
+  tool.value = p.tool === "instance" ? "instance" : "keep";
+  tool.onchange = () => set("tool", tool.value);
+  const tri = document.createElement("input");
+  tri.type = "number";
+  tri.className = "al-num";
+  tri.placeholder = "tri";
+  tri.value = p.triangles != null ? String(p.triangles) : "";
+  tri.title = t("al.shapeMeshTri");
+  tri.onchange = () => set("triangles", tri.value);
+  const tex = document.createElement("select");
+  for (const sv of ["", "4096", "2048", "1024", "512"]) { const o = document.createElement("option"); o.value = sv; o.textContent = sv || "px"; tex.appendChild(o); }
+  tex.value = p.texture != null ? String(p.texture) : "";
+  tex.onchange = () => set("texture", tex.value);
+  const kx = document.createElement("label");
+  const kc = document.createElement("input");
+  kc.type = "checkbox";
+  kc.checked = p.ktx2;
+  kc.onchange = () => set("ktx2", kc.checked);
+  kx.append(kc, "KTX2");
+  if (p.edited) { const e = document.createElement("b"); e.textContent = "✎ "; box.appendChild(e); }
+  box.append(tool, tri, tex, kx);
+  td.appendChild(box);
+  return td;
+}
+
 /** A target's card: triangles, download, GPU — today and after the queue —
- *  against the band; «dentro / fuori fascia». */
+ *  against the band. MICRO-ARCHIVE-ASSET-2 (E.D.: «dentro la fascia» with 96
+ *  bases missing is false): the coverage first («1 / 97 coperti»), and while
+ *  assets have no version for the target the word is «incompleto»; the count
+ *  estimates what a viewer would load — for the ones missing their item in
+ *  the queue, else their lightest version, and it says so. */
 function assetBudgetCard(ans: AL.AssetListAnswer, k: AL.TargetKey): HTMLElement {
   const b = ans.targets[k].bands;
-  const now = ans.totals[k];
-  const aft = AL.totalsAfter(ans.assets, k, assetUi.plan, assetQueue);
+  const now = AL.sceneCount(ans.assets, k);
+  const aft = AL.sceneCount(ans.assets, k, { plan: assetUi.plan, queue: assetQueue, after: true });
   const okNow = AL.inBand(now, b), okAft = AL.inBand(aft, b);
+  const wNow = AL.budgetWord(now, okNow, b), wAft = AL.budgetWord(aft, okAft, b);
   const card = document.createElement("div");
   card.className = "al-card";
   card.dataset.alCard = k;
-  card.dataset.ok = String(okAft.ok);
+  card.dataset.ok = String(okAft.ok && wAft !== "incomplete");
+  card.dataset.word = wNow;
+  card.dataset.wordAfter = wAft;
+  card.dataset.covered = `${now.covered}/${now.total}`;
   const h = document.createElement("div");
   h.className = "al-card-h";
   const nm = document.createElement("b");
   nm.textContent = t(`al.t.${k}`);
   const pill = document.createElement("span");
-  pill.className = `files-pill ${okAft.ok ? "on" : "warn"}`;
-  pill.textContent = b.scene_triangles || b.scene_download_mb || b.scene_gpu_mb ? t(okAft.ok ? "al.inBand" : "al.outBand") : t("al.noBand");
+  pill.className = `files-pill ${wNow === "in" || wNow === "none" ? "on" : "warn"}`;
+  pill.dataset.alWord = wNow;
+  pill.textContent = t(`al.word.${wNow}`);
+  pill.title = wNow === "incomplete" ? t("al.word.incompleteTitle", { n: String(now.total - now.covered) }) : "";
   h.append(nm, pill);
+  if (wAft !== wNow) {
+    const pa = document.createElement("small");
+    pa.className = "al-word-after";
+    pa.textContent = ` → ${t(`al.word.${wAft}`)}`;
+    pa.title = t("al.word.afterTitle");
+    h.appendChild(pa);
+  }
   card.appendChild(h);
+  // the coverage: how many assets have a version for this target, today → after
+  const cov = document.createElement("div");
+  cov.className = `al-cov${now.covered < now.total ? " over" : ""}`;
+  cov.dataset.alCov = `${now.covered}/${now.total}`;
+  cov.textContent = t("al.covered", { n: fmtN(now.covered), of: fmtN(now.total) })
+    + (aft.covered !== now.covered ? ` → ${t("al.covered", { n: fmtN(aft.covered), of: fmtN(aft.total) })}` : "");
+  cov.title = t("al.coveredTitle");
+  card.appendChild(cov);
   const row = (label: string, n: number, a2: number, max: number | null, over: boolean, unit: "tri" | "mb"): void => {
     const r = document.createElement("div");
     r.className = "al-brow";
@@ -42035,7 +42426,8 @@ function assetBudgetCard(ans: AL.AssetListAnswer, k: AL.TargetKey): HTMLElement 
     const v = document.createElement("span");
     v.className = "n";
     const f = (x: number) => unit === "tri" ? fmtN(x) : fmtN(x, 1);
-    v.textContent = `${f(n)} → ${f(a2)}${max ? ` / ${fmtN(max)}` : ""}`;
+    v.textContent = `${now.estimated ? "≈ " : ""}${f(n)} → ${f(a2)}${max ? ` / ${fmtN(max)}` : ""}`;
+    v.title = v.textContent;
     r.append(l, barEl, v);
     card.appendChild(r);
   };
@@ -42044,21 +42436,25 @@ function assetBudgetCard(ans: AL.AssetListAnswer, k: AL.TargetKey): HTMLElement 
   row(t("al.col.gpu"), now.gpu_bytes / 1048576, aft.gpu_bytes / 1048576, b.scene_gpu_mb, okAft.gpu, "mb");
   const note = document.createElement("div");
   note.className = "files-hint";
+  const streamed = ans.totals[k]?.streamed ?? 0;
+  const missing = now.total - now.covered;
   note.textContent = (b.object_triangles ? t("al.perObject", { tri: fmtN(b.object_triangles), px: String(b.object_texture_side ?? "—") })
-    : t("al.archNote")) + (now.streamed ? ` · ${tn("al.streamed", now.streamed)}` : "") + (now.estimated ? ` · ${tn("al.estimated", now.estimated)}` : "")
+    : t("al.archNote")) + (missing ? ` · ${tn("al.lightestEstimate", missing)}` : "")
+    + (streamed ? ` · ${tn("al.streamed", streamed)}` : "")
+    + (aft.instances ? ` · ${tn("al.instancesCounted", aft.instances)}` : "")
     + ` · ${t("al.barsHint")}`;
+  note.title = note.textContent;
   card.appendChild(note);
-  void okNow;
   return card;
 }
 
 /** One asset: its row, and when open its versions and their textures. */
 function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0: AL.Bands | undefined,
-                   shared: Map<string, number>, repaint: () => void): void {
+                   shared: Map<string, number>, repaint: () => void, inShape = false): void {
   const v = AL.shownVersion(a, assetUi.target);
   const open = assetUi.expandAll || assetUi.open.has(a.id);
   const tr = document.createElement("tr");
-  tr.className = `al-asset${assetUi.sel.has(a.id) ? " sel" : ""}${assetUi.detail === a.id ? " on" : ""}`;
+  tr.className = `al-asset${assetUi.sel.has(a.id) ? " sel" : ""}${assetUi.detail === a.id ? " on" : ""}${inShape ? " al-in-shape" : ""}`;
   tr.dataset.alAsset = a.id;
   const td0 = document.createElement("td");
   const cb = document.createElement("input");
@@ -42085,11 +42481,13 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
   br.textContent = a.branch ? ` ${a.branch}` : "";
   tdn.appendChild(br);
   const ob = AL.overBand(v, b0);
+  // MICRO-ARCHIVE-ASSET-2 · every cell says its whole text on the pointer
+  // (a column too narrow truncates it)
   const cell = (text: string, cls = "", title = ""): HTMLTableCellElement => {
     const td = document.createElement("td");
     td.className = cls;
     td.textContent = text;
-    if (title) td.title = title;
+    td.title = title ? (text && !title.includes(text) ? `${text}\n${title}` : title) : text;
     return td;
   };
   const st = AL.lastStamp(a);
@@ -42104,8 +42502,9 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
     cell(v?.texture_side ? String(v.texture_side) : "—", `n${ob.tex ? " over" : ""}`),
     cell(String(v ? (v.textures.length || v.texture_count || 0) : 0), "n"),
     stampTd);
+  stampTd.title = [stampTd.textContent, st.say].filter(Boolean).join("\n");
   for (const k of targets) tr.appendChild(targetCell(a, k, repaint));
-  tr.onclick = () => { assetUi.detail = assetUi.detail === a.id ? "" : a.id; renderStorage(); };
+  tr.onclick = () => { if (alPick) alPick(a.id); else { assetUi.detail = assetUi.detail === a.id ? "" : a.id; renderStorage(); } };
   tb.appendChild(tr);
   if (!open) return;
   for (const x of a.versions) {
@@ -42130,6 +42529,7 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
       name.appendChild(u);
     }
     void by;
+    name.title = [name.textContent, x.url, x.made_say].filter(Boolean).join("\n");
     const obv = AL.overBand(x, b0);
     const stv = cell(x.made?.at ? x.made.at.slice(0, 10) : "—", x.modified_after_stamp ? "al-mod" : "", x.made_say);
     if (x.modified_after_stamp) stv.textContent += ` · ${t("al.modified")}`;
@@ -42143,21 +42543,26 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
       cell(String(x.textures.length || x.texture_count || 0), "n"), stv, state);
     tb.appendChild(vr);
     if (!vo) continue;
+    // MICRO-ARCHIVE-ASSET-2 · a texture's values in the columns of the row
+    // above (format under Livello, px under Triangoli and Texture max, MB
+    // under Disco, GPU under GPU, ×N under Tex), each with its tooltip
     for (const tx of x.textures) {
       const r = document.createElement("tr");
       r.className = "al-tex";
       r.dataset.alTex = tx.sha256;
-      const nmc = document.createElement("td");
-      nmc.textContent = `▫ ${tx.name} `;
-      const f = document.createElement("small");
-      f.textContent = tx.format;
-      nmc.appendChild(f);
       const n = shared.get(tx.sha256) ?? 1;
-      if (n > 1) { const s = document.createElement("span"); s.className = "al-shared"; s.textContent = ` ${t("al.shared", { n: String(n) })}`; nmc.appendChild(s); }
       const big = Math.max(tx.width, tx.height);
-      r.append(cell(""), nmc, cell(`${tx.width}×${tx.height}`), cell(""), cell(tx.bytes != null ? `${fmtN(tx.bytes / 1024)} KB` : "—"),
-        cell(fmtMB(tx.gpu_bytes), "n"), cell(String(big), `n${b0?.object_texture_side && big > b0.object_texture_side ? " over" : ""}`),
-        cell(""), cell(""));
+      const nmc = cell(`▫ ${tx.name}`, "al-tex-name", [tx.name, tx.sha256].filter(Boolean).join("\n"));
+      const px = `${tx.width}×${tx.height} px`;
+      r.append(cell(""), nmc,
+        cell((tx.format || "—").toUpperCase(), "al-tex-fmt", t("al.tex.format")),
+        cell(px, "n", t("al.tex.side")),
+        cell(tx.bytes != null ? fmtMB(tx.bytes, 2) : "—", "n", t("al.texMbTitle")),
+        cell(fmtMB(tx.gpu_bytes, 1), "n", t("al.texGpuTitle")),
+        cell(String(big), `n${b0?.object_texture_side && big > b0.object_texture_side ? " over" : ""}`, px),
+        cell(n > 1 ? `×${n}` : "1", `n${n > 1 ? " al-shared" : ""}`, n > 1 ? t("al.shared", { n: String(n) }) : t("al.texOnce")),
+        cell(""));
+      r.dataset.alTexValues = [tx.format, px, tx.bytes ?? "", tx.gpu_bytes, n].join("|");
       const pad = cell("");
       pad.colSpan = targets.length;
       r.appendChild(pad);
@@ -42206,7 +42611,13 @@ function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLT
   box.onclick = (e) => e.stopPropagation();
   const tool = document.createElement("select");
   tool.dataset.alProp = `${a.id}|${k}|tool`;
-  for (const x of AL.TOOLS) { const o = document.createElement("option"); o.value = x; o.textContent = t(`al.tool.${x}`); tool.appendChild(o); }
+  // MICRO-ARCHIVE-ASSET-2 · «da installare» beside a tool whose program is not here
+  for (const x of AL.TOOLS) {
+    const o = document.createElement("option");
+    o.value = x;
+    o.textContent = toolWords(x, AL.sourceFor(a, x, (id) => fileStateOf(id)?.path ?? "").kind);
+    tool.appendChild(o);
+  }
   tool.value = p.tool;
   tool.onchange = () => { AL.editProposal(assetUi.plan, a, k, "tool", tool.value); renderStorage(); };
   const tri = document.createElement("input");
@@ -42365,8 +42776,113 @@ function waitWords(w: { code: string; other?: string }): string {
 
 function queueAdd(items: AL.QueueItem[]): void {
   AL.enqueue(assetQueue, items);
+  // MICRO-ARCHIVE-ASSET-2 · each item shows AT ONCE; one that cannot start
+  // stays, waiting, with why and the gesture that solves it
+  applyBlocks();
   paintQueue();
   pumpQueue();
+  if (!blockFacts || Date.now() - blockFacts.at > 30000) void loadBlockFacts().then(() => { applyBlocks(); paintQueue(); pumpQueue(); });
+}
+
+// ── MICRO-ARCHIVE-ASSET-2 · what blocks an item, and the gesture ─────────────
+// E.D. put Tempio_4_BAKE in the queue in Run (gltfpack not installed, the
+// source not stamped) and saw nothing: the item went to «non riuscito» in a
+// second with a sentence that named nothing, and the bridge had no job (it
+// refused it with a 501). Now the item stays in the queue, waiting, with the
+// reason and its gesture (Installa, Timbra, Blender…), and starts when solved.
+
+/** what this computer has: the add-ons installed, Blender with EM Tools */
+let blockFacts: { at: number; addons: Set<string> | null; blender: boolean } | null = null;
+async function loadBlockFacts(force = false): Promise<void> {
+  const list = await loadAddons(force);
+  const bl = await loadBlender(force);
+  const probe = bl?.probe;
+  blockFacts = { at: Date.now(), addons: list ? new Set(list.filter((a) => a.installed).map((a) => a.id)) : null,
+                 blender: !!bl?.current && (!probe || (!!probe.ok && !!probe.emtools?.loaded)) };
+}
+
+/** the stamp of a source, read once (null while it is being read) */
+const stampKnown = new Map<string, boolean>();
+const stampReading = new Set<string>();
+function stampedNow(path: string): boolean | null {
+  if (stampKnown.has(path)) return stampKnown.get(path)!;
+  if (!stampReading.has(path)) {
+    stampReading.add(path);
+    void readStamp(stampPathFor(path)).then((st) => !!st).catch(() => false)
+      .then((v) => { stampReading.delete(path); stampKnown.set(path, v); applyBlocks(); paintQueue(); pumpQueue(); });
+  }
+  return null;
+}
+
+/** The source of a list's item: its asset (a form: its first copy). */
+function itemSource(it: AL.QueueItem): { kind: "files" | "blend" | "none"; path: string; block: string; version: string } | null {
+  const a = assetUi.ans?.assets.find((x) => x.id === it.asset_id);
+  if (!a || !it.tool) return null;
+  return AL.sourceFor(a, it.tool, (id) => fileStateOf(id)?.path ?? "");
+}
+
+/** Each waiting item of the list judged again: blocked, or free to start. */
+function applyBlocks(): void {
+  for (const it of assetQueue) {
+    if (it.state !== "waiting" || it.from !== "list" || !it.tool) continue;
+    const src = itemSource(it);
+    if (!src) { it.block = { code: "no_source" }; continue; }
+    let stampUnknown = false;
+    const b = AL.blockOf(it.tool, src, {
+      addons: blockFacts?.addons ?? null, blender: blockFacts ? blockFacts.blender : true,
+      stamped: (p) => { const v = stampedNow(p); if (v === null) stampUnknown = true; return v; } });
+    it.block = b ?? (stampUnknown || !blockFacts ? { code: "checking" } : null);
+  }
+}
+
+/** The words of a block, and its gesture. */
+function blockWords(b: AL.Block): string {
+  return t(`al.block.${b.code}`, { addon: b.addon ?? "", file: b.path ? baseName(b.path) : "" });
+}
+function blockGesture(it: AL.QueueItem, b: AL.Block): HTMLButtonElement | null {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ghost al-fix";
+  btn.dataset.action = `queue-fix-${b.code}`;
+  if (b.code === "addon" && b.addon) {
+    btn.textContent = t("files.addonInstall");
+    btn.disabled = [...bgJobs.values()].some((j) => j.kind === "addon" && jobRunning(j));
+    btn.onclick = () => { void installAddonById(b.addon!).then(() => loadBlockFacts(true)).then(() => { applyBlocks(); paintQueue(); pumpQueue(); }); };
+    return btn;
+  }
+  if (b.code === "unstamped" && b.path) {
+    btn.textContent = t("al.fix.stamp");
+    btn.onclick = () => { void stampFromQueue(b.path!); };
+    return btn;
+  }
+  if (b.code === "blender") {
+    btn.textContent = t("al.fix.blender");
+    btn.onclick = () => { addonFocus = "blender"; openSettings("settings-sect-addons"); };
+    return btn;
+  }
+  void it;
+  return null;
+}
+
+/** «Timbra»: Archive on the source's file, the tab Timbro open on it; the
+ *  queue asks the stamp again when the window comes back. */
+async function stampFromQueue(path: string): Promise<void> {
+  const win = windowsOf().find((w) => w.type === "storage");
+  if (!win) { toast(t("blend.prepareNoArchive")); return; }
+  stampKnown.delete(path);
+  setArchiveView(win, "files");
+  await storageGoChecked(win, paths.dirname(path));
+  setStorageSelected(win, path);
+  setFilesPref(win, "tab", "stamp");
+  renderStorage();
+}
+
+/** An add-on installed by its id (the same gesture as Settings › Add-ons). */
+async function installAddonById(id: string): Promise<void> {
+  const list = await loadAddons();
+  const a = list?.find((x) => x.id === id);
+  if (!a) { addonFocus = id; openSettings("settings-sect-addons"); return; }
+  await installAddon(a);
 }
 
 /** Ottimizza's action (gltfpack, Blender, «Preparato per un uso», a tileset)
@@ -42380,6 +42896,7 @@ function viaQueue(label: string, run: () => Promise<void>): boolean {
 }
 
 function pumpQueue(): void {
+  applyBlocks();
   const it = AL.nextToRun(assetQueue, queueMode, queueRoom());
   if (!it) return;
   it.state = "running";
@@ -42468,6 +42985,9 @@ function queuePanel(): HTMLElement {
   const list = document.createElement("div");
   list.className = "al-jobs";
   box.appendChild(list);
+  // MICRO-ARCHIVE-ASSET-2 · a source stamped meanwhile (Timbra): read again
+  for (const it of assetQueue) if (it.state === "waiting" && it.block?.code === "unstamped" && it.block.path) stampKnown.delete(it.block.path);
+  if (assetQueue.some((x) => x.state === "waiting" && x.block)) queueMicrotask(() => { applyBlocks(); paintQueue(); pumpQueue(); });
   paintQueueInto(list);
   paintSchedLine();
   if (!schedView) void pushQueueShare().then(loadScheduler).then(paintSchedLine);
@@ -42501,6 +43021,16 @@ function paintQueueInto(list: HTMLElement): void {
     // its batch), or here, the first in line while the room is full
     const w = AL.waitOf(it, [...bgJobs.values()].filter((j) => j.owner === it.id && jobRunning(j)), it.id === firstHeld);
     if (w) { const ws = document.createElement("small"); ws.className = "al-wait"; ws.dataset.wait = w.code; ws.textContent = ` ${waitWords(w)}`; r.appendChild(ws); }
+    // MICRO-ARCHIVE-ASSET-2 · blocked: why, and the gesture that solves it
+    if (it.state === "waiting" && it.block) {
+      const bw = document.createElement("small");
+      bw.className = "al-block files-warn";
+      bw.dataset.block = it.block.code;
+      bw.textContent = ` ${blockWords(it.block)}`;
+      r.appendChild(bw);
+      const fix = blockGesture(it, it.block);
+      if (fix) r.appendChild(fix);
+    }
     if (it.state === "waiting") {
       for (const [d, g] of [[-1, "↑"], [1, "↓"]] as const) {
         const b = document.createElement("button");
@@ -42610,8 +43140,17 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   // a master inside a .blend: EM Tools' «Prepare for a use» in a background
   // Blender (the profiles first: the version registered declares their uses)
   if (!useState.profiles) await loadUseProfiles();
-  const job = await owned(it, () => startJob({ kind: "blender", op: "measure", blend: src.path, objects: src.block ? [src.block] : [] },
-    t("files.useMeasuring", { name: src.block || baseName(src.path) })));
+  // MICRO-ARCHIVE-ASSET-2 · a form repeated: its copies' masters in the same
+  // .blend, measured together — the diagnosis finds them one geometry, EM
+  // Tools links ONE mesh (reduced) N times and writes ONE file; the same file
+  // is then registered as a version of each copy (a file once in the scene)
+  const members = it.shape ? (it.asset_ids ?? []).map((id) => assetUi.ans?.assets.find((x) => x.id === id)).filter((x): x is AL.AssetRow => !!x)
+    .map((m) => ({ m, s: AL.sourceFor(m, "instance", (id) => fileStateOf(id)?.path ?? "") }))
+    .filter((x) => x.s.kind === "blend" && paths.toPosix(x.s.path) === paths.toPosix(src.path)) : [];
+  if (it.shape && members.length < 2) return t("al.shapeNoBlend");
+  const blocks = members.length ? members.map((x) => x.s.block).filter(Boolean) : src.block ? [src.block] : [];
+  const job = await owned(it, () => startJob({ kind: "blender", op: "measure", blend: src.path, objects: blocks },
+    t("files.useMeasuring", { name: members.length ? t("al.shape", { n: String(members.length) }) : src.block || baseName(src.path) })));
   if (!job) return t("al.blenderNo");
   const end = await job.done;
   if (end.state !== "done") return jobText(end);
@@ -42622,15 +43161,17 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   // the diagnosis' ticks, and — the tool asks it — the decimation (baked
   // normals by 3DSC) and the instances, which it does not tick by default
   const wants = (r: Diagnosis["improvements"][number]): boolean => r.available && !r.separate
-    && (r.checked || (it.tool === "decimate_bake" && r.kind === "decimate" && !!it.triangles)
+    && (r.checked || ((it.tool === "decimate_bake" || it.tool === "instance") && r.kind === "decimate" && !!it.triangles)
         || (it.tool === "instance" && r.kind === "instances"));
   const ids = d.improvements.filter(wants).map((r) => r.id);
+  if (it.shape && !d.improvements.some((r) => r.kind === "instances" && ids.includes(r.id))) return t("al.shapeNotOne");
   const params: Record<string, RowParams> = {};
   for (const r of d.improvements.filter((x) => ids.includes(x.id))) {
     if (r.kind === "decimate" && it.triangles) params[r.id] = { ...(r.params ?? {}), triangles_to: it.triangles };
     if (r.kind === "texture_side" && it.texture) params[r.id] = { ...(r.params ?? {}), side: it.texture };
   }
-  prepareCtx.set(src.path, { master: src.version, model: a.id, name: src.block || a.name, profile });
+  prepareCtx.set(src.path, { master: src.version, model: a.id, name: src.block || a.name, profile,
+                              also: members.slice(1).map((x) => x.s.version) });
   useState.measured.set(useKey([], src.path), m as never);
   return runJudged(() => applyUse(src.path, d, ids, src.block || a.name, levelFor(d, ids), params), it);
 }
@@ -42644,8 +43185,12 @@ function assetDetail(win: Win, a: AL.AssetRow): HTMLElement {
   box.dataset.alDetail = a.id;
   const h = document.createElement("div");
   h.className = "files-sec-h";
+  // MICRO-ARCHIVE-ASSET-2 · the name of the row lit, in the detail's title
   const hb = document.createElement("b");
+  hb.className = "al-detail-title";
+  hb.dataset.alDetailTitle = a.name;
   hb.textContent = a.name;
+  hb.title = t("al.detailOf", { name: a.name });
   const show = document.createElement("button");
   show.type = "button";
   show.className = "ghost";
@@ -42736,11 +43281,17 @@ function assetDetail(win: Win, a: AL.AssetRow): HTMLElement {
   const listing: FsListing = { roots: false, path: paths.dirname(src.path), parent: null,
     entries: [{ name: baseName(src.path), type: "file", size: 0, mtime: 0,
                 ext: (/\.([a-z0-9]+)$/i.exec(src.path)?.[1] ?? "").toLowerCase(), path: src.path }] };
+  alDetailAsset = a;
   try {
     box.appendChild(assetUi.detailTab === "info" ? filesInfoTab(win, listing) : filesOptimizeTab(win, listing));
   } catch (err) { box.appendChild(storageEmpty(String((err as Error).message))); }
+  finally { alDetailAsset = null; }
   return box;
 }
+
+/** MICRO-ARCHIVE-ASSET-2 · the asset whose detail is being drawn: Ottimizza's
+ *  «versioni su disco» shows only ITS versions there */
+let alDetailAsset: AL.AssetRow | null = null;
 
 // ── MICRO-BLEND-OFFICINA-3 · «Consolida per…» and «Componi un .blend dal grafo»
 // (E.D., 31 Oct 2026: two actions, not one). «Consolida per…» writes nothing:
@@ -42757,7 +43308,10 @@ function assetDetail(win: Win, a: AL.AssetRow): HTMLElement {
 
 /** a .blend opened in Ottimizza by «Prepara» on a master inside it: the
  *  version EM Tools makes there is registered on THAT master */
-const prepareCtx = new Map<string, { master: string; model: string; name: string; profile: string }>();
+const prepareCtx = new Map<string, { master: string; model: string; name: string; profile: string;
+  /** MICRO-ARCHIVE-ASSET-2 · the other masters of a form repeated: the same
+   *  file registered as a version of each */
+  also?: string[] }>();
 
 async function postGraph<T>(route: string, body: Record<string, unknown>): Promise<T & { ok?: boolean; error?: string; status: number }> {
   try {
@@ -42812,8 +43366,22 @@ async function registerUseVersionNow(blend: string, profile: string, model: stri
     { profile, model, level }, "", { technique: "prepare_for_use", tool: "EM Tools · Prepare for a use",
       software: [{ name: "EM Tools · Prepare for a use", version: "" }] }, master,
     res.measured?.triangles != null ? { triangles: res.measured.triangles } : undefined);
-  if (why === null) { prepareCtx.delete(blend); toast(t("files.useRegistered", { name, master: String(store.node(master)?.name ?? master) })); }
+  if (why === null) { toast(t("files.useRegistered", { name, master: String(store.node(master)?.name ?? master) })); }
   else logWarn(t("files.useNotRegistered", { name, why }));
+  // MICRO-ARCHIVE-ASSET-2 · a form repeated: the same file (the same sha256),
+  // a version of each other copy — the scene counts it once
+  let also = 0;
+  for (const other of ctx?.also ?? []) {
+    const w = await registerVersionNow({ source: blend, path: res.entry, name, sha256: sha ?? undefined, bytes: res.bytes,
+      facts: undefined } as unknown as OptOut,
+      { lod: level, destination: prof?.destination ?? profile, use: prof?.uses ?? [] },
+      { profile, model, level, shared_mesh: true, instances: (ctx?.also?.length ?? 0) + 1 }, "",
+      { technique: "prepare_for_use", tool: "EM Tools · Prepare for a use", software: [{ name: "EM Tools · Prepare for a use", version: "" }] },
+      other, res.measured?.triangles != null ? { triangles: res.measured.triangles } : undefined);
+    if (w === null) also++; else logWarn(t("files.useNotRegistered", { name: `${name} → ${String(store.node(other)?.name ?? other)}`, why: w }));
+  }
+  if (also) logInfo(t("al.shapeRegistered", { name, n: String(also + (why === null ? 1 : 0)) }));
+  prepareCtx.delete(blend);
 }
 
 /** «Componi un .blend dal grafo»: from the open study, no .blend to start
