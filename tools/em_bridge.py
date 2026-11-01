@@ -820,6 +820,92 @@ def _measure_by_sha(resolved, progress=None):
     return measure
 
 
+#: MICRO-ARCHIVE-ASSET-3 · a tileset's tiles measured by their heads, by
+#: (path, size, mtime) of its root (tileset.json or .3tz)
+_TILES_MEMO = {}
+
+
+def _tile_range_reader(path):
+    """``read_at(p, offset, length)`` for the files of a tileset: in its
+    folder (beside ``tileset.json``) or the STORED members of a ``.3tz``
+    (their data found from the central directory: never the whole archive).
+    A deflated member is read whole (a 3tz stores its tiles)."""
+    import struct
+    import zipfile
+    if path.lower().endswith(".3tz"):
+        zf = zipfile.ZipFile(_long_path(path))
+        infos = {i.filename: i for i in zf.infolist()}
+        starts = {}
+
+        def read_at(p, off, n):
+            i = infos.get(p)
+            if i is None:
+                raise OSError(f"{p}: not in the archive")
+            if i.compress_type != zipfile.ZIP_STORED:
+                return zf.read(i)[off:off + n]
+            if p not in starts:
+                with open(_long_path(path), "rb") as fh:
+                    fh.seek(i.header_offset)
+                    h = fh.read(30)
+                    nlen, xlen = struct.unpack("<HH", h[26:30])
+                    starts[p] = i.header_offset + 30 + nlen + xlen
+            n = max(0, min(n, i.file_size - off))
+            with open(_long_path(path), "rb") as fh:
+                fh.seek(starts[p] + off)
+                return fh.read(n)
+        return read_at, zf
+    folder = os.path.dirname(path) if path.lower().endswith(".json") else path
+
+    def read_at(p, off, n):
+        with open(_long_path(os.path.join(folder, *p.split("/"))), "rb") as fh:
+            fh.seek(off)
+            return fh.read(n)
+    return read_at, None
+
+
+def _tiles_by_path(resolved):
+    """A ``tiles`` for s3Dgraphy's ``asset_list`` (MICRO-ARCHIVE-ASSET-3): a
+    tileset version's tiles, each measured by its head (``tileset_fit``:
+    the wrapper, the glb's JSON, the first bytes of its images — never the
+    geometry), from its tileset.json or .3tz on this computer; None when the
+    file is not here, is in the cloud, or the s3dgraphy has no tileset_fit."""
+    try:
+        from s3dgraphy.resources import detail as D
+        from s3dgraphy.resources import tileset_fit as F
+    except ImportError:
+        return None
+    paths = {str(r.get("id")): r.get("path") for r in resolved or [] if r.get("path")}
+
+    def tiles(entry):
+        path = paths.get(str(entry.get("id")))
+        if not path or not os.path.exists(path) or _is_cloud_placeholder(path):
+            return None
+        try:
+            st = os.stat(path)
+            key = (os.path.realpath(path), st.st_size, st.st_mtime)
+        except OSError:
+            return None
+        if key not in _TILES_MEMO:
+            got = None
+            try:
+                if path.lower().endswith(".3tz"):
+                    lj, sz, _rb = D.tz_loader(path)
+                else:
+                    lj, sz, _rb = D.folder_loader(os.path.dirname(path) if path.lower().endswith(".json") else path)
+                tree = D.read_tileset(lj, "tileset.json")
+                read_at, zf = _tile_range_reader(path)
+                try:
+                    got = F.measure_tiles(tree, read_at)
+                finally:
+                    if zf is not None:
+                        zf.close()
+            except Exception:  # noqa: BLE001 — unreadable: not known
+                got = None
+            _TILES_MEMO[key] = got
+        return _TILES_MEMO[key]
+    return tiles
+
+
 def _cloud_paths_on_versions(graph, out, cloud):
     """MICRO-TESTATA-CLOUD · each version of ``asset_list`` whose file (or
     one of its files) is in the cloud gets ``in_cloud``, ``cloud_paths`` and
@@ -2154,7 +2240,11 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: plan}`` says how many files and MB, ``{paths}`` downloads them (by token,
 #: ``GET /fs/hydrate?token=``), ``{cancel}`` stops; ``/assets/list``'s
 #: versions carry ``cloud_paths`` / ``cloud_bytes``.
-BRIDGE_LEVEL = 56   # 30 also = /validate
+#: 57 = MICRO-ARCHIVE-ASSET-3: ``/assets/list`` reads a tileset's tiles by
+#: their heads (tileset.json or the stored members of a .3tz, never the
+#: geometry) and passes them to s3Dgraphy (``tiles=``): a tileset «ok» for a
+#: target only if its tiles fit the band, and then it covers its meshes.
+BRIDGE_LEVEL = 57   # 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -4642,6 +4732,10 @@ def make_handler(api):
                 _asset_progress(token, "measure", 0, len({r.get("path") for r in disk if str(r.get("path") or "").lower().endswith((".glb", ".gltf"))}))
                 extra = {"measure": _measure_by_sha(disk, progress=lambda n, t: _asset_progress(token, "measure", n, t)),
                          "changed": C.changed_from(disk)}
+                # MICRO-ARCHIVE-ASSET-3 · a tileset's tiles against each band
+                tiles = _tiles_by_path(disk)
+                if tiles is not None and "tiles" in getattr(AL.asset_list, "__code__").co_varnames:
+                    extra["tiles"] = tiles
                 for r in disk:
                     states.setdefault(str(r.get("id")), str(r.get("state") or ""))
             # MICRO-TESTATA-CLOUD · what this computer says now of a file in

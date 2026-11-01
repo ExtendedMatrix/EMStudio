@@ -13948,7 +13948,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 56;   // 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 57;   // 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -42231,16 +42231,35 @@ function assetListView(win: Win): HTMLElement {
     info.className = "files-hint";
     info.dataset.alSel = String(n);
     info.textContent = tn("al.selected", n);
+    // MICRO-ARCHIVE-ASSET-3 · ONE gesture: the proposal applied AND queued
+    // (with the queue in Pausa the items wait); a form and its copies once
+    const shapeLabel = (s2: AL.Shape, k: AL.TargetKey, p: AL.Proposal): string =>
+      `${t("al.shape", { n: String(s2.assets.length) })} ${s2.assets[0].name}… → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}${p.triangles ? ` ${fmtN(p.triangles)} tri` : ""}`;
+    const oneLabel = (a: AL.AssetRow, k: AL.TargetKey, p: AL.Proposal): string => `${a.name} → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}`;
+    const toQueue = (items: AL.QueueItem[]): void => {
+      if (!items.length) { toast(t("al.nothingToQueue")); renderStorage(); return; }
+      const before = assetQueue.length;
+      queueAdd(items);
+      AL.unplan(assetUi.plan, items);
+      assetUi.sel.clear();
+      // «controllo di che cosa serve…» (a stamp being read) is not a block
+      const blocked = items.filter((x) => x.block && x.block.code !== "checking").length;
+      const kept = assetQueue.length - before;
+      toast(tn("al.queued", items.length) + (blocked ? ` · ${tn("al.queuedBlocked", blocked)}` : "")
+        + (kept < items.length && kept >= 0 ? ` · ${tn("al.queuedSame", items.length - kept)}` : "")
+        + (queueMode === "pause" ? ` · ${t("al.queuedPaused")}` : ""));
+      renderStorage();
+    };
     const prop = document.createElement("button");
     prop.type = "button";
-    prop.dataset.action = "al-apply-proposal";
-    prop.textContent = t("al.applyProposal");
-    prop.title = t("al.applyProposalTitle");
+    prop.className = "primary";
+    prop.dataset.action = "al-apply-enqueue";
+    prop.textContent = t("al.applyEnqueue");
+    prop.title = t("al.applyEnqueueTitle");
     prop.disabled = !n;
     prop.onclick = () => {
-      const k = AL.applyProposal(assetUi.plan, ans.assets, assetUi.sel, targets);
-      toast(tn("al.proposalApplied", k));
-      renderStorage();
+      AL.applyProposal(assetUi.plan, ans.assets, assetUi.sel, targets, { shapes: shapesOf(ans).list, bands });
+      toQueue(AL.selectionItems(ans.assets, shapesOf(ans).list, assetUi.sel, targets, assetUi.plan, bands, { shape: shapeLabel, one: oneLabel }));
     };
     const or = document.createElement("span");
     or.className = "files-hint";
@@ -42272,34 +42291,23 @@ function assetListView(win: Win): HTMLElement {
     set.disabled = !n;
     set.onclick = () => {
       const k = AL.setInBulk(assetUi.plan, ans.assets, assetUi.sel, targets, { tool: tool.value as AL.Tool | "",
-        triangles: tri.value ? Number(tri.value) : null, texture: tex.value ? Number(tex.value) : null, ktx2: ktx.checked });
+        triangles: tri.value ? Number(tri.value) : null, texture: tex.value ? Number(tex.value) : null, ktx2: ktx.checked },
+        { shapes: shapesOf(ans).list, bands });
       toast(tn("al.setDone", k));
       renderStorage();
     };
+    // the plan set by hand and not queued yet: «Metti in coda (N)», lit
+    // while N > 0 — the whole plan, forms once, a copy never alone
+    const pending = AL.planItems(ans.assets, shapesOf(ans).list, targets, assetUi.plan, bands, assetQueue, { shape: shapeLabel, one: oneLabel });
     const go = document.createElement("button");
     go.type = "button";
-    go.className = "primary";
+    go.className = pending.length ? "primary al-pending" : "";
     go.dataset.action = "al-enqueue";
-    go.textContent = t("al.enqueue");
+    go.dataset.alPending = String(pending.length);
+    go.textContent = pending.length ? tn("al.enqueuePlan", pending.length) : t("al.enqueue");
     go.title = t("al.enqueueTitle");
-    go.disabled = !n;
-    go.onclick = () => {
-      // MICRO-ARCHIVE-ASSET-2 · a form repeated whose copies are all selected:
-      // ONE item (a mesh reduced + N instances); the others one by one
-      const sh = AL.shapeItemsFor(shapesOf(ans).list, assetUi.sel, targets, assetUi.plan, bands,
-        (s2, k, p) => `${t("al.shape", { n: String(s2.assets.length) })} ${s2.assets[0].name}… → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}${p.triangles ? ` ${fmtN(p.triangles)} tri` : ""}`);
-      const single = AL.itemsFor(ans.assets, assetUi.sel, targets, assetUi.plan,
-        (a, k, p) => `${a.name} → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}`)
-        .filter((it) => !sh.covered.get(it.target!)?.has(it.asset_id!));
-      const items = [...sh.items, ...single];
-      if (!items.length) { toast(t("al.nothingToQueue")); return; }
-      queueAdd(items);
-      for (const it of single) { const r = assetUi.plan.get(it.asset_id!); if (r) delete r[it.target!]; }
-      assetUi.sel.clear();
-      const blocked = items.filter((x) => x.block).length;
-      toast(tn("al.queued", items.length) + (blocked ? ` · ${tn("al.queuedBlocked", blocked)}` : ""));
-      renderStorage();
-    };
+    go.disabled = !pending.length;
+    go.onclick = () => toQueue(AL.planItems(ans.assets, shapesOf(ans).list, targets, assetUi.plan, bands, assetQueue, { shape: shapeLabel, one: oneLabel }));
     sheet.append(info, prop, or, tri, tex, kL, tool, set, go);
     // MICRO-TESTATA-CLOUD · the selection's files in the cloud
     const selCloud = n ? AL.cloudOf(ans.assets.filter((a) => assetUi.sel.has(a.id))) : null;
@@ -42606,7 +42614,7 @@ function shapeTargetCell(sh: AL.Shape, k: AL.TargetKey, b: AL.Bands | undefined,
 function assetBudgetCard(ans: AL.AssetListAnswer, k: AL.TargetKey): HTMLElement {
   const b = ans.targets[k].bands;
   const now = AL.sceneCount(ans.assets, k);
-  const aft = AL.sceneCount(ans.assets, k, { plan: assetUi.plan, queue: assetQueue, after: true });
+  const aft = AL.sceneCount(ans.assets, k, { plan: assetUi.plan, queue: assetQueue, after: true, shapes: shapesOf(ans).list });
   const okNow = AL.inBand(now, b), okAft = AL.inBand(aft, b);
   const wNow = AL.budgetWord(now, okNow, b), wAft = AL.budgetWord(aft, okAft, b);
   const card = document.createElement("div");
@@ -42688,7 +42696,10 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
   const v = AL.shownVersion(a, assetUi.target);
   const open = assetUi.expandAll || assetUi.open.has(a.id);
   const tr = document.createElement("tr");
-  tr.className = `al-asset${assetUi.sel.has(a.id) ? " sel" : ""}${assetUi.detail === a.id ? " on" : ""}${inShape ? " al-in-shape" : ""}`;
+  // MICRO-ARCHIVE-ASSET-3 · covered by its container's tileset for the
+  // target shown: the whole row grey, nothing in red
+  const coveredRow = !!a.targets[assetUi.target]?.covered_by;
+  tr.className = `al-asset${assetUi.sel.has(a.id) ? " sel" : ""}${assetUi.detail === a.id ? " on" : ""}${inShape ? " al-in-shape" : ""}${coveredRow ? " al-covered-row" : ""}`;
   tr.dataset.alAsset = a.id;
   const td0 = document.createElement("td");
   const cb = document.createElement("input");
@@ -42724,7 +42735,7 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
     cl.title = t("al.cloud.badgeTitle", { v: fmtN(ac.versions), n: fmtN(ac.paths.length), mb: fmtMB(ac.bytes) });
     tdn.append(cl, " ", cloudButton(ac, "al-hydrate-row", true));
   }
-  const ob = AL.overBand(v, b0);
+  const ob = coveredRow ? { tri: false, tex: false } : AL.overBand(v, b0);
   // MICRO-ARCHIVE-ASSET-2 · every cell says its whole text on the pointer
   // (a column too narrow truncates it)
   const cell = (text: string, cls = "", title = ""): HTMLTableCellElement => {
@@ -42739,11 +42750,12 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
   if (st.modified) stampTd.textContent += ` · ${t("al.modified")}`;
   if (a.audit.files_missing.length) stampTd.textContent += ` · ${tn("al.filesMissing", a.audit.files_missing.length)}`;
   tr.append(td0, tdn,
-    cell(v ? (v.master ? "◆ master" : v.level_say) : "—", "", v ? (v.measured ? t("al.measured") : t("al.estimatedOne")) : ""),
-    cell(fmtN(v?.triangles), `n${ob.tri ? " over" : ""}`),
+    cell(v ? AL.levelSay(v, t("al.tilesetStreaming")) : "—", "", v ? (v.tiles ? tilesTitle(v) : v.measured ? t("al.measured") : t("al.estimatedOne")) : ""),
+    v?.tiles ? cell(tilesTri(v), "n", tilesTitle(v)) : cell(fmtN(v?.triangles), `n${ob.tri ? " over" : ""}`),
     cell(fmtMB(v?.size_bytes)),
     cell(fmtMB(v?.gpu_bytes) + (v && !v.measured && v.gpu_bytes != null ? "*" : ""), "n", v && !v.measured ? t("al.estimatedOne") : ""),
-    cell(v?.texture_side ? String(v.texture_side) : "—", `n${ob.tex ? " over" : ""}`),
+    v?.tiles?.max_texture_side ? cell(`${v.tiles.max_texture_side} ${t("al.perTile")}`, "n", tilesTitle(v))
+      : cell(v?.texture_side ? String(v.texture_side) : "—", `n${ob.tex ? " over" : ""}`),
     cell(String(v ? (v.textures.length || v.texture_count || 0) : 0), "n"),
     stampTd);
   stampTd.title = [stampTd.textContent, st.say].filter(Boolean).join("\n");
@@ -42762,7 +42774,7 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
     vt.className = "al-tog";
     vt.textContent = x.textures.length ? (vo ? "▾" : "▸") : "";
     vt.onclick = (e) => { e.stopPropagation(); if (assetUi.openVer.has(x.id)) assetUi.openVer.delete(x.id); else assetUi.openVer.add(x.id); repaint(); };
-    name.append(vt, ` ${x.master ? "◆ master" : "● " + (x.level || x.name)} `);
+    name.append(vt, ` ${x.master ? "◆ master" : "● " + (x.tileset ? t("al.tilesetShort") : x.level || x.name)} `);
     const sm = document.createElement("small");
     sm.textContent = x.master ? (x.url.split("#")[0].split("/").pop() ?? "") : x.use.join(", ");
     name.appendChild(sm);
@@ -42785,9 +42797,11 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
       state.title = t("al.cloud.versionTitle", { mb: fmtMB(x.cloud_bytes ?? 0), path: x.cloud_paths.join("\n") });
       state.append(" ", cloudButton({ paths: x.cloud_paths, bytes: x.cloud_bytes ?? 0 }, "al-hydrate-version", true));
     }
-    vr.append(cell(""), name, cell(x.level_say), cell(fmtN(x.triangles), `n${obv.tri ? " over" : ""}`), cell(fmtMB(x.size_bytes)),
+    vr.append(cell(""), name, cell(AL.levelSay(x, t("al.tilesetStreaming")), "", x.tiles ? tilesTitle(x) : ""),
+      x.tiles ? cell(tilesTri(x), "n", tilesTitle(x)) : cell(fmtN(x.triangles), `n${obv.tri ? " over" : ""}`), cell(fmtMB(x.size_bytes)),
       cell(fmtMB(x.gpu_bytes) + (!x.measured && x.gpu_bytes != null ? "*" : ""), "n"),
-      cell(x.texture_side ? String(x.texture_side) : "—", `n${obv.tex ? " over" : ""}`),
+      x.tiles?.max_texture_side ? cell(`${x.tiles.max_texture_side} ${t("al.perTile")}`, "n", tilesTitle(x))
+        : cell(x.texture_side ? String(x.texture_side) : "—", `n${obv.tex ? " over" : ""}`),
       cell(String(x.textures.length || x.texture_count || 0), "n"), stv, state);
     tb.appendChild(vr);
     if (!vo) continue;
@@ -42819,6 +42833,17 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
   }
 }
 
+/** MICRO-ARCHIVE-ASSET-3 · a tileset's numbers are per tile: the most
+ *  triangles of one tile, and the words of its tiles read */
+function tilesTri(v: AL.VersionRow): string {
+  return v.tiles?.max_triangles != null ? `≤ ${fmtN(v.tiles.max_triangles)} ${t("al.perTile")}` : "—";
+}
+function tilesTitle(v: AL.VersionRow): string {
+  const x = v.tiles;
+  if (!x) return "";
+  return t("al.tilesTitle", { n: fmtN(x.tiles), read: fmtN(x.read), tri: fmtN(x.max_triangles), px: String(x.max_texture_side ?? "—") });
+}
+
 /** The state of an asset for a target, and its proposal — editable here. */
 function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLTableCellElement {
   const td = document.createElement("td");
@@ -42831,7 +42856,8 @@ function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLT
   pill.title = c.why;
   td.appendChild(pill);
   const p = AL.proposalOf(a, k, assetUi.plan);
-  const queued = assetQueue.find((x) => x.asset_id === a.id && x.target === k && (x.state === "waiting" || x.state === "running"));
+  const queued = assetQueue.find((x) => (x.asset_id === a.id || (x.asset_ids ?? []).includes(a.id)) && x.target === k
+    && (x.state === "waiting" || x.state === "running"));
   if (queued) {
     const q = document.createElement("span");
     q.className = "al-queued";
@@ -42839,10 +42865,37 @@ function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLT
     td.appendChild(q);
     return td;
   }
+  // MICRO-ARCHIVE-ASSET-3 · a copy of a form repeated has no proposal of its
+  // own: it is covered by its form (one mesh + N instances), once
+  const sh = assetUi.ans ? shapesOf(assetUi.ans).index.get(a.id) : undefined;
+  if (sh && AL.shapeCovers(sh, k, assetUi.ans?.targets[k]?.bands, assetUi.plan)) {
+    td.classList.add("al-covered");
+    td.dataset.alCovered = "shape";
+    pill.className = "al-state al-na";
+    pill.textContent = t("al.coveredShort");
+    const u = document.createElement("small");
+    const done = AL.shapeShared(sh, k);
+    u.textContent = ` ${t("al.coveredByShape", { n: String(sh.assets.length) })}`;
+    td.title = t(done ? "al.coveredByShapeDone" : "al.coveredByShapeTitle", { n: String(sh.assets.length), first: sh.assets[0].name });
+    td.appendChild(u);
+    return td;
+  }
+  // MICRO-ARCHIVE-ASSET-3 · a mesh covered by its container's tileset: grey,
+  // no proposal, out of the count
+  if (c.covered_by) {
+    td.classList.add("al-covered");
+    td.dataset.alCovered = "tileset";
+    pill.textContent = t("al.coveredShort");
+    const u = document.createElement("small");
+    u.textContent = ` ${t("al.coveredByTileset", { name: c.covered_by.name })}`;
+    td.title = c.why;
+    td.appendChild(u);
+    return td;
+  }
   if (c.state === "ok" && !p.edited) {
     const u = document.createElement("small");
     const v = a.versions.find((x) => x.id === c.loads);
-    u.textContent = v ? ` ${v.master ? "master" : v.level}` : "";
+    u.textContent = v ? ` ${v.master ? "master" : v.tileset ? t("al.tilesetShort") : v.level}` : "";
     u.title = c.why;
     td.appendChild(u);
     return td;
@@ -43023,6 +43076,13 @@ function waitWords(w: { code: string; other?: string }): string {
 }
 
 function queueAdd(items: AL.QueueItem[]): void {
+  // MICRO-ARCHIVE-ASSET-3 · each item says where it starts from: the queue
+  // never holds two live items of the same source, target and tool
+  for (const it of items) {
+    if (it.from !== "list" || it.source) continue;
+    const src = itemSource(it);
+    if (src && src.kind !== "none" && src.path) it.source = `${src.kind}:${src.path}#${src.block}`;
+  }
   AL.enqueue(assetQueue, items);
   // MICRO-ARCHIVE-ASSET-2 · each item shows AT ONCE; one that cannot start
   // stays, waiting, with why and the gesture that solves it

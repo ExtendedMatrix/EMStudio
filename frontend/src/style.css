@@ -11136,6 +11136,11 @@ body:not(.tt-comfy) .tile-tablebody .mdl-rm .btn.sm { line-height: 16px; font-si
 .al-state.al-todo { color: var(--warn-ink); border-color: var(--warn); }
 .al-state.al-missing { color: var(--danger); border-color: var(--danger); }
 .al-state.al-na { color: var(--text-faint); }
+/* MICRO-ARCHIVE-ASSET-3 · covered by its form or by its container's tileset:
+   grey, no proposal; the plan waiting for the queue lit */
+.al-target.al-covered, .al-target.al-covered small { color: var(--text-faint); }
+tr.al-covered-row > td { color: var(--text-faint); }
+.al-sheet button.al-pending { box-shadow: 0 0 0 2px var(--warn); font-weight: 600; }
 .al-prop { display: inline-flex; gap: 3px; align-items: center; margin-left: 4px; }
 .al-prop select, .al-prop input { font-size: 11px; padding: 0 3px; }
 .al-prop select { max-width: 104px; }

@@ -161,6 +161,76 @@ const dv = A.diskVersionsOf([{ name: "Column1.glb", entry: "/p/SB/versions/Colum
   col1, (id) => id === "Column1.v0" ? "/p/SB/versions/Column1.glb" : "");
 ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk of this asset only, each with its version in the graph");
 
+// ── MICRO-ARCHIVE-ASSET-3 ──────────────────────────────────────────────────
+// 2 · a form and its copies never add up
+{
+  const shapes3 = A.repeatedShapes(shapesL);
+  const cp = new Map();
+  // an old plan of a copy (its own decimation) and «seleziona tutto»
+  cp.set("ColA2", { web: { tool: "decimate_bake", triangles: 50, texture: 512, ktx2: true, why: "old" } });
+  const all3 = new Set(shapesL.map((a) => a.id));
+  A.applyProposal(cp, shapesL, all3, ["web"], { shapes: shapes3, bands: BANDS });
+  ok(cp.get(`shape:${shapes3[0].key}`)?.web?.tool === "instance" && !cp.get("ColA2")?.web && !cp.get("ColA1")?.web,
+     "«Applica»: the form's proposal once, its copies none (an old copy plan dropped)");
+  const cov3 = A.shapeCover(shapes3, ["web"], cp, BANDS);
+  ok(cov3.get("web").size === 5, `the copies covered by their forms (${cov3.get("web").size})`);
+  const itAll = A.selectionItems(shapesL, shapes3, all3, ["web"], cp, BANDS);
+  ok(itAll.length === 3 && itAll.filter((x) => x.shape).length === 2 && !itAll.some((x) => !x.shape && /^Col[AC]/.test(x.asset_id)),
+     `select all → one item per form + the rows alone (${itAll.map((x) => x.shape ? `form×${x.asset_ids.length}` : x.asset_id).join(", ")})`);
+  const itOne = A.selectionItems(shapesL, shapes3, new Set(["ColA2"]), ["web"], new Map(), BANDS);
+  ok(itOne.length === 1 && itOne[0].shape === shapes3[0].key && itOne[0].asset_ids.length === 3, "ONE copy selected → the form's item (the instances), not the copy");
+  const itGrp = A.selectionItems(shapesL, shapes3, new Set(shapes3[0].assets.map((a) => a.id)), ["web"], new Map(), BANDS);
+  ok(itGrp.length === 1 && itGrp[0].shape, "the group selected → one item");
+  // «una per una»: the copies go alone again
+  const each = new Map([[`shape:${shapes3[0].key}`, { web: { tool: "keep", triangles: null, texture: null, ktx2: false, why: "una per una" } }]]);
+  ok(A.selectionItems(shapesL, shapes3, new Set(["ColA1", "ColA2"]), ["web"], each, BANDS).filter((x) => !x.shape).length === 2, "«una per una»: then the copies go one by one");
+  // the queue's safety net
+  const q3 = [];
+  A.enqueue(q3, itOne);
+  A.enqueue(q3, A.itemsFor(shapesL, new Set(["ColA3"]), ["web"], new Map()));
+  ok(q3.length === 1, "a copy queued alone behind its form waiting: kept out");
+  q3[0].state = "running";
+  A.enqueue(q3, A.selectionItems(shapesL, shapes3, new Set(["ColA1"]), ["web"], new Map(), BANDS));
+  ok(q3.length === 1, "the same form again while it runs: not doubled");
+  const src = (id, s) => ({ id, label: id, state: "waiting", note: "", asset_id: id, target: "web", tool: "gltfpack", from: "list", source: s });
+  A.enqueue(q3, [src("X1", "files:/p/x.glb#"), src("X2", "files:/p/x.glb#")]);
+  ok(q3.filter((x) => x.source === "files:/p/x.glb#").length === 1, "two items of the same source, target and tool: one");
+  // the plan waiting for the queue: «Metti in coda (N)»
+  const pp = new Map();
+  A.setInBulk(pp, shapesL, new Set(["ColA1", "ColB1"]), ["web"], { triangles: 30 }, { shapes: shapes3, bands: BANDS });
+  const pend = A.planItems(shapesL, shapes3, ["web"], pp, BANDS, []);
+  ok(pend.length === 2 && pend.some((x) => x.shape && x.triangles === 30) && pend.some((x) => x.asset_id === "ColB1"),
+     `«Imposta» then «Metti in coda (${pend.length})»: the form once, the row alone`);
+  const aftP = A.sceneCount(shapesL, "web", { plan: pp, after: true, shapes: shapes3 });
+  ok(aftP.instances === 3 && aftP.triangles === 30 + 30 + 60 + 60, `the budget counts the form's mesh once from the plan (${aftP.triangles} tri)`);
+  // a form ALREADY one file for its copies (the instances made): the copies
+  // stay covered — never their own decimation of a file that draws N instances
+  const made = (id) => { const x = colG(id, ["g:1"]); x.versions.push(ver(`${id}.inst`, { triangles: 180, checksum: "sha256:INST",
+    textures: [tex("AO", 1024), tex("N", 1024)], texture_side: 1024 })); x.targets.web = cell("todo", `${id}.inst`); return x; };
+  const doneL = [made("ColA1"), made("ColA2"), made("ColA3")];
+  const doneS = A.repeatedShapes(doneL);
+  ok(A.shapeShared(doneS[0], "web") && A.shapeCovers(doneS[0], "web", BANDS.web, new Map())
+     && A.selectionItems(doneL, doneS, new Set(["ColA1", "ColA2", "ColA3"]), ["web"], new Map(), BANDS).length === 0
+     && A.applyProposal(new Map(), doneL, new Set(["ColA2"]), ["web"], { shapes: doneS, bands: BANDS }) === 0,
+     "a form already instanced: its copies covered, no item, no proposal");
+  A.unplan(pp, pend);
+  ok(A.planItems(shapesL, shapes3, ["web"], pp, BANDS, []).length === 0, "queued: the plan empties, the button goes dark");
+}
+// 3 · 4 · a tileset covers its meshes; its row says it streams
+{
+  const tsV = ver("TS.t", { level: "lod0", level_say: "tileset · in streaming", tileset: true, triangles: null, measured: false,
+                            tiles: { tiles: 10, read: 10, max_triangles: 9000, max_texture_side: 512 } });
+  ok(A.levelSay(tsV) === "tileset · in streaming" && A.levelSay({ ...tsV, level_say: "lod0 · webXR" }) === "tileset · in streaming"
+     && A.levelSay(ver("x", {})) === "lod0 · webXR", "a tileset's level: «tileset · in streaming», not «lod0»");
+  const covered = asset("Tile9", { container: "Survey2015" }, [M("Tile9.m"), ver("Tile9.v0", { triangles: 60000 })],
+    { web: { state: "na", loads: "Tile9.v0", why: "coperta dal tileset di Survey2015", covered_by: { id: "c", name: "Survey2015", version: "TS.t" },
+             proposal: { tool: "keep", triangles: null, texture: null, ktx2: false, why: "coperta" } } });
+  const listT = [col1, covered];
+  ok(A.coverage(listT, "web").total === 1 && A.sceneCount(listT, "web").triangles === 80
+     && A.itemsFor(listT, new Set(["Tile9"]), ["web"], new Map()).length === 0
+     && A.applyProposal(new Map(), listT, new Set(["Tile9"]), ["web"]) === 0, "a mesh covered by the tileset: no proposal, out of the count");
+}
+
 // ── the bridge ──────────────────────────────────────────────────────────────
 if (!existsSync(PY)) {
   console.log(`asset-list: ${checks} page checks; no s3Dgraphy venv — bridge SKIPPED`);
@@ -203,7 +273,7 @@ const post = async (route, body) => {
 };
 try {
   const h = await (await fetch(`${B}/health`, { headers: H })).json();
-  ok(h.bridge_level >= 55, `the bridge is at level 55 (${h.bridge_level})`);
+  ok(h.bridge_level >= 57, `the bridge is at level 57 (${h.bridge_level})`);
   // MICRO-ARCHIVE-ASSET-2 · the progress of a list asked, by its token
   const prog = await (await fetch(`${B}/assets/progress?token=none`, { headers: H })).json();
   ok(prog.ok && prog.phase === "", "GET /assets/progress answers (nothing for an unknown token)");
@@ -270,6 +340,40 @@ try {
       const b4 = A.sceneCount(tl.assets, k), af = A.sceneCount(tl.assets, k, { queue: A.enqueue([], it.items), after: true });
       console.log(`  · ${k}: instancing the ${tsh.length} forms (${all.size} assets, ${it.items.length} items): ${b4.triangles} → ${af.triangles} tri, ${(b4.download_bytes / 1048576).toFixed(1)} → ${(af.download_bytes / 1048576).toFixed(1)} MB, GPU ${(b4.gpu_bytes / 1048576).toFixed(1)} → ${(af.gpu_bytes / 1048576).toFixed(1)} MB, covered ${b4.covered} → ${af.covered} / ${af.total}`);
       ok(it.items.length === tsh.length && af.triangles < b4.triangles, `${k}: one item a form, the triangles fall`);
+    }
+    // MICRO-ARCHIVE-ASSET-3 on Templu Mare: the tileset read by its tiles,
+    // its meshes covered; «seleziona tutto» → the queue fills in one gesture
+    const cont = tl.assets.find((x) => x.kind === "container");
+    const tv = cont.versions.find((v) => v.tileset);
+    ok(tv.level_say === "tileset · in streaming" && tv.tiles?.tiles > 1000 && tv.tiles.read === tv.tiles.tiles,
+       `the tileset says «${tv.level_say}», its ${tv.tiles?.tiles} tiles read by their heads (≤ ${tv.tiles?.max_triangles} tri, ≤ ${tv.tiles?.max_texture_side} px a tile)`);
+    ok(cont.targets.web.state === "ok" && cont.targets.web.tiles?.known && cont.targets.mobile.state === "todo" && cont.targets.mobile.tiles?.over_texture > 0,
+       `web «ok» (the tiles fit), mobile «da fare»: ${cont.targets.mobile.why}`);
+    const sv = tl.assets.filter((x) => x.kind === "rm" && x.containers.some((c) => c.name === "Survey2015"));
+    ok(sv.length === 10 && sv.every((x) => x.targets.web.covered_by?.name === "Survey2015" && x.targets.web.state === "na" && x.targets.web.proposal.tool === "keep")
+       && sv.every((x) => !x.targets.mobile.covered_by && /il tileset di Survey2015 non la copre/.test(x.targets.mobile.why)),
+       "the 10 meshes of Survey2015: covered by the tileset for the web, not for mobile (said why)");
+    const wcov = A.coverage(tl.assets, "web");
+    ok(wcov.total === 88 && tl.counts.covered_by_tileset?.web === 10, `web: ${wcov.covered} / ${wcov.total} (the 10 covered out of the count)`);
+    const allT = new Set(tl.assets.map((x) => x.id));
+    for (const k of ["mobile", "web"]) {
+      const bk = { [k]: tl.targets[k].bands };
+      const pl = new Map();
+      const nowK = A.sceneCount(tl.assets, k);
+      const applied = A.applyProposal(pl, tl.assets, allT, [k], { shapes: tsh, bands: bk });
+      const planned = A.sceneCount(tl.assets, k, { plan: pl, after: true, shapes: tsh });
+      const its = A.selectionItems(tl.assets, tsh, allT, [k], pl, bk);
+      const qT = A.enqueue([], its);
+      const copiesAlone = qT.filter((x) => !x.shape && tsh.some((s) => s.assets.some((a) => a.id === x.asset_id)));
+      const shapeItems = qT.filter((x) => x.shape);
+      const afterK = A.sceneCount(tl.assets, k, { queue: qT, after: true, shapes: tsh });
+      console.log(`  · ${k} · seleziona tutto → «Applica e metti in coda»: ${applied} proposals, ${qT.length} items (${shapeItems.length} forms, ${qT.length - shapeItems.length} rows); `
+        + `today ${nowK.triangles} tri ${(nowK.download_bytes / 1048576).toFixed(1)} MB GPU ${(nowK.gpu_bytes / 1048576).toFixed(1)} MB ${nowK.covered}/${nowK.total} → `
+        + `after ${afterK.triangles} tri ${(afterK.download_bytes / 1048576).toFixed(1)} MB GPU ${(afterK.gpu_bytes / 1048576).toFixed(1)} MB ${afterK.covered}/${afterK.total} `
+        + `(${A.budgetWord(afterK, A.inBand(afterK, tl.targets[k].bands), tl.targets[k].bands)})`);
+      ok(shapeItems.length === tsh.length && copiesAlone.length === 0 && afterK.triangles === planned.triangles,
+         `${k}: one item per form (${shapeItems.length}), no copy alone, the plan and the queue count the same`);
+      ok(!qT.some((x) => sv.some((m) => m.id === x.asset_id)) || k === "mobile", `${k}: no item for a mesh the tileset covers`);
     }
     const sample = tl.assets.find((x) => x.name === "Column_tempio1").versions.find((v) => v.level === "lod0");
     ok(Array.isArray(sample.geometry_keys) && sample.geometry_keys.length === 1, `a version says its geometry keys (${sample.geometry_keys})`);

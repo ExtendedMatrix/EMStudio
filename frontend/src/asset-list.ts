@@ -42,9 +42,26 @@ export interface VersionRow {
    *  iCloud, Dropbox «online only» — never read by the bridge: the numbers
    *  are the graph's; where they are and how many bytes (bridge ≥ 56) */
   in_cloud?: boolean; cloud_paths?: string[]; cloud_bytes?: number;
+  /** MICRO-ARCHIVE-ASSET-3 · a tileset's tiles read by their heads (bridge
+   *  ≥ 57): how many, how many read, the most triangles and the largest
+   *  texture side of one tile */
+  tiles?: { tiles: number; read: number; max_triangles: number | null; max_texture_side: number | null } | null;
 }
 export interface Proposal { tool: Tool; triangles: number | null; texture: number | null; ktx2: boolean; why: string }
-export interface TargetCell { state: TargetState; loads: string; why: string; proposal: Proposal; loaded_why?: string }
+export interface TileFit { ok: boolean; known: boolean; tiles: number; read: number; over_triangles: number; over_texture: number;
+                           max_triangles: number | null; max_texture_side: number | null }
+export interface TargetCell {
+  state: TargetState; loads: string; why: string; proposal: Proposal; loaded_why?: string;
+  /** MICRO-ARCHIVE-ASSET-3 · a mesh covered by its container's tileset for
+   *  this target (state `na`, no proposal, out of the count) */
+  covered_by?: { id: string; name: string; version: string } | null;
+  /** the container's tileset of a mesh, and its state for this target */
+  tileset_of?: { id: string; name: string; state: TargetState } | null;
+  /** why a mesh is wanted one by one though its container has a tileset */
+  single?: string;
+  /** a tileset's cell: do its tiles fit the band */
+  tiles?: TileFit;
+}
 export interface AssetRow {
   id: string; name: string; kind: "rm" | "container"; description?: string;
   containers: { id: string; name: string }[]; branch: string; epochs: string[]; family: string; status: string;
@@ -84,6 +101,13 @@ export function shownVersion(a: AssetRow, target: TargetKey): VersionRow | null 
   const vs = a.versions.filter((x) => !x.master && !x.tileset);
   if (vs.length) return [...vs].sort((x, y) => (y.triangles ?? 0) - (x.triangles ?? 0) || x.id.localeCompare(y.id))[0];
   return a.versions.find((x) => x.master) ?? a.versions[0] ?? null;
+}
+
+/** MICRO-ARCHIVE-ASSET-3 · what a version's level says: a tileset «tileset ·
+ *  in streaming» (s3Dgraphy ≥ dev85 says it; before, its «lod0») */
+export function levelSay(v: Pick<VersionRow, "level_say" | "tileset" | "master">, tilesetWords = "tileset · in streaming"): string {
+  if (v.master) return "◆ master";
+  return v.tileset ? tilesetWords : v.level_say;
 }
 
 /** What of a version is over a target's band (per object): triangles, texture. */
@@ -184,6 +208,9 @@ export function groupAssets(list: readonly AssetRow[], g: Grouping, target: Targ
     const assets = by.get(key)!;
     let triangles = 0, gpu = 0, todo = 0;
     for (const a of assets) {
+      // MICRO-ARCHIVE-ASSET-3 · a mesh its container's tileset covers is not
+      // loaded for this target: out of its group's sums
+      if (a.targets[target]?.covered_by) continue;
       const v = shownVersion(a, target);
       triangles += v?.triangles ?? 0;
       gpu += v?.gpu_bytes ?? 0;
@@ -230,11 +257,30 @@ export function editProposal(plan: Plan, a: AssetRow, target: TargetKey, field: 
 
 /** «Applica la proposta» on the selected rows, for the targets on: s3Dgraphy's
  *  proposal where the target is not ok (the person's edits are kept). */
-export function applyProposal(plan: Plan, assets: readonly AssetRow[], sel: ReadonlySet<string>, targets: readonly TargetKey[]): number {
+export function applyProposal(plan: Plan, assets: readonly AssetRow[], sel: ReadonlySet<string>, targets: readonly TargetKey[],
+                              o: { shapes?: readonly Shape[]; bands?: Partial<Record<TargetKey, Bands>> } = {}): number {
   let n = 0;
+  // MICRO-ARCHIVE-ASSET-3 · a form repeated touched by the selection (all of
+  // it, the group, one copy): ITS proposal, once; its copies have none
+  const cov = shapeCover(o.shapes ?? [], targets, plan, o.bands ?? {});
+  for (const s of o.shapes ?? []) {
+    if (!s.assets.some((a) => sel.has(a.id))) continue;
+    for (const t of targets) {
+      if (!cov.get(t)?.has(s.assets[0].id) || shapeProposalOf(s, t, o.bands?.[t], plan).tool !== "instance") continue;
+      const key = `shape:${s.key}`;
+      const row = { ...(plan.get(key) ?? {}) };
+      if (!row[t]) {
+        const p = { ...shapeProposalOf(s, t, o.bands?.[t], plan) } as Proposal & { edited?: boolean };
+        delete p.edited;
+        row[t] = p; n++;
+      }
+      plan.set(key, row);
+    }
+  }
   for (const a of assets) {
     if (!sel.has(a.id)) continue;
     for (const t of targets) {
+      if (cov.get(t)?.has(a.id)) { const r = plan.get(a.id); if (r?.[t]) { delete r[t]; } continue; }
       const c = a.targets[t];
       if (!c || c.state === "ok" || c.state === "na" || c.proposal.tool === "keep") continue;
       const row = { ...(plan.get(a.id) ?? {}) };
@@ -248,12 +294,34 @@ export function applyProposal(plan: Plan, assets: readonly AssetRow[], sel: Read
 /** «Imposta» on the selected rows: triangles, texture, KTX2, tool by hand,
  *  for the targets on (not the archive: it has no version to make). */
 export function setInBulk(plan: Plan, assets: readonly AssetRow[], sel: ReadonlySet<string>, targets: readonly TargetKey[],
-                          v: { tool?: Tool | ""; triangles?: number | null; texture?: number | null; ktx2?: boolean }): number {
+                          v: { tool?: Tool | ""; triangles?: number | null; texture?: number | null; ktx2?: boolean },
+                          o: { shapes?: readonly Shape[]; bands?: Partial<Record<TargetKey, Bands>> } = {}): number {
   let n = 0;
+  // MICRO-ARCHIVE-ASSET-3 · the copies of a form repeated take the values on
+  // their form (one mesh + N instances), not each its own — unless the tool
+  // set is not «istanze»: then the form goes one by one
+  const cov = shapeCover(o.shapes ?? [], targets, plan, o.bands ?? {});
+  for (const s of o.shapes ?? []) {
+    if (!s.assets.some((a) => sel.has(a.id))) continue;
+    for (const t of targets) {
+      if (t === "arch" || !cov.get(t)?.has(s.assets[0].id) || shapeProposalOf(s, t, o.bands?.[t], plan).tool !== "instance") continue;
+      const key = `shape:${s.key}`;
+      const p = { ...shapeProposalOf(s, t, o.bands?.[t], plan) } as Proposal & { edited?: boolean };
+      delete p.edited;
+      if (v.tool && v.tool !== "instance") { p.tool = "keep"; p.why = "una per una"; }
+      if (v.triangles) p.triangles = v.triangles;
+      if (v.texture) p.texture = v.texture;
+      if (v.ktx2 !== undefined) p.ktx2 = v.ktx2;
+      plan.set(key, { ...(plan.get(key) ?? {}), [t]: p });
+      if (p.tool === "instance") { n++; for (const a of s.assets) cov.get(t)!.add(a.id); }
+      else for (const a of s.assets) cov.get(t)!.delete(a.id);
+    }
+  }
   for (const a of assets) {
     if (!sel.has(a.id)) continue;
     for (const t of targets) {
       if (t === "arch") continue;
+      if (cov.get(t)?.has(a.id)) continue;
       const p = { ...proposalOf(a, t, plan) } as Proposal & { edited?: boolean };
       delete p.edited;
       if (v.tool) p.tool = v.tool;
@@ -288,6 +356,9 @@ export interface QueueItem {
   /** MICRO-ARCHIVE-ASSET-2 · why it cannot start (and stays, waiting, with
    *  its gesture): an add-on missing, the source not stamped, Blender off… */
   block?: Block | null;
+  /** MICRO-ARCHIVE-ASSET-3 · where it starts from (`kind:path#block`): the
+   *  queue never holds two live items of the same source, target and tool */
+  source?: string;
 }
 export type BlockCode = "addon" | "unstamped" | "blender" | "no_source" | "no_blend" | "no_mesh" | "checking" | "cloud" | "author";
 /** `cloud` (MICRO-TESTATA-CLOUD): the source is in the cloud, «da scaricare»
@@ -330,6 +401,20 @@ export function itemsFor(assets: readonly AssetRow[], sel: ReadonlySet<string>, 
 
 export function enqueue(q: QueueItem[], items: readonly QueueItem[]): QueueItem[] {
   for (const it of items) {
+    // MICRO-ARCHIVE-ASSET-3 · the safety net: a form and its copies never add
+    // up, nor two items of the same source, target and tool — one already
+    // running (or a form waiting that holds this copy) keeps it out
+    const live = q.filter((x) => (x.state === "waiting" || x.state === "running") && x.target === it.target);
+    const holds = (x: QueueItem): boolean =>
+      (!!it.shape && x.shape === it.shape)
+      || (!it.shape && !!x.shape && !!it.asset_id && (x.asset_ids ?? []).includes(it.asset_id))
+      || (!it.shape && !x.shape && !!it.asset_id && x.asset_id === it.asset_id)
+      || (!!it.source && x.source === it.source && x.tool === it.tool);
+    if (live.some((x) => x.state === "running" && holds(x))) continue;
+    if (!it.shape && live.some((x) => x.state === "waiting" && !!x.shape && holds(x))) continue;
+    const twin = !it.shape && it.source ? q.findIndex((x) => x.state === "waiting" && x.target === it.target && !x.shape
+      && x.source === it.source && x.tool === it.tool && x.asset_id !== it.asset_id) : -1;
+    if (twin >= 0) { q[twin] = it; continue; }
     // a form repeated stands for its members: their waiting items for the
     // same target go, and the same shape again is replaced
     const mine = new Set(it.asset_ids ?? (it.asset_id ? [it.asset_id] : []));
@@ -464,10 +549,19 @@ export interface SceneCount {
  *  the items not failed nor cancelled and the plan not yet queued count their
  *  estimate — a form repeated ONE mesh plus its instances. A file once, a
  *  shared texture once. */
-export function sceneCount(assets: readonly AssetRow[], target: TargetKey, o: { plan?: Plan; queue?: readonly QueueItem[]; after?: boolean } = {}): SceneCount {
+export function sceneCount(assets: readonly AssetRow[], target: TargetKey,
+                           o: { plan?: Plan; queue?: readonly QueueItem[]; after?: boolean; shapes?: readonly Shape[] } = {}): SceneCount {
   const out: SceneCount = { triangles: 0, download_bytes: 0, gpu_bytes: 0, estimated: 0, covered: 0, total: 0, instances: 0 };
   const seen = new Set<string>(), seenTex = new Set<string>(), shapes = new Set<string>();
   const live = (o.queue ?? []).filter((x) => x.target === target && x.state !== "failed" && x.state !== "cancelled" && x.state !== "done");
+  // MICRO-ARCHIVE-ASSET-3 · a form planned «istanze» (not queued yet) counts
+  // as its item would: the mesh once, an instance each — its copies' own
+  // plans never on top
+  const planShape = new Map<string, { key: string; p: Proposal }>();
+  for (const s of o.shapes ?? []) {
+    const p = o.plan?.get(`shape:${s.key}`)?.[target];
+    if (p?.tool === "instance") for (const a of s.assets) planShape.set(a.id, { key: s.key, p });
+  }
   const add = (v: VersionRow): void => {
     if (v.tileset) return;
     if (v.checksum && seen.has(v.checksum)) return;
@@ -490,19 +584,22 @@ export function sceneCount(assets: readonly AssetRow[], target: TargetKey, o: { 
     const cur = cell.loads && cell.state !== "missing" ? a.versions.find((v) => v.id === cell.loads) ?? null : null;
     if (cur) out.covered++;
     if (o.after) {
-      const item = [...live].reverse().find((x) => x.asset_id === a.id || (x.asset_ids ?? []).includes(a.id));
+      const item = [...live].reverse().find((x) => (x.asset_ids ?? []).includes(a.id))
+        ?? [...live].reverse().find((x) => x.asset_id === a.id);
+      const ps = item ? null : planShape.get(a.id);
       const p = item ? { triangles: item.triangles ?? null, texture: item.texture ?? null, ktx2: !!item.ktx2, tool: item.tool }
-        : o.plan?.get(a.id)?.[target];
+        : ps ? ps.p : o.plan?.get(a.id)?.[target];
+      const shapeKey = item?.shape ?? ps?.key;
       if (p && p.tool && p.tool !== "keep" && p.tool !== "tileset") {
         out.estimated++;
         if (!cur) out.covered++;
-        if (item?.shape) {
+        if (shapeKey) {
           // one mesh for the whole form, then an instance each
           out.instances++;
           out.download_bytes += INSTANCE_BYTES;
           out.gpu_bytes += INSTANCE_BYTES;
-          if (shapes.has(item.shape)) continue;
-          shapes.add(item.shape);
+          if (shapes.has(shapeKey)) continue;
+          shapes.add(shapeKey);
         }
         const c = plannedCost(p, cur ?? shownVersion(a, target));
         out.triangles += c.triangles; out.download_bytes += c.download_bytes; out.gpu_bytes += c.gpu_bytes;
@@ -630,10 +727,12 @@ export function shapeProposalOf(s: Shape, target: TargetKey, b: Bands | undefine
   return p ? { ...p, edited: true } : { ...shapeProposal(s, target, b), edited: false };
 }
 
-/** «Metti in coda» for the forms whose copies are ALL selected: one item per
- *  form and target (one mesh + N instances) — unless the person chose another
- *  tool for the form, then its copies go one by one (`itemsFor`). → the items
- *  and the assets they stand for. */
+/** «Metti in coda» for the forms the selection touches — all of it, the
+ *  group, or ONE copy (MICRO-ARCHIVE-ASSET-3: a copy has no proposal of its
+ *  own, it is covered by its form): one item per form and target (one mesh +
+ *  N instances) — unless the person chose another tool for the form, then
+ *  its copies go one by one (`itemsFor`). → the items and the assets they
+ *  stand for. */
 export function shapeItemsFor(shapes: readonly Shape[], sel: ReadonlySet<string>, targets: readonly TargetKey[], plan: Plan,
                               bands: Partial<Record<TargetKey, Bands>>,
                               labelOf: (s: Shape, t: TargetKey, p: Proposal) => string = (s, t, p) => `${s.assets[0].name} ×${s.assets.length} → ${t} · ${p.tool}`):
@@ -641,7 +740,7 @@ export function shapeItemsFor(shapes: readonly Shape[], sel: ReadonlySet<string>
   const items: QueueItem[] = [];
   const covered = new Map<TargetKey, Set<string>>(targets.map((t) => [t, new Set<string>()]));
   for (const s of shapes) {
-    if (!s.assets.every((a) => sel.has(a.id))) continue;
+    if (!s.assets.some((a) => sel.has(a.id))) continue;
     for (const t of targets) {
       const p = shapeProposalOf(s, t, bands[t], plan);
       if (p.tool !== "instance") continue;
@@ -653,6 +752,83 @@ export function shapeItemsFor(shapes: readonly Shape[], sel: ReadonlySet<string>
     }
   }
   return { items, covered };
+}
+
+/** MICRO-ARCHIVE-ASSET-3 · the copies covered by their form, per target:
+ *  those of a form whose proposal (or the person's) is «istanze» — they have
+ *  no proposal of their own and never go in the queue alone. */
+export function shapeCover(shapes: readonly Shape[], targets: readonly TargetKey[], plan: Plan,
+                           bands: Partial<Record<TargetKey, Bands>>): Map<TargetKey, Set<string>> {
+  const out = new Map<TargetKey, Set<string>>(targets.map((t) => [t, new Set<string>()]));
+  for (const s of shapes) for (const t of targets) {
+    if (!shapeCovers(s, t, bands[t], plan)) continue;
+    for (const a of s.assets) out.get(t)!.add(a.id);
+  }
+  return out;
+}
+
+/** Does a form cover its copies for a target: its proposal is «istanze», or
+ *  it is ALREADY one file for all of them (then a copy's own proposal — a
+ *  decimation of a file that draws N instances — would be work twice). Not
+ *  the archive (each master its own), not when the person chose «una per
+ *  una». */
+export function shapeCovers(s: Shape, t: TargetKey, b: Bands | undefined, plan: Plan): boolean {
+  if (t === "arch") return false;
+  const p = shapeProposalOf(s, t, b, plan);
+  if (p.tool === "instance") return true;
+  return !p.edited && shapeShared(s, t);
+}
+
+/** The items of a selection, all in one (MICRO-ARCHIVE-ASSET-3, «Applica e
+ *  metti in coda»): the forms it touches once each, the other rows one by
+ *  one — a copy of a form never alone. */
+export function selectionItems(assets: readonly AssetRow[], shapes: readonly Shape[], sel: ReadonlySet<string>,
+                               targets: readonly TargetKey[], plan: Plan, bands: Partial<Record<TargetKey, Bands>>,
+                               labels: { shape?: (s: Shape, t: TargetKey, p: Proposal) => string;
+                                         one?: (a: AssetRow, t: TargetKey, p: Proposal) => string } = {}): QueueItem[] {
+  const sh = shapeItemsFor(shapes, sel, targets, plan, bands, labels.shape);
+  const cov = shapeCover(shapes, targets, plan, bands);
+  const single = itemsFor(assets, sel, targets, plan, labels.one)
+    .filter((it) => !sh.covered.get(it.target!)?.has(it.asset_id!) && !cov.get(it.target!)?.has(it.asset_id!));
+  return [...sh.items, ...single];
+}
+
+/** The plan not queued yet (MICRO-ARCHIVE-ASSET-3): the items the person's
+ *  plan would make — forms once, rows one by one, a copy of a form never —
+ *  less those already waiting or running. «Metti in coda (N)» says N. */
+export function planItems(assets: readonly AssetRow[], shapes: readonly Shape[], targets: readonly TargetKey[], plan: Plan,
+                          bands: Partial<Record<TargetKey, Bands>>, q: readonly QueueItem[] = [],
+                          labels: { shape?: (s: Shape, t: TargetKey, p: Proposal) => string;
+                                    one?: (a: AssetRow, t: TargetKey, p: Proposal) => string } = {}): QueueItem[] {
+  const out: QueueItem[] = [];
+  const cov = shapeCover(shapes, targets, plan, bands);
+  const live = q.filter((x) => x.state === "waiting" || x.state === "running");
+  for (const s of shapes) for (const t of targets) {
+    const p = plan.get(`shape:${s.key}`)?.[t];
+    if (!p || p.tool !== "instance") continue;
+    if (live.some((x) => x.target === t && x.shape === s.key)) continue;
+    out.push(...shapeItemsFor([s], new Set([s.assets[0].id]), [t], plan, bands, labels.shape).items);
+  }
+  for (const a of assets) for (const t of targets) {
+    const p = plan.get(a.id)?.[t];
+    if (!p || p.tool === "keep" || cov.get(t)?.has(a.id)) continue;
+    if (live.some((x) => x.target === t && (x.asset_id === a.id || (x.asset_ids ?? []).includes(a.id)))) continue;
+    out.push(...itemsFor([a], new Set([a.id]), [t], plan, labels.one));
+  }
+  return out;
+}
+
+/** What leaves the plan when its items went in the queue: a row's entry for
+ *  that target, a form's «istanze» (its «una per una» stays: a choice). */
+export function unplan(plan: Plan, items: readonly QueueItem[]): Plan {
+  for (const it of items) {
+    if (!it.target) continue;
+    const key = it.shape ? `shape:${it.shape}` : it.asset_id ?? "";
+    const r = plan.get(key);
+    if (r?.[it.target] && (!it.shape || r[it.target]!.tool === "instance")) delete r[it.target];
+    if (r && !Object.keys(r).length) plan.delete(key);
+  }
+  return plan;
 }
 
 // ── MICRO-ARCHIVE-ASSET-2 · what a tool needs on this computer ─────────────
