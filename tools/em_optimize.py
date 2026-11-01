@@ -967,6 +967,10 @@ class Job:
         self.started = None
         self.ended = None
         self.cancel = threading.Event()
+        #: MICRO-CODA-VISTA p.4 · who asked the cancel (the page says it: the
+        #: queue, the status bar's chip, Ottimizza's bar…) — another window
+        #: following the same job then says by whom, not a bare «cancelled»
+        self.cancel_by = ""
         self.proc = None
         #: a batch's rows (MICRO-OTTIMIZZA-2): one per file, its own state,
         #: progress and cancel
@@ -1020,7 +1024,8 @@ class Job:
                     "items": [{k: v for k, v in it.items()} for it in self.items],
                     "wait": self.wait if self.state == "queued" else None,
                     "tool": (self.need or {}).get("tool"), "cores": (self.need or {}).get("cores"),
-                    "created": self.created, "started": self.started, "ended": self.ended}
+                    "created": self.created, "started": self.started, "ended": self.ended,
+                    "cancel_by": self.cancel_by}
 
 
 def _run(job: Job, target):
@@ -1084,11 +1089,14 @@ def get(job_id: str):
     return _JOBS.get(job_id)
 
 
-def cancel(job_id: str, item=None) -> bool:
-    """Cancel a job, or ONE file of a batch (``item``: its index)."""
+def cancel(job_id: str, item=None, by: str = "") -> bool:
+    """Cancel a job, or ONE file of a batch (``item``: its index). ``by``
+    (MICRO-CODA-VISTA): who asked it, kept on the job and in its view."""
     job = _JOBS.get(job_id)
     if job is None:
         return False
+    if by and not job.cancel_by:
+        job.cancel_by = str(by)[:80]
     if item is not None:
         try:
             job.items[int(item)]["cancel"] = True

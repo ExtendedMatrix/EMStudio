@@ -11140,6 +11140,35 @@ tr.al-covered-row > td { color: var(--text-faint); }
 .al-job[data-state="running"] .al-job-state { color: var(--accent-ink); }
 .al-job[data-state="done"] .al-job-state { color: var(--ok-ink); }
 .al-job[data-state="failed"] .al-job-state { color: var(--danger); }
+/* MICRO-CODA-VISTA · ONE vocabulary of signs (asset-list.ts SIGNS): the row's
+   cell, the view «Coda», Ottimizza's panel */
+.al-sign { display: inline-block; min-width: 1.1em; text-align: center; font-weight: 700; }
+.al-tone-wait, .al-sign.al-tone-wait { color: var(--text-faint); }
+.al-tone-block, .al-sign.al-tone-block { color: var(--warn-ink); }
+.al-tone-run, .al-sign.al-tone-run { color: var(--accent-ink); }
+.al-tone-ok, .al-sign.al-tone-ok { color: var(--ok-ink); }
+.al-tone-fail, .al-sign.al-tone-fail { color: var(--danger); }
+.al-tone-off, .al-sign.al-tone-off { color: var(--text-faint); }
+.al-run { display: inline-flex; flex-direction: column; gap: 1px; min-width: 110px; max-width: 220px; vertical-align: middle; }
+.al-run-bar { position: relative; height: 4px; border-radius: 2px; background: var(--bg-sunken); overflow: hidden; }
+.al-run-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 2px; transition: width .3s; }
+.al-run-bar.busy i { width: 30%; animation: al-slide 1.2s ease-in-out infinite; }
+.al-run-words { font-size: 10px; color: var(--text-dim, var(--text-faint)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.al-state.al-done { background: var(--ok-ink); color: var(--bg, #fff); border-radius: 3px; padding: 0 4px; font-weight: 600; }
+.al-runline { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.al-golink { cursor: pointer; }
+.al-golink:hover { text-decoration: underline; }
+.al-job .al-run { min-width: 80px; }
+.al-out { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+.al-qview .al-table-wrap { flex: 1 1 auto; overflow: auto; }
+.al-qtable td { vertical-align: middle; }
+.al-qtable td.al-qout { white-space: normal; max-width: 520px; }
+.al-qtable td.al-qact { white-space: nowrap; }
+.al-qtable tr.lit > td { background: var(--accent-soft, rgba(80, 140, 255, .15)); }
+.al-qfilters .files-seg button[data-n="0"] { opacity: .6; }
+.al-mis { margin: 4px 0; padding: 4px 8px; border-radius: 4px; }
+.al-mis ul { margin: 2px 0 0 16px; padding: 0; font-size: 11px; }
+.al-shapeless { color: var(--text-faint); }
 .al-detail { margin-top: 8px; }
 .al-detail .files-sec-h { display: flex; gap: 6px; align-items: center; }
 .al-detail .files-sec-h b { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }

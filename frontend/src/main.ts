@@ -409,6 +409,7 @@ import {
 import { guessKind, mightBeTileset, planDesktopDrop, positionsArePhysical, toCssPoint, TILESET_TARGETS } from "./desktop-drop";
 import * as paths from "./paths";
 import * as AL from "./asset-list";
+import { blendBlock, findMisplaced, type Misplaced } from "./version-misplaced";
 import * as who from "./who-chip";
 import { bridgeLevelVerdict, levelKey, type BridgeHealth } from "./bridge-level";
 import { classify, isDiskUrl, locatorOnDisk, missingCount, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
@@ -13916,7 +13917,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 57;   // 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 58;   // 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -33932,6 +33933,18 @@ function renderStorageInto(host: StorageHost): void {
     return;
   }
 
+  // MICRO-CODA-VISTA · Archive › Coda: the queue as a view
+  if (winModeOf(win) === "queue") {
+    if (crumb) crumb.textContent = t("al.qcrumb");
+    up?.classList.add("hidden");
+    paintSurface(win, body, () => {
+      body.textContent = "";
+      body.classList.remove("storage-split");
+      body.appendChild(queueView(win));
+    });
+    return;
+  }
+
   // MICRO-ARCHIVE-ASSET · Archive › Asset: the list of the study's assets
   if (winModeOf(win) === "assets") {
     if (crumb) crumb.textContent = t("al.crumb");
@@ -34985,8 +34998,13 @@ interface BgJob extends JobView { next: number; lines: string[]; result?: unknow
   items?: JobItemView[];
   /** MICRO-CODA-MULTICORE · the queue's item that started it */
   owner?: string;
+  /** MICRO-CODA-VISTA p.4 · who cancelled it (the bridge's word: «emstudio:chip»…),
+   *  and lost: the bridge no longer knows it (restarted) */
+  cancel_by?: string; lost?: boolean;
   done: Promise<BgJob>; settle: (j: BgJob) => void }
 const bgJobs = new Map<string, BgJob>();
+/** MICRO-CODA-VISTA p.4 · why the bridge refused to start an item's job */
+const startRefused = new Map<string, string>();
 let bgTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** `POST /jobs` → the job, followed until it ends (the promise). Null when the
@@ -35000,7 +35018,12 @@ async function startJob(body: Record<string, unknown>, label: string): Promise<B
   } catch { toast(t("storage.bridgeDown")); return null; }
   const j = await r.json().catch(() => ({})) as { ok?: boolean; job?: string; error?: string };
   if (r.status === 404 && !j.job) { toast(t("files.optOldBridge")); return null; }
-  if (!j.ok || !j.job) { toast(t("files.optFailed", { why: String(j.error ?? r.status) })); return null; }
+  if (!j.ok || !j.job) {
+    // MICRO-CODA-VISTA p.4 · the queue's item says the bridge's own reason,
+    // not «no job started»
+    if (ownerNow) startRefused.set(ownerNow.id, String(j.error ?? r.status));
+    toast(t("files.optFailed", { why: String(j.error ?? r.status) })); return null;
+  }
   return trackJob(j.job, String(body.kind), label);
 }
 
@@ -35030,8 +35053,10 @@ function pollJobs(): void {
       try {
         const r = await fetch(`${await bridgeUrl()}/jobs?id=${encodeURIComponent(job.id)}&since=${job.next}`, { cache: "no-store" });
         const v = await r.json().catch(() => ({})) as { state?: string; progress?: number; stage?: string; lines?: string[];
-          next?: number; result?: unknown; error?: string | null; items?: JobItemView[]; wait?: JobView["wait"] };
-        if (r.status === 404) { job.state = "failed"; job.error = t("files.jobLost"); }
+          next?: number; result?: unknown; error?: string | null; items?: JobItemView[]; wait?: JobView["wait"]; cancel_by?: string };
+        // MICRO-CODA-VISTA p.4 · a job the bridge no longer knows: it was
+        // restarted (or ended) — its item says so
+        if (r.status === 404) { job.state = "failed"; job.error = t("files.jobLost"); job.lost = true; }
         else {
           if (v.state && v.state !== job.state) changed = true;
           job.state = v.state ?? job.state;
@@ -35044,6 +35069,7 @@ function pollJobs(): void {
           if (v.wait !== undefined && JSON.stringify(v.wait) !== JSON.stringify(job.wait ?? null)) changed = true;
           job.wait = v.wait ?? null;
           if (v.items?.length) job.items = v.items;
+          if (v.cancel_by) job.cancel_by = v.cancel_by;
         }
       } catch { /* the bridge is busy: asked again */ }
       if (!jobRunning(job)) { changed = true; job.settle(job); }
@@ -35058,10 +35084,14 @@ function pollJobs(): void {
   }, 600);
 }
 
-async function cancelJob(id: string, item?: number): Promise<void> {
+/** MICRO-CODA-VISTA p.4 · the cancels this page asked, by job: who (the
+ *  queue's «Annulla», the status bar's chip, Ottimizza's bar) */
+const cancelAsked = new Map<string, AL.CancelBy>();
+async function cancelJob(id: string, item?: number, by: AL.CancelBy = "panel"): Promise<void> {
+  if (item === undefined) cancelAsked.set(id, by);
   try {
     await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ step: "cancel", id, ...(item !== undefined ? { item } : {}) }) });
+      body: JSON.stringify({ step: "cancel", id, by: `emstudio:${by}`, ...(item !== undefined ? { item } : {}) }) });
   } catch { /* the poll says what happened */ }
   pollJobs();
 }
@@ -35078,7 +35108,7 @@ function paintJobs(): void {
       chip.id = "footer-jobs";
       chip.type = "button";
       chip.className = "footer-log footer-jobs hidden";
-      chip.onclick = () => { const j = [...bgJobs.values()].find(jobRunning); if (j && confirmInline(chip!, t("files.jobCancelAsk", { what: j.label }))) void cancelJob(j.id); };
+      chip.onclick = () => { const j = [...bgJobs.values()].find(jobRunning); if (j && confirmInline(chip!, t("files.jobCancelAsk", { what: j.label }))) void cancelJob(j.id, undefined, "chip"); };
       zone.prepend(chip);
     }
   }
@@ -35109,6 +35139,8 @@ function paintJobs(): void {
       if (x) x.hidden = !jobItemOpen(it) || !!it.cancel;
     }
   }
+  // MICRO-CODA-VISTA · the queue's bars (rows, view) follow their jobs
+  paintRunBars();
 }
 
 /** A file of a batch in words: its name, then its stage and share, or how it
@@ -35141,6 +35173,9 @@ function jobText(job: BgJob): string {
 
 /** The jobs of a kind, as rows of the tab: a bar, its words, «Annulla». */
 function jobRows(kinds: string[]): HTMLElement | null {
+  // MICRO-CODA-VISTA p.3 · no bars at the foot of an asset's detail: a job of
+  // the queue shows on its row (and in the view «Coda»)
+  if (alDetailAsset && kinds.some((k) => k !== "addon")) return null;
   const list = [...bgJobs.values()].filter((j) => kinds.includes(j.kind)).slice(-4);
   if (!list.length) return null;
   const box = document.createElement("div");
@@ -35518,7 +35553,7 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   // 5 · prepared for a use: the diagnosis, the grid, the versions on disk
   box.appendChild(filesUseSection(win, chosen));
   // MICRO-ARCHIVE-ASSET · the one queue (in the Asset view it is on the side already)
-  if (winModeOf(win) !== "assets") box.appendChild(queuePanel());
+  if (winModeOf(win) !== "assets" && winModeOf(win) !== "queue") box.appendChild(queuePanel());
   return box;
 }
 
@@ -36714,7 +36749,9 @@ async function stampDerived(source: string | string[], out: { path: string; sha2
   const src = stamps[0];
   // MICRO-OTTIMIZZA-2 · a source nobody stamped is DECLARED (a file, by its
   // name), when the caller allows it: the batch of a folder of OBJ
-  if (stamps.some((x) => !x) && !opts.declare) return false;
+  // MICRO-CODA-VISTA p.4 · a source the graph knows as stamped (its date in
+  // the Stamp column) but whose sidecar is not beside it is declared too
+  if (stamps.some((x, i) => !x && !graphStampedPaths.has(all[i])) && !opts.declare) return false;
   const listing = await fsList(paths.dirname(out.path));
   const entry = listing.entries.find((e) => e.path === out.path);
   if (!entry) return false;
@@ -42101,11 +42138,19 @@ const assetUi = {
   scroll: { top: 0, left: 0 }, sideScroll: 0,
 };
 /** MICRO-ARCHIVE-ASSET-2 · the forms repeated of the answer, once per answer */
-let alShapes: { ans: AL.AssetListAnswer | null; list: AL.Shape[]; index: Map<string, AL.Shape> } = { ans: null, list: [], index: new Map() };
+let alShapes: { ans: AL.AssetListAnswer | null; refused: number; list: AL.Shape[]; index: Map<string, AL.Shape> } = { ans: null, refused: 0, list: [], index: new Map() };
 function shapesOf(ans: AL.AssetListAnswer): { list: AL.Shape[]; index: Map<string, AL.Shape> } {
-  if (alShapes.ans !== ans) { const list = AL.repeatedShapes(ans.assets); alShapes = { ans, list, index: AL.shapeIndex(list) }; }
+  // MICRO-CODA-VISTA p.5 · the forms the diagnosis refused are no group
+  if (alShapes.ans !== ans || alShapes.refused !== refusedShapes.size) {
+    const list = AL.repeatedShapes(ans.assets, refusedShapes);
+    alShapes = { ans, refused: refusedShapes.size, list, index: AL.shapeIndex(list) };
+  }
   return alShapes;
 }
+/** MICRO-CODA-VISTA p.6 · the answer's number and when it was ASKED: an item
+ *  done after that still counts as planned until the next answer */
+let answerSeq = 0;
+let answeredAt = 0;
 (() => {
   try {
     const v = JSON.parse(localStorage.getItem(ASSET_UI_KEY) ?? "{}") as Partial<{ target: AL.TargetKey; compare: boolean;
@@ -42155,6 +42200,7 @@ async function askAssetList(): Promise<void> {
   assetUi.progress = { phase: "graph", n: nodes, total: nodes };
   renderStorage();
   const token = `al${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const askedAt = Date.now();
   let polling = true;
   const poll = async (): Promise<void> => {
     while (polling) {
@@ -42189,6 +42235,7 @@ async function askAssetList(): Promise<void> {
       // here proposes nothing it cannot do: «manca il master»
       AL.retileWithoutMaster(j, (id) => fileStateOf(id)?.path ?? "", (k, names) => t(`al.retile.${k}`, { names }));
       assetUi.ans = j; assetUi.docKey = assetDocKey();
+      answerSeq++; answeredAt = askedAt;
     }
   } finally { polling = false; assetUi.asking = false; assetUi.progress = null; renderStorage(); void first; }
 }
@@ -42244,12 +42291,14 @@ function fileAssetSwitch(win: Win): HTMLElement {
   const seg = document.createElement("span");
   seg.className = "files-seg al-switch";
   seg.dataset.alSwitch = "";
-  const cur = winModeOf(win) === "assets" ? "assets" : "files";
-  for (const [k, key] of [["files", "al.viewFiles"], ["assets", "al.viewAssets"]] as const) {
+  const mode = winModeOf(win);
+  const cur = mode === "assets" ? "assets" : mode === "queue" ? "queue" : "files";
+  // MICRO-CODA-VISTA p.2 · «Coda» beside «Asset»: the same full space
+  for (const [k, key] of [["files", "al.viewFiles"], ["assets", "al.viewAssets"], ["queue", "al.viewQueue"]] as const) {
     const b = document.createElement("button");
     b.type = "button";
     b.dataset.action = `al-view-${k}`;
-    b.textContent = t(key);
+    b.textContent = k === "queue" ? queueSwitchWords() : t(key);
     b.title = t(`${key}Title`);
     b.setAttribute("aria-pressed", String(cur === k));
     b.onclick = () => { if (k !== cur) setArchiveView(win, k); };
@@ -42258,10 +42307,17 @@ function fileAssetSwitch(win: Win): HTMLElement {
   return seg;
 }
 
-function setArchiveView(win: Win, k: "files" | "assets"): void {
-  setWinModeOf(win, k === "assets" ? "assets" : "filesystem");
+/** «Coda (3)»: the view's name and the jobs still to end */
+function queueSwitchWords(): string {
+  const n = assetQueue.filter((x) => x.state === "waiting" || x.state === "running").length;
+  const bad = assetQueue.filter((x) => x.state === "failed").length;
+  return `${t("al.viewQueue")}${n ? ` (${n})` : ""}${bad ? ` ${AL.SIGNS.fail}${bad}` : ""}`;
+}
+
+function setArchiveView(win: Win, k: "files" | "assets" | "queue"): void {
+  setWinModeOf(win, k === "assets" ? "assets" : k === "queue" ? "queue" : "filesystem");
   const max = maximizedWin();
-  if (k === "assets" && max !== win.id && windowsOf().length > 1) { toggleMaximize(win.id); setWinCurrent(win, "al.max", true); }
+  if (k !== "files" && max !== win.id && windowsOf().length > 1) { toggleMaximize(win.id); setWinCurrent(win, "al.max", true); }
   if (k === "files" && max === win.id && winCurrent(win, "al.max") === true) { toggleMaximize(win.id); setWinCurrent(win, "al.max", null); }
   surfaceOf(win.id)?.refresh();
   renderTiles();
@@ -42358,6 +42414,19 @@ function assetListView(win: Win): HTMLElement {
   say.dataset.alSay = "";
   say.textContent = ans.say_it;
   host.appendChild(say);
+  // MICRO-CODA-VISTA p.1 · versions registered on the wrong asset: said, with «Correggi»
+  const mis = misplacedNow();
+  if (mis.length) host.appendChild(misplacedBanner(mis));
+  // MICRO-CODA-VISTA p.1 · no geometry key, no form: said
+  const nokey = AL.shapeless(ans.assets);
+  if (nokey.length) {
+    const nk = document.createElement("p");
+    nk.className = "files-hint al-shapeless";
+    nk.dataset.alShapeless = String(nokey.length);
+    nk.textContent = tn("al.shapeless", nokey.length);
+    nk.title = ans.assets.filter((a) => nokey.includes(a.id)).map((a) => a.name).join("\n");
+    host.appendChild(nk);
+  }
   // MICRO-TESTATA-CLOUD · versions in the cloud: said, with the gesture for them all
   const allCloud = AL.cloudOf(ans.assets);
   if (allCloud.paths.length) {
@@ -42659,7 +42728,8 @@ function assetListView(win: Win): HTMLElement {
     side.textContent = "";
     const hb = hydrateBox();
     if (hb) side.appendChild(hb);
-    side.appendChild(queuePanel());
+    // MICRO-CODA-VISTA p.2 · the right side is the asset's detail only: the
+    // queue is the view «Coda» (and each job shows on its row)
     const a = assetUi.detail ? ans.assets.find((x) => x.id === assetUi.detail) : undefined;
     if (a) side.appendChild(assetDetail(win, a));
     else { const p = document.createElement("p"); p.className = "files-hint"; p.textContent = t("al.detailHint"); side.appendChild(p); }
@@ -42719,7 +42789,7 @@ function shapeRow(tb: HTMLElement, sh: AL.Shape, mine: AL.AssetRow[], targets: A
   const first = mine[0].name, last = mine[mine.length - 1].name;
   nm.textContent = `⧉ ${t("al.shape", { n: String(mine.length) })} · ${first}${mine.length > 1 ? ` … ${last}` : ""}`;
   tdn.append(tog, " ", nm);
-  tdn.title = `${t(sh.via === "geometry" ? "al.shapeViaGeometry" : "al.shapeViaTriangles")}\n${mine.map((a) => a.name).join("\n")}`;
+  tdn.title = `${t("al.shapeViaGeometry")}\n${mine.map((a) => a.name).join("\n")}`;
   // already ONE file for the copies (for the target): its numbers, once;
   // else the numbers of one copy, ×N
   const sharedNow = AL.shapeShared({ ...sh, assets: mine }, assetUi.target);
@@ -42733,7 +42803,7 @@ function shapeRow(tb: HTMLElement, sh: AL.Shape, mine: AL.AssetRow[], targets: A
       : c(one ? `${fmtN(one.triangles)} ×${mine.length}` : "—", "n", t("al.shapeTriTitle", { one: fmtN(one?.triangles), n: String(mine.length), all: fmtN((one?.triangles ?? 0) * mine.length) })),
     c(fmtMB(one?.size_bytes)), c(fmtMB(one?.gpu_bytes), "n"),
     c(one?.texture_side ? String(one.texture_side) : "—", "n"), c(String(one?.textures.length ?? 0), "n"),
-    c(t(sh.via === "geometry" ? "al.shapeSameGeometry" : "al.shapeSameTriangles"), "al-shape-via"));
+    c(t("al.shapeSameGeometry"), "al-shape-via"));
   for (const k of targets) tr.appendChild(shapeTargetCell(sh, k, bands[k], repaint));
   tb.appendChild(tr);
 }
@@ -42746,14 +42816,12 @@ function shapeTargetCell(sh: AL.Shape, k: AL.TargetKey, b: AL.Bands | undefined,
   td.className = "al-target";
   td.dataset.alCell = k;
   const p = AL.shapeProposalOf(sh, k, b, assetUi.plan);
-  const queued = assetQueue.find((x) => x.shape === sh.key && x.target === k && (x.state === "waiting" || x.state === "running"));
-  if (queued) {
-    const q = document.createElement("span");
-    q.className = "al-queued";
-    q.textContent = `⧗ ${t("al.tool.instance")}`;
-    td.appendChild(q);
-    return td;
-  }
+  // MICRO-CODA-VISTA p.3 · its item: the bar while it works, «ok» when done,
+  // «!» with the reason when it failed (a click → its row in «Coda»)
+  const mineQ = assetQueue.filter((x) => x.shape && x.target === k && (x.shape === sh.key || sh.assets.some((m) => (x.asset_ids ?? []).includes(m.id))));
+  const qit = mineQ.find((x) => x.state === "running") ?? mineQ.find((x) => x.state === "waiting")
+    ?? [...mineQ].sort((x, y) => (y.ended ?? 0) - (x.ended ?? 0))[0] ?? null;
+  if (cellRunInto(td, qit, AL.shapeShared(sh, k))) return td;
   if (k === "arch" || (p.tool === "keep" && !p.edited)) {
     const u = document.createElement("small");
     u.textContent = p.why;
@@ -42811,10 +42879,24 @@ function shapeTargetCell(sh: AL.Shape, k: AL.TargetKey, b: AL.Bands | undefined,
  *  assets have no version for the target the word is «incompleto»; the count
  *  estimates what a viewer would load — for the ones missing their item in
  *  the queue, else their lightest version, and it says so. */
+/** MICRO-CODA-VISTA p.6 · the budget's ONE computation per answer, queue
+ *  epoch (an item added, removed, ended) and plan — never per repaint */
+let budgetMemo: { key: string; by: Map<AL.TargetKey, { now: AL.SceneCount; aft: AL.SceneCount }> } | null = null;
+function budgetOf(ans: AL.AssetListAnswer, k: AL.TargetKey): { now: AL.SceneCount; aft: AL.SceneCount } {
+  const key = `${AL.budgetKey(answerSeq, queueEpoch, assetUi.plan)}|${refusedShapes.size}`;
+  if (!budgetMemo || budgetMemo.key !== key) budgetMemo = { key, by: new Map() };
+  let v = budgetMemo.by.get(k);
+  if (!v) {
+    v = { now: AL.sceneCount(ans.assets, k),
+          aft: AL.sceneCount(ans.assets, k, { plan: assetUi.plan, queue: assetQueue, after: true, shapes: shapesOf(ans).list, answeredAt }) };
+    budgetMemo.by.set(k, v);
+  }
+  return v;
+}
+
 function assetBudgetCard(ans: AL.AssetListAnswer, k: AL.TargetKey): HTMLElement {
   const b = ans.targets[k].bands;
-  const now = AL.sceneCount(ans.assets, k);
-  const aft = AL.sceneCount(ans.assets, k, { plan: assetUi.plan, queue: assetQueue, after: true, shapes: shapesOf(ans).list });
+  const { now, aft } = budgetOf(ans, k);
   const okNow = AL.inBand(now, b), okAft = AL.inBand(aft, b);
   const wNow = AL.budgetWord(now, okNow, b), wAft = AL.budgetWord(aft, okAft, b);
   const card = document.createElement("div");
@@ -43056,15 +43138,13 @@ function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLT
   pill.title = c.why;
   td.appendChild(pill);
   const p = AL.proposalOf(a, k, assetUi.plan);
-  const queued = assetQueue.find((x) => (x.asset_id === a.id || (x.asset_ids ?? []).includes(a.id)) && x.target === k
-    && (x.state === "waiting" || x.state === "running"));
-  if (queued) {
-    const q = document.createElement("span");
-    q.className = "al-queued";
-    q.textContent = ` ⧗ ${t(`al.tool.${queued.tool}`)}`;
-    td.appendChild(q);
-    return td;
-  }
+  // MICRO-CODA-VISTA p.3 · the queue on the row: the bar with its phase while
+  // it works, a green «ok» with the new version when done, a red «!» with
+  // the short reason when it failed — a click opens its row in «Coda»
+  const qit = AL.cellItem(assetQueue, a.id, k);
+  if (qit && (qit.state === "waiting" || qit.state === "running" || qit.state === "done")) pill.remove();
+  if (cellRunInto(td, qit, c.state === "ok")) return td;
+  if (qit?.state === "done" && !td.contains(pill)) td.prepend(pill);
   // MICRO-ARCHIVE-ASSET-3 · a copy of a form repeated has no proposal of its
   // own: it is covered by its form (one mesh + N instances), once
   const sh = assetUi.ans ? shapesOf(assetUi.ans).index.get(a.id) : undefined;
@@ -43284,6 +43364,7 @@ function queueAdd(items: AL.QueueItem[]): void {
     if (src && src.kind !== "none" && src.path) it.source = `${src.kind}:${src.path}#${src.block}`;
   }
   AL.enqueue(assetQueue, items);
+  queueChanged();
   // MICRO-ARCHIVE-ASSET-2 · each item shows AT ONCE; one that cannot start
   // stays, waiting, with why and the gesture that solves it
   applyBlocks();
@@ -43345,9 +43426,19 @@ function applyBlocks(): void {
     const cb = ca ? AL.cloudBlock(ca, it.tool, (id) => fileStateOf(id)?.path ?? "") : null;
     if (cb) { it.block = cb; continue; }
     let stampUnknown = false;
+    // MICRO-CODA-VISTA p.4 · the same truth as the Stamp column: a version
+    // the graph says was made and stamped is never asked a stamp (its
+    // derived file declares it); one without, beside a stamp of ANOTHER
+    // version (the master's), says whose stamp the column shows
+    const sv = ca?.versions.find((v) => v.id === src.version);
+    if (sv && graphStamped(sv)) graphStampedPaths.add(src.path);
     const b = AL.blockOf(it.tool, src, {
       addons: blockFacts?.addons ?? null, blender: blockFacts ? blockFacts.blender : true,
-      stamped: (p) => { const v = stampedNow(p); if (v === null) stampUnknown = true; return v; } });
+      stamped: (p) => { if (graphStampedPaths.has(p)) return true; const v = stampedNow(p); if (v === null) stampUnknown = true; return v; } });
+    if (b?.code === "unstamped" && ca) {
+      const other = ca.versions.filter((v) => v.id !== src.version && v.made?.at).sort((x, y) => y.made.at.localeCompare(x.made.at))[0];
+      b.stamp_of = other ? { at: other.made.at.slice(0, 10), level: other.master ? "master" : other.level, master: other.master } : null;
+    }
     it.block = b ?? (stampUnknown || !blockFacts ? { code: "checking" } : null);
   }
   recheckBlocksLater();
@@ -43369,9 +43460,19 @@ function recheckBlocksLater(): void {
 
 /** The words of a block, and its gesture. */
 function blockWords(b: AL.Block): string {
+  if (b.code === "unstamped" && b.stamp_of)
+    return t(b.stamp_of.master ? "al.block.unstampedMaster" : "al.block.unstampedOther",
+      { file: b.path ? baseName(b.path) : "", at: b.stamp_of.at, level: b.stamp_of.level });
   return t(`al.block.${b.code}`, { addon: b.addon ?? "", file: b.path ? baseName(b.path) : "",
     n: fmtN(b.paths?.length ?? 0), mb: fmtMB(b.bytes ?? 0) });
 }
+
+/** MICRO-CODA-VISTA p.4 · a version the graph says was made (a date in the
+ *  Stamp column) and holds its checksum: stamped, for the queue too */
+function graphStamped(v: AL.VersionRow): boolean { return !!v.made?.at && !!v.stamped; }
+/** the source files stamped in the graph whose sidecar is not beside them:
+ *  their derived file declares them as parent (by name) */
+const graphStampedPaths = new Set<string>();
 function blockGesture(it: AL.QueueItem, b: AL.Block): HTMLButtonElement | null {
   const btn = document.createElement("button");
   btn.type = "button";
@@ -43451,6 +43552,8 @@ function pumpQueue(): void {
   const it = AL.nextToRun(assetQueue, queueMode, queueRoom());
   if (!it) return;
   it.state = "running";
+  it.started = Date.now();
+  it.ended = undefined;
   // starting until its first job is at the bridge (`owned`), or it ends
   queueStarting.add(it.id);
   paintQueue();
@@ -43459,10 +43562,28 @@ function pumpQueue(): void {
       const call = queueCalls.get(it.id);
       const why = call ? await runJudged(call, it) : await runAssetItem(it);
       it.state = why === null ? "done" : "failed";
-      if (why) { it.note = why; logWarn(`${it.label}: ${why}`); }
+      if (why) it.note = why;
     } catch (e) { it.state = "failed"; it.note = String((e as Error).message ?? e); }
+    it.ended = Date.now();
+    it.phase = undefined;
+    // MICRO-CODA-VISTA · what it made, and — cancelled — by whom (never a
+    // bare «cancelled»): the person, the bridge restarted, another window,
+    // the page (a form without one geometry: back to its copies)
+    const mine = [...bgJobs.values()].filter((j) => j.owner === it.id);
+    if (it.state === "done") it.made = madeOf(mine) || it.made;
+    if (it.state === "failed") {
+      const off = mine.find((j) => j.state === "cancelled" || j.lost);
+      if (it.cancel?.by === "split" || off) {
+        it.state = "cancelled";
+        if (it.cancel?.by !== "split") it.cancel = cancelOf(off!);
+      }
+    }
+    if (it.state === "failed") logWarn(`${it.label}: ${it.note}`);
+    if (it.state === "cancelled") logInfo(`${it.label}: ${cancelWords(it.cancel)}`);
     queueStarting.delete(it.id);
     queueCalls.delete(it.id);
+    queueChanged();
+    if (it.cancel?.by === "split") splitShapeItem(it);
     if (it.from === "list" && it.state === "done") void askAssetList();
     paintQueue();
     renderStorage();
@@ -43485,7 +43606,9 @@ async function runJudged(f: () => Promise<void>, it: AL.QueueItem): Promise<stri
     return p;
   });
   const mine = [...bgJobs.values()].filter((j) => !before.has(j.id) && j.owner === it.id);
-  if (!mine.length) return t("al.noJob");
+  const refused = startRefused.get(it.id);
+  startRefused.delete(it.id);
+  if (!mine.length) return refused ? t("al.refused", { why: refused }) : t("al.noJob");
   const bad = mine.find((j) => j.state !== "done");
   return bad ? jobText(bad) : null;
 }
@@ -43498,9 +43621,148 @@ function setQueueMode(m: AL.QueueMode): void {
   renderStorage();
 }
 
-/** The queue's panel (the Asset view's right side, Ottimizza's tab): Run /
- *  Pausa, the items with ↑ ↓ «togli», each one's state; the bridge's jobs
- *  running under them with their bars. */
+// ── MICRO-CODA-VISTA · the queue as a view, the progress on the row ─────────
+// E.D. (1 Nov, lab.28): the bars sat at the foot of the right panel instead of
+// on the asset's row; signs at odds and unclear errors here and there; the
+// counts «coperti» changed at every repaint. Now: in Archive, beside «Asset»,
+// the view «Coda» (the same full space) — one row per job with its asset,
+// target, tool, state, bar, time, outcome in plain words and the gesture that
+// solves it, filters; the right panel is the asset's detail only; the row's
+// cell shows the bar while it works, a green «ok» with the new version when
+// done, a red «!» with the short reason when it failed (a click → its row in
+// the view). ONE vocabulary of signs (asset-list.ts `SIGNS`).
+
+const queueUi = { filter: "all" as AL.QueueFilter, lit: "" };
+/** an item added, removed or ended: the ONE moment the budget is computed again */
+let queueEpoch = 0;
+function queueChanged(): void { queueEpoch++; }
+
+/** What an item made: the file its jobs wrote (EM Tools' entry, gltfpack's
+ *  outputs, a tileset's archive). */
+function madeOf(jobs: readonly BgJob[]): string {
+  for (const j of [...jobs].reverse()) {
+    if (j.state !== "done") continue;
+    const r = (j.result ?? {}) as { result?: { entry?: string }; outputs?: { path?: string; state?: string }[]; path?: string; archive?: string };
+    const p = r.result?.entry ?? r.outputs?.find((o) => o.path && (!o.state || o.state === "written"))?.path ?? r.archive ?? r.path;
+    if (p) return baseName(String(p));
+  }
+  return "";
+}
+
+/** Who cancelled a job: this page (its own gesture), the bridge restarted
+ *  (it no longer knows the job), another window or program (the bridge's
+ *  word, `cancel_by`). */
+function cancelOf(j: BgJob): AL.QueueItem["cancel"] {
+  if (j.lost) return { by: "bridge" };
+  const mine = cancelAsked.get(j.id);
+  if (mine) return { by: mine };
+  const theirs = String(j.cancel_by ?? "");
+  return { by: "other", other: theirs.replace(/^emstudio:/, "") };
+}
+function cancelWords(c: AL.QueueItem["cancel"]): string {
+  if (!c) return t("al.qs.cancelled");
+  if (c.by === "other") {
+    const who = c.other ? t(`al.cancelWho.${c.other}`, undefined, c.other) : "";
+    return who ? t("al.cancel.otherBy", { who }) : t("al.cancel.other");
+  }
+  return t(`al.cancel.${c.by}`);
+}
+
+/** A running item's progress and phase: its job's share and words, or why it
+ *  waits at the bridge. */
+function itemRun(it: AL.QueueItem): { p: number | null; words: string } {
+  const jobs = [...bgJobs.values()].filter((j) => j.owner === it.id && jobRunning(j));
+  const w = AL.waitOf(it, jobs, false);
+  const phase = it.phase ? t(`al.phaseRun.${it.phase}`, undefined, it.phase) : "";
+  if (w) return { p: null, words: [phase, waitWords(w)].filter(Boolean).join(" · ") };
+  const j = jobs[jobs.length - 1];
+  if (j && j.state === "running") return { p: j.progress, words: `${phase || t("al.qs.running")} ${Math.round(j.progress * 100)}%` };
+  return { p: null, words: phase || t("al.qs.running") };
+}
+
+/** The outcome of an item in plain words (the same on the row, in the view
+ *  and in Ottimizza's panel). */
+function itemOutcome(it: AL.QueueItem, firstHeld = false): string {
+  if (it.state === "done") return it.made ? t("al.out.made", { file: it.made }) : t("al.qs.done");
+  if (it.state === "failed") return it.note || t("al.qs.failed");
+  if (it.state === "cancelled") return cancelWords(it.cancel);
+  if (it.state === "running") return itemRun(it).words;
+  if (it.block && it.block.code !== "checking") return blockWords(it.block);
+  if (it.block?.code === "checking") return t("al.block.checking");
+  const w = AL.waitOf(it, [], firstHeld);
+  return w ? waitWords(w) : queueMode === "pause" ? t("al.out.paused") : t("al.qs.waiting");
+}
+/** the short reason a row's cell says (the whole one in its title) */
+function shortWhy(s: string): string {
+  const one = s.split(/\n/)[0].replace(/^.*?(failed|non riuscito)[^:]*:\s*/i, "");
+  return one.length > 64 ? `${one.slice(0, 62)}…` : one;
+}
+/** «lod0 · mobile» of `Porta2_BAKE@lod0-mobile.glb` */
+function madeShort(file: string): string {
+  const at = file.indexOf("@");
+  return (at >= 0 ? file.slice(at + 1) : file).replace(/\.(glb|gltf|3tz|zip)$/i, "").replace(/-/g, " · ");
+}
+
+/** The words of a tone (the sign is `AL.SIGNS`). */
+function toneSign(tone: AL.ItemTone): HTMLElement {
+  const s = document.createElement("span");
+  s.className = `al-sign al-tone-${tone}`;
+  s.dataset.tone = tone;
+  s.textContent = AL.SIGNS[tone];
+  s.title = t(`al.tone.${tone}`);
+  return s;
+}
+
+/** The gestures of an item: the block's own (Timbra, Installa…), Riprova,
+ *  Togli, Annulla — and ↑ ↓ while it waits. */
+function itemGestures(it: AL.QueueItem, into: HTMLElement): void {
+  const g = AL.itemGesture(it);
+  const btn = (action: string, text: string, title: string, f: () => void): void => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ghost al-fix";
+    b.dataset.action = action;
+    b.textContent = text;
+    b.title = title;
+    b.onclick = (e) => { e.stopPropagation(); f(); };
+    into.appendChild(b);
+  };
+  if (g === "fix" && it.block) { const fix = blockGesture(it, it.block); if (fix) into.appendChild(fix); }
+  if (g === "retry") btn("queue-retry", t("al.retry"), t("al.retryTitle"), () => {
+    AL.retryItem(assetQueue, it.id); queueChanged(); applyBlocks(); paintQueue(); pumpQueue(); renderStorage();
+  });
+  if (g === "cancel") btn("queue-cancel", t("files.jobCancel"), t("al.cancelTitle"), () => {
+    for (const j of [...bgJobs.values()].filter((x) => x.owner === it.id && jobRunning(x))) void cancelJob(j.id, undefined, "user");
+  });
+  if (it.state === "waiting") {
+    for (const [d, gl] of [[-1, "↑"], [1, "↓"]] as const) btn(d < 0 ? "queue-up" : "queue-down", gl, "", () => { AL.moveItem(assetQueue, it.id, d); paintQueue(); });
+  }
+  if (it.state !== "running") btn("queue-remove", t("al.remove"), t("al.removeTitle"), () => {
+    AL.removeItem(assetQueue, it.id); queueCalls.delete(it.id); queueChanged(); paintQueue(); renderStorage();
+  });
+}
+
+/** Run / Pausa, as a segmented control (the panel and the view). */
+function queueModeSeg(): HTMLElement {
+  const seg = document.createElement("span");
+  seg.className = "files-seg";
+  seg.dataset.queueMode = "";
+  for (const m of ["run", "pause"] as const) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.action = `queue-${m}`;
+    b.textContent = t(`al.queue.${m}`);
+    b.title = t(`al.queue.${m}Title`);
+    b.setAttribute("aria-pressed", String(queueMode === m));
+    b.onclick = () => setQueueMode(m);
+    seg.appendChild(b);
+  }
+  return seg;
+}
+
+/** The queue's panel (Ottimizza's tab in the File view): Run / Pausa, the
+ *  items with their sign, bar, outcome and gesture — and «Apri la Coda». The
+ *  Asset view has the view «Coda» instead (its right side is the detail). */
 function queuePanel(): HTMLElement {
   const box = document.createElement("section");
   box.className = "files-sec al-queue";
@@ -43513,19 +43775,13 @@ function queuePanel(): HTMLElement {
   const cnt = document.createElement("small");
   cnt.textContent = n ? ` (${n})` : "";
   hb.appendChild(cnt);
-  const seg = document.createElement("span");
-  seg.className = "files-seg";
-  for (const m of ["run", "pause"] as const) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.action = `queue-${m}`;
-    b.textContent = t(`al.queue.${m}`);
-    b.title = t(`al.queue.${m}Title`);
-    b.setAttribute("aria-pressed", String(queueMode === m));
-    b.onclick = () => setQueueMode(m);
-    seg.appendChild(b);
-  }
-  h.append(hb, seg);
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "ghost";
+  open.dataset.action = "queue-open-view";
+  open.textContent = t("al.queueOpen");
+  open.onclick = () => openQueueView();
+  h.append(hb, queueModeSeg(), open);
   box.appendChild(h);
   // MICRO-CODA-MULTICORE · how much of the machine, and the scheduler's line
   box.appendChild(queueShareControl("al-share"));
@@ -43536,82 +43792,300 @@ function queuePanel(): HTMLElement {
   const list = document.createElement("div");
   list.className = "al-jobs";
   box.appendChild(list);
-  // MICRO-ARCHIVE-ASSET-2 · a source stamped meanwhile (Timbra): read again
-  for (const it of assetQueue) if (it.state === "waiting" && it.block?.code === "unstamped" && it.block.path) stampKnown.delete(it.block.path);
-  if (assetQueue.some((x) => x.state === "waiting" && x.block)) queueMicrotask(() => { applyBlocks(); paintQueue(); pumpQueue(); });
+  queueRecheck();
   paintQueueInto(list);
   paintSchedLine();
   if (!schedView) void pushQueueShare().then(loadScheduler).then(paintSchedLine);
-  const jobs = jobRows(["variants", "blender", "tileset"]);
-  if (jobs) box.appendChild(jobs);
   return box;
+}
+
+/** a source stamped meanwhile (Timbra) is read again; blocks judged again */
+function queueRecheck(): void {
+  for (const it of assetQueue) if (it.state === "waiting" && it.block?.code === "unstamped" && it.block.path) stampKnown.delete(it.block.path);
+  if (assetQueue.some((x) => x.state === "waiting" && x.block)) queueMicrotask(() => { applyBlocks(); paintQueue(); pumpQueue(); });
+}
+
+/** the first waiting item while the room is full (it waits for its turn) */
+function firstHeldId(): string {
+  const room = queueRoom();
+  const full = queueMode === "run" && (room.held > 0 || assetQueue.filter((x) => x.state === "running").length >= room.slots);
+  return full ? assetQueue.find((x) => x.state === "waiting")?.id ?? "" : "";
 }
 
 function paintQueueInto(list: HTMLElement): void {
   list.textContent = "";
-  const room = queueRoom();
-  const full = queueMode === "run" && (room.held > 0 || assetQueue.filter((x) => x.state === "running").length >= room.slots);
-  const firstHeld = full ? assetQueue.find((x) => x.state === "waiting")?.id ?? "" : "";
+  const held = firstHeldId();
   // few words in Ottimizza (its rule): «Vuota», the sentence in the tooltip
   if (!assetQueue.length) { const e = document.createElement("small"); e.className = "al-empty"; e.textContent = t("al.queueEmptyShort"); e.title = t("al.queueEmpty"); list.appendChild(e); return; }
   for (const it of assetQueue) {
     const r = document.createElement("div");
+    const tone = AL.itemTone(it);
     r.className = "al-job";
     r.dataset.alItem = it.id;
     r.dataset.state = it.state;
-    const s = document.createElement("span");
-    s.className = "al-job-state";
-    s.textContent = { waiting: "⧗", running: "⟳", done: "✔", failed: "✖", cancelled: "–" }[it.state];
-    s.title = t(`al.qs.${it.state}`);
+    r.dataset.tone = tone;
     const l = document.createElement("span");
     l.className = "al-job-label";
     l.textContent = it.label;
     l.title = it.note || it.label;
-    r.append(s, l);
-    // MICRO-CODA-MULTICORE · why it waits: at the bridge (its job, a file of
-    // its batch), or here, the first in line while the room is full
-    const w = AL.waitOf(it, [...bgJobs.values()].filter((j) => j.owner === it.id && jobRunning(j)), it.id === firstHeld);
-    if (w) { const ws = document.createElement("small"); ws.className = "al-wait"; ws.dataset.wait = w.code; ws.textContent = ` ${waitWords(w)}`; r.appendChild(ws); }
-    // MICRO-ARCHIVE-ASSET-2 · blocked: why, and the gesture that solves it
-    if (it.state === "waiting" && it.block) {
-      const bw = document.createElement("small");
-      bw.className = "al-block files-warn";
-      bw.dataset.block = it.block.code;
-      bw.textContent = ` ${blockWords(it.block)}`;
-      r.appendChild(bw);
-      const fix = blockGesture(it, it.block);
-      if (fix) r.appendChild(fix);
-    }
-    if (it.state === "waiting") {
-      for (const [d, g] of [[-1, "↑"], [1, "↓"]] as const) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "ghost";
-        b.dataset.action = d < 0 ? "queue-up" : "queue-down";
-        b.textContent = g;
-        b.onclick = () => { AL.moveItem(assetQueue, it.id, d); paintQueue(); };
-        r.appendChild(b);
-      }
-      const x = document.createElement("button");
-      x.type = "button";
-      x.className = "ghost";
-      x.dataset.action = "queue-remove";
-      x.textContent = t("al.remove");
-      x.onclick = () => { AL.removeItem(assetQueue, it.id); queueCalls.delete(it.id); paintQueue(); renderStorage(); };
-      r.appendChild(x);
-    }
-    if (it.state === "failed" && it.note) { const w = document.createElement("small"); w.className = "files-warn"; w.textContent = ` ${it.note}`; r.appendChild(w); }
+    r.append(toneSign(tone), l);
+    if (it.state === "running") r.appendChild(runBar(it));
+    const out = document.createElement("small");
+    out.className = `al-out al-tone-${tone}`;
+    out.dataset.alOut = it.id;
+    out.textContent = ` ${itemOutcome(it, it.id === held)}`;
+    out.title = out.textContent.trim();
+    r.appendChild(out);
+    itemGestures(it, r);
     list.appendChild(r);
   }
-  if (assetQueue.some((x) => !["waiting", "running"].includes(x.state))) {
-    const c = document.createElement("button");
-    c.type = "button";
-    c.className = "ghost";
-    c.dataset.action = "queue-clear";
-    c.textContent = t("al.clearEnded");
-    c.onclick = () => { const k = AL.clearEnded(assetQueue); assetQueue.length = 0; assetQueue.push(...k); paintQueue(); };
-    list.appendChild(c);
+  if (assetQueue.some((x) => !["waiting", "running"].includes(x.state))) list.appendChild(clearEndedButton());
+}
+
+function clearEndedButton(): HTMLButtonElement {
+  const c = document.createElement("button");
+  c.type = "button";
+  c.className = "ghost";
+  c.dataset.action = "queue-clear";
+  c.textContent = t("al.clearEnded");
+  c.onclick = () => { const k = AL.clearEnded(assetQueue); assetQueue.length = 0; assetQueue.push(...k); queueChanged(); paintQueue(); renderStorage(); };
+  return c;
+}
+
+/** A thin bar with the phase, kept up to date by the polls (`paintRunBars`). */
+function runBar(it: AL.QueueItem): HTMLElement {
+  const box = document.createElement("span");
+  box.className = "al-run";
+  box.dataset.alRun = it.id;
+  const bar = document.createElement("span");
+  bar.className = "al-run-bar";
+  const fill = document.createElement("i");
+  bar.appendChild(fill);
+  const w = document.createElement("small");
+  w.className = "al-run-words";
+  box.append(bar, w);
+  paintRunBar(box, it);
+  return box;
+}
+function paintRunBar(el: HTMLElement, it: AL.QueueItem): void {
+  const r = itemRun(it);
+  const bar = el.querySelector<HTMLElement>(".al-run-bar");
+  const fill = el.querySelector<HTMLElement>(".al-run-bar > i");
+  bar?.classList.toggle("busy", r.p === null);
+  if (fill) fill.style.width = r.p === null ? "" : `${Math.round(r.p * 100)}%`;
+  const w = el.querySelector<HTMLElement>(".al-run-words");
+  if (w) { w.textContent = r.words; w.title = r.words; }
+}
+/** every bar and time of a running item, written in place (no repaint) */
+function paintRunBars(): void {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-al-run]")) {
+    const it = assetQueue.find((x) => x.id === el.dataset.alRun);
+    if (it && it.state === "running") paintRunBar(el, it);
   }
+  for (const el of document.querySelectorAll<HTMLElement>("[data-al-time]")) {
+    const it = assetQueue.find((x) => x.id === el.dataset.alTime);
+    if (it) el.textContent = AL.itemTime(it);
+  }
+}
+setInterval(() => { if (assetQueue.some((x) => x.state === "running")) paintRunBars(); }, 1000);
+
+/** «Coda» in Archive: the view, opened on the Archive window. */
+function openQueueView(lit = ""): void {
+  let st = windowsOf().find((w) => w.type === "storage");
+  if (!st) { setWorkspace("assets"); st = windowsOf().find((w) => w.type === "storage"); }
+  if (!st) { toast(t("blend.prepareNoArchive")); return; }
+  if (lit) { queueUi.lit = lit; queueUi.filter = "all"; }
+  selectWindow(st.id);
+  setArchiveView(st, "queue");
+}
+
+/** The view «Coda»: the head (File | Asset | Coda, Run / Pausa, the share,
+ *  the scheduler's line), the filters with their counts, one row per job. */
+function queueView(win: Win): HTMLElement {
+  const host = document.createElement("div");
+  host.className = "al-view al-qview";
+  host.dataset.alQview = "";
+  const bar = document.createElement("div");
+  bar.className = "files-bar al-head";
+  const grow = document.createElement("span");
+  grow.className = "grow";
+  bar.append(fileAssetSwitch(win), queueModeSeg(), queueShareControl("al-share"), grow);
+  host.appendChild(bar);
+  const sl = document.createElement("p");
+  sl.className = "al-sched files-hint";
+  sl.dataset.alSched = "";
+  host.appendChild(sl);
+  const fl = document.createElement("div");
+  fl.className = "al-tools al-qfilters";
+  fl.dataset.alQfilters = "";
+  host.appendChild(fl);
+  const tw = document.createElement("div");
+  tw.className = "al-table-wrap";
+  const table = document.createElement("table");
+  table.className = "al-table al-qtable";
+  table.dataset.noTableTools = "";
+  const hr = document.createElement("tr");
+  for (const k of ["state", "asset", "target", "tool", "progress", "time", "outcome", "act"]) {
+    const th = document.createElement("th");
+    th.textContent = t(`al.qcol.${k}`);
+    th.dataset.qcol = k;
+    hr.appendChild(th);
+  }
+  const thead = document.createElement("thead");
+  thead.appendChild(hr);
+  const tb = document.createElement("tbody");
+  tb.dataset.alQbody = "";
+  table.append(thead, tb);
+  tw.appendChild(table);
+  host.appendChild(tw);
+  queueRecheck();
+  paintQueueView(host);
+  paintSchedLine();
+  if (!schedView) void pushQueueShare().then(loadScheduler).then(paintSchedLine);
+  return host;
+}
+
+function paintQueueView(host: HTMLElement): void {
+  const fl = host.querySelector<HTMLElement>("[data-al-qfilters]");
+  const tb = host.querySelector<HTMLElement>("[data-al-qbody]");
+  if (!fl || !tb) return;
+  fl.textContent = "";
+  const counts = AL.queueCounts(assetQueue);
+  const seg = document.createElement("span");
+  seg.className = "files-seg";
+  for (const f of AL.QUEUE_FILTERS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.action = `queue-filter-${f}`;
+    b.dataset.n = String(counts[f]);
+    b.textContent = `${t(`al.qf.${f}`)} (${counts[f]})`;
+    b.setAttribute("aria-pressed", String(queueUi.filter === f));
+    b.onclick = () => { queueUi.filter = f; queueUi.lit = ""; paintQueue(); };
+    seg.appendChild(b);
+  }
+  fl.appendChild(seg);
+  if (assetQueue.some((x) => !["waiting", "running"].includes(x.state))) fl.appendChild(clearEndedButton());
+  tb.textContent = "";
+  const held = firstHeldId();
+  const rows = AL.queueFilter(assetQueue, queueUi.filter);
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 8;
+    td.className = "files-hint";
+    td.textContent = assetQueue.length ? t("al.qEmptyFilter") : t("al.queueEmpty");
+    tr.appendChild(td);
+    tb.appendChild(tr);
+    return;
+  }
+  for (const it of rows) {
+    const tone = AL.itemTone(it);
+    const tr = document.createElement("tr");
+    tr.className = `al-qrow${queueUi.lit === it.id ? " lit" : ""}`;
+    tr.dataset.alQrow = it.id;
+    tr.dataset.state = it.state;
+    tr.dataset.tone = tone;
+    const c = (cls = ""): HTMLTableCellElement => { const td = document.createElement("td"); td.className = cls; tr.appendChild(td); return td; };
+    const st = c("al-qstate");
+    st.append(toneSign(tone), ` ${t(`al.tone.${tone}`)}`);
+    const an = c("al-qasset");
+    const name = it.shape ? `${t("al.shape", { n: String(it.asset_ids?.length ?? 0) })} ${it.asset ?? ""}` : it.asset ?? it.label;
+    if (it.asset_id) {
+      const a = document.createElement("a");
+      a.href = "#";
+      a.textContent = name;
+      a.title = t("al.qGoAsset", { name });
+      a.onclick = (e) => { e.preventDefault(); assetUi.detail = it.asset_id!; setArchiveView(win0(), "assets"); };
+      an.appendChild(a);
+    } else an.textContent = name;
+    an.title = it.label;
+    c().textContent = it.target ? t(`al.t.${it.target}`) : "—";
+    c().textContent = it.tool ? t(`al.tool.${it.tool}`) : t("files.tab.optimize");
+    const pr = c("al-qprogress");
+    if (it.state === "running") pr.appendChild(runBar(it));
+    const tm = c("n al-qtime");
+    tm.dataset.alTime = it.id;
+    tm.textContent = AL.itemTime(it);
+    const out = c(`al-qout al-tone-${tone}`);
+    out.dataset.alOut = it.id;
+    out.textContent = it.state === "running" ? "" : itemOutcome(it, it.id === held);
+    out.title = [out.textContent, it.label].filter(Boolean).join("\n");
+    itemGestures(it, c("al-qact"));
+    tb.appendChild(tr);
+  }
+  if (queueUi.lit) requestAnimationFrame(() => tb.querySelector<HTMLElement>(`[data-al-qrow="${queueUi.lit}"]`)?.scrollIntoView({ block: "center" }));
+}
+/** the Archive window (the view's links) */
+function win0(): Win { return windowsOf().find((w) => w.type === "storage")!; }
+
+/** What a row's cell shows of the queue for a target (MICRO-CODA-VISTA p.3):
+ *  waiting / running → only that (the bar with the phase); done → green
+ *  «ok» with the new version while the answer has not caught up (or the
+ *  target is ok); failed / cancelled → a red «!» (a grey «–») with the short
+ *  reason ABOVE the proposal — a click opens its row in «Coda». → whether
+ *  the cell is taken. */
+function cellRunInto(td: HTMLTableCellElement, it: AL.QueueItem | null, cellOk: boolean): boolean {
+  if (!it) return false;
+  const tone = AL.itemTone(it);
+  td.dataset.alRunCell = tone;
+  const go = (el: HTMLElement): void => {
+    el.classList.add("al-golink");
+    el.title = `${el.title ? `${el.title}\n` : ""}${t("al.qGoRow")}`;
+    el.onclick = (e) => { e.stopPropagation(); openQueueView(it.id); };
+  };
+  if (tone === "run") {
+    td.appendChild(runBar(it));
+    go(td);
+    return true;
+  }
+  if (tone === "wait" || tone === "block") {
+    const q = document.createElement("span");
+    q.className = `al-queued al-tone-${tone}`;
+    q.append(toneSign(tone), ` ${tone === "block" ? shortWhy(blockWords(it.block!)) : `${t("al.inQueue")} · ${t(`al.tool.${it.tool ?? "keep"}`)}`}`);
+    q.title = itemOutcome(it);
+    go(q);
+    td.appendChild(q);
+    return true;
+  }
+  if (tone === "ok") {
+    if (!cellOk && (it.ended ?? 0) <= answeredAt) return false;
+    const ok = document.createElement("span");
+    ok.className = "al-state al-ok al-done";
+    ok.append(`${AL.SIGNS.ok} ${t("al.state.ok")}`);
+    const v = document.createElement("small");
+    v.textContent = it.made ? ` ${madeShort(it.made)}` : "";
+    ok.title = itemOutcome(it);
+    go(ok);
+    td.append(ok, v);
+    return true;
+  }
+  const line = document.createElement("div");
+  line.className = `al-runline al-tone-${tone}`;
+  const why = tone === "fail" ? it.note || t("al.qs.failed") : cancelWords(it.cancel);
+  line.append(toneSign(tone), ` ${shortWhy(why)}`);
+  line.title = why;
+  go(line);
+  td.appendChild(line);
+  return false;
+}
+
+/** MICRO-CODA-VISTA p.5 · a form the diagnosis did not find ONE geometry for
+ *  (Column_entrance ×2): no group any more — each copy has its own proposal
+ *  again, and each goes in the queue with it (said). */
+const refusedShapes = new Set<string>();
+function splitShapeItem(it: AL.QueueItem): void {
+  if (!it.shape || !assetUi.ans || !it.target) return;
+  refusedShapes.add(it.shape);
+  const ans = assetUi.ans;
+  const ids = new Set(it.asset_ids ?? []);
+  const bands = Object.fromEntries(AL.TARGET_KEYS.map((k) => [k, ans.targets[k]?.bands])) as Record<AL.TargetKey, AL.Bands>;
+  const items = AL.selectionItems(ans.assets, shapesOf(ans).list, ids, [it.target], assetUi.plan, bands,
+    { one: (a, k, p) => `${a.name} → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}` });
+  const names = ans.assets.filter((a) => ids.has(a.id)).map((a) => a.name).join(", ");
+  const m = t("al.shapeSplitSaid", { names, n: String(items.length) });
+  toast(m);
+  logInfo(m);
+  if (items.length) queueAdd(items);
 }
 
 /** The share in a segmented control (the queue's panel, Settings): all of
@@ -43661,8 +44135,12 @@ function paintQueue(): void {
     const n = assetQueue.filter((x) => x.state === "waiting" || x.state === "running").length;
     el.textContent = n ? ` (${n})` : "";
   }
-  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-al-queue] [data-action^='queue-run'], [data-al-queue] [data-action^='queue-pause']"))
+  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-queue-mode] [data-action^='queue-run'], [data-queue-mode] [data-action^='queue-pause']"))
     b.setAttribute("aria-pressed", String(b.dataset.action === `queue-${queueMode}`));
+  // MICRO-CODA-VISTA · the view «Coda», the switch's count, the rows' cells
+  for (const el of document.querySelectorAll<HTMLElement>("[data-al-qview]")) paintQueueView(el);
+  for (const el of document.querySelectorAll<HTMLElement>("[data-action='al-view-queue']")) el.textContent = queueSwitchWords();
+  paintRunBars();
 }
 
 /** What a list item does when its turn comes: the tool on the asset's
@@ -43678,6 +44156,7 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   const base = OPTIMIZE_PRESETS.find((p) => p.id === presetForProfile(profile)) ?? OPTIMIZE_PRESETS[0];
   if (it.tool === "keep") return null;
   if (src.kind === "none") return t("al.noSource");
+  it.phase = "make";
   if (it.tool === "tileset") {
     if (src.kind !== "files") return t("al.noMesh");
     return runJudged(() => runTileset(win, [src.path], 1), it);
@@ -43700,6 +44179,7 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
     .filter((x) => x.s.kind === "blend" && paths.toPosix(x.s.path) === paths.toPosix(src.path)) : [];
   if (it.shape && members.length < 2) return t("al.shapeNoBlend");
   const blocks = members.length ? members.map((x) => x.s.block).filter(Boolean) : src.block ? [src.block] : [];
+  it.phase = "measure";
   const job = await owned(it, () => startJob({ kind: "blender", op: "measure", blend: src.path, objects: blocks },
     t("files.useMeasuring", { name: members.length ? t("al.shape", { n: String(members.length) }) : src.block || baseName(src.path) })));
   if (!job) return t("al.blenderNo");
@@ -43707,6 +44187,8 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   if (end.state !== "done") return jobText(end);
   const m = (end.result as { result?: { objects: unknown[]; textures: Record<string, unknown>; names: string[] } })?.result;
   if (!m || !m.objects?.length) return t("files.useNoMeasure");
+  it.phase = "diagnose";
+  paintRunBars();
   const d = await postUse<Diagnosis>("/optimize/diagnose", { profile, measured: { objects: m.objects, textures: m.textures } });
   if (!d.ok) return String(d.error ?? "?");
   // the diagnosis' ticks, and — the tool asks it — the decimation (baked
@@ -43715,15 +44197,24 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
     && (r.checked || ((it.tool === "decimate_bake" || it.tool === "instance") && r.kind === "decimate" && !!it.triangles)
         || (it.tool === "instance" && r.kind === "instances"));
   const ids = d.improvements.filter(wants).map((r) => r.id);
-  if (it.shape && !d.improvements.some((r) => r.kind === "instances" && ids.includes(r.id))) return t("al.shapeNotOne");
+  // MICRO-CODA-VISTA p.5 · no ONE geometry for the copies (Column_entrance
+  // ×2): no group — back to the proposal of each copy (said, and queued)
+  if (it.shape && !d.improvements.some((r) => r.kind === "instances" && ids.includes(r.id))) {
+    it.cancel = { by: "split" };
+    return t("al.shapeNotOne");
+  }
   const params: Record<string, RowParams> = {};
   for (const r of d.improvements.filter((x) => ids.includes(x.id))) {
     if (r.kind === "decimate" && it.triangles) params[r.id] = { ...(r.params ?? {}), triangles_to: it.triangles };
     if (r.kind === "texture_side" && it.texture) params[r.id] = { ...(r.params ?? {}), side: it.texture };
   }
-  prepareCtx.set(src.path, { master: src.version, model: a.id, name: src.block || a.name, profile,
+  // MICRO-CODA-VISTA p.1 · the context by .blend AND object: two items of the
+  // same .blend ending side by side never take each other's master
+  prepareCtx.set(prepareKey(src.path, src.block || a.name), { master: src.version, model: a.id, name: src.block || a.name, profile,
                               also: members.slice(1).map((x) => x.s.version) });
   useState.measured.set(useKey([], src.path), m as never);
+  it.phase = "make";
+  paintRunBars();
   return runJudged(() => applyUse(src.path, d, ids, src.block || a.name, levelFor(d, ids), params), it);
 }
 
@@ -43779,6 +44270,11 @@ function assetDetail(win: Win, a: AL.AssetRow): HTMLElement {
     vt.appendChild(tr);
   }
   box.appendChild(vt);
+  // MICRO-CODA-VISTA p.1 · a version of this asset that is another's (or one
+  // of its own registered elsewhere): said, with «Correggi»
+  const masterIds = new Set(a.versions.filter((v) => v.master).map((v) => v.id));
+  const misA = misplacedNow().filter((m) => masterIds.has(m.on_id) || (m.right_id && masterIds.has(m.right_id)));
+  if (misA.length) box.appendChild(misplacedBanner(misA));
   // the findings (Consolida 2's), with their hands
   for (const f of a.findings) {
     const p = document.createElement("p");
@@ -43825,7 +44321,7 @@ function assetDetail(win: Win, a: AL.AssetRow): HTMLElement {
   const lead = tabLead(t(src.kind === "blend" ? "al.fromBlend" : "al.fromFile", { file: baseName(src.path), block: src.block }), "files-hint");
   box.appendChild(lead);
   if (src.kind === "blend") setFilesPref(win, `use-model:${src.path}`, src.block || a.name);
-  if (src.kind === "blend") prepareCtx.set(src.path, { master: src.version, model: a.id, name: src.block || a.name, profile: assetUi.target === "mobile" ? "mobile_webxr" : "webxr" });
+  if (src.kind === "blend") prepareCtx.set(prepareKey(src.path, src.block || a.name), { master: src.version, model: a.id, name: src.block || a.name, profile: assetUi.target === "mobile" ? "mobile_webxr" : "webxr" });
   // the File window's tabs read the choice of the window: the asset's file, in its folder
   setWinCurrent(win, "fsSelected", src.path);
   setWinCurrent(win, "fsPicked", null);
@@ -43838,6 +44334,116 @@ function assetDetail(win: Win, a: AL.AssetRow): HTMLElement {
   } catch (err) { box.appendChild(storageEmpty(String((err as Error).message))); }
   finally { alDetailAsset = null; }
   return box;
+}
+
+// ── MICRO-CODA-VISTA p.1 · versions registered on the wrong asset ──────────
+// Found in the open graph (version-misplaced.ts), said in the Asset view and
+// in the asset's detail, and «Correggi»: each moved to the master of the
+// object it was made from (and to the copies of its form, the same file) or
+// removed — ONE step of undo, before the person saves. The asset that lost
+// its place keeps its own file when the graph has it (a revision of the
+// wrong version becomes the version).
+
+let misMemo: { key: string; list: Misplaced[] } | null = null;
+function misplacedNow(): Misplaced[] {
+  if (!store?.doc?.graph) return [];
+  const g = store.doc.graph;
+  const key = `${assetDocKey()}|${g.nodes.length}|${g.edges.length}|${answerSeq}`;
+  if (!misMemo || misMemo.key !== key) misMemo = { key, list: findMisplaced(store.liveNodes(), store.liveEdges()) };
+  return misMemo.list;
+}
+
+function misplacedLine(m: Misplaced): string {
+  const file = baseName(m.file);
+  return m.action === "move"
+    ? t("al.mis.move", { file, on: m.on_name, right: m.right_name })
+    : t(m.shared ? "al.mis.removeShared" : "al.mis.remove", { file, on: m.on_name, model: m.model });
+}
+
+function misplacedBanner(list: Misplaced[]): HTMLElement {
+  const p = document.createElement("div");
+  p.className = "files-warn al-mis";
+  p.dataset.alMis = String(list.length);
+  const head = document.createElement("b");
+  head.textContent = `${AL.SIGNS.block} ${tn("al.mis.head", list.length)}`;
+  const ul = document.createElement("ul");
+  for (const m of list) {
+    const li = document.createElement("li");
+    li.dataset.alMisVersion = m.version_id;
+    li.dataset.action = m.action;
+    li.textContent = misplacedLine(m);
+    ul.appendChild(li);
+  }
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "primary";
+  b.dataset.action = "al-mis-fix";
+  b.textContent = t("al.mis.fix");
+  b.title = t("al.mis.fixTitle");
+  b.onclick = () => { b.disabled = true; void fixMisplaced(list).finally(() => { b.disabled = false; }); };
+  p.append(head, " ", b, ul);
+  return p;
+}
+
+async function fixMisplaced(list: Misplaced[]): Promise<{ moved: number; removed: number; failed: string[] }> {
+  const res = { moved: 0, removed: 0, failed: [] as string[] };
+  if (!store?.doc?.graph || !list.length) return res;
+  const st = store;
+  const drop = new Set(list.flatMap((m) => [m.version_id, m.process_id]));
+  // the graph as it will be without them: the moves are asked on it (a
+  // version's id is its master's and level's — the right one may be free
+  // only once the wrong one is gone)
+  const clone = JSON.parse(JSON.stringify(st.doc)) as typeof st.doc;
+  clone.graph.nodes = clone.graph.nodes.filter((n) => !drop.has(n.id));
+  clone.graph.edges = clone.graph.edges.filter((e) => !drop.has(e.source) && !drop.has(e.target));
+  const addN: EmNode[] = [], addE: EmEdge[] = [];
+  const dataOfNode = (id: string): Record<string, unknown> => (st.node(id)?.data ?? {}) as Record<string, unknown>;
+  for (const m of list.filter((x) => x.action === "move" && x.right_id)) {
+    const pd = dataOfNode(m.process_id);
+    const vd = dataOfNode(m.version_id);
+    const params = { ...((pd.parameters ?? {}) as Record<string, unknown>) };
+    const level = String(params.level ?? m.level ?? "");
+    const purpose = String(params.purpose ?? "");
+    delete params.level; delete params.purpose; delete params.shared_mesh; delete params.instances;
+    // the copies of the right form get the same file (one mesh, N instances)
+    const row = assetUi.ans?.assets.find((r) => r.versions.some((v) => v.master && v.id === m.right_id));
+    const sh = row && assetUi.ans ? shapesOf(assetUi.ans).index.get(row.id) : undefined;
+    const others = (sh?.assets ?? []).filter((x) => x.id !== row?.id)
+      .map((x) => x.versions.find((v) => v.master)?.id).filter((x): x is string => !!x);
+    const tool = pd.tool && typeof pd.tool === "object" ? String((pd.tool as Record<string, unknown>).name ?? "") : String(pd.tool ?? "");
+    for (const [i, master] of [m.right_id!, ...others].entries()) {
+      const r = await fetch(`${await bridgeUrl()}/graph/add-version`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doc: clone, source: "", em_json: currentFilePath ?? "", master_id: master,
+          locator: m.file, sha256: m.checksum, bytes: vd.size_bytes ?? undefined, level, destination: purpose,
+          use: Array.isArray(vd.use) ? vd.use : [], primitives: vd.primitives ?? undefined,
+          parameters: i ? { ...params, shared_mesh: true, instances: others.length + 1 } : params,
+          technique: String(pd.technique ?? "prepare_for_use"), tool: tool || "EM Tools · Prepare for a use",
+          software: Array.isArray(pd.software) ? pd.software : undefined,
+          author: String(pd.author ?? "") || undefined, at: String(pd.at ?? "") || undefined }) }).catch(() => null);
+      const j = r ? await r.json().catch(() => ({})) as { ok?: boolean; registered?: boolean; reason?: string; error?: string; nodes?: EmNode[]; edges?: EmEdge[] } : {};
+      if (!r || !j.ok || !j.registered) {
+        res.failed.push(`${baseName(m.file)} → ${String(st.node(master)?.name ?? master)}: ${j.reason ?? j.error ?? (r ? r.status : t("storage.bridgeDown"))}`);
+        continue;
+      }
+      for (const nd of j.nodes ?? []) { addN.push(nd); clone.graph.nodes.push(nd); }
+      for (const e of j.edges ?? []) { addE.push(e); clone.graph.edges.push(e); }
+      if (i === 0) res.moved++;
+    }
+  }
+  st.batch(() => {
+    for (const id of drop) if (st.node(id)) st.deleteNode(id);
+    for (const nd of addN) if (!st.node(nd.id)) st.addNode(nd);
+    for (const e of addE) st.addEdge(e.source, e.target, String(e.edge_type ?? ""), undefined, e.id);
+  });
+  res.removed = list.length - res.moved;
+  const msg = t("al.mis.done", { moved: String(res.moved), removed: String(res.removed) });
+  toast(msg);
+  logInfo(`${msg}\n${list.map(misplacedLine).join("\n")}`);
+  for (const f of res.failed) logWarn(f);
+  misMemo = null;
+  void askAssetList();
+  return res;
 }
 
 /** MICRO-ARCHIVE-ASSET-2 · the asset whose detail is being drawn: Ottimizza's
@@ -43859,6 +44465,9 @@ let alDetailAsset: AL.AssetRow | null = null;
 
 /** a .blend opened in Ottimizza by «Prepara» on a master inside it: the
  *  version EM Tools makes there is registered on THAT master */
+/** MICRO-CODA-VISTA p.1 · the key of a «Prepare for a use» context: the
+ *  .blend and the object (the .blend alone was shared by its objects) */
+function prepareKey(blend: string, model: string): string { return `${paths.toPosix(blend)}|${model}`; }
 const prepareCtx = new Map<string, { master: string; model: string; name: string; profile: string;
   /** MICRO-ARCHIVE-ASSET-2 · the other masters of a form repeated: the same
    *  file registered as a version of each */
@@ -44022,7 +44631,16 @@ function registerUseVersion(blend: string, profile: string, model: string, level
 async function registerUseVersionNow(blend: string, profile: string, model: string, level: string,
                                   res: { entry?: string; bytes?: number; measured?: { triangles?: number } }): Promise<void> {
   if (!store || !res.entry) return;
-  const ctx = prepareCtx.get(blend);
+  // MICRO-CODA-VISTA p.1 · the context of THIS object of the .blend (it was
+  // the .blend's: Porta2's file registered on Tempio_4, whose item had set it
+  // meanwhile) — and a master that is not this object is never taken
+  const key = prepareKey(blend, model);
+  let ctx = prepareCtx.get(key);
+  const ctxBlock = ctx ? blendBlock(String((store.node(ctx.master)?.data as Record<string, unknown> | undefined)?.url ?? "")) : null;
+  if (ctx && ctxBlock && ctxBlock.block !== model) {
+    logWarn(t("al.mis.ctxRefused", { name: baseName(res.entry), master: String(store.node(ctx.master)?.name ?? ctx.master) }));
+    ctx = undefined;
+  }
   let master = ctx?.master ?? "";
   if (!master) {
     // a master inside this .blend whose datablock or RM bears the model's name
@@ -44057,7 +44675,7 @@ async function registerUseVersionNow(blend: string, profile: string, model: stri
     if (w === null) also++; else logWarn(t("files.useNotRegistered", { name: `${name} → ${String(store.node(other)?.name ?? other)}`, why: w }));
   }
   if (also) logInfo(t("al.shapeRegistered", { name, n: String(also + (why === null ? 1 : 0)) }));
-  prepareCtx.delete(blend);
+  prepareCtx.delete(key);
 }
 
 /** «Componi un .blend dal grafo»: from the open study, no .blend to start

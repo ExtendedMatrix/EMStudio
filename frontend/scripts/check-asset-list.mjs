@@ -130,11 +130,27 @@ ok(aftM.covered === 2 && aftM.triangles === 10 + 20 + 5, `after the queue: the i
 // 2 · the forms repeated: one mesh + N instances
 const colG = (id, keys, comp = "") => asset(id, { family: "Col" }, [M(`${id}.m`), ver(`${id}.v0`, { triangles: 60, geometry_keys: keys, compression: comp,
   textures: [tex("AO", 1024), tex("N", 1024)], texture_side: 1024, checksum: `sha256:${id}` })], { web: cell("todo", `${id}.v0`) });
-const shapesL = [colG("ColA1", ["g:1"]), colG("ColA2", ["g:1"]), colG("ColA3", ["g:1"]), colG("ColB1", ["g:2"]), colG("ColC1", ["g:9"], "draco"), colG("ColC2", ["g:8"], "draco")];
+// MICRO-CODA-VISTA p.1 · a form ONLY from the geometry's fingerprint + the
+// textures' sha256: the compressed bytes count (the same Draco bytes), the
+// same triangles never do
+const shapesL = [colG("ColA1", ["g:1"]), colG("ColA2", ["g:1"]), colG("ColA3", ["g:1"]), colG("ColB1", ["g:2"]), colG("ColC1", ["d:7"], "draco"), colG("ColC2", ["d:7"], "draco")];
 const shp = A.repeatedShapes(shapesL);
 ok(shp.length === 2 && shp[0].assets.map((a) => a.id).join() === "ColA1,ColA2,ColA3" && shp[0].via === "geometry",
    `the same geometry keys and textures: one form ×3 (${shp.map((s) => `${s.via}×${s.assets.length}`).join(", ")})`);
-ok(shp[1].via === "triangles" && shp[1].assets.length === 2, "compressed files: the same triangles and textures (said)");
+ok(shp[1].via === "geometry" && shp[1].assets.length === 2 && shp[1].key.startsWith("g:draco:"), "compressed files: the same compressed geometry and textures (the key says the compression)");
+{
+  // Porta2 / Tempio_4 (E.D., 1 Nov): the same triangles and textures, other geometry → never one form
+  const pt = [colG("Porta2", ["d:1"], "draco"), colG("Tempio_4", ["d:2"], "draco")];
+  ok(A.repeatedShapes(pt).length === 0, "the same triangles and textures, another geometry: no form (Porta2 / Tempio_4)");
+  const plain = [colG("P1", ["g:5"]), colG("P2", ["d:5"], "draco")];
+  ok(A.repeatedShapes(plain).length === 0, "a Draco file never meets a plain one with the same key");
+  const nokey = [colG("N1", []), colG("N2", [])];
+  ok(A.repeatedShapes(nokey).length === 0 && A.shapeless(nokey).join() === "N1,N2", "no geometry key: no group, said (shapeless)");
+  const texDiff = [colG("T1", ["g:3"]), (() => { const x = colG("T2", ["g:3"]); x.versions[1].textures = [tex("AO", 1024), tex("N2", 1024)]; return x; })()];
+  ok(A.repeatedShapes(texDiff).length === 0, "the same geometry, other textures: no form");
+  // p.5 · a form the diagnosis refused (Column_entrance ×2): no group
+  ok(A.repeatedShapes(shapesL, new Set([shp[1].key])).length === 1, "a form refused by the diagnosis: no group, its copies alone");
+}
 const sp = A.shapeProposal(shp[0], "web", BANDS.web);
 ok(sp.tool === "instance" && sp.triangles === 50 && sp.ktx2 && /3 istanze/.test(sp.why), `ONE proposal: ${sp.why}`);
 ok(A.shapeProposal(shp[0], "arch", BANDS.arch).tool === "keep", "the archive keeps its masters");
@@ -258,6 +274,43 @@ ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk o
      "a tileset asked by hand with nothing to start from: «manca il master», not «no file»");
 }
 
+// ── MICRO-CODA-VISTA ───────────────────────────────────────────────────────
+{
+  const it = (id, state, o = {}) => ({ id, label: id, state, note: "", from: "list", target: "web", tool: "gltfpack", asset_id: id, ...o });
+  // p.4 · ONE vocabulary: the tone and its sign, the same everywhere
+  const tones = [it("w", "waiting"), it("b", "waiting", { block: { code: "addon", addon: "gltfpack" } }), it("c", "waiting", { block: { code: "checking" } }),
+    it("r", "running"), it("d", "done"), it("f", "failed"), it("x", "cancelled")].map((x) => A.itemTone(x));
+  ok(tones.join() === "wait,block,wait,run,ok,fail,off", `one tone per state (${tones.join()}); «checking» is not a block`);
+  ok(new Set(Object.values(A.SIGNS)).size === 6 && A.SIGNS.fail === "!" && A.SIGNS.ok === "✓", "one sign per tone, none twice (! failed, ✓ done)");
+  // p.2 · the view's filters and counts
+  const qv = [it("r1", "running"), it("w1", "waiting"), it("w2", "waiting", { block: { code: "unstamped", path: "/p/a.glb" } }),
+    it("f1", "failed"), it("x1", "cancelled"), it("d1", "done"), it("d2", "done")];
+  const cnt = A.queueCounts(qv);
+  ok(cnt.all === 7 && cnt.running === 1 && cnt.waiting === 2 && cnt.failed === 2 && cnt.done === 2
+     && A.queueFilter(qv, "failed").map((x) => x.id).join() === "f1,x1", `the filters: ${JSON.stringify(cnt)} (falliti = failed + cancelled)`);
+  // the gesture that solves it
+  ok(qv.map((x) => A.itemGesture(x)).join() === "cancel,remove,fix,retry,retry,,", `the gestures: ${qv.map((x) => A.itemGesture(x) ?? "—").join(",")}`);
+  const rq = [it("f2", "failed", { note: "boom", started: 1, ended: 2, cancel: null })];
+  A.retryItem(rq, "f2");
+  ok(rq[0].state === "waiting" && !rq[0].note && rq[0].ended === undefined, "«Riprova»: back waiting, its outcome forgotten");
+  ok(A.itemTime({ started: 0, ended: 12000 }) === "12 s" && A.itemTime({ started: 0, ended: 185000 }) === "3 min 05 s", "the time in words");
+  // p.3 · the row's cell: the live item first, else the last ended
+  const qc = [it("old", "failed", { asset_id: "A", ended: 10 }), it("new", "done", { asset_id: "A", ended: 20 }),
+    it("form", "running", { asset_id: "B", asset_ids: ["B", "C"], shape: "k" })];
+  ok(A.cellItem(qc, "A", "web")?.id === "new" && A.cellItem(qc, "C", "web")?.id === "form" && A.cellItem(qc, "A", "mobile") === null,
+     "the cell's item: the last ended for its asset, a form's on each copy, none for another target");
+  // p.6 · the counts stable: an item done after the answer still counts
+  const qd = [{ id: "m1", label: "", state: "done", note: "", asset_id: "Column1", target: "mobile", tool: "decimate_bake", triangles: 10, texture: 512, ktx2: true, ended: 2000 }];
+  const before = A.sceneCount(list, "mobile", { queue: [{ ...qd[0], state: "running" }], after: true });
+  const between = A.sceneCount(list, "mobile", { queue: qd, after: true, answeredAt: 1000 });
+  const caught = A.sceneCount(list, "mobile", { queue: qd, after: true, answeredAt: 3000 });
+  ok(before.covered === between.covered && before.triangles === between.triangles && caught.covered === 1,
+     `between the end and the next answer the count does not drop (${before.covered} → ${between.covered}; answered: the answer's own ${caught.covered})`);
+  const k1 = A.budgetKey(3, 7, new Map([["a", { web: { tool: "gltfpack" } }]]));
+  ok(k1 === A.budgetKey(3, 7, new Map([["a", { web: { tool: "gltfpack" } }]])) && k1 !== A.budgetKey(3, 8, new Map([["a", { web: { tool: "gltfpack" } }]])),
+     "the budget's key: the same answer, epoch and plan → the same (no recount on a repaint)");
+}
+
 // ── the bridge ──────────────────────────────────────────────────────────────
 if (!existsSync(PY)) {
   console.log(`asset-list: ${checks} page checks; no s3Dgraphy venv — bridge SKIPPED`);
@@ -357,6 +410,13 @@ try {
        `mobile is «incompleto» (${tcov.covered} / ${tcov.total}), not «dentro»`);
     const tsh = A.repeatedShapes(tl.assets);
     for (const s of tsh) console.log(`  · form ×${s.assets.length} (${s.via}, ${s.triangles} tri): ${s.assets.map((a) => a.name).join(" ")}`);
+    // MICRO-CODA-VISTA p.1 · Porta2 and Tempio_4: two forms of their own, never one
+    const p2 = tsh.find((s) => s.assets.some((a) => a.name.startsWith("Porta2_BAKE")));
+    const t4 = tsh.find((s) => s.assets.some((a) => a.name.startsWith("Tempio_4_BAKE")));
+    ok(p2 && t4 && p2 !== t4 && p2.assets.length === 2 && t4.assets.length === 2 && p2.via === "geometry" && t4.via === "geometry"
+       && !tsh.some((s) => s.assets.some((a) => a.name.startsWith("Porta2")) && s.assets.some((a) => a.name.startsWith("Tempio_4"))),
+       `Porta2 ×2 and Tempio_4 ×2: two forms by their geometry, never together (${p2?.triangles} / ${t4?.triangles} tri)`);
+    ok(tsh.every((s) => s.via === "geometry"), `every form of Templu by its geometry (${tsh.length} forms; ${A.shapeless(tl.assets).length} meshes without a key)`);
     const temp = tsh.find((s) => s.assets.some((a) => a.name === "Column_tempio1"));
     ok(tsh.length >= 3 && temp && temp.assets.filter((a) => /^Column_tempio\d$/.test(a.name)).length === 6 && temp.via === "geometry",
        `Templu Mare: ${tsh.length} forms repeated; Column_tempio1–6 one form`);

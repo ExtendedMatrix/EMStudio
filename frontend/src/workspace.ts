@@ -102,9 +102,10 @@ export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "graphs"];
  *  and the room's S3 store
  *  (`s3Panel`: delivery, lots, derivation); and the study's ASSETS
  *  (MICRO-ARCHIVE-ASSET: Archive › Asset, the list with versions and textures,
- *  `assetListView`). AUDIT C · it said «NOT connected
+ *  `assetListView`), and its QUEUE (MICRO-CODA-VISTA: Archive › Coda, one
+ *  row per job, `queueView`). AUDIT C · it said «NOT connected
  *  (phase 2)», which stopped being true when the panel was implemented. */
-export const STORAGE_MODES = ["filesystem", "graphfiles", "s3", "assets"] as const;
+export const STORAGE_MODES = ["filesystem", "graphfiles", "s3", "assets", "queue"] as const;
 
 /** How a Viewer window shows its collection: one item at a time, or all of it.
  *  Same collection either way — the Mode is the reading, not the content. */

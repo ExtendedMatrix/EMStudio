@@ -2248,7 +2248,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: their heads (tileset.json or the stored members of a .3tz, never the
 #: geometry) and passes them to s3Dgraphy (``tiles=``): a tileset «ok» for a
 #: target only if its tiles fit the band, and then it covers its meshes.
-BRIDGE_LEVEL = 57   # 30 also = /validate
+BRIDGE_LEVEL = 58   # 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -4070,7 +4070,7 @@ def make_handler(api):
                 self._json(O.SCHED.view())
                 return
             if body.get("step") == "cancel":
-                ok = O.cancel(str(body.get("id") or ""), body.get("item"))
+                ok = O.cancel(str(body.get("id") or ""), body.get("item"), str(body.get("by") or ""))
                 self._json({"ok": ok} if ok else {"ok": False, "error": "no such job"}, 200 if ok else 404)
                 return
             kind = str(body.get("kind") or "")

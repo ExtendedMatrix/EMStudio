@@ -362,11 +362,23 @@ export interface QueueItem {
   /** MICRO-ARCHIVE-ASSET-3 · where it starts from (`kind:path#block`): the
    *  queue never holds two live items of the same source, target and tool */
   source?: string;
+  /** MICRO-CODA-VISTA · when it started and ended (ms), what it made (the
+   *  file, the level), the phase it is in, and — cancelled — by whom */
+  started?: number; ended?: number; made?: string; phase?: string; progress?: number;
+  cancel?: { by: CancelBy; other?: string } | null;
 }
+/** MICRO-CODA-VISTA p.4 · who cancelled an item: the person (from the queue,
+ *  the status bar's chip, Ottimizza's bar), the bridge restarted (its job
+ *  lost), another window or program, the page itself (a form the diagnosis
+ *  did not find one geometry for: back to its copies) */
+export type CancelBy = "user" | "chip" | "panel" | "bridge" | "other" | "split";
 export type BlockCode = "addon" | "unstamped" | "blender" | "no_source" | "no_blend" | "no_mesh" | "no_master" | "checking" | "cloud" | "author";
 /** `cloud` (MICRO-TESTATA-CLOUD): the source is in the cloud, «da scaricare»
  *  — `paths` and `bytes` are what «Scarica e misura» would download */
-export interface Block { code: BlockCode; addon?: string; path?: string; paths?: string[]; bytes?: number }
+export interface Block { code: BlockCode; addon?: string; path?: string; paths?: string[]; bytes?: number;
+  /** MICRO-CODA-VISTA p.4 · «unstamped»: the stamp the Stamp column shows is
+   *  of ANOTHER version (the master's, or another level's) — when and which */
+  stamp_of?: { at: string; level: string; master: boolean } | null }
 export type QueueMode = "run" | "pause";
 /** «quanto della macchina usare»: all of it, half, one job at a time */
 export type QueueShare = "all" | "half" | "one";
@@ -494,6 +506,84 @@ export function clearEnded(q: QueueItem[]): QueueItem[] {
   return q.filter((x) => x.state === "waiting" || x.state === "running");
 }
 
+// ── MICRO-CODA-VISTA · ONE vocabulary of states and signs ───────────────────
+// The row's cell, the queue's view and the detail say the same thing with the
+// same sign: never ✖ here and ! there for a failure, ✔ and «ok» for a done.
+
+export type ItemTone = "wait" | "block" | "run" | "ok" | "fail" | "off";
+/** the sign of each tone (the words are the page's) */
+export const SIGNS: Readonly<Record<ItemTone, string>> = { wait: "⧗", block: "⚠", run: "⟳", ok: "✓", fail: "!", off: "–" };
+
+/** The tone of an item: waiting (or blocked, saying why — «checking» is not a
+ *  block), running, done, failed, cancelled. */
+export function itemTone(it: Pick<QueueItem, "state" | "block">): ItemTone {
+  if (it.state === "waiting") return it.block && it.block.code !== "checking" ? "block" : "wait";
+  return ({ running: "run", done: "ok", failed: "fail", cancelled: "off" } as const)[it.state];
+}
+
+/** The filters of the view «Coda»: in corso, in attesa (blocked too), falliti
+ *  (cancelled too: nothing made), fatti. */
+export type QueueFilter = "all" | "running" | "waiting" | "failed" | "done";
+export const QUEUE_FILTERS: readonly QueueFilter[] = ["all", "running", "waiting", "failed", "done"];
+export function queueFilter(q: readonly QueueItem[], f: QueueFilter): QueueItem[] {
+  if (f === "all") return [...q];
+  const want = { running: ["running"], waiting: ["waiting"], failed: ["failed", "cancelled"], done: ["done"] }[f];
+  return q.filter((x) => want.includes(x.state));
+}
+export function queueCounts(q: readonly QueueItem[]): Record<QueueFilter, number> {
+  const out = { all: q.length, running: 0, waiting: 0, failed: 0, done: 0 } as Record<QueueFilter, number>;
+  for (const f of QUEUE_FILTERS) if (f !== "all") out[f] = queueFilter(q, f).length;
+  return out;
+}
+
+/** The item a row's cell shows for a target: the live one (running first,
+ *  then waiting), else the last one ended — its outcome stays on the row
+ *  until the queue is cleaned. A form's item shows on each of its copies. */
+export function cellItem(q: readonly QueueItem[], assetId: string, target: TargetKey): QueueItem | null {
+  const mine = q.filter((x) => x.target === target && (x.asset_id === assetId || (x.asset_ids ?? []).includes(assetId)));
+  return mine.find((x) => x.state === "running") ?? mine.find((x) => x.state === "waiting")
+    ?? [...mine].sort((x, y) => (y.ended ?? 0) - (x.ended ?? 0))[0] ?? null;
+}
+
+/** How long it took (or has been running): «12 s», «3 min 05 s». */
+export function itemTime(it: Pick<QueueItem, "started" | "ended">, now = Date.now()): string {
+  if (it.started == null) return "";
+  const s = Math.max(0, Math.round(((it.ended ?? now) - it.started) / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+}
+
+/** The gesture that solves an item, by its state: blocked → the block's own
+ *  (Timbra, Installa, Blender, Scarica, Chi firma), failed or cancelled →
+ *  Riprova, waiting → Togli, running → Annulla; done → none. */
+export type ItemGesture = "fix" | "retry" | "remove" | "cancel" | null;
+export function itemGesture(it: Pick<QueueItem, "state" | "block">): ItemGesture {
+  if (it.state === "waiting") return it.block && it.block.code !== "checking" ? "fix" : "remove";
+  if (it.state === "running") return "cancel";
+  if (it.state === "failed" || it.state === "cancelled") return "retry";
+  return null;
+}
+
+/** «Riprova»: a failed or cancelled item back in the queue, waiting, its
+ *  outcome forgotten (the same parameters, the same place). */
+export function retryItem(q: QueueItem[], id: string): QueueItem[] {
+  const it = q.find((x) => x.id === id);
+  if (!it || (it.state !== "failed" && it.state !== "cancelled")) return q;
+  it.state = "waiting";
+  it.note = "";
+  it.cancel = null;
+  it.block = null;
+  it.started = undefined; it.ended = undefined; it.made = undefined; it.phase = undefined; it.progress = undefined;
+  return q;
+}
+
+/** MICRO-CODA-VISTA p.6 · the key of the budget's ONE computation: the answer,
+ *  the queue's epoch (an item added, removed or ended — never a poll, a block
+ *  or a repaint), the plan. */
+export function budgetKey(answer: number, queueEpoch: number, plan: Plan): string {
+  const p = [...plan.entries()].map(([k, v]) => `${k}:${JSON.stringify(v)}`).sort().join(";");
+  return `${answer}|${queueEpoch}|${p}`;
+}
+
 // ── the bars: today and after the queue ─────────────────────────────────────
 
 const GEO_BYTES_PER_TRIANGLE = 64;
@@ -553,10 +643,15 @@ export interface SceneCount {
  *  estimate — a form repeated ONE mesh plus its instances. A file once, a
  *  shared texture once. */
 export function sceneCount(assets: readonly AssetRow[], target: TargetKey,
-                           o: { plan?: Plan; queue?: readonly QueueItem[]; after?: boolean; shapes?: readonly Shape[] } = {}): SceneCount {
+                           o: { plan?: Plan; queue?: readonly QueueItem[]; after?: boolean; shapes?: readonly Shape[];
+                                answeredAt?: number } = {}): SceneCount {
   const out: SceneCount = { triangles: 0, download_bytes: 0, gpu_bytes: 0, estimated: 0, covered: 0, total: 0, instances: 0 };
   const seen = new Set<string>(), seenTex = new Set<string>(), shapes = new Set<string>();
-  const live = (o.queue ?? []).filter((x) => x.target === target && x.state !== "failed" && x.state !== "cancelled" && x.state !== "done");
+  // MICRO-CODA-VISTA p.6 · an item done AFTER the answer was asked still
+  // counts as planned until the next answer has its version (else the count
+  // drops and comes back between the end and the answer)
+  const live = (o.queue ?? []).filter((x) => x.target === target && x.state !== "failed" && x.state !== "cancelled"
+    && (x.state !== "done" || (o.answeredAt != null && (x.ended ?? 0) > o.answeredAt)));
   // MICRO-ARCHIVE-ASSET-3 · a form planned «istanze» (not queued yet) counts
   // as its item would: the mesh once, an instance each — its copies' own
   // plans never on top
@@ -654,36 +749,46 @@ export interface Shape {
   key: string; assets: AssetRow[];
   /** the triangles of one copy (the heaviest version measured), its textures */
   triangles: number | null; textures: string[];
-  /** how it was recognised: the geometry keys of the files (indices and UVs),
-   *  or — files compressed, or an s3Dgraphy before dev84 — the same triangles
-   *  and the same textures */
-  via: "geometry" | "triangles";
+  /** how it was recognised: the geometry keys of the files (indices and UVs,
+   *  or the compressed bytes) — MICRO-CODA-VISTA p.1: never the triangles */
+  via: "geometry";
 }
 
 const texSet = (v: VersionRow): string => v.textures.map((t) => t.sha256).filter(Boolean).sort().join("+");
 
 /** The shape of an asset: the geometry keys of its heaviest version measured
- *  with an uncompressed geometry, with its textures; else its heaviest
- *  version's triangles with its textures. "" when nothing says it (no file
- *  measured, no texture). */
+ *  (an uncompressed geometry first — two encodings of the same mesh differ in
+ *  their Draco bytes — else the compressed bytes: the key then carries the
+ *  compression, so a Draco file never meets a plain one), with its textures. MICRO-CODA-VISTA p.1 (E.D., 1 Nov: Porta2 and Tempio_4 together,
+ *  a version registered on the wrong asset): ONLY the geometry's fingerprint
+ *  and the textures' sha256 make a form — the same triangles never do. null
+ *  when nothing says it (no file measured, or a bridge / s3Dgraphy before
+ *  dev84 that gives no geometry key): no group, said (`shapeless`). */
 export function shapeKey(a: AssetRow): { key: string; via: Shape["via"]; v: VersionRow } | null {
   if (a.kind !== "rm") return null;
   const vs = a.versions.filter((v) => !v.master && !v.tileset && v.measured && (v.triangles ?? 0) > 0)
     .sort((x, y) => (y.triangles ?? 0) - (x.triangles ?? 0) || x.id.localeCompare(y.id));
-  const g = vs.find((v) => v.geometry_keys?.length && !v.compression);
-  if (g) return { key: `g:${g.geometry_keys!.join(",")}|${texSet(g)}`, via: "geometry", v: g };
-  const v = vs.find((x) => x.textures.length);
-  if (v) return { key: `t:${v.triangles}|${texSet(v)}`, via: "triangles", v };
-  return null;
+  const g = vs.find((v) => v.geometry_keys?.length && !v.compression) ?? vs.find((v) => v.geometry_keys?.length);
+  if (!g) return null;
+  return { key: `g:${g.compression ? `${g.compression}:` : ""}${g.geometry_keys!.join(",")}|${texSet(g)}`, via: "geometry", v: g };
+}
+
+/** MICRO-CODA-VISTA p.1 · the assets that cannot be told a form: measured
+ *  meshes whose files give no geometry key — they never join a group. */
+export function shapeless(assets: readonly AssetRow[]): string[] {
+  return assets.filter((a) => a.kind === "rm" && !shapeKey(a)
+    && a.versions.some((v) => !v.master && !v.tileset && v.measured && (v.triangles ?? 0) > 0)).map((a) => a.id);
 }
 
 /** The forms repeated of a list: the shapes held by two assets or more,
- *  heaviest first (triangles × copies). */
-export function repeatedShapes(assets: readonly AssetRow[]): Shape[] {
+ *  heaviest first (triangles × copies). MICRO-CODA-VISTA p.5 · `refused`:
+ *  the forms the diagnosis did not find ONE geometry for (Column_entrance ×2)
+ *  — no group: each copy has its own proposal again. */
+export function repeatedShapes(assets: readonly AssetRow[], refused: ReadonlySet<string> = new Set()): Shape[] {
   const by = new Map<string, { s: Shape }>();
   for (const a of assets) {
     const k = shapeKey(a);
-    if (!k) continue;
+    if (!k || refused.has(k.key)) continue;
     const e = by.get(k.key) ?? { s: { key: k.key, assets: [], triangles: k.v.triangles, textures: k.v.textures.map((t) => t.sha256), via: k.via } };
     e.s.assets.push(a);
     by.set(k.key, e);

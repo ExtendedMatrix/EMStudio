@@ -258,7 +258,16 @@ else {
        `«one at a time»: 1 running, 2 waiting (${v.running.length}/${v.waiting.length})`);
     const listing = (await get("/jobs")).j;
     ok(listing.scheduler?.share === "one", "GET /jobs carries the scheduler too");
-    for (const id of ids) await post("/jobs", { step: "cancel", id });
+    // MICRO-CODA-VISTA p.4 · a cancel says by whom: the job keeps it, and
+    // another window following the job reads it (level 58)
+    ok(h.bridge_level >= 58, `the bridge is at level 58 or later (${h.bridge_level})`);
+    await post("/jobs", { step: "cancel", id: ids[0], by: "emstudio:chip" });
+    await post("/jobs", { step: "cancel", id: ids[1] });
+    for (const id of ids.slice(2)) await post("/jobs", { step: "cancel", id, by: "emstudio:user" });
+    for (let i = 0; i < 40; i++) { const st = await Promise.all(ids.map((id) => get(`/jobs?id=${id}`))); if (st.every((x) => !["queued", "running"].includes(x.j.state))) break; await sleep(250); }
+    const ends = await Promise.all(ids.map((id) => get(`/jobs?id=${id}`)));
+    ok(ends.every((x) => x.j.state === "cancelled") && ends[0].j.cancel_by === "emstudio:chip" && ends[1].j.cancel_by === ""
+       && ends[2].j.cancel_by === "emstudio:user", `a job says who cancelled it (${ends.map((x) => `${x.j.state}:${x.j.cancel_by || "—"}`).join(", ")})`);
   } finally {
     proc.kill();
   }

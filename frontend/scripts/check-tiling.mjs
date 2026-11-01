@@ -258,7 +258,7 @@ const eq = (got, want, what) => {
   eq(W.winModes("graph"), W.GRAPH_MODES, "the graph window's modes ARE GRAPH_MODES");
   // MICRO-CONTENTS-2 intervention 5 · «Disco», «File del grafo», «Nella stanza»;
   // MICRO-ARCHIVE-ASSET · «Asset», Archive's second view
-  eq([...W.winModes("storage")], ["filesystem", "graphfiles", "s3", "assets"], "storage offers the disk, the graph's files, the room and the assets");
+  eq([...W.winModes("storage")], ["filesystem", "graphfiles", "s3", "assets", "queue"], "storage offers the disk, the graph's files, the room, the assets and the queue");
   eq([...W.winModes("viewer")], ["single", "gallery"], "viewer offers single + gallery");
   eq([...W.winModes("table")], [], "a type with no modes has no mode list");
 
