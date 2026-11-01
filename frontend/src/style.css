@@ -11042,7 +11042,7 @@ body:not(.tt-comfy) .tile-tablebody .mdl-rm .btn.sm { line-height: 16px; font-si
 /* ── MICRO-ARCHIVE-ASSET · Archive › Asset (the list, the budget, the queue) ── */
 .files-pill.warn { color: var(--danger); border-color: var(--danger); }
 .al-switch { margin-right: 4px; }
-.al-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.al-view { display: flex; flex-direction: column; height: 100%; min-height: 0; width: 100%; box-sizing: border-box; }
 .al-head { flex-wrap: wrap; }
 .al-head .al-compare { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
 .al-head .grow { flex: 1 1 auto; }
@@ -11160,14 +11160,30 @@ tr.al-covered-row > td { color: var(--text-faint); }
 .al-golink:hover { text-decoration: underline; }
 .al-job .al-run { min-width: 80px; }
 .al-out { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
-.al-qview .al-table-wrap { flex: 1 1 auto; overflow: auto; }
-.al-qtable td { vertical-align: middle; }
-.al-qtable td.al-qout { white-space: normal; max-width: 520px; }
-.al-qtable td.al-qact { white-space: nowrap; }
+.al-qview .al-table-wrap { flex: 1 1 auto; overflow: auto; border-right: 0; }
+/* MICRO-CODA-VISTA-2 p.2 · declared widths, the whole width of the view: the
+   columns never measure their content again at an update (a bar, a time, an
+   outcome changing); long words cut, the whole in the tooltip */
+.al-qtable { table-layout: fixed; width: 100%; min-width: 1120px; }
+.al-qtable col[data-qcol="state"] { width: 118px; }
+.al-qtable col[data-qcol="asset"] { width: 18%; }
+.al-qtable col[data-qcol="target"] { width: 112px; }
+.al-qtable col[data-qcol="tool"] { width: 150px; }
+.al-qtable col[data-qcol="progress"] { width: 190px; }
+.al-qtable col[data-qcol="time"] { width: 78px; }
+.al-qtable col[data-qcol="act"] { width: 330px; }
+.al-qtable th, .al-qtable td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.al-qtable td { vertical-align: middle; height: 24px; }
+.al-qtable td.al-qprogress .al-run { display: flex; flex-direction: column; min-width: 0; }
+.al-qtable td.al-qact { text-overflow: clip; text-align: right; }
+.al-qhead { flex-wrap: nowrap; gap: 8px; }
+.al-qhead .al-sched { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
+.al-qview [hidden] { display: none !important; }
+.al-qempty { margin: 0; padding: 18px 12px; width: 100%; box-sizing: border-box; color: var(--text-muted); font-size: 13px; border-bottom: 1px solid var(--border); }
 .al-qtable tr.lit > td { background: var(--accent-soft, rgba(80, 140, 255, .15)); }
 .al-qfilters .files-seg button[data-n="0"] { opacity: .6; }
-.al-mis { margin: 4px 0; padding: 4px 8px; border-radius: 4px; }
-.al-mis ul { margin: 2px 0 0 16px; padding: 0; font-size: 11px; }
+.al-mis { flex: 0 0 auto; margin: 4px 8px; padding: 4px 8px; border-radius: 4px; }
+.al-mis ul { margin: 2px 0 0 16px; padding: 0; font-size: 11px; max-height: 96px; overflow: auto; }
 .al-shapeless { color: var(--text-faint); }
 .al-detail { margin-top: 8px; }
 .al-detail .files-sec-h { display: flex; gap: 6px; align-items: center; }

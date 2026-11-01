@@ -240,7 +240,7 @@ import {
   type LinkedItem,
 } from "./add-menu";
 import { descriptionFromFile, mediumOfFile, openNewDocumentForm, type NewDocumentValues } from "./doc-form";
-import type { Arrangement } from "./workspace";
+import type { Arrangement, STORAGE_MODES } from "./workspace";
 import { renderNarrativeIndex } from "./narrative-index";
 import { renderCiteSection, renderNarrativeInspector } from "./narrative-inspector";
 import { linkGroupOf, throughExtractor } from "./add-menu";
@@ -2869,6 +2869,10 @@ window.__EM_SCENE__ = () => {
   /** MICRO-TESTATA-CLOUD · the gate of an operation that signs, as a test asks
    *  it: true when it may go; false → the chip's menu, and `__whoResumed`
    *  says the operation once it resumed */
+  // MICRO-CODA-VISTA-2 · Archive's view by its tab (the Mode), for the checks
+  archiveView: (k: string) => { const w = windowsOf().find((x) => x.type === "storage"); if (w) setArchiveView(w, k as "files"); },
+  queueItems: () => assetQueue.map((x) => ({ ...x })),
+  logTail: (n = 20) => logEntries().slice(-n).map((e) => `${e.level} ${e.message}`),
   needSigner: (op: who.SignOp) => needSigner(op, () => { (window as unknown as { __whoResumed?: string }).__whoResumed = op; }),
   whoFacts: () => whoFacts(),
   useToken: (tok: string | null) => {
@@ -13917,7 +13921,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 58;   // 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 59;   // 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -33937,6 +33941,15 @@ function renderStorageInto(host: StorageHost): void {
   if (winModeOf(win) === "queue") {
     if (crumb) crumb.textContent = t("al.qcrumb");
     up?.classList.add("hidden");
+    // MICRO-CODA-VISTA-2 p.1 · the view is built once and KEPT: a render
+    // (a job's change, a poll, a focus) paints its rows in place — the
+    // scroll, the hover, the widths stay
+    const kept = queueHosts.get(win.id);
+    if (kept && kept.parentElement === body && body.childElementCount === 1) {
+      paintQueueView(kept);
+      paintSchedLine();
+      return;
+    }
     paintSurface(win, body, () => {
       body.textContent = "";
       body.classList.remove("storage-split");
@@ -33953,6 +33966,12 @@ function renderStorageInto(host: StorageHost): void {
       body.textContent = "";
       body.classList.remove("storage-split");
       body.appendChild(assetListView(win));
+      // MICRO-CODA-VISTA-2 p.1 · the list's place put back now that it is in
+      // the page (on a detached box the scroll is not kept: a frame at 0)
+      const tw = body.querySelector<HTMLElement>(".al-main > .al-table-wrap");
+      if (tw) { tw.scrollTop = assetUi.scroll.top; tw.scrollLeft = assetUi.scroll.left; }
+      const side = body.querySelector<HTMLElement>(".al-main > .al-side");
+      if (side) side.scrollTop = assetUi.sideScroll;
     });
     return;
   }
@@ -34408,8 +34427,9 @@ function filesCentre(win: Win, listing: FsListing, wasAt: unknown): HTMLElement 
     b.onclick = () => { setFilesPref(win, "view", v === "list" ? null : v); renderStorage(); };
     seg.appendChild(b);
   }
-  // MICRO-ARCHIVE-ASSET · «File | Asset» at the top of Archive
-  bar.append(fileAssetSwitch(win), tog("places", "◧", "files.placesToggle", "files-places-toggle"), q, kind, seg,
+  // MICRO-CODA-VISTA-2 p.4 · no «File | Asset | Coda» here any more: the
+  // Archive's own tabs (Disco, File del grafo, Nella stanza, Asset, Coda)
+  bar.append(tog("places", "◧", "files.placesToggle", "files-places-toggle"), q, kind, seg,
              tog("panel", "◨", "files.panelToggle", "files-panel-toggle"));
   centre.appendChild(bar);
 
@@ -35016,8 +35036,14 @@ async function startJob(body: Record<string, unknown>, label: string): Promise<B
     r = await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body) });
   } catch { toast(t("storage.bridgeDown")); return null; }
-  const j = await r.json().catch(() => ({})) as { ok?: boolean; job?: string; error?: string };
+  const j = await r.json().catch(() => ({})) as { ok?: boolean; job?: string; error?: string; exists?: boolean; path?: string; name?: string };
   if (r.status === 404 && !j.job) { toast(t("files.optOldBridge")); return null; }
+  // MICRO-CODA-VISTA-2 p.5 · the file is already in versions/: «già fatto
+  // prima» on the queue's item (never a failure), with the file
+  if (!j.ok && j.exists && j.path && ownerNow) {
+    itemBefore.set(ownerNow.id, { path: j.path, name: j.name ?? baseName(j.path), registered: versionRegistered(j.path) });
+    return null;
+  }
   if (!j.ok || !j.job) {
     // MICRO-CODA-VISTA p.4 · the queue's item says the bridge's own reason,
     // not «no job started»
@@ -35078,7 +35104,7 @@ function pollJobs(): void {
     // MICRO-CODA-MULTICORE · the scheduler said again, the queue painted and
     // pumped (an item whose job waited may let the next one go)
     if (live.length) await loadScheduler();
-    if (changed) { paintQueue(); pumpQueue(); renderStorage(); }
+    if (changed) { paintQueue(); pumpQueue(); queueRepaint(); }
     else paintSchedLine();
     if ([...bgJobs.values()].some(jobRunning)) pollJobs();
   }, 600);
@@ -35680,13 +35706,21 @@ async function applyUse(blend: string, d: Diagnosis, ids: string[], model: strin
       () => applyUse(blend, d, ids, model, level, params))) return;
   const cont = useState.container.get(blend) ?? "";
   const m = useState.measured.get(useKey([], blend));
+  // MICRO-CODA-VISTA-2 p.5 · «Sostituisci» asked on the queue's item
+  const qit = queueItemNow();
   const body = { kind: "blender", op: "apply_use", blend, container: cont, objects: cont ? [] : (m?.names ?? []),
-    profile: d.profile, checked: ids, params, model, level, replace: useState.replace };
+    profile: d.profile, checked: ids, params, model, level, replace: useState.replace || !!qit?.replace };
   const prof = useState.profiles?.find((p) => p.id === d.profile);
   const label = t("files.useApplying", { name: `${model}@${level}`,
     profile: prof ? profileWords(prof, getLocale()).label : d.profile_label });
   const job = await startJob(body, label);
-  if (!job) { renderStorage(); return; }
+  if (!job) {
+    // the file was there: «Usa quello che c'è» registers it as this would have
+    const b4 = qit ? itemBefore.get(qit.id) : undefined;
+    if (qit && b4) beforeUse.set(qit.id, async () => { await registerUseVersion(blend, d.profile, model, level, { entry: b4.path }); return null; });
+    renderStorage();
+    return;
+  }
   toast(t("files.blStarted", { what: label }));
   renderStorage();
   const end = await job.done;
@@ -36740,8 +36774,15 @@ function folderStampOf(folder: string): { self: { resource_id: string; digest?: 
 async function stampDerived(source: string | string[], out: { path: string; sha256?: string }, act: { kind: string; technique: string;
     parameters: Record<string, unknown>; software: { name: string; version: string }[] },
     opts: { tree?: boolean; declare?: boolean; parent?: DeclaredParent } = {}): Promise<boolean> {
+  return (await stampDerivedWhy(source, out, act, opts)) === null;
+}
+/** MICRO-CODA-VISTA-2 p.5 · the same, saying WHY a variant stays unstamped
+ *  (null: stamped) — «0 stamped as derived» named nothing. */
+async function stampDerivedWhy(source: string | string[], out: { path: string; sha256?: string }, act: { kind: string; technique: string;
+    parameters: Record<string, unknown>; software: { name: string; version: string }[] },
+    opts: { tree?: boolean; declare?: boolean; parent?: DeclaredParent; replacing?: boolean } = {}): Promise<string | null> {
   const me = currentIdentity();
-  if (!me?.orcid) return false;
+  if (!me?.orcid) return t("files.stampWhy.author");
   // MICRO-OTTIMIZZA-3 p.3 · one step with N inputs (the parts of a survey's
   // ONE tileset): each stamped source an input, each other one declared
   const all = Array.isArray(source) ? source : [source];
@@ -36751,17 +36792,25 @@ async function stampDerived(source: string | string[], out: { path: string; sha2
   // name), when the caller allows it: the batch of a folder of OBJ
   // MICRO-CODA-VISTA p.4 · a source the graph knows as stamped (its date in
   // the Stamp column) but whose sidecar is not beside it is declared too
-  if (stamps.some((x, i) => !x && !graphStampedPaths.has(all[i])) && !opts.declare) return false;
+  const bare = all.find((x, i) => !stamps[i] && !isGraphStampedPath(x));
+  if (bare && !opts.declare) return t("files.stampWhy.source", { file: baseName(bare) });
+  // MICRO-CODA-VISTA-2 · made again with the very same bytes («Sostituisci»
+  // of a deterministic tool): the stamp beside it is already theirs
+  if (out.sha256) {
+    const had = await readStamp(stampPathFor(out.path)).catch(() => null);
+    if (had?.self?.digest && had.self.digest === out.sha256) return null;
+  }
   const listing = await fsList(paths.dirname(out.path));
   const entry = listing.entries.find((e) => e.path === out.path);
-  if (!entry) return false;
+  if (!entry) return t("files.stampWhy.noFile", { file: baseName(out.path) });
   // a tileset FOLDER is one resource (`packaging: directory`, its content
   // digest), asked of dtcstamp through the bridge
   const tree = opts.tree ? await treeOf(out.path).catch(() => null) : null;
-  if (opts.tree && !tree?.ok) return false;
+  if (opts.tree && !tree?.ok) return t("files.stampWhy.noFile", { file: baseName(out.path) });
   const draft = newDraft([tree ? { path: out.path, name: entry.name, size: tree.size_bytes, mtime: entry.mtime, digest: tree.digest, tree }
                                : { ...outputFrom(entry), digest: out.sha256 }]);
   if (tree) draft.tree = tree;
+  if (opts.replacing) draft.replacing = true;
   draft.origin = false;
   draft.kind = act.kind;
   draft.technique = act.technique;
@@ -36778,9 +36827,9 @@ async function stampDerived(source: string | string[], out: { path: string; sha2
   } else if (src) draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(all[0]), path: all[0] }];
   else draft.declared = [{ parents: [opts.parent ?? { kind: "file", label: baseName(all[0]), path: all[0] }] }];
   const emitted = await emitDraft(draft, { graph_id: store?.doc?.graph?.graph_id as string | undefined });
-  if (!emitted.written.length) return false;
+  if (!emitted.written.length) return emitted.error || emitted.refused.map((r) => `${baseName(r.path)}: ${r.why}`).join("; ") || t("files.stampWhy.none");
   landEmission(draft, emitted);
-  return true;
+  return null;
 }
 
 /** A variant registered as a VERSION of its asset in the open graph (s3Dgraphy's
@@ -36830,6 +36879,20 @@ async function registerVersionNow(o: OptOut, pre: Pick<OptimizePreset, "lod" | "
   return null;
 }
 
+/** MICRO-CODA-VISTA-2 p.5 · «1 variant written, 0 stamped as derived, 1
+ *  registered as a version» in words: what was made, stamped or not (and
+ *  why not), a version or not. */
+function optDoneWords(n: number, stamped: number, registered: number, why: string): string {
+  if (!n) return t("files.optNone");
+  const made = tn("files.optMade", n);
+  const st = stamped === n ? t(n === 1 ? "files.optStampedAll1" : "files.optStampedAll")
+    : stamped === 0 ? `${t(n === 1 ? "files.optStampedNone1" : "files.optStampedNone")}${why ? ` (${why})` : ""}`
+    : `${t("files.optStampedSome", { k: String(stamped), n: String(n) })}${why ? ` (${why})` : ""}`;
+  const rg = registered === n ? t(n === 1 ? "files.optRegAll1" : "files.optRegAll")
+    : registered === 0 ? t(n === 1 ? "files.optRegNone1" : "files.optRegNone") : t("files.optRegSome", { k: String(registered), n: String(n) });
+  return `${made}: ${st}; ${rg}.`;
+}
+
 /** gltfpack as a JOB of the bridge, then each variant: stamped as DERIVED from
  *  its source (step `lod_generation`, technique `decimation`, the parameters
  *  and the tool said), registered as a version of its asset, in the Chain. The
@@ -36837,9 +36900,10 @@ async function registerVersionNow(o: OptOut, pre: Pick<OptimizePreset, "lod" | "
 async function runOptimize(win: Win, pre: OptimizePreset, sources: string[], estimateMb: number): Promise<void> {
   if (!sources.length) return;
   if (viaQueue(`gltfpack · ${t(pre.labelKey)} · ${sources.map(baseName).join(", ")}`, () => runOptimize(win, pre, sources, estimateMb))) return;
+  const qit = queueItemNow();
   const job = await startJob({ kind: "variants", sources, preset: pre.id, lod: pre.lod, destination: pre.destination,
     ratio: pre.ratio, texture_px: pre.texturePx, ktx2: pre.ktx2, meshopt: pre.meshopt, quantize: pre.meshopt,
-    estimate_mb: estimateMb }, `gltfpack · ${t(pre.labelKey)}`);
+    estimate_mb: estimateMb, replace: !!qit?.replace }, `gltfpack · ${t(pre.labelKey)}`);
   if (!job) return;
   toast(tn("files.optStarted", sources.length));
   renderStorage();
@@ -36851,21 +36915,38 @@ async function runOptimize(win: Win, pre: OptimizePreset, sources: string[], est
   for (const o of (res.outputs ?? []).filter((x) => x.state === "error")) logWarn(`${baseName(o.source)}: ${o.error}`);
   const version = (res.tool?.version ?? "").replace(/^gltfpack\s*/i, "");
   const params = { ...(res.parameters ?? {}), tool: "gltfpack" };
+  // MICRO-CODA-VISTA-2 p.5 · nothing written because the file was there: the
+  // queue's item says «già fatto prima» (its «Usa» registers it as it is)
+  const there = (res.outputs ?? []).filter((o) => o.state === "exists" && o.path);
+  if (end.owner && !written.length && there.length) {
+    const o = there[0];
+    itemBefore.set(end.owner, { path: o.path!, name: baseName(o.path!), registered: versionRegistered(o.path!) });
+    beforeUse.set(end.owner, async () => {
+      const sha = await bridgeChecksum(o.path!);
+      return registerVersion({ ...o, sha256: sha ?? undefined } as OptOut, pre, params, version);
+    });
+    renderStorage();
+    return;
+  }
   let stamped = 0, registered = 0;
+  let unstampedWhy = "";
   for (const o of written) {
     try {
-      if (await stampDerived(o.source, { path: o.path!, sha256: o.sha256 }, { kind: "lod_generation", technique: "decimation",
-          parameters: params, software: [{ name: "gltfpack", version }] })) stamped++;
-    } catch (e) { logWarn(`${baseName(o.path!)}: ${(e as Error).message}`); }
+      const why = await stampDerivedWhy(o.source, { path: o.path!, sha256: o.sha256 }, { kind: "lod_generation", technique: "decimation",
+          parameters: params, software: [{ name: "gltfpack", version }] }, { replacing: !!(o as { replace?: boolean }).replace });
+      if (why === null) stamped++;
+      else { unstampedWhy ||= why; logWarn(`${baseName(o.path!)}: ${t("files.optNotStampedWhy", { why })}`); }
+    } catch (e) { unstampedWhy ||= (e as Error).message; logWarn(`${baseName(o.path!)}: ${(e as Error).message}`); }
     try {
       const why = await registerVersion(o, pre, params, version);
       if (why === null) registered++; else logWarn(t("files.optNotRegistered", { name: baseName(o.path!), why }));
     } catch (e) { logWarn(`${baseName(o.path!)}: ${(e as Error).message}`); }
   }
-  const msg = tn("files.optDone", written.length, { stamped: String(stamped), registered: String(registered) });
+  // MICRO-CODA-VISTA-2 p.5 · in words: what was made, whether it is stamped
+  // (and why not) and whether it is a version now
+  const msg = optDoneWords(written.length, stamped, registered, unstampedWhy);
   toast(msg);
   logInfo(msg + " — " + written.map((o) => `${baseName(o.path!)} (${formatBytes(o.bytes ?? 0)}, ${o.seconds}s)`).join(", "));
-  if (written.length > stamped) logWarn(t("files.optNotStamped", { n: String(written.length - stamped) }));
   optPlans.clear();
   forgetProjectTrees();
   if (written[0]?.path && win && storagePath(win) !== null) {
@@ -42198,7 +42279,11 @@ async function askAssetList(): Promise<void> {
   const first = !assetUi.ans;
   const nodes = store.doc.graph?.nodes?.length ?? 0;
   assetUi.progress = { phase: "graph", n: nodes, total: nodes };
-  renderStorage();
+  // MICRO-CODA-VISTA-2 p.1 · asked again with an answer on screen (a job of
+  // the queue ended): the list stays as it is, only «Aggiorna» says it asks
+  if (assetUi.ans && assetUi.docKey === assetDocKey()) {
+    for (const b of document.querySelectorAll<HTMLButtonElement>("[data-action='al-refresh']")) { b.textContent = t("al.asking"); b.disabled = true; }
+  } else renderStorage();
   const token = `al${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const askedAt = Date.now();
   let polling = true;
@@ -42285,40 +42370,24 @@ function paintAssetProgress(): void {
   for (const b of boxes) paintAssetProgressInto(b);
 }
 
-/** «File | Asset» at the top of Archive: the File window's two views. Asset
- *  takes the whole working area (the window magnified); File gives it back. */
-function fileAssetSwitch(win: Win): HTMLElement {
-  const seg = document.createElement("span");
-  seg.className = "files-seg al-switch";
-  seg.dataset.alSwitch = "";
-  const mode = winModeOf(win);
-  const cur = mode === "assets" ? "assets" : mode === "queue" ? "queue" : "files";
-  // MICRO-CODA-VISTA p.2 · «Coda» beside «Asset»: the same full space
-  for (const [k, key] of [["files", "al.viewFiles"], ["assets", "al.viewAssets"], ["queue", "al.viewQueue"]] as const) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.action = `al-view-${k}`;
-    b.textContent = k === "queue" ? queueSwitchWords() : t(key);
-    b.title = t(`${key}Title`);
-    b.setAttribute("aria-pressed", String(cur === k));
-    b.onclick = () => { if (k !== cur) setArchiveView(win, k); };
-    seg.appendChild(b);
-  }
-  return seg;
-}
-
+let queueTabWords = "";
 /** «Coda (3)»: the view's name and the jobs still to end */
 function queueSwitchWords(): string {
   const n = assetQueue.filter((x) => x.state === "waiting" || x.state === "running").length;
-  const bad = assetQueue.filter((x) => x.state === "failed").length;
+  const bad = assetQueue.filter((x) => AL.itemTone(x) === "fail").length;
   return `${t("al.viewQueue")}${n ? ` (${n})` : ""}${bad ? ` ${AL.SIGNS.fail}${bad}` : ""}`;
 }
 
-function setArchiveView(win: Win, k: "files" | "assets" | "queue"): void {
-  setWinModeOf(win, k === "assets" ? "assets" : k === "queue" ? "queue" : "filesystem");
+/** Archive's view (MICRO-CODA-VISTA-2 p.4: its own tabs are the ONE way —
+ *  the Mode of the window; «files» is the disk): Asset and Coda take the
+ *  whole working area (the window magnified), the others give it back. */
+function setArchiveView(win: Win, k: "files" | "assets" | "queue" | (typeof STORAGE_MODES)[number]): void {
+  const mode = k === "files" ? "filesystem" : k;
+  const wide = mode === "assets" || mode === "queue";
+  setWinModeOf(win, mode);
   const max = maximizedWin();
-  if (k !== "files" && max !== win.id && windowsOf().length > 1) { toggleMaximize(win.id); setWinCurrent(win, "al.max", true); }
-  if (k === "files" && max === win.id && winCurrent(win, "al.max") === true) { toggleMaximize(win.id); setWinCurrent(win, "al.max", null); }
+  if (wide && max !== win.id && windowsOf().length > 1) { toggleMaximize(win.id); setWinCurrent(win, "al.max", true); }
+  if (!wide && max === win.id && winCurrent(win, "al.max") === true) { toggleMaximize(win.id); setWinCurrent(win, "al.max", null); }
   surfaceOf(win.id)?.refresh();
   renderTiles();
   renderStorage();
@@ -42348,7 +42417,6 @@ function assetListView(win: Win): HTMLElement {
   host.dataset.win = win.id;
   const bar = document.createElement("div");
   bar.className = "files-bar al-head";
-  bar.appendChild(fileAssetSwitch(win));
   // the target, and «Confronta»
   const tsel = document.createElement("select");
   tsel.dataset.al = "target";
@@ -42392,6 +42460,12 @@ function assetListView(win: Win): HTMLElement {
   again.onclick = () => { void askAssetList(); };
   bar.append(grow, again);
   host.appendChild(bar);
+  // MICRO-CODA-VISTA p.1 · versions registered on the wrong asset: said, with
+  // «Correggi» — MICRO-CODA-VISTA-2 p.6: at the TOP of the view, under its
+  // head, before the budget (it sat under the cards and the sentence, out of
+  // sight on a short window); the table scrolls under it, it stays
+  const mis = misplacedNow();
+  if (mis.length) host.appendChild(misplacedBanner(mis));
 
   if (!store) { host.appendChild(storageEmpty(t("al.noDoc"))); return host; }
   const ans = assetUi.ans;
@@ -42407,16 +42481,13 @@ function assetListView(win: Win): HTMLElement {
   // the budget cards: today and after the queue, against the bands
   const bud = document.createElement("div");
   bud.className = "al-budget";
-  for (const k of targets) bud.appendChild(assetBudgetCard(ans, k));
+  for (const k of targets) bud.appendChild(rebuildable(() => assetBudgetCard(ans, k)));
   host.appendChild(bud);
   const say = document.createElement("p");
   say.className = "files-hint al-say";
   say.dataset.alSay = "";
   say.textContent = ans.say_it;
   host.appendChild(say);
-  // MICRO-CODA-VISTA p.1 · versions registered on the wrong asset: said, with «Correggi»
-  const mis = misplacedNow();
-  if (mis.length) host.appendChild(misplacedBanner(mis));
   // MICRO-CODA-VISTA p.1 · no geometry key, no form: said
   const nokey = AL.shapeless(ans.assets);
   if (nokey.length) {
@@ -42744,6 +42815,47 @@ function assetListView(win: Win): HTMLElement {
   return host;
 }
 
+/** MICRO-CODA-VISTA-2 p.1 · the cells of Asset that say the queue (a
+ *  target's cell, a form's, the budget's cards) keep how they are made: when
+ *  the queue moves, they are made again IN PLACE (`queueRepaint`) and swapped
+ *  only if they changed — the table, its scroll, its selection and its rows
+ *  opened are never rebuilt for a job's progress. */
+const cellMakers = new WeakMap<HTMLElement, () => HTMLElement>();
+function rebuildable<T extends HTMLElement>(make: () => T): T {
+  const el = make();
+  cellMakers.set(el, make);
+  return el;
+}
+function paintAssetCellsIn(root: HTMLElement): boolean {
+  const cells = root.querySelectorAll<HTMLElement>("[data-al-table] td[data-al-cell], .al-budget > [data-al-card]");
+  if (!cells.length) return false;
+  for (const el of cells) {
+    const make = cellMakers.get(el);
+    if (!make) continue;
+    const next = make();
+    cellMakers.set(next, make);
+    // never under the person's hands (a field of the proposal being typed)
+    if (el.contains(document.activeElement)) continue;
+    if (next.outerHTML !== el.outerHTML) el.replaceWith(next);
+  }
+  return true;
+}
+
+/** The queue moved (a job started, ended, was polled): each view says it in
+ *  place — «Coda» its rows, Asset its cells; the File view (Ottimizza's
+ *  panel) is painted as before. */
+function queueRepaint(others = true): void {
+  for (const host of storageHostsNow()) {
+    const m = winModeOf(host.win);
+    if (m === "queue") { const kept = queueHosts.get(host.win.id); if (kept?.isConnected) { paintQueueView(kept); continue; } }
+    if (m === "assets" && paintAssetCellsIn(host.body)) continue;
+    if (!others) continue;
+    if (heldBy(host.body, () => renderStorageInto(host))) continue;
+    renderStorageInto(host);
+  }
+  paintRunBars();
+}
+
 /** MICRO-ARCHIVE-ASSET-2 · the row clicked (the view in place sets it) */
 let alPick: ((id: string) => void) | null = null;
 
@@ -42804,7 +42916,7 @@ function shapeRow(tb: HTMLElement, sh: AL.Shape, mine: AL.AssetRow[], targets: A
     c(fmtMB(one?.size_bytes)), c(fmtMB(one?.gpu_bytes), "n"),
     c(one?.texture_side ? String(one.texture_side) : "—", "n"), c(String(one?.textures.length ?? 0), "n"),
     c(t("al.shapeSameGeometry"), "al-shape-via"));
-  for (const k of targets) tr.appendChild(shapeTargetCell(sh, k, bands[k], repaint));
+  for (const k of targets) tr.appendChild(rebuildable(() => shapeTargetCell(sh, k, bands[k], repaint)));
   tb.appendChild(tr);
 }
 
@@ -43041,7 +43153,7 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
     cell(String(v ? (v.textures.length || v.texture_count || 0) : 0), "n"),
     stampTd);
   stampTd.title = [stampTd.textContent, st.say].filter(Boolean).join("\n");
-  for (const k of targets) tr.appendChild(targetCell(a, k, repaint));
+  for (const k of targets) tr.appendChild(rebuildable(() => targetCell(a, k, repaint)));
   tr.onclick = () => { if (alPick) alPick(a.id); else { assetUi.detail = assetUi.detail === a.id ? "" : a.id; renderStorage(); } };
   tb.appendChild(tr);
   if (!open) return;
@@ -43431,10 +43543,10 @@ function applyBlocks(): void {
     // derived file declares it); one without, beside a stamp of ANOTHER
     // version (the master's), says whose stamp the column shows
     const sv = ca?.versions.find((v) => v.id === src.version);
-    if (sv && graphStamped(sv)) graphStampedPaths.add(src.path);
+    if (sv && graphStamped(sv)) graphStampedPaths.add(pathKey(src.path));
     const b = AL.blockOf(it.tool, src, {
       addons: blockFacts?.addons ?? null, blender: blockFacts ? blockFacts.blender : true,
-      stamped: (p) => { if (graphStampedPaths.has(p)) return true; const v = stampedNow(p); if (v === null) stampUnknown = true; return v; } });
+      stamped: (p) => { if (isGraphStampedPath(p)) return true; const v = stampedNow(p); if (v === null) stampUnknown = true; return v; } });
     if (b?.code === "unstamped" && ca) {
       const other = ca.versions.filter((v) => v.id !== src.version && v.made?.at).sort((x, y) => y.made.at.localeCompare(x.made.at))[0];
       b.stamp_of = other ? { at: other.made.at.slice(0, 10), level: other.master ? "master" : other.level, master: other.master } : null;
@@ -43473,6 +43585,31 @@ function graphStamped(v: AL.VersionRow): boolean { return !!v.made?.at && !!v.st
 /** the source files stamped in the graph whose sidecar is not beside them:
  *  their derived file declares them as parent (by name) */
 const graphStampedPaths = new Set<string>();
+/** MICRO-CODA-VISTA-2 · one spelling of a path for these comparisons: the
+ *  bridge answers its outputs' sources by their real path (`/private/tmp/…`
+ *  for `/tmp/…` on a Mac), the page holds the resolver's — the same file.
+ *  The resolver's is not normalized (`…/EM/../SB/versions/x.glb`, a url
+ *  relative to the em.json), the bridge's is (`…/SB/versions/x.glb`).
+ *  Seen on 1 Nov (E.D., 18:08): 25 KTX2 variants of sources the graph says
+ *  made and stamped were born unstamped — their source «not stamped» by
+ *  spelling. */
+function pathKey(p: string): string {
+  return paths.normalize(paths.toPosix(p)).replace(/^\/private(?=\/(?:tmp|var|etc)\/)/, "").replace(/\/+$/, "");
+}
+/** a source the graph says made and stamped (its date and checksum in the
+ *  Stamp column) — by the queue's own reading, or found now among the
+ *  versions of the answer by its file (an action of Ottimizza too) */
+function isGraphStampedPath(p: string): boolean {
+  const k = pathKey(p);
+  if (graphStampedPaths.has(k)) return true;
+  const name = baseName(k).toLowerCase();
+  for (const a of assetUi.ans?.assets ?? []) for (const v of a.versions) {
+    if (!graphStamped(v)) continue;
+    const vp = fileStateOf(v.id)?.path ?? "";
+    if ((vp && pathKey(vp) === k) || (!vp && baseName(String(v.url ?? "").split(/[?#]/)[0]).toLowerCase() === name)) { graphStampedPaths.add(k); return true; }
+  }
+  return false;
+}
 function blockGesture(it: AL.QueueItem, b: AL.Block): HTMLButtonElement | null {
   const btn = document.createElement("button");
   btn.type = "button";
@@ -43557,6 +43694,7 @@ function pumpQueue(): void {
   // starting until its first job is at the bridge (`owned`), or it ends
   queueStarting.add(it.id);
   paintQueue();
+  queueRepaint(false);
   void (async () => {
     try {
       const call = queueCalls.get(it.id);
@@ -43578,7 +43716,9 @@ function pumpQueue(): void {
         if (it.cancel?.by !== "split") it.cancel = cancelOf(off!);
       }
     }
-    if (it.state === "failed") logWarn(`${it.label}: ${it.note}`);
+    it.replace = false;
+    if (it.state === "failed" && it.before) logInfo(`${it.label}: ${itemOutcome(it)}`);
+    else if (it.state === "failed") logWarn(`${it.label}: ${it.note}`);
     if (it.state === "cancelled") logInfo(`${it.label}: ${cancelWords(it.cancel)}`);
     queueStarting.delete(it.id);
     queueCalls.delete(it.id);
@@ -43586,7 +43726,7 @@ function pumpQueue(): void {
     if (it.cancel?.by === "split") splitShapeItem(it);
     if (it.from === "list" && it.state === "done") void askAssetList();
     paintQueue();
-    renderStorage();
+    queueRepaint();
     pumpQueue();
   })();
   // the next one too, when there is room: the start of this one holds it
@@ -43608,6 +43748,11 @@ async function runJudged(f: () => Promise<void>, it: AL.QueueItem): Promise<stri
   const mine = [...bgJobs.values()].filter((j) => !before.has(j.id) && j.owner === it.id);
   const refused = startRefused.get(it.id);
   startRefused.delete(it.id);
+  // MICRO-CODA-VISTA-2 p.5 · made before (refused at the start, or gltfpack
+  // found its output there): said as such, with «Sostituisci» / «Usa»
+  const there = itemBefore.get(it.id);
+  itemBefore.delete(it.id);
+  if (there) { it.before = there; return t("al.out.beforeShort"); }
   if (!mine.length) return refused ? t("al.refused", { why: refused }) : t("al.noJob");
   const bad = mine.find((j) => j.state !== "done");
   return bad ? jobText(bad) : null;
@@ -43632,9 +43777,25 @@ function setQueueMode(m: AL.QueueMode): void {
 // done, a red «!» with the short reason when it failed (a click → its row in
 // the view). ONE vocabulary of signs (asset-list.ts `SIGNS`).
 
-const queueUi = { filter: "all" as AL.QueueFilter, lit: "" };
+const queueUi = { filter: "all" as AL.QueueFilter, lit: "", litShown: "", scroll: { top: 0, left: 0 } };
 /** an item added, removed or ended: the ONE moment the budget is computed again */
 let queueEpoch = 0;
+/** MICRO-CODA-VISTA-2 p.5 · an item whose file was already in versions/ (by
+ *  item id, until its run is judged), and how to register that file as it is
+ *  («Usa quello che c'è»: the call that would have registered the new one) */
+const itemBefore = new Map<string, NonNullable<AL.QueueItem["before"]>>();
+const beforeUse = new Map<string, () => Promise<string | null>>();
+/** the queue's item whose call is running now (its «Sostituisci» asked) */
+function queueItemNow(): AL.QueueItem | undefined { return ownerNow ? assetQueue.find((x) => x.id === ownerNow!.id) : undefined; }
+/** a file of versions/ the open graph already has as a version (by its name:
+ *  versions/ names are canonical) */
+function versionRegistered(path: string): boolean {
+  if (!store) return false;
+  const name = baseName(path).toLowerCase();
+  return store.liveNodes().some((n) => n.node_type === "resource"
+    && (paths.toPosix(fileStateOf(n.id)?.path ?? "") === paths.toPosix(path)
+        || baseName(String((n.data as Record<string, unknown> | undefined)?.url ?? "").split(/[?#]/)[0]).toLowerCase() === name));
+}
 function queueChanged(): void { queueEpoch++; }
 
 /** What an item made: the file its jobs wrote (EM Tools' entry, gltfpack's
@@ -43684,6 +43845,10 @@ function itemRun(it: AL.QueueItem): { p: number | null; words: string } {
  *  and in Ottimizza's panel). */
 function itemOutcome(it: AL.QueueItem, firstHeld = false): string {
   if (it.state === "done") return it.made ? t("al.out.made", { file: it.made }) : t("al.qs.done");
+  // MICRO-CODA-VISTA-2 p.5 · never «failed» / «cancelled» for these two
+  if (it.state === "failed" && it.before)
+    return t(it.before.registered ? "al.out.beforeReg" : "al.out.beforeNotReg", { file: it.before.name });
+  if (it.state === "cancelled" && it.cancel?.by === "split") return tn("al.out.split", it.split ?? 0);
   if (it.state === "failed") return it.note || t("al.qs.failed");
   if (it.state === "cancelled") return cancelWords(it.cancel);
   if (it.state === "running") return itemRun(it).words;
@@ -43713,6 +43878,32 @@ function toneSign(tone: AL.ItemTone): HTMLElement {
   return s;
 }
 
+/** «Usa quello che c'è»: the file already in versions/ becomes the item's
+ *  outcome — registered first as a version of its asset when the graph does
+ *  not have it (the same registration the new file would have had). */
+async function useWhatIsThere(it: AL.QueueItem): Promise<void> {
+  const b4 = it.before;
+  if (!b4) return;
+  if (!versionRegistered(b4.path)) {
+    const reg = beforeUse.get(it.id);
+    if (!reg) { toast(t("al.before.useNoWay", { file: b4.name })); return; }
+    const why = await reg().catch((e: unknown) => String((e as Error)?.message ?? e));
+    if (why || !versionRegistered(b4.path)) { const m = t("al.before.useFailed", { file: b4.name, why: why || t("files.useNoMaster") }); toast(m); logWarn(m); return; }
+  }
+  beforeUse.delete(it.id);
+  it.state = "done";
+  it.made = b4.name;
+  it.before = null;
+  it.ended = Date.now();
+  queueChanged();
+  const m = t("al.before.used", { file: b4.name });
+  toast(m);
+  logInfo(m);
+  if (it.from === "list") void askAssetList();
+  paintQueue();
+  queueRepaint();
+}
+
 /** The gestures of an item: the block's own (Timbra, Installa…), Riprova,
  *  Togli, Annulla — and ↑ ↓ while it waits. */
 function itemGestures(it: AL.QueueItem, into: HTMLElement): void {
@@ -43731,6 +43922,21 @@ function itemGestures(it: AL.QueueItem, into: HTMLElement): void {
   if (g === "retry") btn("queue-retry", t("al.retry"), t("al.retryTitle"), () => {
     AL.retryItem(assetQueue, it.id); queueChanged(); applyBlocks(); paintQueue(); pumpQueue(); renderStorage();
   });
+  // MICRO-CODA-VISTA-2 p.5 · the file was there: make it again over it
+  // (asked first: E.D.'s decision), or take it as it is
+  if (g === "before" && it.before) {
+    const b4 = it.before;
+    btn("queue-replace", t("al.before.replace"), t("al.before.replaceTitle", { file: b4.name }), () => {
+      void askConfirm(t("al.before.replaceAsk", { file: b4.name, path: b4.path }), { danger: true }).then((yes) => {
+        if (!yes) return;
+        AL.retryItem(assetQueue, it.id);
+        it.replace = true;
+        queueChanged(); applyBlocks(); paintQueue(); pumpQueue(); queueRepaint();
+      });
+    });
+    btn("queue-use-there", t("al.before.use"), t(b4.registered ? "al.before.useTitleReg" : "al.before.useTitle", { file: b4.name }),
+      () => { void useWhatIsThere(it); });
+  }
   if (g === "cancel") btn("queue-cancel", t("files.jobCancel"), t("al.cancelTitle"), () => {
     for (const j of [...bgJobs.values()].filter((x) => x.owner === it.id && jobRunning(x))) void cancelJob(j.id, undefined, "user");
   });
@@ -43894,40 +44100,60 @@ function openQueueView(lit = ""): void {
   let st = windowsOf().find((w) => w.type === "storage");
   if (!st) { setWorkspace("assets"); st = windowsOf().find((w) => w.type === "storage"); }
   if (!st) { toast(t("blend.prepareNoArchive")); return; }
-  if (lit) { queueUi.lit = lit; queueUi.filter = "all"; }
+  if (lit) { queueUi.lit = lit; queueUi.litShown = ""; queueUi.filter = "all"; }
   selectWindow(st.id);
   setArchiveView(st, "queue");
 }
 
-/** The view «Coda»: the head (File | Asset | Coda, Run / Pausa, the share,
- *  the scheduler's line), the filters with their counts, one row per job. */
+/** The view «Coda»: ONE line of controls (Run / Pausa, Macchina, the
+ *  scheduler's line), the filters with their counts, one row per job — or,
+ *  empty, one sentence the whole width (MICRO-CODA-VISTA-2).
+ *
+ *  MICRO-CODA-VISTA-2 (E.D., 1 Nov 18:08) · the view went back to the top all
+ *  the time while the jobs ran and its columns changed width at every update:
+ *  it was rebuilt whole (`renderStorage` at every job's change, the body
+ *  emptied, a new table) and its rows emptied and drawn again at every paint,
+ *  the lit row scrolled into view at each. Now the view is built ONCE per
+ *  window and kept (`queueHosts`): a paint changes only the rows whose words
+ *  changed, in place (`paintQueueView`); bars and times are written by
+ *  `paintRunBars`; the columns have their declared widths (`table-layout:
+ *  fixed`), long words cut with their tooltip; the scroll stays. */
+const queueHosts = new Map<string, HTMLElement>();
 function queueView(win: Win): HTMLElement {
   const host = document.createElement("div");
   host.className = "al-view al-qview";
   host.dataset.alQview = "";
+  host.dataset.win = win.id;
   const bar = document.createElement("div");
-  bar.className = "files-bar al-head";
-  const grow = document.createElement("span");
-  grow.className = "grow";
-  bar.append(fileAssetSwitch(win), queueModeSeg(), queueShareControl("al-share"), grow);
-  host.appendChild(bar);
-  const sl = document.createElement("p");
+  bar.className = "files-bar al-head al-qhead";
+  const sl = document.createElement("span");
   sl.className = "al-sched files-hint";
   sl.dataset.alSched = "";
-  host.appendChild(sl);
+  bar.append(queueModeSeg(), queueShareControl("al-share"), sl);
+  host.appendChild(bar);
   const fl = document.createElement("div");
   fl.className = "al-tools al-qfilters";
   fl.dataset.alQfilters = "";
   host.appendChild(fl);
+  const empty = document.createElement("p");
+  empty.className = "al-qempty";
+  empty.dataset.alQempty = "";
+  host.appendChild(empty);
   const tw = document.createElement("div");
-  tw.className = "al-table-wrap";
+  tw.className = "al-table-wrap al-qwrap";
+  tw.dataset.alQwrap = "";
   const table = document.createElement("table");
   table.className = "al-table al-qtable";
   table.dataset.noTableTools = "";
+  const cg = document.createElement("colgroup");
   const hr = document.createElement("tr");
-  for (const k of ["state", "asset", "target", "tool", "progress", "time", "outcome", "act"]) {
+  for (const k of AL_QCOLS) {
+    const col = document.createElement("col");
+    col.dataset.qcol = k;
+    cg.appendChild(col);
     const th = document.createElement("th");
     th.textContent = t(`al.qcol.${k}`);
+    th.title = th.textContent;
     th.dataset.qcol = k;
     hr.appendChild(th);
   }
@@ -43935,85 +44161,136 @@ function queueView(win: Win): HTMLElement {
   thead.appendChild(hr);
   const tb = document.createElement("tbody");
   tb.dataset.alQbody = "";
-  table.append(thead, tb);
+  table.append(cg, thead, tb);
   tw.appendChild(table);
   host.appendChild(tw);
+  tw.onscroll = () => { queueUi.scroll = { top: tw.scrollTop, left: tw.scrollLeft }; };
+  queueHosts.set(win.id, host);
   queueRecheck();
   paintQueueView(host);
   paintSchedLine();
+  // the place it was at (a view built again: another window, a reload of the tree)
+  const put = (): void => { tw.scrollTop = queueUi.scroll.top; tw.scrollLeft = queueUi.scroll.left; };
+  put();
+  requestAnimationFrame(put);
   if (!schedView) void pushQueueShare().then(loadScheduler).then(paintSchedLine);
   return host;
+}
+/** the columns of «Coda», their widths declared in style.css (`col[data-qcol]`) */
+const AL_QCOLS = ["state", "asset", "target", "tool", "progress", "time", "outcome", "act"] as const;
+
+/** What a row shows besides its bar and time: when this changes, the row is
+ *  written again — never otherwise (a poll, a tick, another row's change). */
+function queueRowSig(it: AL.QueueItem, held: boolean): string {
+  return JSON.stringify([it.state, AL.itemTone(it), it.block?.code ?? "", it.state === "running" ? "" : itemOutcome(it, held),
+    it.asset ?? it.label, it.target ?? "", it.tool ?? "", it.state === "running", queueUi.lit === it.id,
+    it.before?.registered ?? null, it.block?.addon ?? "", it.block?.path ?? ""]);
 }
 
 function paintQueueView(host: HTMLElement): void {
   const fl = host.querySelector<HTMLElement>("[data-al-qfilters]");
   const tb = host.querySelector<HTMLElement>("[data-al-qbody]");
-  if (!fl || !tb) return;
-  fl.textContent = "";
+  const tw = host.querySelector<HTMLElement>("[data-al-qwrap]");
+  const empty = host.querySelector<HTMLElement>("[data-al-qempty]");
+  if (!fl || !tb || !tw || !empty) return;
+  // the filters: their counts and pressed state written in place
   const counts = AL.queueCounts(assetQueue);
-  const seg = document.createElement("span");
-  seg.className = "files-seg";
-  for (const f of AL.QUEUE_FILTERS) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.action = `queue-filter-${f}`;
-    b.dataset.n = String(counts[f]);
-    b.textContent = `${t(`al.qf.${f}`)} (${counts[f]})`;
-    b.setAttribute("aria-pressed", String(queueUi.filter === f));
-    b.onclick = () => { queueUi.filter = f; queueUi.lit = ""; paintQueue(); };
-    seg.appendChild(b);
+  let seg = fl.querySelector<HTMLElement>(":scope > .files-seg");
+  if (!seg) {
+    seg = document.createElement("span");
+    seg.className = "files-seg";
+    for (const f of AL.QUEUE_FILTERS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.action = `queue-filter-${f}`;
+      b.onclick = () => { queueUi.filter = f; queueUi.lit = ""; paintQueue(); };
+      seg.appendChild(b);
+    }
+    fl.appendChild(seg);
   }
-  fl.appendChild(seg);
-  if (assetQueue.some((x) => !["waiting", "running"].includes(x.state))) fl.appendChild(clearEndedButton());
-  tb.textContent = "";
-  const held = firstHeldId();
+  for (const b of seg.querySelectorAll<HTMLButtonElement>("button")) {
+    const f = b.dataset.action!.slice("queue-filter-".length) as AL.QueueFilter;
+    const words = `${t(`al.qf.${f}`)} (${counts[f]})`;
+    if (b.textContent !== words) b.textContent = words;
+    b.dataset.n = String(counts[f]);
+    b.setAttribute("aria-pressed", String(queueUi.filter === f));
+  }
+  const ended = assetQueue.some((x) => !["waiting", "running"].includes(x.state));
+  const clr = fl.querySelector<HTMLElement>("[data-action='queue-clear']");
+  if (ended && !clr) fl.appendChild(clearEndedButton());
+  if (!ended && clr) clr.remove();
+  fl.hidden = !assetQueue.length;
+  // MICRO-CODA-VISTA-2 p.3 · empty: one sentence the whole width, no table
   const rows = AL.queueFilter(assetQueue, queueUi.filter);
   if (!rows.length) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 8;
-    td.className = "files-hint";
-    td.textContent = assetQueue.length ? t("al.qEmptyFilter") : t("al.queueEmpty");
-    tr.appendChild(td);
-    tb.appendChild(tr);
+    const words = assetQueue.length ? t("al.qEmptyFilter") : t("al.queueEmptyView");
+    if (empty.textContent !== words) empty.textContent = words;
+    empty.hidden = false;
+    tw.hidden = true;
+    tb.textContent = "";
     return;
   }
+  empty.hidden = true;
+  tw.hidden = false;
+  const held = firstHeldId();
+  const have = new Map<string, HTMLTableRowElement>();
+  for (const tr of tb.querySelectorAll<HTMLTableRowElement>(":scope > tr[data-al-qrow]")) have.set(tr.dataset.alQrow!, tr);
+  const keep = new Set(rows.map((x) => x.id));
+  for (const [id, tr] of have) if (!keep.has(id)) { tr.remove(); have.delete(id); }
+  let at: Element | null = tb.firstElementChild;
   for (const it of rows) {
-    const tone = AL.itemTone(it);
-    const tr = document.createElement("tr");
-    tr.className = `al-qrow${queueUi.lit === it.id ? " lit" : ""}`;
-    tr.dataset.alQrow = it.id;
-    tr.dataset.state = it.state;
-    tr.dataset.tone = tone;
-    const c = (cls = ""): HTMLTableCellElement => { const td = document.createElement("td"); td.className = cls; tr.appendChild(td); return td; };
-    const st = c("al-qstate");
-    st.append(toneSign(tone), ` ${t(`al.tone.${tone}`)}`);
-    const an = c("al-qasset");
-    const name = it.shape ? `${t("al.shape", { n: String(it.asset_ids?.length ?? 0) })} ${it.asset ?? ""}` : it.asset ?? it.label;
-    if (it.asset_id) {
-      const a = document.createElement("a");
-      a.href = "#";
-      a.textContent = name;
-      a.title = t("al.qGoAsset", { name });
-      a.onclick = (e) => { e.preventDefault(); assetUi.detail = it.asset_id!; setArchiveView(win0(), "assets"); };
-      an.appendChild(a);
-    } else an.textContent = name;
-    an.title = it.label;
-    c().textContent = it.target ? t(`al.t.${it.target}`) : "—";
-    c().textContent = it.tool ? t(`al.tool.${it.tool}`) : t("files.tab.optimize");
-    const pr = c("al-qprogress");
-    if (it.state === "running") pr.appendChild(runBar(it));
-    const tm = c("n al-qtime");
-    tm.dataset.alTime = it.id;
-    tm.textContent = AL.itemTime(it);
-    const out = c(`al-qout al-tone-${tone}`);
-    out.dataset.alOut = it.id;
-    out.textContent = it.state === "running" ? "" : itemOutcome(it, it.id === held);
-    out.title = [out.textContent, it.label].filter(Boolean).join("\n");
-    itemGestures(it, c("al-qact"));
-    tb.appendChild(tr);
+    const sig = queueRowSig(it, it.id === held);
+    let tr = have.get(it.id);
+    if (!tr) { tr = document.createElement("tr"); tr.dataset.alQrow = it.id; }
+    if (tr.dataset.sig !== sig) { queueRowInto(tr, it, it.id === held); tr.dataset.sig = sig; }
+    // in order, moving only a row out of its place
+    if (tr !== at) tb.insertBefore(tr, at);
+    else at = at.nextElementSibling;
   }
-  if (queueUi.lit) requestAnimationFrame(() => tb.querySelector<HTMLElement>(`[data-al-qrow="${queueUi.lit}"]`)?.scrollIntoView({ block: "center" }));
+  // the row asked (a click on a row's cell in Asset) scrolled to ONCE — not
+  // at every paint (that was the view «going back» while the jobs ran)
+  if (queueUi.lit && queueUi.litShown !== queueUi.lit) {
+    queueUi.litShown = queueUi.lit;
+    requestAnimationFrame(() => tb.querySelector<HTMLElement>(`[data-al-qrow="${queueUi.lit}"]`)?.scrollIntoView({ block: "center" }));
+  }
+}
+
+/** One row of «Coda», written into its own `tr` (kept: its place, its hover). */
+function queueRowInto(tr: HTMLTableRowElement, it: AL.QueueItem, held: boolean): void {
+  const tone = AL.itemTone(it);
+  tr.textContent = "";
+  tr.className = `al-qrow${queueUi.lit === it.id ? " lit" : ""}`;
+  tr.dataset.state = it.state;
+  tr.dataset.tone = tone;
+  const c = (cls = "", title = ""): HTMLTableCellElement => {
+    const td = document.createElement("td"); td.className = cls; if (title) td.title = title; tr.appendChild(td); return td;
+  };
+  const st = c("al-qstate", t(`al.tone.${tone}`));
+  st.append(toneSign(tone), ` ${t(`al.tone.${tone}`)}`);
+  const name = it.shape ? `${t("al.shape", { n: String(it.asset_ids?.length ?? 0) })} ${it.asset ?? ""}` : it.asset ?? it.label;
+  const an = c("al-qasset", it.label);
+  if (it.asset_id) {
+    const a = document.createElement("a");
+    a.href = "#";
+    a.textContent = name;
+    a.title = `${it.label}\n${t("al.qGoAsset", { name })}`;
+    a.onclick = (e) => { e.preventDefault(); assetUi.detail = it.asset_id!; setArchiveView(win0(), "assets"); };
+    an.appendChild(a);
+  } else an.textContent = name;
+  const tg = it.target ? t(`al.t.${it.target}`) : "—";
+  c("", tg).textContent = tg;
+  const tl = it.tool ? t(`al.tool.${it.tool}`) : t("files.tab.optimize");
+  c("", tl).textContent = tl;
+  const pr = c("al-qprogress");
+  if (it.state === "running") pr.appendChild(runBar(it));
+  const tm = c("n al-qtime");
+  tm.dataset.alTime = it.id;
+  tm.textContent = AL.itemTime(it);
+  const out = c(`al-qout al-tone-${tone}`);
+  out.dataset.alOut = it.id;
+  out.textContent = it.state === "running" ? "" : itemOutcome(it, held);
+  out.title = [out.textContent, it.before ? it.before.path : "", it.label].filter(Boolean).join("\n");
+  itemGestures(it, c("al-qact"));
 }
 /** the Archive window (the view's links) */
 function win0(): Win { return windowsOf().find((w) => w.type === "storage")!; }
@@ -44061,7 +44338,7 @@ function cellRunInto(td: HTMLTableCellElement, it: AL.QueueItem | null, cellOk: 
   }
   const line = document.createElement("div");
   line.className = `al-runline al-tone-${tone}`;
-  const why = tone === "fail" ? it.note || t("al.qs.failed") : cancelWords(it.cancel);
+  const why = tone === "fail" ? it.note || t("al.qs.failed") : tone === "before" || tone === "split" ? itemOutcome(it) : cancelWords(it.cancel);
   line.append(toneSign(tone), ` ${shortWhy(why)}`);
   line.title = why;
   go(line);
@@ -44082,6 +44359,7 @@ function splitShapeItem(it: AL.QueueItem): void {
   const items = AL.selectionItems(ans.assets, shapesOf(ans).list, ids, [it.target], assetUi.plan, bands,
     { one: (a, k, p) => `${a.name} → ${t(`al.t.${k}`)} · ${t(`al.tool.${p.tool}`)}` });
   const names = ans.assets.filter((a) => ids.has(a.id)).map((a) => a.name).join(", ");
+  it.split = items.length;
   const m = t("al.shapeSplitSaid", { names, n: String(items.length) });
   toast(m);
   logInfo(m);
@@ -44139,7 +44417,8 @@ function paintQueue(): void {
     b.setAttribute("aria-pressed", String(b.dataset.action === `queue-${queueMode}`));
   // MICRO-CODA-VISTA · the view «Coda», the switch's count, the rows' cells
   for (const el of document.querySelectorAll<HTMLElement>("[data-al-qview]")) paintQueueView(el);
-  for (const el of document.querySelectorAll<HTMLElement>("[data-action='al-view-queue']")) el.textContent = queueSwitchWords();
+  // the Archive tab «Coda (n) !k»: its header said again only when the words change
+  if (queueSwitchWords() !== queueTabWords) { queueTabWords = queueSwitchWords(); renderAreaHeaders(); }
   paintRunBars();
 }
 
@@ -48664,10 +48943,12 @@ function headerModesOf(win: Win): {
   if (win.type === "viewer" && viewerImageCount(win) < 2) return null;
   if (winModes(win.type).length) {
     const cur = winModeOf(win);
+    // MICRO-CODA-VISTA-2 p.4 · Archive's «Coda» says what is left and what failed
+    const modeWords = (m: string): string => win.type === "storage" && m === "queue" ? queueSwitchWords() : t(`mode.${m}`);
     return {
-      currentLabel: t(`mode.${cur}`),
+      currentLabel: modeWords(cur),
       items: winModes(win.type).map((m) => ({
-        label: t(`mode.${m}`),
+        label: modeWords(m),
         current: m === cur,
         // A mode that is planned but not built is LISTED and disabled, with the
         // reason — the same treatment the menus give an action that cannot run.
@@ -48676,6 +48957,8 @@ function headerModesOf(win: Win): {
         disabled: DISABLED_MODES[m] ? t(DISABLED_MODES[m]) : undefined,
         run: () =>
           focusThen(win, () => {
+            // Archive: Asset and Coda magnified, as their switch did
+            if (win.type === "storage") { setArchiveView(win, m as (typeof STORAGE_MODES)[number]); return; }
             setWinModeOf(win, m);
             // a mode is a fact about THIS window: record it and repaint. It
             // used to have to re-mount the shared wrap as well.

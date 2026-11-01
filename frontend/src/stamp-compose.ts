@@ -81,6 +81,9 @@ export interface Software { name: string; version?: string; commit?: string }
 export interface Draft {
   outputs: DraftOutput[];
   inputs: DraftInput[];
+  /** MICRO-CODA-VISTA-2 · its output was made again over a file already
+   *  stamped («Sostituisci», confirmed): the old stamp is kept aside */
+  replacing?: boolean;
   /** falso = viene da qualcosa (**il default**); vero = è un'origine */
   origin: boolean;
   /** A2 · la dichiarazione esplicita, che è il gesto in più */
@@ -519,6 +522,9 @@ async function emitOne(
     operator: draft.operator.id || draft.operator.label ? draft.operator : undefined,
     registry,
     write: true,
+    // MICRO-CODA-VISTA-2 · the file was made again over the one there
+    // («Sostituisci», confirmed): its old stamp is kept aside, not refused
+    ...(draft.replacing ? { replacing: true } : {}),
   };
   const res = await fetch(`${await bridge()}/stamp/emit`, {
     method: "POST",

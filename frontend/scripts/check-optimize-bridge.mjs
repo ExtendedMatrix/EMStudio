@@ -173,6 +173,16 @@ try {
     ok(ex.includes("EXT_meshopt_compression") && ex.includes("KHR_texture_basisu"), `meshopt and KTX2 in it (${ex.join(", ")})`);
     ok(out.facts?.faces > 0 && out.facts.faces < 1152 && out.facts.texture_count === 1, `its facts: ${out.facts?.faces} faces, ${out.facts?.texture_count} texture`);
     ok(/^sha256:[0-9a-f]{64}$/.test(out.sha256 ?? ""), "its sha256, for the stamp");
+    // MICRO-CODA-VISTA-2 · a variant of a version is named after the master,
+    // never the chain of its sources' names; the same again is «made before»,
+    // and «Sostituisci» (replace) writes over it
+    const chain = await post("/fs/optimize", { sources: [out.path], preset: "heriverse", dry_run: true });
+    ok(/\/OB_CUBE_LOD1@lod3-aton-heriverse\.glb$/.test(chain.j.outputs?.[0]?.path ?? ""),
+       `a variant of OB_CUBE_LOD1@lod4-web.glb is OB_CUBE_LOD1@lod3-aton-heriverse.glb (${chain.j.outputs?.[0]?.name})`);
+    const twice = await until(get, (await post("/jobs", { kind: "variants", sources: [src], preset: "web" })).j.job);
+    ok(twice.state === "done" && twice.result?.outputs?.[0]?.state === "exists", "the same variant again: «exists», nothing written over it");
+    const repl = await until(get, (await post("/jobs", { kind: "variants", sources: [src], preset: "web", replace: true })).j.job);
+    ok(repl.state === "done" && repl.result?.outputs?.[0]?.state === "written", "…with «replace»: written again");
     ok(vv.result.parameters.compression === "meshopt" && vv.result.parameters.textures === "ktx2" && vv.result.parameters.max_texture_px === 1024,
        "the parameters said, for the stamp and the step");
 

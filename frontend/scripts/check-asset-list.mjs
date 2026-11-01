@@ -281,7 +281,20 @@ ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk o
   const tones = [it("w", "waiting"), it("b", "waiting", { block: { code: "addon", addon: "gltfpack" } }), it("c", "waiting", { block: { code: "checking" } }),
     it("r", "running"), it("d", "done"), it("f", "failed"), it("x", "cancelled")].map((x) => A.itemTone(x));
   ok(tones.join() === "wait,block,wait,run,ok,fail,off", `one tone per state (${tones.join()}); «checking» is not a block`);
-  ok(new Set(Object.values(A.SIGNS)).size === 6 && A.SIGNS.fail === "!" && A.SIGNS.ok === "✓", "one sign per tone, none twice (! failed, ✓ done)");
+  ok(new Set(Object.values(A.SIGNS)).size === 8 && A.SIGNS.fail === "!" && A.SIGNS.ok === "✓", "one sign per tone, none twice (! failed, ✓ done)");
+  // MICRO-CODA-VISTA-2 p.5 · «già fatto prima» and «diviso»: neither failed nor cancelled
+  const bf = it("bf", "failed", { before: { path: "/p/SB/versions/A@lod4-mobile.glb", name: "A@lod4-mobile.glb", registered: false } });
+  const sp = it("sp", "cancelled", { cancel: { by: "split" }, split: 2 });
+  ok(A.itemTone(bf) === "before" && A.itemTone(sp) === "split" && A.SIGNS.before !== A.SIGNS.fail && A.SIGNS.split !== A.SIGNS.off,
+     `a file already there is «${A.itemTone(bf)}», a form without one geometry «${A.itemTone(sp)}» — never fail / off`);
+  const q2 = [bf, sp, it("f9", "failed")];
+  const c2 = A.queueCounts(q2);
+  ok(c2.failed === 1 && c2.done === 2 && A.queueFilter(q2, "failed").map((x) => x.id).join() === "f9",
+     `they are counted «fatti», not «falliti» (${JSON.stringify(c2)})`);
+  ok(A.itemGesture(bf) === "before" && A.itemGesture(sp) === null, "«già fatto prima» → Sostituisci / Usa quello che c'è; «diviso» → nothing to do");
+  const rb = [{ ...bf, replace: true }];
+  A.retryItem(rb, "bf");
+  ok(rb[0].state === "waiting" && rb[0].before === null && rb[0].replace === true, "«Sostituisci»: back waiting, the file forgotten, replace kept for its run");
   // p.2 · the view's filters and counts
   const qv = [it("r1", "running"), it("w1", "waiting"), it("w2", "waiting", { block: { code: "unstamped", path: "/p/a.glb" } }),
     it("f1", "failed"), it("x1", "cancelled"), it("d1", "done"), it("d2", "done")];

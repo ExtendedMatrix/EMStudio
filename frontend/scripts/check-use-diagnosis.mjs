@@ -180,7 +180,9 @@ open(sys.argv[1] + ".stamp.json", "w").write("{}")`, `${fsroot}/SB/versions/A@lo
        "…with the ticks and the parameters the page sent");
     r = await post("/jobs", { kind: "blender", op: "apply_use", blend: `${fsroot}/SB/scene.blend`, profile: "mobile_webxr",
                               checked: ids, model: "Colonnato", level: "lod1" });
-    ok(r.status === 400 && /already in versions/.test(r.j.error ?? ""), "never over a version already there…");
+    ok(r.status === 409 && /already in versions/.test(r.j.error ?? "") && r.j.exists === true
+       && /SB\/versions\/Colonnato@lod1-mobile\.glb$/.test(r.j.path ?? "") && r.j.name === "Colonnato@lod1-mobile.glb",
+       "never over a version already there… (409, «made before», with its path and name: MICRO-CODA-VISTA-2)");
     r = await post("/jobs", { kind: "blender", op: "apply_use", blend: `${fsroot}/SB/scene.blend`, profile: "mobile_webxr",
                               checked: ids, model: "Colonnato", level: "lod1", replace: true, dry_run: true });
     ok(r.status === 200 && r.j.outputs[0].exists === true, "…unless the person says «replace»");

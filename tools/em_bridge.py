@@ -1801,6 +1801,42 @@ def _variant_parameters(params: dict) -> dict:
             "use": list(params.get("use") or []), "preset": params.get("preset") or None}
 
 
+def _stamp_superseded(stamp_path: str, out: dict) -> bool:
+    """MICRO-CODA-VISTA-2 · the stamp beside a file made again («Sostituisci»):
+    when it names OTHER bytes than the output's digest, it is moved aside
+    (``<file>.stamp.json.superseded-<UTC>``, never deleted nor modified) → True;
+    a stamp of these very bytes, or one that cannot be read, stays → False."""
+    import time as _time
+    try:
+        with open(stamp_path, encoding="utf-8") as fh:
+            old = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    had = str(((old or {}).get("self") or {}).get("digest") or "")
+    now = str((out or {}).get("digest") or "")
+    if not now or not had or had == now:
+        return False
+    os.replace(stamp_path, f"{stamp_path}.superseded-{_time.strftime('%Y%m%dT%H%M%SZ', _time.gmtime())}")
+    return True
+
+
+def _variant_stem_source(path: str) -> str:
+    """MICRO-CODA-VISTA-2 · a variant is named after its MASTER, with its own
+    level and use: a source that is itself a version
+    (``Architrave_1_BAKE_SM_Architrave_1_BAKE@lod0-aton-heriverse.glb``)
+    gives ``…_BAKE@lod4-mobile.glb``, never the chain of its sources' names
+    (``…@lod0-aton-heriverse@lod4-mobile.glb``). → the path ``variant_path``
+    names from (the same folder, the model's name, the source's extension);
+    a source that is not a version is returned as it is. The files already
+    made keep their names."""
+    base = os.path.basename(path)
+    if "@" not in base:
+        return path
+    stem, ext = os.path.splitext(base)
+    model = stem.split("@", 1)[0]
+    return os.path.join(os.path.dirname(path), model + ext) if model else path
+
+
 def _variant_write(item: dict, params: dict, tool: dict, job=None) -> dict:
     """ONE variant by gltfpack, never over a file that exists. With a job the
     tool runs as the job's process (cancel ends it); without, synchronously.
@@ -2248,7 +2284,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: their heads (tileset.json or the stored members of a .3tz, never the
 #: geometry) and passes them to s3Dgraphy (``tiles=``): a tileset «ok» for a
 #: target only if its tiles fit the band, and then it covers its meshes.
-BRIDGE_LEVEL = 58   # 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 59   # 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3915,12 +3951,17 @@ def make_handler(api):
                 if not full.lower().endswith((".glb", ".gltf", ".obj")):
                     planned.append({"source": full, "error": "gltfpack reads .glb, .gltf and .obj"})
                     continue
-                out = variant_path(full, params["lod"], params["destination"], root=find_project_root(full))
+                out = variant_path(_variant_stem_source(full), params["lod"], params["destination"],
+                                   root=find_project_root(full))
                 if not _fs_inside_roots(out):
                     planned.append({"source": full, "error": f"{out} is outside the folders this bridge serves"})
                     continue
+                # MICRO-CODA-VISTA-2 · «Sostituisci» (asked and confirmed in
+                # the page): gltfpack writes over the file there
                 planned.append({"source": full, "path": out, "name": os.path.basename(out),
-                                "exists": os.path.exists(out), "bytes_in": os.path.getsize(full)})
+                                "exists": os.path.exists(out) and not body.get("replace"),
+                                "replace": bool(body.get("replace")) and os.path.exists(out),
+                                "bytes_in": os.path.getsize(full)})
             return planned
 
         def _optimize(self, body):
@@ -4351,13 +4392,13 @@ def make_handler(api):
             if op == "lod_set":
                 levels = max(1, min(4, int(body.get("levels") or 3)))
                 for i in range(1, levels + 1):
-                    outputs.append({"level": f"lod{i}", "path": variant_path(source, f"lod{i}", "realtime", root=root)})
+                    outputs.append({"level": f"lod{i}", "path": variant_path(_variant_stem_source(source), f"lod{i}", "realtime", root=root)})
             elif op == "atlas":
-                outputs.append({"level": "", "path": variant_path(source, "", "atlas", root=root)})
+                outputs.append({"level": "", "path": variant_path(_variant_stem_source(source), "", "atlas", root=root)})
             else:
                 use = [u for u in (body.get("use") or ["realtime"]) if isinstance(u, str)]
                 outputs.append({"level": str(body.get("level") or "lod3"),
-                                "path": variant_path(source, str(body.get("level") or "lod3"), use[0] if use else "realtime", root=root)})
+                                "path": variant_path(_variant_stem_source(source), str(body.get("level") or "lod3"), use[0] if use else "realtime", root=root)})
             for o in outputs:
                 o["name"] = os.path.basename(o["path"])
                 o["exists"] = os.path.exists(o["path"])
@@ -4401,8 +4442,10 @@ def make_handler(api):
                 if not _fs_inside_roots(path):
                     return {"ok": False, "error": f"{path} is outside the folders this bridge serves"}
                 if exists and not body.get("replace"):
-                    return {"ok": False, "error": f"{name} is already in versions/: tick «replace» to make it again",
-                            "exists": True}
+                    # MICRO-CODA-VISTA-2 · the file there, said with its path:
+                    # the page offers «Sostituisci» / «Usa quello che c'è»
+                    return {"ok": False, "error": f"{name} is already in versions/ (made before)",
+                            "exists": True, "path": path, "name": os.path.basename(path)}
             return plan
 
         def _use_job(self, body, plan):
@@ -5013,6 +5056,10 @@ def make_handler(api):
                 self._fail(501, f"s3dgraphy with project_tree.variant_path is not importable here: {exc}")
                 return
             if not plan.get("ok"):
+                if plan.get("exists"):
+                    self._json({"ok": False, "error": plan.get("error"), "exists": True,
+                                "path": plan.get("path"), "name": plan.get("name")}, 409)
+                    return
                 self._fail(400, plan.get("error") or "no plan")
                 return
             if body.get("dry_run"):
@@ -5496,7 +5543,14 @@ def make_handler(api):
                     self._fail(403, f"{path} is outside the folders this bridge serves")
                     return
                 stamp_path = full + ".stamp.json"
-                if os.path.exists(stamp_path):
+                if os.path.exists(stamp_path) and body.get("replacing") and _stamp_superseded(stamp_path, out):
+                    # MICRO-CODA-VISTA-2 · «Sostituisci», asked and confirmed:
+                    # the file was made again, its old stamp names bytes that
+                    # are gone. It is not modified: it is kept beside, renamed
+                    # (``….stamp.json.superseded-<UTC>``), and the new bytes
+                    # get their own stamp.
+                    pass
+                elif os.path.exists(stamp_path):
                     refused.append({"path": path, "why": "already stamped"})
                     continue
                 targets.append((out, full, stamp_path))

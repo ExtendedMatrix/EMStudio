@@ -366,6 +366,15 @@ export interface QueueItem {
    *  file, the level), the phase it is in, and — cancelled — by whom */
   started?: number; ended?: number; made?: string; phase?: string; progress?: number;
   cancel?: { by: CancelBy; other?: string } | null;
+  /** MICRO-CODA-VISTA-2 · the file was already in versions/ (the bridge
+   *  refused to write over it, or gltfpack left it): «già fatto prima», with
+   *  the file and whether the graph already has it as a version — never a
+   *  failure. `replace`: «Sostituisci» asked (confirmed) for the next run */
+  before?: { path: string; name: string; registered: boolean } | null;
+  replace?: boolean;
+  /** MICRO-CODA-VISTA-2 · a form without one geometry: split, each copy its
+   *  own item (how many were made) — never «cancelled» */
+  split?: number;
 }
 /** MICRO-CODA-VISTA p.4 · who cancelled an item: the person (from the queue,
  *  the status bar's chip, Ottimizza's bar), the bridge restarted (its job
@@ -510,25 +519,30 @@ export function clearEnded(q: QueueItem[]): QueueItem[] {
 // The row's cell, the queue's view and the detail say the same thing with the
 // same sign: never ✖ here and ! there for a failure, ✔ and «ok» for a done.
 
-export type ItemTone = "wait" | "block" | "run" | "ok" | "fail" | "off";
-/** the sign of each tone (the words are the page's) */
-export const SIGNS: Readonly<Record<ItemTone, string>> = { wait: "⧗", block: "⚠", run: "⟳", ok: "✓", fail: "!", off: "–" };
+export type ItemTone = "wait" | "block" | "run" | "ok" | "fail" | "off" | "before" | "split";
+/** the sign of each tone (the words are the page's) — MICRO-CODA-VISTA-2:
+ *  «già fatto prima» (≡) and «diviso» (⑂) are not failures nor cancels */
+export const SIGNS: Readonly<Record<ItemTone, string>> = { wait: "⧗", block: "⚠", run: "⟳", ok: "✓", fail: "!", off: "–", before: "≡", split: "⑂" };
 
 /** The tone of an item: waiting (or blocked, saying why — «checking» is not a
  *  block), running, done, failed, cancelled. */
-export function itemTone(it: Pick<QueueItem, "state" | "block">): ItemTone {
+export function itemTone(it: Pick<QueueItem, "state" | "block"> & Partial<Pick<QueueItem, "before" | "cancel">>): ItemTone {
   if (it.state === "waiting") return it.block && it.block.code !== "checking" ? "block" : "wait";
+  if (it.state === "failed" && it.before) return "before";
+  if (it.state === "cancelled" && it.cancel?.by === "split") return "split";
   return ({ running: "run", done: "ok", failed: "fail", cancelled: "off" } as const)[it.state];
 }
 
 /** The filters of the view «Coda»: in corso, in attesa (blocked too), falliti
- *  (cancelled too: nothing made), fatti. */
+ *  (cancelled too: nothing made), fatti — MICRO-CODA-VISTA-2: «già fatto
+ *  prima» (the file is there) and «diviso» (its copies queued) are «fatti»,
+ *  never «falliti». */
 export type QueueFilter = "all" | "running" | "waiting" | "failed" | "done";
 export const QUEUE_FILTERS: readonly QueueFilter[] = ["all", "running", "waiting", "failed", "done"];
 export function queueFilter(q: readonly QueueItem[], f: QueueFilter): QueueItem[] {
   if (f === "all") return [...q];
-  const want = { running: ["running"], waiting: ["waiting"], failed: ["failed", "cancelled"], done: ["done"] }[f];
-  return q.filter((x) => want.includes(x.state));
+  const want = { running: ["run"], waiting: ["wait", "block"], failed: ["fail", "off"], done: ["ok", "before", "split"] }[f];
+  return q.filter((x) => want.includes(itemTone(x)));
 }
 export function queueCounts(q: readonly QueueItem[]): Record<QueueFilter, number> {
   const out = { all: q.length, running: 0, waiting: 0, failed: 0, done: 0 } as Record<QueueFilter, number>;
@@ -555,10 +569,13 @@ export function itemTime(it: Pick<QueueItem, "started" | "ended">, now = Date.no
 /** The gesture that solves an item, by its state: blocked → the block's own
  *  (Timbra, Installa, Blender, Scarica, Chi firma), failed or cancelled →
  *  Riprova, waiting → Togli, running → Annulla; done → none. */
-export type ItemGesture = "fix" | "retry" | "remove" | "cancel" | null;
-export function itemGesture(it: Pick<QueueItem, "state" | "block">): ItemGesture {
+export type ItemGesture = "fix" | "retry" | "remove" | "cancel" | "before" | null;
+export function itemGesture(it: Pick<QueueItem, "state" | "block"> & Partial<Pick<QueueItem, "before" | "cancel">>): ItemGesture {
   if (it.state === "waiting") return it.block && it.block.code !== "checking" ? "fix" : "remove";
   if (it.state === "running") return "cancel";
+  // MICRO-CODA-VISTA-2 · «Sostituisci» / «Usa quello che c'è»; a split ended
+  if (it.state === "failed" && it.before) return "before";
+  if (it.state === "cancelled" && it.cancel?.by === "split") return null;
   if (it.state === "failed" || it.state === "cancelled") return "retry";
   return null;
 }
@@ -573,6 +590,7 @@ export function retryItem(q: QueueItem[], id: string): QueueItem[] {
   it.cancel = null;
   it.block = null;
   it.started = undefined; it.ended = undefined; it.made = undefined; it.phase = undefined; it.progress = undefined;
+  it.before = null; it.split = undefined;
   return q;
 }
 
