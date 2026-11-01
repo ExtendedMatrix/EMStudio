@@ -787,22 +787,8 @@ body.sync-active #footer-brand {
 #mode-indicator[data-reach="reachable"]::before { background: var(--ok); }
 #mode-indicator[data-reach="unreachable"]::before { background: var(--danger); }
 
-#conn-pop {
-  position: fixed;
-  z-index: 60;
-  width: min(372px, calc(100vw - 16px));
-  max-height: min(72vh, 640px);
-  overflow: auto;
-  padding: 10px 12px;
-  background: var(--bg-elevated);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
-  font-size: 12px;
-  line-height: 1.45;
-}
-#conn-pop.hidden { display: none; }
+/* MICRO-CHIP-UNICO · the «Where you are» popup (#conn-pop) is gone: its pieces
+   are drawn inside the chip's menu (.who-menu) */
 .conn-sect + .conn-sect { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .conn-panel h4 { margin: 0 0 6px; font-size: 12px; font-weight: 700; }
 .conn-panel h5 { margin: 10px 0 4px; font-size: 11px; font-weight: 700; color: var(--text-muted); }
@@ -11271,6 +11257,62 @@ tr.al-covered-row > td { color: var(--text-faint); }
 .who-menu .who-acts button:hover { background: var(--bg-hover); }
 .who-menu .who-acts button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .who-menu .who-tie { margin: 8px 2px 0; color: var(--text-faint); font-size: 11px; }
+
+/* ── MICRO-CHIP-UNICO · one menu: the pair's steps, four sections, grey items ─ */
+.who-menu { overflow: auto; width: min(400px, calc(100vw - 16px)); }
+.who-menu .who-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.who-menu .who-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font: 500 11px var(--font-sans);
+  cursor: pointer;
+}
+.who-menu .who-step:hover { background: var(--bg-hover); }
+.who-menu .who-step-t { flex: 1 1 auto; min-width: 0; text-align: left; line-height: 1.15; overflow-wrap: anywhere; }
+.who-menu .who-step-n { color: var(--text-faint); }
+.who-menu .who-steps li[data-state="done"] .who-step { color: var(--text); }
+.who-menu .who-steps li[data-state="done"] .who-step-s { color: var(--ok); }
+.who-menu .who-steps li[data-state="warn"] .who-step-s { color: var(--danger); }
+.who-menu .who-steps li.next .who-step { border-color: var(--accent); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.who-menu .who-acts button.pair-off,
+.who-menu button[aria-disabled="true"] { opacity: .55; cursor: help; }
+.who-menu .who-need { color: var(--warn-ink, var(--warn)); }
+.who-menu .who-sect h6 { margin: 8px 0 3px; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.who-menu .who-sect .conn-sect { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border); }
+.who-menu .who-sect .conn-sect:first-of-type { border-top: 0; }
+.who-menu .conn-where { margin: 0 0 4px; }
+.who-menu .conn-node { margin: 2px 0 6px; }
+.who-menu .conn-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.who-menu .who-chooser {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+}
+.who-menu .who-chooser .insp-sect { margin: 0 0 4px; font-size: 12px; }
+.who-menu .who-chooser input { min-width: 0; width: calc(100% - 70px); }
+.who-menu .who-chooser .nc-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 2px 0 4px; }
+.who-menu .who-chooser .nc-row .insp-hint { flex: 1 1 100%; order: 3; }
+.who-menu .who-chooser .nc-row button { margin-left: auto; }
+.who-menu .who-back { margin-bottom: 6px; }
+.who-menu .who-landing { margin-top: 6px; }
+.set-node-chooser { margin-top: 8px; padding: 6px 8px; border: 1px dashed var(--border-strong); border-radius: 6px; }
 
 /* ── MICRO-TESTATA-CLOUD · files in the cloud, not downloaded ─────────────── */
 .al-cloud { color: var(--accent-ink); font-size: 11.5px; white-space: nowrap; }

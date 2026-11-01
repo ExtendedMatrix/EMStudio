@@ -49,39 +49,48 @@ const g = {
   findApp: async () => "ws://localhost:8788",
   listRooms: async () => { throw new TypeError("Load failed"); },
 };
+// MICRO-CHIP-UNICO · the panel's pieces, drawn inside the chip's menu:
+// «Dove lavori» (mode · apps · room), the active node in «Nodo e account»,
+// «Le mie stanze» in «Il mio spazio»
 const host = doc.createElement("div");
 doc.body.appendChild(host);
-const nodes = [
-  { url: "https://em.localhost:8443/em", active: true, reach: "reachable", access: "none" },
-  { url: "https://nodo.esempio.eu/em", active: false, reach: "unreachable", access: "none" },
-];
-C.renderConnectionPanel(host, { ...base, nodes, appUrl: "ws://localhost:8788" }, g);
-eq([...host.querySelectorAll(":scope > .conn-sect")].map((s) => s.dataset.sect), ["mode", "apps", "nodes"], "three sections, in order");
+C.renderWhereSection(host, { ...base, appUrl: "ws://localhost:8788" }, g);
+eq([...host.querySelectorAll(":scope > .conn-sect")].map((s) => s.dataset.sect), ["mode", "apps"], "«Dove lavori»: mode, apps — in order");
 eq([...host.querySelectorAll(".conn-mode")].map((b) => b.textContent), ["On this computer", "With an app", "In a room"], "the three modes");
 eq(host.querySelector(".conn-app-url").textContent, "ws://localhost:8788", "the app's address");
+ok(!host.querySelector('[data-sect="nodes"]'), "no list of nodes in «Dove lavori» (the selector is the node's)");
+host.textContent = "";
+C.renderWhereSection(host, { ...base, mode: "hub", room: "r1", roomTitle: "Foro" }, g);
+ok(host.querySelector('[data-sect="room"]') && /Foro/.test(host.textContent), "in a room: the room and its gestures");
+host.textContent = "";
+C.renderNodeAccess(host, base, g);
 const active = host.querySelector('.conn-node[data-node="https://em.localhost:8443/em"]');
-ok(active.querySelector('[data-sect="rooms"]'), "the rooms are drawn under the active node");
 eq([...active.querySelectorAll("[data-act]")].map((b) => b.dataset.act).filter((a) => a.startsWith("enter")), ["enter-orcid", "enter-password"],
    "not entered: Enter with ORCID / with the node's password");
-const down = host.querySelector('.conn-node[data-node="https://nodo.esempio.eu/em"] [data-err="unreachable"]');
+active.querySelector('[data-act="enter-orcid"]').dispatchEvent(new win.Event("click"));
+eq(calls.at(-1), "enter:orcid:https://em.localhost:8443/em", "Enter with ORCID on the active node");
+host.textContent = "";
+C.renderNodeAccess(host, { ...base, node: "https://nodo.esempio.eu/em", reach: "unreachable" }, g);
+const down = host.querySelector('[data-err="unreachable"]');
 ok(down && /does not answer/.test(down.textContent) && !/Load failed/.test(down.textContent), "an unreachable node in one plain line");
 down.querySelector('[data-act="retry-node"]').dispatchEvent(new win.Event("click"));
 eq(calls.at(-1), "retry:https://nodo.esempio.eu/em", "«Try again» asks that node again");
-active.querySelector('[data-act="enter-orcid"]').dispatchEvent(new win.Event("click"));
-eq(calls.at(-1), "enter:orcid:https://em.localhost:8443/em", "Enter with ORCID on the active node");
+host.textContent = "";
+C.renderMyRooms(host, base, g);
 await new Promise((r) => setTimeout(r, 0));
 const roomsErr = host.querySelector('[data-sect="rooms"] .conn-err');
 ok(roomsErr && !/Load failed/.test(roomsErr.textContent) && /does not answer/.test(roomsErr.textContent),
    "the rooms list of a node that does not answer: no «Load failed»");
 // entered: Leave this node
-C.renderConnectionPanel(host, { ...base, access: "orcid_node", nodes: [{ ...nodes[0], access: "accredited" }] }, g);
+host.textContent = "";
+C.renderNodeAccess(host, { ...base, access: "orcid_node" }, g);
 ok(host.querySelector('[data-act="sign-out-node"]') && !host.querySelector('[data-act="enter-orcid"]'), "entered: Leave this node");
 ok(/accredited/.test(host.querySelector(".conn-access").textContent), "the access is said: accredited");
 
 // «Mode» left the top bar; the label is the way in, and ⇧⌘L
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 ok(!/id="dd-mode"/.test(html), "no Mode menu in the top bar");
-ok(/id="mode-actions" hidden/.test(html), "the mode buttons stay, hidden, pressed by the panel");
+ok(/id="mode-actions" hidden/.test(html), "the mode buttons stay, hidden, pressed by the chip's menu");
 const keymap = readFileSync(`${SRC}keymap.ts`, "utf8");
 ok(/id: "where", keys: "⇧⌘L"/.test(keymap), "⇧⌘L is in the key map (Help ▸ Shortcuts)");
 

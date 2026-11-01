@@ -180,7 +180,7 @@
         <!-- MICRO-PULIZIA p.1 · «Publish…» stays where the verb will live, grey:
              aria-disabled (not disabled) so Tab reaches it and the tooltip says why -->
         <button id="ns-publish" class="ns-btn primary" type="button" aria-disabled="true"
-                data-i18n="strip.publish" data-i18n-title="strip.publishPhase2"
+                data-i18n="strip.publish"
                 title="Publishing to a StratiGraph node arrives with phase 2">Publish…</button>
       </div>
       <!-- MICRO-TESTATA-CLOUD · at the top right: the theme (☀ / ☾, remembered;
@@ -532,22 +532,21 @@
               </label>
             </details>
           </section>
-          <!-- MICRO-DOVE-CHI-MENU p.5 · CONNECTIONS: the saved nodes (address,
-               Test, Remove) and, below, the synchronised apps. Entering a node
-               and choosing a room are «Where you are»: no Sign in, no Room here. -->
+          <!-- MICRO-DOVE-CHI-MENU p.5 · CONNECTIONS: the saved nodes and, below, the
+               synchronised apps. MICRO-CHIP-UNICO p.4 · only what lasts: each saved
+               node made the default, edited, tested, removed; «Add a node…» unfolds
+               THE node selector (the chip's). Signing in and rooms are the chip's. -->
           <section data-settings-tab="connections" class="settings-sect" id="settings-sect-node">
             <h4 data-i18n="settings.nodesTitle">StratiGraph nodes</h4>
             <p class="settings-hint" data-i18n="settings.nodesHint">
-              The nodes this computer knows. You enter one, and pick its rooms, in «Where you are»
-              (the status bar's left label).
+              The nodes this computer knows. You choose one, sign in and pick its rooms from the chip at
+              the top right.
             </p>
             <ul id="set-nodes" class="set-nodes"></ul>
             <div class="settings-node-actions">
-              <input id="set-node-add" type="url" data-i18n-placeholder="settings.nodeAddressPh"
-                     placeholder="for example https://em.localhost:8443/em" />
-              <button type="button" id="set-node-add-btn" data-i18n="settings.nodeAdd">Add</button>
+              <button type="button" id="set-node-add-btn" aria-expanded="false" data-i18n="settings.nodeAddMore">Add a node…</button>
             </div>
-            <p class="settings-hint" id="set-node-result" aria-live="polite"></p>
+            <div id="set-node-chooser" class="set-node-chooser" hidden></div>
           </section>
           <!-- MICRO-SPAZIO-3D-2 p.6 · the node's orphan assets, for its operator -->
           <section data-settings-tab="connections" class="settings-sect orph-off" id="settings-sect-orphans">

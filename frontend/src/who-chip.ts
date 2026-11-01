@@ -88,3 +88,78 @@ export function themeToggle(mode: "auto" | "light" | "dark", resolved: "light" |
   { glyph: string; next: "light" | "dark"; following: boolean } {
   return { glyph: resolved === "dark" ? "☾" : "☀", next: resolved === "dark" ? "light" : "dark", following: mode === "auto" };
 }
+
+// ── MICRO-CHIP-UNICO (E.D. 1 Nov 2026) · ONE place: the chip ─────────────────
+// Three doors (the chip, «On this computer» in the status bar, Settings ›
+// Connections) used to say the same thing with different contents and popups
+// on top of each other. Now the chip's menu is the one place, in four
+// sections in this order —
+//
+//   author · who signs (name, ORCID, verify, edit)
+//   node   · the node and the account (THE node selector — this computer, the
+//            local network, saved, by hand, turn on a node here — then Sign in
+//            / Sign out)
+//   where  · where you work (on the computer / with an app / in a room, the
+//            synchronised apps, Find)
+//   space  · my space (my rooms, space used, permissions; the node's engine
+//            when it exists)
+//
+// — and on top the steps of the node–user pair: ① Author → ② Node → ③ Sign in
+// → ④ My space. Until the pair is complete what needs the node stays visible
+// but grey, saying what is missing, and a click leads to the missing step.
+
+export type WhoSection = "author" | "node" | "where" | "space";
+export const WHO_SECTIONS: readonly WhoSection[] = ["author", "node", "where", "space"];
+
+export type PairStep = "author" | "node" | "login" | "space";
+export const PAIR_STEPS: readonly PairStep[] = ["author", "node", "login", "space"];
+export type PairState = "done" | "todo" | "warn";
+
+export interface PairFacts extends Pick<WhoFacts, "author" | "node" | "signedIn"> {
+  /** the node answers (`unreachable` = it was asked and did not) */
+  reach?: "reachable" | "unreachable" | "unknown";
+}
+
+/** Each step with its state: author declared; a node chosen (warn when it
+ *  does not answer); signed in on it; my space = all three, the node up. */
+export function pairSteps(f: PairFacts): { step: PairStep; state: PairState }[] {
+  const nodeState: PairState = !f.node ? "todo" : f.reach === "unreachable" ? "warn" : "done";
+  const login: PairState = f.node && f.signedIn ? "done" : "todo";
+  const space: PairState = login === "done" ? (nodeState === "done" ? "done" : "warn") : "todo";
+  return [
+    { step: "author", state: f.author ? "done" : "todo" },
+    { step: "node", state: nodeState },
+    { step: "login", state: login },
+    { step: "space", state: space },
+  ];
+}
+
+/** What each node-side action needs of the pair: seeing my rooms / my space
+ *  needs the node and the login; publishing and a room (written, signed) also
+ *  the author — the same order as the steps. */
+export const PAIR_NEEDS = {
+  rooms: ["node", "login"],
+  space: ["node", "login"],
+  publish: ["author", "node", "login"],
+  roomCreate: ["author", "node", "login"],
+  roomBring: ["author", "node", "login"],
+} as const satisfies Record<string, readonly PairStep[]>;
+export type PairAction = keyof typeof PAIR_NEEDS;
+
+/** The steps still missing for an action, in order ([] = it may go). A node
+ *  that does not answer counts as missing: nothing can be asked of it. */
+export function pairMissing(action: PairAction, f: PairFacts): PairStep[] {
+  const st = new Map(pairSteps(f).map((s) => [s.step, s.state]));
+  return PAIR_NEEDS[action].filter((s) => st.get(s) !== "done");
+}
+
+/** Where a missing step is done: the author in «Autore», the node and the
+ *  login in «Nodo e account» (the node first: the selector opens). */
+export function sectionOfStep(step: PairStep): WhoSection {
+  return step === "author" ? "author" : step === "space" ? "space" : "node";
+}
+
+/** The grey item's sentence, as keys: «serve: scegli un nodo → accedi». */
+export function needKeys(missing: readonly PairStep[]): string[] {
+  return missing.map((s) => `pair.do.${s}`);
+}

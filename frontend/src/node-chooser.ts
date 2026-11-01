@@ -6,6 +6,13 @@
 // When this computer has no node: «Turn on a node on this computer» (the
 // personal node: this computer only, the files stay in the folders). «Open to
 // the local network» is an explicit choice, with the sentence of who can come in.
+//
+// MICRO-CHIP-UNICO (E.D. 1 Nov 2026) · THE node selector: one component, used
+// in the chip's menu («Nodo e account») and in Settings › Connections («Add a
+// node»), never copied. It draws inside the host it is given (no popup of its
+// own: one menu at a time). Without the bridge (the web page alone) the saved
+// nodes and the one typed by hand are still asked, by the page (`probe`); this
+// computer and the local network need the bridge, and that is said.
 import { t, getLocale } from "./i18n";
 import { askConfirm } from "./app-dialog";
 import { stateBadge } from "./state-symbols";
@@ -21,12 +28,19 @@ export interface Found {
 export interface PersonalState { running: boolean; lan?: boolean; url?: string; lan_url?: string | null; who?: string }
 
 export interface ChooserHooks {
+  /** the bridge's address, "" when there is none (the web page alone) */
   bridge: string;
   saved: string[];
   current(): string;
   projectRoot: string;
   use(url: string): void;
   log(line: string): void;
+  /** the label of a row's button («Use» in the chip, «Add» in Settings) */
+  pickLabel?: string;
+  /** a row already among the picked ones («in use» / «saved»): its button off */
+  picked?(url: string): boolean;
+  /** one node asked by the page (`/v1/health`), when the bridge cannot */
+  probe?(url: string): Promise<NodeRow>;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -49,7 +63,7 @@ export const findNodes = (h: ChooserHooks, typed = "") =>
 export const personal = (h: ChooserHooks, action: "start" | "stop" | "status", lan = false) =>
   post(h.bridge, "/node/personal", { action, lan, root: h.projectRoot }) as unknown as Promise<PersonalState & { ok: boolean; error?: string }>;
 
-function row(n: NodeRow, h: ChooserHooks, host: HTMLElement): HTMLElement {
+function row(n: NodeRow, h: ChooserHooks, host: HTMLElement, typed = false): HTMLElement {
   const r = el("div", "nc-row");
   r.dataset.url = n.url;
   r.appendChild(stateBadge(n.reachable ? "node.reachable" : "node.unreachable", false));
@@ -58,28 +72,49 @@ function row(n: NodeRow, h: ChooserHooks, host: HTMLElement): HTMLElement {
     const facts = [n.version ? `v${n.version}` : "", n.profile === "personal" ? t("nodes.personal") : "",
                    (n.ways_in ?? []).map((w) => t(`nodes.way.${w}`)).join(" · ")].filter(Boolean).join(" · ");
     r.appendChild(el("span", "insp-hint", facts));
-    const use = el("button", "ghost", n.url === h.current() ? t("nodes.inUse") : t("nodes.use")) as HTMLButtonElement;
-    use.disabled = n.url === h.current();
+  } else {
+    r.appendChild(el("span", "insp-hint", t("nodes.silent")));
+  }
+  // a node that answers can be used; one typed by hand too (an explicit
+  // address: it may be off now, it is said beside it)
+  if (n.reachable || typed) {
+    const on = h.picked ? h.picked(n.url) : n.url === h.current();
+    const use = el("button", "ghost", on ? (h.picked ? t("nodes.picked") : t("nodes.inUse")) : (h.pickLabel ?? t("nodes.use"))) as HTMLButtonElement;
+    use.type = "button";
+    use.disabled = on;
     use.dataset.act = "use";
     use.addEventListener("click", () => { h.use(n.url); void paintChooser(host, h); });
     r.appendChild(use);
-  } else {
-    r.appendChild(el("span", "insp-hint", t("nodes.silent")));
   }
   return r;
 }
 
+/** Without the bridge: the saved nodes and the typed one, asked by the page. */
+async function foundByPage(h: ChooserHooks, typed: string): Promise<Found> {
+  const ask = (url: string): Promise<NodeRow> => h.probe ? h.probe(url).catch(() => ({ url, reachable: false }))
+    : Promise.resolve({ url, reachable: false });
+  const clean = typed.trim().replace(/\/+$/, "");
+  const [saved, typedRows] = await Promise.all([Promise.all(h.saved.filter(Boolean).map(ask)),
+                                                clean ? Promise.all([ask(clean)]) : Promise.resolve([])]);
+  return { local: [], lan: [], saved, typed: typedRows, lan_how: "none", lan_note: t("nodes.noBridgeLan"),
+           suggestion: t("nodes.noBridge"), suggestion_key: "no_bridge", real_node: "" };
+}
+
 export async function paintChooser(host: HTMLElement, h: ChooserHooks, typed = ""): Promise<void> {
+  host.dataset.nodeChooser = "";
   host.replaceChildren(el("h3", "insp-sect", t("nodes.title")), el("div", "insp-hint", t("nodes.looking")));
   let found: Found;
   let mine: PersonalState = { running: false };
+  let bridged = !!h.bridge;
   try {
+    if (!bridged) throw new Error("no bridge");
     [found, mine] = await Promise.all([findNodes(h, typed), personal(h, "status").catch(() => ({ running: false }))]);
-  } catch (e) {
-    host.replaceChildren(el("h3", "insp-sect", t("nodes.title")), el("div", "insp-hint", (e as Error).message));
-    return;
+  } catch {
+    bridged = false;
+    found = await foundByPage(h, typed);
   }
   host.replaceChildren(el("h3", "insp-sect", t("nodes.title")));
+  host.dataset.bridge = bridged ? "yes" : "no";
   const say = el("div", "nc-say", found.suggestion);
   say.dataset.key = found.suggestion_key;
   host.appendChild(say);
@@ -94,8 +129,11 @@ export async function paintChooser(host: HTMLElement, h: ChooserHooks, typed = "
   group("local", found.local);
   // N2 · this computer: turn on, open to the network, turn off
   const acts = el("div", "nc-acts");
-  if (!mine.running) {
+  if (!bridged) {
+    acts.appendChild(el("div", "insp-hint", t("nodes.noBridgeLocal")));
+  } else if (!mine.running) {
     const on = el("button", "", t("nodes.turnOn")) as HTMLButtonElement;
+    on.type = "button";
     on.dataset.act = "turn-on";
     on.title = t("nodes.turnOnHint");
     on.addEventListener("click", async () => {
@@ -129,15 +167,22 @@ export async function paintChooser(host: HTMLElement, h: ChooserHooks, typed = "
   hand.dataset.group = "typed";
   hand.appendChild(el("div", "nc-head", t("nodes.g.typed")));
   const input = document.createElement("input");
+  input.type = "url";
   input.placeholder = "https://…";
   input.value = typed;
+  input.dataset.ncTyped = "";
+  input.setAttribute("aria-label", t("nodes.g.typed"));
   const go = el("button", "ghost", t("nodes.try")) as HTMLButtonElement;
+  go.type = "button";
+  go.dataset.act = "try";
   go.addEventListener("click", () => { void paintChooser(host, h, input.value.trim()); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go.click(); } });
   hand.append(input, go);
-  for (const n of found.typed) hand.appendChild(row(n, h, host));
+  for (const n of found.typed) hand.appendChild(row(n, h, host, true));
   host.appendChild(hand);
   // a real node, and the move that does not exist yet
-  host.appendChild(el("div", "insp-hint nc-real", found.real_node));
+  if (found.real_node) host.appendChild(el("div", "insp-hint nc-real", found.real_node));
+  if (!bridged) return;
   const travaso = el("button", "ghost", t("nodes.travaso")) as HTMLButtonElement;
   travaso.disabled = true;
   travaso.dataset.act = "travaso";

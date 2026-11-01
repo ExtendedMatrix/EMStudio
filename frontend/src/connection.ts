@@ -508,22 +508,27 @@ export function renderRoomList(host: HTMLElement, rooms: RoomInfo[], current: st
 }
 
 /**
- * MICRO-DOVE-CHI-MENU p.3 · «Where you are», the panel zone 1 opens (the left
- * label of the status bar; «Mode» left the top bar). Three sections, always in
- * this order: the MODE (on this computer / with an app / in a room), the
- * SYNCHRONISED APPS (Blender today: its state, its address, «Find»), and the
- * NODES AND ROOMS (every known node with whether it answers, your access and
- * Enter / Leave; under the active one its rooms). Entering a node is done here,
- * because it is about a place; who you are is the right label's panel.
+ * MICRO-CHIP-UNICO (E.D. 1 Nov 2026) · the pieces of the chip's menu that are
+ * about the PLACE, drawn here and placed by the page (`paintWhoMenu`): the
+ * separate «Where you are» popup is gone — the status bar's label opens the
+ * chip's menu at «Dove lavori».
+ *
+ *   renderWhereSection · «Dove lavori»: the mode (on this computer / with an
+ *                        app / in a room), the synchronised apps (Blender
+ *                        today: state, address, «Find»), the room this session
+ *                        is in with its gestures;
+ *   renderNodeAccess   · the active node's line in «Nodo e account»: whether it
+ *                        answers, the access, Enter with ORCID / with the
+ *                        node's password, or Leave / another user;
+ *   renderMyRooms      · «Le mie stanze» in «Il mio spazio»: the node's rooms
+ *                        for this session, + New room, Bring into a room.
+ *
+ * Choosing ANOTHER node is the node selector's (`node-chooser.ts`), the one
+ * component used by the chip and by Settings › Connections.
  */
-export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: ConnectionGestures,
-                                      parts: ConnectionParts = {}): void {
-  host.textContent = "";
-  host.className = "conn-panel";
-  host.setAttribute("role", "dialog");
-  host.setAttribute("aria-label", t("conn.title"));
-
-  const head = el("h4", "conn-where");
+export function renderWhereSection(host: HTMLElement, s: ConnectionState, g: ConnectionGestures,
+                                   parts: ConnectionParts = {}): void {
+  const head = el("p", "conn-where");
   const dot = el("span", "where-dot");
   dot.dataset.health = whereHealth(s);
   head.append(dot, stateBadge(roomStateId(s), false), document.createTextNode(wherePhrase(s)));
@@ -534,7 +539,7 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   // 1 · the mode
   const modes = el("div", "conn-sect");
   modes.dataset.sect = "mode";
-  modes.appendChild(el("h5", "", t("conn.modeHead")));
+  modes.appendChild(el("h6", "", t("conn.modeHead")));
   const row = el("div", "conn-modes");
   for (const m of ["standalone", "sidecar", "hub"] as SessionMode[]) {
     const b = btn(t(`conn.modeChoice.${m}`), "conn-btn conn-mode" + (s.mode === m ? " on" : ""));
@@ -550,7 +555,7 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   // 2 · the synchronised apps: Blender today, the shape ready for others
   const apps = el("div", "conn-sect");
   apps.dataset.sect = "apps";
-  apps.appendChild(el("h5", "", t("conn.appsHead")));
+  apps.appendChild(el("h6", "", t("conn.appsHead")));
   const tool = s.hostTool || "Blender";
   const appRow = el("div", "conn-app");
   appRow.dataset.app = tool.toLowerCase();
@@ -567,7 +572,7 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   if (s.mode === "sidecar") {
     if (parts.host) apps.appendChild(parts.host);
     if (parts.accept) {
-      apps.appendChild(el("h5", "", t("conn.acceptHead", { tool })));
+      apps.appendChild(el("h6", "", t("conn.acceptHead", { tool })));
       apps.appendChild(parts.accept);
     }
   }
@@ -591,101 +596,11 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   apps.appendChild(appActs);
   host.appendChild(apps);
 
-  // 3 · the nodes and their rooms
-  const nodes = el("div", "conn-sect");
-  nodes.dataset.sect = "nodes";
-  nodes.appendChild(el("h5", "", t("conn.nodesHead")));
-  const list = s.nodes ?? (s.node ? [{ url: s.node, active: true, reach: s.reach, access: nodeAccessOf(s.access) }] : []);
-  if (!list.length) nodes.appendChild(el("p", "conn-line conn-dim", t("conn.noNodeLong")));
-  const ul = el("ul", "conn-nodes");
-  /** the active node's row: its room and its rooms are drawn inside it */
-  let activeLi: HTMLElement | null = null;
-  for (const n of list) {
-    const li = el("li", "conn-node" + (n.active ? " on" : ""));
-    if (n.active) activeLi = li;
-    li.dataset.node = n.url;
-    li.dataset.reach = n.reach;
-    li.dataset.access = n.access;
-    const line = el("div", "conn-node-line");
-    line.appendChild(stateBadge(n.reach === "unreachable" ? "node.unreachable" : "node.reachable", false));
-    const name = n.active || !g.useNode ? el("b", "", shortNode(n.url))
-      : btn(shortNode(n.url), "conn-btn conn-node-use");
-    if (!n.active && g.useNode) {
-      (name as HTMLButtonElement).title = t("conn.useNodeTitle");
-      name.addEventListener("click", () => g.useNode!(n.url));
-    }
-    line.appendChild(name);
-    line.appendChild(el("span", "conn-dim", ` · ${t(`conn.reach.${n.reach}`)}`));
-    if (n.active) line.appendChild(el("span", "conn-access", ` · ${t(`conn.nodeAccess.${n.access}`)}`));
-    li.appendChild(line);
-    if (n.reach === "unreachable") {
-      // one line, and «Try again»
-      const down = el("p", "conn-line conn-err", t("conn.nodeDown", { node: shortNode(n.url) }));
-      down.dataset.err = "unreachable";
-      if (g.retryNode) {
-        const again = btn(t("nodes.retry"));
-        again.dataset.act = "retry-node";
-        again.addEventListener("click", () => g.retryNode!(n.url));
-        down.append(" ", again);
-      }
-      li.appendChild(down);
-    } else if (n.active) {
-      const acts = el("div", "conn-acts");
-      if (n.access === "none" || n.access === "expired") {
-        if (g.enterNode) {
-          const viaOrcid = btn(t("conn.enterOrcid"));
-          viaOrcid.dataset.act = "enter-orcid";
-          viaOrcid.title = t("conn.enterOrcidTitle");
-          viaOrcid.addEventListener("click", () => g.enterNode!(n.url, "orcid"));
-          const viaPw = btn(t("conn.enterPassword"));
-          viaPw.dataset.act = "enter-password";
-          viaPw.title = t("conn.enterPasswordTitle");
-          viaPw.addEventListener("click", () => g.enterNode!(n.url, "password"));
-          acts.append(viaOrcid, viaPw);
-        }
-      } else {
-        if (g.signOutOfNode) {
-          const out = btn(t("conn.leaveNode"));
-          out.dataset.act = "sign-out-node";
-          out.title = t("conn.signOutNodeTitle");
-          out.addEventListener("click", () => g.signOutOfNode!());
-          acts.appendChild(out);
-        }
-        if (g.signInAsOther) {
-          const other = btn(t("conn.signInOther"));
-          other.dataset.act = "sign-in-other";
-          other.title = t("conn.signInOtherTitle");
-          other.addEventListener("click", () => g.signInAsOther!());
-          acts.appendChild(other);
-        }
-      }
-      li.appendChild(acts);
-    }
-    ul.appendChild(li);
-  }
-  nodes.appendChild(ul);
-  const nodeActs = el("div", "conn-acts");
-  if (g.chooseNode) {
-    const find = btn(t("conn.findNodes"));
-    find.dataset.act = "choose-node";
-    find.title = t("conn.findNodesTitle");
-    find.addEventListener("click", () => g.chooseNode!());
-    nodeActs.appendChild(find);
-  }
-  if (g.addNode) {
-    const add = btn(t("conn.addNode"));
-    add.dataset.act = "add-node";
-    add.addEventListener("click", () => g.addNode!());
-    nodeActs.appendChild(add);
-  }
-  nodes.appendChild(nodeActs);
-  host.appendChild(nodes);
-
-  // the room this session is in, under its node
+  // 3 · the room this session is in
   if (s.mode === "hub" && s.room) {
-    const room = el("div", "conn-sect conn-sub");
+    const room = el("div", "conn-sect");
     room.dataset.sect = "room";
-    room.appendChild(el("h5", "", t("conn.roomHead")));
+    room.appendChild(el("h6", "", t("conn.roomHead")));
     room.appendChild(el("p", "conn-line", t("conn.inRoom", { room: s.roomTitle || s.room })));
     // I1 · the room, the role and the sync, each with its sign and its word
     const signs = el("div", "conn-signs");
@@ -697,7 +612,7 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
     room.appendChild(signs);
     if (parts.roster) room.appendChild(parts.roster);
     if (parts.accept) {
-      room.appendChild(el("h5", "", t("conn.acceptHead", { tool: t("conn.theRoom") })));
+      room.appendChild(el("h6", "", t("conn.acceptHead", { tool: t("conn.theRoom") })));
       room.appendChild(parts.accept);
     }
     const acts = el("div", "conn-acts");
@@ -707,6 +622,7 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
     const on = btn(t("conn.openOnNode"));
     on.addEventListener("click", () => g.openOnNode());
     const leave = btn(t("conn.leaveRoom"));
+    leave.dataset.act = "leave-room";
     leave.addEventListener("click", () => g.leaveRoom());
     acts.append(rs, on);
     if (g.roomResources) {
@@ -731,70 +647,139 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
     }
     acts.appendChild(leave);
     room.appendChild(acts);
-    (activeLi ?? host).appendChild(room);
+    host.appendChild(room);
   }
+}
 
-  // R1 · the rooms, asked of the node with this session's access
-  if (s.node && g.listRooms && s.reach !== "unreachable") {
-    const rooms = el("div", "conn-sect conn-sub");
-    rooms.dataset.sect = "rooms";
-    rooms.appendChild(el("h5", "", t("rooms.head")));
-    const body = el("div", "conn-rooms-body");
-    body.appendChild(el("p", "conn-line conn-dim", t("rooms.loading")));
-    rooms.appendChild(body);
+/** The active node in «Nodo e account»: its address, whether it answers, the
+ *  access; not entered → Enter with ORCID / with the node's password; entered
+ *  → Leave this node / another user; not answering → one line and «Try again». */
+export function renderNodeAccess(host: HTMLElement, s: ConnectionState, g: ConnectionGestures): void {
+  if (!s.node) return;
+  const access = nodeAccessOf(s.access);
+  const box = el("div", "conn-node on");
+  box.dataset.node = s.node;
+  box.dataset.reach = s.reach;
+  box.dataset.access = access;
+  const line = el("div", "conn-node-line");
+  line.appendChild(stateBadge(s.reach === "unreachable" ? "node.unreachable" : "node.reachable", false));
+  line.appendChild(el("b", "", shortNode(s.node)));
+  line.appendChild(el("span", "conn-dim", ` · ${t(`conn.reach.${s.reach}`)}`));
+  line.appendChild(el("span", "conn-access", ` · ${t(`conn.nodeAccess.${access}`)}`));
+  box.appendChild(line);
+  if (s.reach === "unreachable") {
+    const down = el("p", "conn-line conn-err", t("conn.nodeDown", { node: shortNode(s.node) }));
+    down.dataset.err = "unreachable";
+    if (g.retryNode) {
+      const again = btn(t("nodes.retry"));
+      again.dataset.act = "retry-node";
+      again.addEventListener("click", () => g.retryNode!(s.node));
+      down.append(" ", again);
+    }
+    box.appendChild(down);
+  } else {
     const acts = el("div", "conn-acts");
-    if (g.newRoom) {
-      const nw = btn(t("rooms.new"));
-      nw.dataset.act = "new-room";
-      nw.addEventListener("click", () => g.newRoom!());
-      acts.appendChild(nw);
+    if (access === "none" || access === "expired") {
+      if (g.enterNode) {
+        const viaOrcid = btn(t("conn.enterOrcid"), "conn-btn primary");
+        viaOrcid.dataset.act = "enter-orcid";
+        viaOrcid.title = t("conn.enterOrcidTitle");
+        viaOrcid.addEventListener("click", () => g.enterNode!(s.node, "orcid"));
+        const viaPw = btn(t("conn.enterPassword"));
+        viaPw.dataset.act = "enter-password";
+        viaPw.title = t("conn.enterPasswordTitle");
+        viaPw.addEventListener("click", () => g.enterNode!(s.node, "password"));
+        acts.append(viaOrcid, viaPw);
+      }
+    } else {
+      if (g.signOutOfNode) {
+        const out = btn(t("conn.leaveNode"));
+        out.dataset.act = "sign-out-node";
+        out.title = t("conn.signOutNodeTitle");
+        out.addEventListener("click", () => g.signOutOfNode!());
+        acts.appendChild(out);
+      }
+      if (g.signInAsOther) {
+        const other = btn(t("conn.signInOther"));
+        other.dataset.act = "sign-in-other";
+        other.title = t("conn.signInOtherTitle");
+        other.addEventListener("click", () => g.signInAsOther!());
+        acts.appendChild(other);
+      }
     }
-    if (g.bringIntoRoom) {
-      const br = btn(t("rooms.bring"));
-      br.dataset.act = "bring-into-room";
-      br.title = t("rooms.bringTitle");
-      br.addEventListener("click", () => g.bringIntoRoom!());
-      acts.appendChild(br);
-    }
-    rooms.appendChild(acts);
-    (activeLi ?? host).appendChild(rooms);
-    void g.listRooms().then(
-      (list) => renderRoomList(body, list, s.room, (id) => g.joinRoom?.(id)),
-      (error) => {
-        body.textContent = "";
-        // A2 · an expired access is not a fault to read: it has a gesture
-        // p.3 · …and a session that never entered is not «expired»: the way in
-        // is the node's own «Enter», just above
-        if (error instanceof NodeError && error.status === 401 && nodeAccessOf(s.access) === "none") {
-          const line = el("p", "conn-line conn-dim", t("rooms.enterFirst"));
-          line.dataset.err = "not-entered";
-          body.appendChild(line);
-          return;
-        }
-        if (error instanceof NodeError && error.status === 401 && g.signInAgain) {
-          const line = el("p", "conn-line conn-err conn-expired", t("rooms.accessExpired"));
-          const again = btn(t("rooms.signInAgain"));
-          again.dataset.act = "sign-in-again";
-          again.addEventListener("click", () => g.signInAgain!());
-          line.append(" ", again);
-          body.appendChild(line);
-          return;
-        }
-        // p.3 · «the node did not give the list: Load failed» was the
-        // browser's words: a node that does not answer is said as such
-        const line = el("p", "conn-line conn-err", unreachableError(error)
-          ? t("rooms.unreachable", { node: shortNode(s.node) })
-          : t("rooms.cannotList", { why: (error as Error).message }));
-        line.dataset.err = unreachableError(error) ? "unreachable" : "refused";
-        if (g.retryNode) {
-          const again = btn(t("nodes.retry"));
-          again.dataset.act = "retry-node";
-          again.addEventListener("click", () => g.retryNode!(s.node));
-          line.append(" ", again);
-        }
-        body.appendChild(line);
-      });
+    box.appendChild(acts);
   }
+  host.appendChild(box);
+}
+
+/** R1 · «Le mie stanze»: asked of the node with this session's access, two
+ *  groups (mine / shared), a click joins; + New room, Bring into a room.
+ *  `blocked` (the pair not complete): the buttons stay, grey, with the
+ *  sentence of what is missing, and a click goes to that step. */
+export function renderMyRooms(host: HTMLElement, s: ConnectionState, g: ConnectionGestures,
+                              blocked: Partial<Record<"newRoom" | "bringIntoRoom", { say: string; go(): void }>> = {}): void {
+  const rooms = el("div", "conn-sect");
+  rooms.dataset.sect = "rooms";
+  rooms.appendChild(el("h6", "", t("rooms.head")));
+  const body = el("div", "conn-rooms-body");
+  body.appendChild(el("p", "conn-line conn-dim", t("rooms.loading")));
+  rooms.appendChild(body);
+  const acts = el("div", "conn-acts");
+  const act = (key: "newRoom" | "bringIntoRoom", label: string, data: string, title = ""): void => {
+    if (!g[key]) return;
+    const b = btn(label);
+    b.dataset.act = data;
+    const no = blocked[key];
+    if (no) {
+      b.setAttribute("aria-disabled", "true");
+      b.classList.add("pair-off");
+      b.title = no.say;
+      b.dataset.need = no.say;
+      b.addEventListener("click", () => no.go());
+    } else {
+      if (title) b.title = title;
+      b.addEventListener("click", () => g[key]!());
+    }
+    acts.appendChild(b);
+  };
+  act("newRoom", t("rooms.new"), "new-room");
+  act("bringIntoRoom", t("rooms.bring"), "bring-into-room", t("rooms.bringTitle"));
+  rooms.appendChild(acts);
+  host.appendChild(rooms);
+  if (!g.listRooms) return;
+  void g.listRooms().then(
+    (list) => renderRoomList(body, list, s.room, (id) => g.joinRoom?.(id)),
+    (error) => {
+      body.textContent = "";
+      if (error instanceof NodeError && error.status === 401 && nodeAccessOf(s.access) === "none") {
+        const line = el("p", "conn-line conn-dim", t("rooms.enterFirst"));
+        line.dataset.err = "not-entered";
+        body.appendChild(line);
+        return;
+      }
+      // A2 · an expired access is not a fault to read: it has a gesture
+      if (error instanceof NodeError && error.status === 401 && g.signInAgain) {
+        const line = el("p", "conn-line conn-err conn-expired", t("rooms.accessExpired"));
+        const again = btn(t("rooms.signInAgain"));
+        again.dataset.act = "sign-in-again";
+        again.addEventListener("click", () => g.signInAgain!());
+        line.append(" ", again);
+        body.appendChild(line);
+        return;
+      }
+      // p.3 · a node that does not answer is said as such, never «Load failed»
+      const line = el("p", "conn-line conn-err", unreachableError(error)
+        ? t("rooms.unreachable", { node: shortNode(s.node) })
+        : t("rooms.cannotList", { why: (error as Error).message }));
+      line.dataset.err = unreachableError(error) ? "unreachable" : "refused";
+      if (g.retryNode) {
+        const again = btn(t("nodes.retry"));
+        again.dataset.act = "retry-node";
+        again.addEventListener("click", () => g.retryNode!(s.node));
+        line.append(" ", again);
+      }
+      body.appendChild(line);
+    });
 }
 
 // ── the room's settings (K2) ─────────────────────────────────────────────────

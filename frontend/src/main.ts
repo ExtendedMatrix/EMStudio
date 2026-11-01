@@ -208,7 +208,7 @@ import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPrevi
          freePlanOf, freeLocal, freeUi, fileRows, listFilter, bucketRows,
          type FileState, type MovedFile } from "./file-states";
 import { docFilesBox, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
-import { paintChooser } from "./node-chooser";
+import { type ChooserHooks, paintChooser } from "./node-chooser";
 import { BUILTIN_STAMP_PRESETS, ENGINES_TODAY, FAVORITES_KEY, KIND_FILTERS, OPTIMIZE_PRESETS, RECENT_DIRS_KEY, SORT_KEYS, TOOL_TABS,
          autoTab, dropStampPreset, engineFor, enginesToday, blenderCan, blenderLines, BLENDER_EXPERIMENTAL_KEY, isOptimizable, jobLine, jobRunning, variantMemoryMb, isSystemFile, kindOf as browserKindOf, pushRecentDir, readPathList, readStampPresets,
          saveStampPreset, statusCounts, toggleFavorite, visibleEntries,
@@ -447,8 +447,8 @@ import type {
 import { choose, confirmLot, engineChoices, humanBytes, INV_GROUPS, inventoryFromPlan, movePlan, reportOf, toMove,
   toUpload, type EnginePlan, type EngineReport, type HomeView, type InvChoice, type Inventory } from "./room-inventory";
 import { type HostInfo, type LayoutPayload, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
-import { type Access, type ConnectionState, type NodeApi, type NodeEntry, type Reach, nodeAccessOf, nodeApi, renderConnectionPanel,
-  renderRoomPanel, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase,
+import { type Access, type ConnectionGestures, type ConnectionState, type NodeApi, type NodeEntry, type Reach, nodeAccessOf, nodeApi,
+  renderMyRooms, renderNodeAccess, renderRoomPanel, renderWhereSection, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase,
   type OrphanAsset, type RoomInfo } from "./connection";
 import { stateBadge, stateSign } from "./state-symbols";
 import * as alignment from "./alignment";
@@ -1620,8 +1620,7 @@ async function probeOtherNodes(): Promise<void> {
   await Promise.all(savedNodes(getSettings()).filter((u) => u !== active).map(async (u) => {
     nodeReachOf.set(u, (await probeNode(u)).reach);
   }));
-  const pop = document.getElementById("conn-pop");
-  if (pop && !pop.classList.contains("hidden") && pop.dataset.view === "conn") paintConnectionPanel(pop);
+  repaintWhoMenu();
 }
 /** FIRMA DELLA NASCITA · the person this session entered the node as, for the
  *  panel's «Who you are» (read at boot before the identity `let`s exist) */
@@ -1710,8 +1709,10 @@ function renderStatusLine(): void {
   modeIndicator.setAttribute("role", "button");
   modeIndicator.tabIndex = 0;
   if (st.room && roomTitleOf?.room !== st.room) void fetchRoomTitle(st.room);
-  const pop = document.getElementById("conn-pop");
-  if (pop && !pop.classList.contains("hidden") && pop.dataset.view === "conn") paintConnectionPanel(pop);
+  // MICRO-CHIP-UNICO · the chip's menu follows the place (its «Dove lavori»)
+  // and the header's «Pubblica…» the node's answer
+  repaintWhoMenu();
+  paintPublishGate();
 }
 async function fetchRoomTitle(room: string): Promise<void> {
   const base = getSettings().sync.hubUrl.trim();
@@ -1751,117 +1752,88 @@ async function pollNodeReach(): Promise<void> {
 setTimeout(() => void pollNodeReach(), 1500);
 setInterval(() => void pollNodeReach(), 10000);
 
-function connectionPop(): HTMLElement {
-  let pop = document.getElementById("conn-pop");
-  if (!pop) {
-    pop = document.createElement("div");
-    pop.id = "conn-pop";
-    pop.className = "hidden";
-    document.body.appendChild(pop);
-    document.addEventListener("pointerdown", (e) => {
-      const p = document.getElementById("conn-pop");
-      if (!p || p.classList.contains("hidden")) return;
-      const tg = e.target as Node;
-      if (p.contains(tg) || modeIndicator.contains(tg) || connPopAnchor?.contains(tg)) return;
-      p.classList.add("hidden");
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") document.getElementById("conn-pop")?.classList.add("hidden");
-    });
-  }
-  return pop;
-}
-/** Z · the panel opens from zone 1 (above it) or from the Mode menu (below it) */
-let connPopAnchor: HTMLElement | null = null;
-function placeConnectionPop(pop: HTMLElement): void {
-  const anchor = connPopAnchor ?? modeIndicator;
-  const r = anchor.getBoundingClientRect();
-  pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 380))}px`;
-  // the bar's zones (the place, the person) open it ABOVE them
-  if (anchor === modeIndicator || r.top > innerHeight / 2) {
-    pop.style.top = "";
-    pop.style.bottom = `${Math.max(8, innerHeight - r.top + 6)}px`;
-  } else {
-    pop.style.bottom = "";
-    pop.style.top = `${Math.round(r.bottom + 4)}px`;
-  }
-}
-function paintConnectionPanel(pop: HTMLElement): void {
-  pop.dataset.view = "conn";
-  renderConnectionPanel(pop, connectionState(), {
-    setMode: (m) => {
-      pop.classList.add("hidden");
-      document.getElementById(`btn-mode-${m}`)?.click();
-    },
-    openNodeSettings: () => { pop.classList.add("hidden"); openNodeSettings(); },
-    chooseNode: () => { void openNodeChooser(pop); },
+/**
+ * MICRO-CHIP-UNICO · the gestures of the place and of the node, handed to the
+ * pieces `connection.ts` draws inside the chip's menu («Nodo e account»,
+ * «Dove lavori», «Il mio spazio»). Every gesture that leads elsewhere closes
+ * the menu first: one menu at a time.
+ */
+function connectionGestures(): ConnectionGestures {
+  const away = (run: () => void) => () => { closeWhoMenu(); run(); };
+  return {
+    setMode: (m) => { closeWhoMenu(); document.getElementById(`btn-mode-${m}`)?.click(); },
+    openNodeSettings: away(() => openNodeSettings()),
     openRoomSettings: () => openRoomPanel(),
-    openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
-    leaveRoom: () => { pop.classList.add("hidden"); if (sync.connected) btnSync.click(); },
+    openOnNode: away(() => shareThisRoom()),
+    leaveRoom: away(() => { if (sync.connected) btnSync.click(); }),
     // R1 · the node's rooms, with this session's access
     listRooms: () => nodeHttp(getSettings().sync.hubUrl.trim()).rooms(),
-    // A2 · the same sign-in as Node settings › Sign in, straight away; on the
-    // way back this panel opens again and asks the rooms again
-    signInAgain: () => { pop.classList.add("hidden"); void signIntoNode({ intent: "identity", then: "rooms" }); },
-    joinRoom: (id) => { pop.classList.add("hidden"); enterRoom(id); },
-    newRoom: () => { pop.classList.add("hidden"); void createRoomHere(); },
-    bringIntoRoom: () => { pop.classList.add("hidden"); void bringIntoRoom(); },
-    roomResources: () => { pop.classList.add("hidden"); if (sync.room) void openResourceInventory(sync.room); },
+    // A2 · the same sign-in, straight away; on the way back the menu opens
+    // again on «Il mio spazio» and asks the rooms again
+    signInAgain: away(() => void signIntoNode({ intent: "identity", then: "space" })),
+    joinRoom: (id) => { closeWhoMenu(); enterRoom(id); },
+    newRoom: away(() => void createRoomHere()),
+    bringIntoRoom: away(() => void bringIntoRoom()),
+    roomResources: away(() => { if (sync.room) void openResourceInventory(sync.room); }),
     // FIRMA DELLA NASCITA · «chi sono, e come esco»
-    signOutOfNode: () => { pop.classList.add("hidden"); void signOutOfNode(); },
-    signInAsOther: () => { pop.classList.add("hidden"); void signInAsOther(); },
-    // MICRO-DOVE-CHI-MENU p.3 · entering a node is done HERE, about a place:
-    // the same sign-ins as before (oidc.ts), only moved and named
+    signOutOfNode: away(() => void signOutOfNode()),
+    signInAsOther: away(() => void signInAsOther()),
+    // entering a node: the same sign-ins as before (oidc.ts); on the way back
+    // the menu lands on «Il mio spazio» (rooms, space, permissions)
     enterNode: (url, how) => {
-      pop.classList.add("hidden");
+      closeWhoMenu();
       useNodeAddress(url);
-      if (how === "orcid") void signIntoNode({ idpHint: "orcid", intent: "identity", then: "rooms" });
-      else void signIntoNode({ intent: "identity", loginHint: currentIdentity()?.orcid || undefined, then: "rooms" });
+      if (how === "orcid") void signIntoNode({ idpHint: "orcid", intent: "identity", then: "space" });
+      else void signIntoNode({ intent: "identity", loginHint: currentIdentity()?.orcid || undefined, then: "space" });
     },
-    useNode: (url) => { useNodeAddress(url); paintConnectionPanel(pop); },
+    useNode: (url) => { useNodeAddress(url); repaintWhoMenu(); },
     retryNode: (url) => {
       nodeReachOf.delete(url);
-      if (url === getSettings().sync.hubUrl.trim().replace(/\/+$/, "")) void pollNodeReach().then(() => paintConnectionPanel(pop));
+      if (url === getSettings().sync.hubUrl.trim().replace(/\/+$/, "")) void pollNodeReach().then(repaintWhoMenu);
       else void probeOtherNodes();
     },
-    addNode: () => { void addNodeByAddress().then(() => paintConnectionPanel(pop)); },
     findApp: () => findSyncApp(),
     openOther: document.getElementById("btn-open-other")?.classList.contains("hidden") ? undefined
-      : () => { pop.classList.add("hidden"); document.getElementById("btn-open-other")?.click(); },
+      : away(() => document.getElementById("btn-open-other")?.click()),
     shareRoom: document.getElementById("btn-share-room")?.classList.contains("hidden") ? undefined
-      : () => { pop.classList.add("hidden"); document.getElementById("btn-share-room")?.click(); },
-  }, { host: sidecarDetail, accept: syncControlEl, roster: hubRosterEl });
-  placeConnectionPop(pop);
+      : away(() => document.getElementById("btn-share-room")?.click()),
+  };
 }
-/** N1/N2 · «Choose the node» in the connection popover */
-async function openNodeChooser(pop: HTMLElement): Promise<void> {
-  pop.dataset.view = "nodes";
-  const bridge = await bridgeUrl();
+/** MICRO-CHIP-UNICO p.5 · THE node selector's hooks, for its two hosts: the
+ *  chip's menu («Use»: the node becomes the active one and joins the saved)
+ *  and Settings › Connections («Add»: it joins the working copy of the saved
+ *  nodes, written on Save). Same component, same finder, no copy. */
+async function nodeChooserHooks(where: "chip" | "settings"): Promise<ChooserHooks> {
+  // the finder is the bridge's; when it does not answer the selector asks the
+  // saved and typed nodes itself (`probe`)
+  const bridge = await bridgeUrl().catch(() => "");
   const s = getSettings();
-  await paintChooser(pop, {
+  const current = (): string => getSettings().sync.hubUrl.trim().replace(/\/+$/, "");
+  return {
     bridge,
-    saved: [s.sync.hubUrl].filter(Boolean),
-    current: () => getSettings().sync.hubUrl.trim().replace(/\/+$/, ""),
+    saved: where === "settings" ? [...settingsNodes] : [current(), ...savedNodes(s)].filter((u, i, all) => u && all.indexOf(u) === i),
+    current,
     projectRoot: fileProjectRoot() || (inventorySources().baseDir ?? ""),
-    use: (url) => {
-      const next = getSettings();
-      next.sync.hubUrl = url;
-      saveSettings(next);
-      logInfo(`${t("nodes.use")}: ${url}`);
-      void pollNodeReach();
+    probe: async (url) => {
+      const p = await probeNode(url);
+      return { url, reachable: p.reach === "reachable", profile: p.profile };
     },
     log: (line) => logInfo(line),
-  });
-  placeConnectionPop(pop);
+    ...(where === "settings"
+      ? { pickLabel: t("nodes.add"), picked: (url: string) => settingsNodes.includes(url),
+          use: (url: string) => {
+            if (!settingsNodes.includes(url)) settingsNodes.push(url);
+            paintSettingsNodes();
+            // tested on its own row at once (where it answers, its ways in)
+            (document.querySelector(`[data-node-test="${CSS.escape(url)}"]`) as HTMLButtonElement | null)?.click();
+          } }
+      : { use: (url: string) => { useNodeAddress(url); whoChooserOpen = false; repaintWhoMenu(); } }),
+  };
 }
-function toggleConnectionPanel(anchor: HTMLElement | null = null): void {
-  const pop = connectionPop();
-  if (!pop.classList.contains("hidden") && connPopAnchor === anchor) { pop.classList.add("hidden"); return; }
-  connPopAnchor = anchor;
-  pop.classList.remove("hidden");
-  paintConnectionPanel(pop);
-  void pollNodeReach();
-  void probeOtherNodes();
+/** The status bar's «On this computer», the Mode menu, ⇧⌘L, the Inspector's
+ *  «Connections…»: the chip's menu at «Dove lavori» (MICRO-CHIP-UNICO p.3). */
+function toggleConnectionPanel(_anchor: HTMLElement | null = null): void {
+  toggleWhoMenu("where");
 }
 /** p.3 · a known node becomes the active one (and stays among the saved). */
 function useNodeAddress(url: string): void {
@@ -1872,23 +1844,6 @@ function useNodeAddress(url: string): void {
   logInfo(`${t("nodes.use")}: ${clean}`);
   nodeReach = "unknown";
   void pollNodeReach();
-}
-/** p.3 · «Add a node…»: its address, asked; it joins the saved nodes. */
-async function addNodeByAddress(): Promise<void> {
-  const typed = await askText(t("conn.addNodeAsk"), "https://");
-  if (!typed) return;
-  let url: string;
-  try {
-    const u = new URL(typed.trim());
-    url = u.toString().replace(/\/+$/, "");
-  } catch {
-    toast(t("conn.addNodeBad", { typed }));
-    return;
-  }
-  const s = getSettings();
-  saveSettings({ ...s, sync: { ...s.sync, nodes: [...new Set([...savedNodes(s), url])] } });
-  nodeReachOf.set(url, (await probeNode(url)).reach);
-  if (!s.sync.hubUrl.trim()) useNodeAddress(url);
 }
 /** p.3 · «Find» the synchronised app: the ports EM Tools is known to use, on
  *  this computer. The local network is not searched: EM Tools does not announce
@@ -1923,19 +1878,31 @@ function openRoomPanel(roomId?: string): void {
   const base = getSettings().sync.hubUrl.trim();
   const room = roomId ?? (sync.connected ? sync.room : null) ?? getSettings().sync.hubRoom;
   if (!base || !room) { toast(t("share.noRoom")); return; }
-  const pop = connectionPop();
-  pop.classList.remove("hidden");
-  pop.dataset.view = "room";
-  void renderRoomPanel(pop, {
-    api: nodeHttp(base),
-    roomId: room,
+  // MICRO-CHIP-UNICO p.5 · inside the chip's menu, in place of its sections
+  // (← back to them): never a second popup over the first
+  whoRoomView = { base, room };
+  if (!document.getElementById("who-menu")) openWhoMenu("where");
+  else repaintWhoMenu();
+}
+/** The room's panel drawn in the chip's menu (members, roles, invitations). */
+function paintRoomView(menu: HTMLElement, v: { base: string; room: string }): void {
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "ghost who-back";
+  back.dataset.who = "back";
+  back.textContent = t("who.back");
+  back.onclick = () => { whoRoomView = null; repaintWhoMenu(); };
+  const host = document.createElement("div");
+  menu.append(back, host);
+  void renderRoomPanel(host, {
+    api: nodeHttp(v.base),
+    roomId: v.room,
     me: nodeIdentity?.orcid ?? currentIdentity()?.orcid ?? null,
-    openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
-    leaveRoom: () => { pop.classList.add("hidden"); if (sync.connected) btnSync.click(); },
+    openOnNode: () => { closeWhoMenu(); shareThisRoom(); },
+    leaveRoom: () => { closeWhoMenu(); if (sync.connected) btnSync.click(); },
     copy: (text) => { void navigator.clipboard?.writeText(text).then(() => toast(t("room.copied")), () => {}); },
-    deleteRoom: (info) => { pop.classList.add("hidden"); askDeleteRoom(base, info); },
-  }).then(() => placeConnectionPop(pop));
-  placeConnectionPop(pop);
+    deleteRoom: (info) => { closeWhoMenu(); askDeleteRoom(v.base, info); },
+  });
 }
 // ── MICRO-SPAZIO-3D-2 p.6 · «Elimina stanza…» and the orphan assets ──────────
 /** The window that says what goes and what stays, and asks for the id again
@@ -4699,6 +4666,7 @@ dirtyDot.addEventListener("click", () => click("btn-save"));
 onLocaleChange(updateToolbar);
 document.getElementById("ns-publish")?.addEventListener("click", () => publishToStratiGraph());
 onLocaleChange(renderNameStrip);
+onLocaleChange(paintPublishGate);
 
 // HDT-O authority autocomplete → em-bridge /resolve-authority (P1-D, offline).
 // Fully graceful: any non-200 / 501 / network error yields [] so the inspector
@@ -15404,7 +15372,7 @@ interface PendingNodeSignIn {
   intent?: "identity";
   /** A2 · started from «Sign in again» in the connection panel: it opens again
    *  on the way back, with the rooms asked anew */
-  then?: "rooms";
+  then?: "rooms" | "space";
   /** FIRMA DELLA NASCITA · «Sign in as another user» from inside a room: the
    *  room is entered again, as the new person, on the way back */
   rejoin?: string;
@@ -15420,7 +15388,7 @@ interface PendingNodeSignIn {
  * permission, and the rule the whole handoff contract is built on.
  */
 async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHint?: string; intent?: "identity";
-                                    then?: "rooms"; fresh?: boolean; rejoin?: string } = {}): Promise<boolean> {
+                                    then?: "rooms" | "space"; fresh?: boolean; rejoin?: string } = {}): Promise<boolean> {
   const server = servingNode();
   if (!server) {   // DEV30 U14 · no node configured: say it, and where to name one
     if (!opts.silent) { toast(t("idw.noNode")); openNodeSettings(); }
@@ -15542,8 +15510,10 @@ async function completeNodeSignIn(search?: string): Promise<boolean> {
   await askNodeWhoIAm(remembered.server);
   if (remembered.intent === "identity") await witnessIdentityFromNode();
   renderStatusLine();
-  // A2 · back where «Sign in again» was pressed: the panel, the rooms asked anew
-  if (remembered.then === "rooms") toggleConnectionPanel();
+  // A2 · back where «Sign in» was pressed: MICRO-CHIP-UNICO p.2 · the landing
+  // is the personal page — the chip's menu on «Il mio spazio» (my rooms, asked
+  // anew; space and permissions on the node's console)
+  if (remembered.then === "rooms" || remembered.then === "space") openWhoMenu("space");
   // FIRMA DELLA NASCITA · back in the room that was left to change person
   if (remembered.rejoin) enterRoom(remembered.rejoin);
   return true;
@@ -15707,9 +15677,23 @@ function renderWhoChip(): void {
   chip.title = [f.author ? `${t("who.sect.author")}: ${m.label}${f.author.orcid ? ` · ${f.author.orcid}` : ""}` : t("who.noAuthorTitle"),
                 `${t("who.sect.node")}: ${nodeLine}`].join("\n");
   chip.setAttribute("aria-label", chip.title);
+  paintPublishGate();
   const menu = document.getElementById("who-menu");
   if (menu) paintWhoMenu(menu);
   resumePendingSign();
+}
+
+/** MICRO-CHIP-UNICO p.2 · «Pubblica…» in the header: grey (it is, until
+ *  phase 2) and its tooltip says what the pair still misses — «serve: scegli
+ *  un nodo → accedi» — or, complete, that publishing comes with phase 2. */
+function paintPublishGate(): void {
+  const pub = document.getElementById("ns-publish");
+  if (!pub) return;
+  let missing: who.PairStep[];
+  // the status line is drawn at boot, before the identity's `let`s exist
+  try { missing = who.pairMissing("publish", pairFacts()); } catch { return; }
+  pub.dataset.need = missing.join(" ");
+  pub.title = missing.length ? pairNeedSay(missing) : t("strip.publishPhase2");
 }
 
 function hostOf(url: string): string {
@@ -15719,7 +15703,7 @@ function hostOf(url: string): string {
 /** what an operation that signs was doing when the identity it needs was missing */
 let pendingSign: { op: who.SignOp; resume: () => void } | null = null;
 let whoMenuWhy = "";
-let whoMenuFocus: who.SignNeed | null = null;
+let whoMenuFocus: who.WhoSection | null = null;
 
 /**
  * The gate of every operation that signs (E.D.: «firmare richiede un
@@ -15751,13 +15735,72 @@ function closeWhoMenu(): void {
   document.getElementById("who-menu")?.remove();
   document.getElementById("ns-who-chip")?.setAttribute("aria-expanded", "false");
   whoMenuFocus = null;
+  whoRoomView = null;
+  whoChooserOpen = false;
 }
 
-function openWhoMenu(focus: who.SignNeed | null = null, why = ""): void {
+/** MICRO-CHIP-UNICO · the menu's live parts, kept across repaints (the place
+ *  changes often): the node selector (its typed address, its finder's answer)
+ *  and «Le mie stanze» (asked once per node and access, not at every repaint). */
+let whoChooserOpen = false;
+let whoChooserHost: HTMLElement | null = null;
+let whoRoomsHost: { key: string; el: HTMLElement } | null = null;
+/** the room's panel shown in the menu in place of its sections */
+let whoRoomView: { base: string; room: string } | null = null;
+
+/** the pair's facts: the chip's, plus whether the node answers — the node
+ *  chosen (`nodeReach`, asked every 10 s) or, on the web with none chosen,
+ *  the node this page came from (asked when the menu opens) */
+function pairFacts(): who.PairFacts {
+  const f = whoFacts();
+  const chosen = !!getSettings().sync.hubUrl.trim();
+  return { ...f, reach: chosen ? nodeReach : nodeReachOf.get(f.node) ?? "unknown" };
+}
+/** …the page's own node, asked once per opening of the menu */
+async function probeServingNode(): Promise<void> {
+  if (getSettings().sync.hubUrl.trim()) return;
+  const node = whoFacts().node;
+  if (!node) return;
+  nodeReachOf.set(node, (await probeNode(node)).reach);
+  repaintWhoMenu();
+  paintPublishGate();
+}
+
+/** «serve: scegli un nodo → accedi» — the grey item's sentence */
+function pairNeedSay(missing: readonly who.PairStep[]): string {
+  return t("pair.needs", { steps: who.needKeys(missing).map((k) => t(k)).join(" → ") });
+}
+
+/** A click on a grey item: the menu at the first missing step (the node
+ *  selector open when the node is what is missing). */
+function goToPairStep(missing: readonly who.PairStep[]): void {
+  const first = missing[0];
+  if (!first) return;
+  whoChooserOpen = first === "node" && !getSettings().sync.hubUrl.trim();
+  openWhoMenu(who.sectionOfStep(first));
+}
+
+function repaintWhoMenu(): void {
+  const menu = document.getElementById("who-menu");
+  if (menu) paintWhoMenu(menu);
+}
+
+function toggleWhoMenu(focus: who.WhoSection | null = null): void {
+  const open = document.getElementById("who-menu");
+  if (open && (focus === null || whoMenuFocus === focus)) { closeWhoMenu(); return; }
+  openWhoMenu(focus ?? (currentIdentity() ? null : "author"));
+}
+
+function openWhoMenu(focus: who.WhoSection | null = null, why = ""): void {
   closeIdentityPanel();
+  const keepChooser = whoChooserOpen;
+  const keepRoom = whoRoomView;
   closeWhoMenu();
+  whoChooserOpen = keepChooser;
+  whoRoomView = keepRoom;
   whoMenuFocus = focus;
   whoMenuWhy = why;
+  whoRoomsHost = null;   // «Le mie stanze» asked again at every opening
   const chip = document.getElementById("ns-who-chip");
   const menu = document.createElement("div");
   menu.id = "who-menu";
@@ -15767,13 +15810,34 @@ function openWhoMenu(focus: who.SignNeed | null = null, why = ""): void {
   document.body.appendChild(menu);
   paintWhoMenu(menu);
   chip?.setAttribute("aria-expanded", "true");
+  // one menu, anchored to the chip, wherever it was asked from
   const r = chip?.getBoundingClientRect();
-  if (r) { menu.style.top = `${Math.round(r.bottom + 6)}px`; menu.style.right = `${Math.max(8, Math.round(innerWidth - r.right))}px`; }
-  (menu.querySelector<HTMLElement>(".who-sect.focus button") ?? menu.querySelector<HTMLElement>("button"))?.focus();
+  if (r) {
+    menu.style.top = `${Math.round(r.bottom + 6)}px`;
+    menu.style.right = `${Math.max(8, Math.round(innerWidth - r.right))}px`;
+    menu.style.maxHeight = `${Math.max(240, Math.round(innerHeight - r.bottom - 16))}px`;
+  }
+  const sect = focus ? menu.querySelector<HTMLElement>(`[data-who-sect="${focus}"]`) : null;
+  sect?.scrollIntoView({ block: "nearest" });
+  (sect?.querySelector<HTMLElement>("button:not([aria-disabled='true'])") ?? menu.querySelector<HTMLElement>("button"))?.focus({ preventScroll: true });
+  if (whoChooserOpen) void paintWhoChooser();
+  void pollNodeReach();
+  void probeServingNode();
+}
+
+/** THE node selector, inside «Nodo e account» (never a popup of its own). */
+async function paintWhoChooser(): Promise<void> {
+  if (!whoChooserHost) {
+    whoChooserHost = document.createElement("div");
+    whoChooserHost.className = "who-chooser";
+  }
+  await paintChooser(whoChooserHost, await nodeChooserHooks("chip"));
 }
 
 function paintWhoMenu(menu: HTMLElement): void {
   const f = whoFacts();
+  const pf = pairFacts();
+  const scroll = menu.scrollTop;
   menu.textContent = "";
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] => {
     const e = document.createElement(tag);
@@ -15788,13 +15852,58 @@ function paintWhoMenu(menu: HTMLElement): void {
     b.onclick = () => run();
     return b;
   };
+  /** visible but grey until the pair is complete: the sentence of what is
+   *  missing, and a click goes to that step */
+  const gated = (key: string, label: string, action: who.PairAction, run: () => void, primary = false): HTMLButtonElement => {
+    const missing = who.pairMissing(action, pf);
+    if (!missing.length) return btn(key, label, run, primary);
+    const b = btn(key, label, () => goToPairStep(missing));
+    b.setAttribute("aria-disabled", "true");
+    b.classList.add("pair-off");
+    b.title = pairNeedSay(missing);
+    b.dataset.need = missing.join(" ");
+    return b;
+  };
+  if (whoRoomView) { paintRoomView(menu, whoRoomView); return; }
+
+  // ① → ④ · the node–user pair, each step with its state; a click goes there
+  const steps = el("ol", "who-steps");
+  steps.dataset.whoSteps = "";
+  const pairs = who.pairSteps(pf);
+  const firstTodo = pairs.find((p) => p.state !== "done")?.step ?? null;
+  pairs.forEach((p, i) => {
+    const li = el("li");
+    li.dataset.step = p.step;
+    li.dataset.state = p.state;
+    if (p.step === firstTodo) li.classList.add("next");
+    const b = el("button", "who-step");
+    b.type = "button";
+    b.append(el("span", "who-step-n", "①②③④"[i]), el("span", "who-step-t", t(`pair.step.${p.step}`)),
+             el("span", "who-step-s", p.state === "done" ? "✓" : p.state === "warn" ? "!" : "○"));
+    b.title = t(`pair.state.${p.step}.${p.state}`);
+    b.onclick = () => {
+      const missing = who.PAIR_STEPS.slice(0, i + 1).filter((s) => pairs.find((x) => x.step === s)!.state !== "done");
+      if (missing.length && missing[0] !== p.step) { goToPairStep(missing); return; }
+      if (p.step === "node" && p.state !== "done") whoChooserOpen = true;
+      openWhoMenu(who.sectionOfStep(p.step));
+    };
+    li.appendChild(b);
+    steps.appendChild(li);
+  });
+  menu.appendChild(steps);
   if (whoMenuWhy) { const w = el("p", "who-why", whoMenuWhy); w.dataset.whoWhy = ""; menu.appendChild(w); }
 
+  const section = (key: who.WhoSection): HTMLElement => {
+    const s = el("section", `who-sect${whoMenuFocus === key ? " focus" : ""}`);
+    s.dataset.whoSect = key;
+    s.appendChild(el("h5", undefined, t(`who.sect.${key}`)));
+    s.appendChild(el("p", "who-lead", t(`who.sect.${key}Lead`)));
+    menu.appendChild(s);
+    return s;
+  };
+
   // 1 · AUTORE — who signs, on this computer
-  const a = el("section", `who-sect${whoMenuFocus === "author" ? " focus" : ""}`);
-  a.dataset.whoSect = "author";
-  a.appendChild(el("h5", undefined, t("who.sect.author")));
-  a.appendChild(el("p", "who-lead", t("who.sect.authorLead")));
+  const a = section("author");
   const acts = el("div", "who-acts");
   if (f.author) {
     const line = el("div", "who-line");
@@ -15804,64 +15913,110 @@ function paintWhoMenu(menu: HTMLElement): void {
     const st = el("p", "who-state", identitySentence());
     st.dataset.whoState = f.author.state;
     a.appendChild(st);
-    acts.appendChild(btn("author-edit", t("who.authorEdit"), () => { closeWhoMenu(); openSettings("settings-sect-identity"); }));
     // the panel «Chi sei» (verify, the nodes it is accredited on, sign out)
     if (f.author.state === "declared") acts.appendChild(btn("author-verify", t("who.authorVerify"), () => { closeWhoMenu(); openIdentityPanel(); }));
     else acts.appendChild(btn("author-panel", t("who.authorPanel"), () => { closeWhoMenu(); openIdentityPanel(); }));
+    acts.appendChild(btn("author-edit", t("who.authorEdit"), () => { closeWhoMenu(); openSettings("settings-sect-identity"); }));
   } else {
     a.appendChild(el("p", "who-state who-none", t("who.noAuthor")));
     acts.appendChild(btn("author-set", t("who.authorSet"), () => {
       closeWhoMenu(); openIdentityPanel(undefined, { anchor: document.getElementById("ns-who-chip") }); }, true));
   }
   a.appendChild(acts);
-  menu.appendChild(a);
 
-  // 2 · NODO — the account on the StratiGraph node
-  const n = el("section", `who-sect${whoMenuFocus === "node" ? " focus" : ""}`);
-  n.dataset.whoSect = "node";
-  n.appendChild(el("h5", undefined, t("who.sect.node")));
-  n.appendChild(el("p", "who-lead", t("who.sect.nodeLead")));
-  const nacts = el("div", "who-acts");
-  if (!f.node) {
-    n.appendChild(el("p", "who-state who-none", t("who.node.none")));
-    nacts.appendChild(btn("node-choose", t("who.nodeChoose"), () => { closeWhoMenu(); openNodeSettings(); }, true));
-  } else if (f.signedIn) {
-    const line = el("div", "who-line");
-    line.appendChild(el("b", undefined, hostOf(f.node)));
-    line.appendChild(document.createTextNode(` · ${t("who.node.as", { who: f.nodeWho?.name || f.nodeWho?.orcid || "—" })}`));
-    n.appendChild(line);
-    if (f.mismatch) n.appendChild(el("p", "who-state who-warn", t("who.mismatch", {
-      node: f.nodeWho?.name || f.nodeWho?.orcid || "", author: f.author?.name || f.author?.orcid || "" })));
-    const space = who.mySpaceUrl(f);
-    if (space) nacts.appendChild(btn("my-space", t("who.mySpace"), () => {
-      closeWhoMenu();
-      logInfo(`identity: opening the node's console ${space}`);
-      if (isTauri()) void openInSystemBrowser(space); else window.open(space, "_blank", "noopener");
-    }, true));
-    nacts.appendChild(btn("node-out", t("who.nodeOut"), () => { closeWhoMenu(); void signOutOfNode(); }));
-  } else {
-    const line = el("div", "who-line");
-    line.appendChild(el("b", undefined, hostOf(f.node)));
-    line.appendChild(document.createTextNode(` · ${t("who.node.notIn")}`));
-    n.appendChild(line);
-    nacts.appendChild(btn("node-in", t("who.nodeIn"), () => {
-      closeWhoMenu(); void signIntoNode({ intent: "identity", loginHint: currentIdentity()?.orcid || undefined }); }, true));
-    nacts.appendChild(btn("node-choose", t("who.nodeOther"), () => { closeWhoMenu(); openNodeSettings(); }));
+  // 2 · NODO E ACCOUNT — the node selector, then Sign in / Sign out
+  const n = section("node");
+  const g = connectionGestures();
+  const st = connectionState();
+  if (!f.node) n.appendChild(el("p", "who-state who-none", t("who.node.none")));
+  else {
+    // the node of the pair (on the web with none chosen: the page's own)
+    renderNodeAccess(n, { ...st, node: f.node, reach: pf.reach ?? st.reach }, g);
+    if (f.signedIn) {
+      // who the node knows, under the node's line and above its buttons
+      const at = n.querySelector(".conn-node-line");
+      const line = el("p", "who-line", t("who.node.as", { who: f.nodeWho?.name || f.nodeWho?.orcid || "—" }));
+      if (at) at.after(line); else n.appendChild(line);
+      if (f.mismatch) line.after(el("p", "who-state who-warn", t("who.mismatch", {
+        node: f.nodeWho?.name || f.nodeWho?.orcid || "", author: f.author?.name || f.author?.orcid || "" })));
+    }
   }
+  const nacts = el("div", "who-acts");
+  const pick = btn("node-choose", whoChooserOpen ? t("who.nodeChooseClose") : f.node ? t("who.nodeOther") : t("who.nodeChoose"), () => {
+    whoChooserOpen = !whoChooserOpen;
+    repaintWhoMenu();
+    if (whoChooserOpen) void paintWhoChooser();
+  }, !f.node);
+  pick.setAttribute("aria-expanded", String(whoChooserOpen));
+  nacts.appendChild(pick);
+  nacts.appendChild(btn("manage", t("who.manage"), () => { closeWhoMenu(); openNodeSettings(); }));
   n.appendChild(nacts);
-  menu.appendChild(n);
+  if (whoChooserOpen) {
+    if (!whoChooserHost) void paintWhoChooser();
+    if (whoChooserHost) n.appendChild(whoChooserHost);
+  }
+
+  // 3 · DOVE LAVORI — on the computer / with an app / in a room, the apps
+  const w = section("where");
+  renderWhereSection(w, st, g, { host: sidecarDetail, accept: syncControlEl, roster: hubRosterEl });
+
+  // 4 · IL MIO SPAZIO — my rooms, space used, permissions (the node's engine
+  // when it exists); grey until the pair is complete
+  const sp = section("space");
+  const spaceMissing = who.pairMissing("space", pf);
+  if (spaceMissing.length) {
+    const off = el("p", "who-state who-need", pairNeedSay(spaceMissing));
+    off.dataset.need = spaceMissing.join(" ");
+    sp.appendChild(off);
+    sp.classList.add("pair-off");
+  }
+  const sacts = el("div", "who-acts");
+  sacts.appendChild(gated("my-rooms", t("who.myRooms"), "rooms", () => {
+    sp.querySelector<HTMLElement>('[data-sect="rooms"]')?.scrollIntoView({ block: "nearest" });
+  }));
+  const space = who.mySpaceUrl(f);
+  sacts.appendChild(gated("my-space", t("who.mySpace"), "space", () => {
+    if (!space) return;
+    closeWhoMenu();
+    logInfo(`identity: opening the node's console ${space}`);
+    if (isTauri()) void openInSystemBrowser(space); else window.open(space, "_blank", "noopener");
+  }));
+  sacts.appendChild(gated("publish", t("strip.publish"), "publish", () => { closeWhoMenu(); publishToStratiGraph(); }));
+  const engine = btn("engine", t("who.engine"), () => toast(t("who.engineSoon")));
+  engine.setAttribute("aria-disabled", "true");
+  engine.classList.add("pair-off");
+  engine.title = t("who.engineSoon");
+  sacts.appendChild(engine);
+  sp.appendChild(sacts);
+  if (!spaceMissing.length) {
+    const key = `${f.node}|${f.signedIn}|${st.room ?? ""}`;
+    if (!whoRoomsHost || whoRoomsHost.key !== key) {
+      const host = el("div", "who-rooms");
+      const noRoom = who.pairMissing("roomCreate", pf);
+      const blocked = noRoom.length
+        ? { newRoom: { say: pairNeedSay(noRoom), go: () => goToPairStep(noRoom) },
+            bringIntoRoom: { say: pairNeedSay(noRoom), go: () => goToPairStep(noRoom) } }
+        : {};
+      renderMyRooms(host, st, g, blocked);
+      whoRoomsHost = { key, el: host };
+    }
+    sp.appendChild(whoRoomsHost.el);
+    sp.appendChild(el("p", "who-lead who-landing", t("who.spaceWhere")));
+  }
   menu.appendChild(el("p", "who-tie", t("who.tie")));
+  menu.scrollTop = scroll;
 }
 
-document.getElementById("ns-who-chip")?.addEventListener("click", () => {
-  if (document.getElementById("who-menu")) { closeWhoMenu(); return; }
-  openWhoMenu(currentIdentity() ? null : "author");
-});
+document.getElementById("ns-who-chip")?.addEventListener("click", () => toggleWhoMenu());
 document.addEventListener("pointerdown", (e) => {
   const m = document.getElementById("who-menu");
   if (!m) return;
   const tg = e.target as Node;
-  if (m.contains(tg) || document.getElementById("ns-who-chip")?.contains(tg)) return;
+  // the menu, the chip and the doors that open it (the status bar's place)
+  if (m.contains(tg) || document.getElementById("ns-who-chip")?.contains(tg) || modeIndicator.contains(tg)
+      || document.getElementById("footer-identity")?.contains(tg)) return;
+  // a dialog it opened (askText, askConfirm) is not «outside»
+  if ((tg as Element).closest?.(".modal, .app-dialog")) return;
   closeWhoMenu();
 }, true);
 document.addEventListener("keydown", (e) => {
@@ -16331,8 +16486,8 @@ let settingsOpenedWith: { locale: Locale; theme: ThemeMode; settings: string } |
  *  node's section, with the cursor in its address field. */
 function openNodeSettings(): void {
   openSettings("settings-sect-node");
-  const field = document.getElementById("set-node-add") as HTMLInputElement | null;
-  setTimeout(() => field?.focus(), 0);
+  const add = document.getElementById("set-node-add-btn") as HTMLButtonElement | null;
+  setTimeout(() => add?.focus(), 0);
 }
 
 /** F8 · what «Test» found at an address: reachable, the server's version, and
@@ -16395,45 +16550,50 @@ async function probeNodeAt(address: string): Promise<{ ok: boolean; text: string
   }
 }
 
-// MICRO-DOVE-CHI-MENU p.5 · Settings ▸ Connections: the saved nodes as a list
-// (address, Test, Remove), edited on a working copy and written on Save. No
-// Sign in and no Room: entering a node and choosing a room are «Where you are».
+// MICRO-DOVE-CHI-MENU p.5 · Settings ▸ Connections: the saved nodes as a list,
+// edited on a working copy and written on Save. MICRO-CHIP-UNICO p.4 · only
+// the configuration that lasts: each saved node can be made the default,
+// edited, tested, removed; «Add a node…» unfolds THE node selector (the same
+// component as the chip's menu). Signing in and choosing a room are the chip's.
 let settingsNodes: string[] = [];
+/** the default node (the active one), on the same working copy */
+let settingsDefaultNode = "";
 function paintSettingsNodes(): void {
   const ul = document.getElementById("set-nodes");
   if (!ul) return;
   ul.textContent = "";
-  const active = getSettings().sync.hubUrl.trim().replace(/\/+$/, "");
+  if (!settingsNodes.includes(settingsDefaultNode)) settingsDefaultNode = settingsNodes[0] ?? "";
   if (!settingsNodes.length) {
     const li = document.createElement("li");
     li.className = "settings-hint";
     li.textContent = t("settings.nodesNone");
     ul.appendChild(li);
   }
+  const button = (key: string, url: string, label: string, run: () => void): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset[key] = url;
+    b.textContent = label;
+    b.addEventListener("click", run);
+    return b;
+  };
   for (const url of settingsNodes) {
     const li = document.createElement("li");
     li.dataset.node = url;
     const addr = document.createElement("code");
     addr.textContent = url;
     li.appendChild(addr);
-    if (url === active) {
+    const isDefault = url === settingsDefaultNode;
+    if (isDefault) {
       const on = document.createElement("span");
       on.className = "settings-hint set-node-active";
-      on.textContent = ` · ${t("settings.nodeActive")}`;
+      on.textContent = ` · ${t("settings.nodeDefault")}`;
       li.appendChild(on);
     }
-    const test = document.createElement("button");
-    test.type = "button";
-    test.dataset.nodeTest = url;
-    test.textContent = t("settings.nodeTest");
-    const rm = document.createElement("button");
-    rm.type = "button";
-    rm.dataset.nodeRemove = url;
-    rm.textContent = t("settings.nodeRemove");
     const out = document.createElement("p");
     out.className = "settings-hint set-node-said";
     out.setAttribute("aria-live", "polite");
-    test.addEventListener("click", async () => {
+    const test = button("nodeTest", url, t("settings.nodeTest"), async () => {
       out.textContent = t("settings.nodeTesting");
       out.dataset.state = "";
       const r = await probeNodeAt(url);
@@ -16448,34 +16608,59 @@ function paintSettingsNodes(): void {
         use.textContent = t("settings.nodeUseSuggested", { url: r.suggest });
         use.addEventListener("click", () => {
           settingsNodes = settingsNodes.map((u) => (u === url ? r.suggest! : u)).filter((u, i, all) => all.indexOf(u) === i);
+          if (settingsDefaultNode === url) settingsDefaultNode = r.suggest!;
           paintSettingsNodes();
           (document.querySelector(`[data-node-test="${CSS.escape(r.suggest!)}"]`) as HTMLButtonElement | null)?.click();
         });
         out.append(" ", use);
       }
     });
-    rm.addEventListener("click", () => {
+    const edit = button("nodeEdit", url, t("settings.nodeEdit"), () => {
+      const field = document.createElement("input");
+      field.type = "url";
+      field.value = url;
+      field.dataset.nodeEditing = url;
+      const done = (): void => {
+        const next = field.value.trim().replace(/\/+$/, "");
+        if (next && next !== url) {
+          if (!/^https?:\/\//.test(next)) { out.textContent = t("settings.nodeNotUrl", { url: next }); return; }
+          settingsNodes = settingsNodes.map((u) => (u === url ? next : u)).filter((u, i, all) => all.indexOf(u) === i);
+          if (settingsDefaultNode === url) settingsDefaultNode = next;
+        }
+        paintSettingsNodes();
+      };
+      field.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); done(); }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); paintSettingsNodes(); }
+      });
+      field.addEventListener("blur", done);
+      addr.replaceWith(field);
+      field.focus();
+    });
+    const def = button("nodeDefault", url, t("settings.nodeMakeDefault"), () => { settingsDefaultNode = url; paintSettingsNodes(); });
+    def.disabled = isDefault;
+    const rm = button("nodeRemove", url, t("settings.nodeRemove"), () => {
       settingsNodes = settingsNodes.filter((u) => u !== url);
       paintSettingsNodes();
     });
-    li.append(" ", test, " ", rm, out);
+    li.append(" ", def, " ", edit, " ", test, " ", rm, out);
     ul.appendChild(li);
   }
+  // the selector, when open, says again which nodes are already saved
+  const chooser = document.getElementById("set-node-chooser");
+  chooser?.querySelectorAll<HTMLElement>(".nc-row[data-url]").forEach((row) => {
+    const b = row.querySelector<HTMLButtonElement>('[data-act="use"]');
+    if (b && settingsNodes.includes(row.dataset.url ?? "")) { b.disabled = true; b.textContent = t("nodes.picked"); }
+  });
 }
-document.getElementById("set-node-add-btn")?.addEventListener("click", () => {
-  const field = document.getElementById("set-node-add") as HTMLInputElement | null;
-  const out = document.getElementById("set-node-result");
-  const typed = field?.value.trim().replace(/\/+$/, "") ?? "";
-  if (!typed) { if (out) out.textContent = t("settings.nodeEmpty"); return; }
-  if (!/^https?:\/\//.test(typed)) { if (out) out.textContent = t("settings.nodeNotUrl", { url: typed }); return; }
-  if (!settingsNodes.includes(typed)) settingsNodes.push(typed);
-  if (field) field.value = "";
-  if (out) out.textContent = "";
-  paintSettingsNodes();
-  (document.querySelector(`[data-node-test="${CSS.escape(typed)}"]`) as HTMLButtonElement | null)?.click();
-});
-document.getElementById("set-node-add")?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); document.getElementById("set-node-add-btn")?.click(); }
+document.getElementById("set-node-add-btn")?.addEventListener("click", async () => {
+  const host = document.getElementById("set-node-chooser");
+  const btn = document.getElementById("set-node-add-btn");
+  if (!host) return;
+  const open = host.hidden;
+  host.hidden = !open;
+  btn?.setAttribute("aria-expanded", String(open));
+  if (open) await paintChooser(host, await nodeChooserHooks("settings"));
 });
 
 /** MICRO-OTTIMIZZA-3 · the persistent tile cache's ceiling, from the
@@ -16512,6 +16697,8 @@ function openSettings(section?: string): void {
   setHostInp.value = s.sync.host;
   setPortInp.value = String(s.sync.port);
   settingsNodes = savedNodes(s);
+  settingsDefaultNode = s.sync.hubUrl.trim().replace(/\/+$/, "");
+  { const ch = document.getElementById("set-node-chooser"); if (ch) { ch.hidden = true; ch.textContent = ""; } }
   paintSettingsNodes();
   setDevUuid.checked = s.developer.showNodeIds;
   setEdgeTips.checked = s.interaction.edgeTooltips;
@@ -16810,6 +16997,10 @@ function publishToStratiGraph(): void {
   // reached by Tab): a click says when it comes, and leads nowhere else — the
   // identity question used to come first and end in «nowhere to publish to».
   const btn = document.getElementById("ns-publish");
+  // MICRO-CHIP-UNICO p.2 · the pair first: what is missing, and a click leads
+  // to that step of the chip's menu; complete, the phase 2 sentence
+  const missing = who.pairMissing("publish", pairFacts());
+  if (missing.length) { goToPairStep(missing); return; }
   if (btn?.getAttribute("aria-disabled") === "true") {
     toast(t("strip.publishPhase2"));
     return;
@@ -16869,9 +17060,9 @@ settingsModal.addEventListener("click", (e) => {
       // node stays the active one unless it was removed (then the first). The
       // room is chosen in «Where you are» and carried through untouched. The
       // token is NOT here: it is asked for at connection time, never written.
+      // MICRO-CHIP-UNICO p.4 · …and the default chosen in the list
       nodes: [...settingsNodes],
-      hubUrl: settingsNodes.includes(getSettings().sync.hubUrl.trim().replace(/\/+$/, ""))
-        ? getSettings().sync.hubUrl.trim().replace(/\/+$/, "") : settingsNodes[0] ?? "",
+      hubUrl: settingsNodes.includes(settingsDefaultNode) ? settingsDefaultNode : settingsNodes[0] ?? "",
       hubRoom: getSettings().sync.hubRoom,
     },
     developer: { showNodeIds: setDevUuid.checked },

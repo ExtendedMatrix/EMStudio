@@ -5164,10 +5164,11 @@ if (K_NODE) test("TK2.live", "T-K2 dal vivo · stanza «cantiere-demo» di dev: 
     await p.evaluate(([u, tk]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tk), [K_NODE, tok]);
     await p.waitForTimeout(1500);
     await p.evaluate(() => window.__EM_DRAG__.roomPanel("cantiere-demo"));
-    await p.waitForFunction(() => !!document.querySelector("#conn-pop.conn-room h4"), null, { timeout: 10000 }).catch(() => {});
+    await p.waitForFunction(() => !!document.querySelector("#who-menu .conn-room h4"), null, { timeout: 10000 }).catch(() => {});
     await p.waitForTimeout(800);
     const r = await p.evaluate(() => {
-      const pop = document.getElementById("conn-pop");
+      // MICRO-CHIP-UNICO · the room's panel is drawn inside the chip's menu
+      const pop = document.querySelector("#who-menu .conn-room");
       return { head: pop?.querySelector("h4")?.textContent ?? "", own: pop?.querySelector("h4")?.dataset.own,
         rows: [...(pop?.querySelectorAll(".conn-members li[data-orcid]") ?? [])].map((li) => [li.dataset.orcid, li.querySelector(".conn-role")?.textContent]),
         invite: !!pop?.querySelector(".conn-add"), leave: [...(pop?.querySelectorAll(".conn-btn") ?? [])].some((b) => /Leave the room/.test(b.textContent)),
@@ -5211,7 +5212,7 @@ test("Y1.wait", "Y1 · Sidecar senza Blender: la voce di stato dice «in attesa 
       ws.onMessage(() => {});
     } } });
   await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
-  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
+  await p.click('#who-menu .conn-mode[data-mode="sidecar"]');
   await p.waitForTimeout(1200);
   const waiting = await p.evaluate(() => window.__EM_DRAG__.statusLine());
   await p.waitForTimeout(3500);
@@ -5219,7 +5220,7 @@ test("Y1.wait", "Y1 · Sidecar senza Blender: la voce di stato dice «in attesa 
   await p.waitForFunction(() => document.body.classList.contains("sync-active"), null, { timeout: 9000 }).catch(() => {});
   const back = await p.evaluate(() => ({ line: window.__EM_DRAG__.statusLine(), active: document.body.classList.contains("sync-active") }));
   await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
-  await p.click('#conn-pop .conn-mode[data-mode="standalone"]');
+  await p.click('#who-menu .conn-mode[data-mode="standalone"]');
   await p.waitForTimeout(400);
   const off = await p.evaluate(() => window.__EM_DRAG__.statusLine());
   const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message));
@@ -5245,7 +5246,7 @@ test("Y2.blender", "Y2 · un file «Temple» (EM 1.6.16) aperto, poi Sidecar: il
   await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/y2/Temple.em.json"), [temple("1.6.16", ["SU001"])]);
   await p.waitForTimeout(1500);
   await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
-  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
+  await p.click('#who-menu .conn-mode[data-mode="sidecar"]');
   await p.waitForTimeout(2500);
   const r = await p.evaluate(() => ({ slots: window.__EM_DRAG__.slots(), strip: document.getElementById("ns-title")?.textContent,
     log: window.__EM_DRAG__.log().map((l) => l.message) }));
@@ -5273,7 +5274,8 @@ test("X1.blocked", "X1 · in Standalone, Inspector di un'unità: «Model the pro
       connectBtn: [...document.querySelectorAll("#inspector button")].some((x) => /Connect to Blender/.test(x.textContent)) };
   });
   await p.click(".insp-blocked-fix"); await p.waitForTimeout(300);
-  const pop = await p.evaluate(() => { const e = document.getElementById("conn-pop"); return !!e && !e.classList.contains("hidden"); });
+  // MICRO-CHIP-UNICO · «Connections…» opens the chip's menu at «Dove lavori»
+  const pop = await p.evaluate(() => !!document.querySelector('#who-menu [data-who-sect="where"].focus'));
   await ctx.close();
   return { pass: !!r && r.disabled && r.aria === "true" && r.border === "dashed" && /Connections/.test(r.why ?? "")
       && r.inProxy && r.fix === "Connections…" && !r.connectBtn && pop && !errors.length, detail: { r, pop, errors } };
@@ -5366,7 +5368,7 @@ test("IS2.blender", "MICRO-INSPECTOR-SEZIONI p.2 · «Model the proxy in Blender
   await pick(p, "USM101");
   const standalone = await state();
   await p.click("#mode-indicator");
-  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
+  await p.click('#who-menu .conn-mode[data-mode="sidecar"]');
   await p.waitForTimeout(1500);
   const waiting = await state();
   blender = true;
@@ -5674,15 +5676,17 @@ test("TC1.storage", "T-C1 · due file aperti in cartelle diverse: lo Storage mos
 // MICRO-PULIZIA p.1 · «Publish…» no longer asks who you are first and then says
 // «nowhere to publish to»: the path B1 measured is gone. What stays measurable:
 // it is grey, reached by Tab, and its click explains and opens no panel.
-test("B1.near", "B1 → PULIZIA p.1 · «Publish…» grigio (aria-disabled, raggiungibile da Tab): il clic dice «fase 2» e non apre «Who you are»", async () => {
+test("B1.near", "B1 → PULIZIA p.1 → CHIP-UNICO p.2 · «Publish…» grigio (aria-disabled, raggiungibile da Tab): il tooltip dice cosa manca della coppia nodo–utente («needs: say who signs → …»), il clic porta al passo mancante nel menu del chip (Autore), non apre «Who you are»; completa la coppia direbbe «fase 2»", async () => {
   const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  const title = await p.evaluate(() => document.getElementById("ns-publish").title);
   await p.click("#ns-publish", { force: true });
   await p.waitForTimeout(400);
   const r = await p.evaluate(() => ({ aria: document.getElementById("ns-publish").getAttribute("aria-disabled"),
     disabled: document.getElementById("ns-publish").disabled, panel: !!document.querySelector(".idpanel"),
-    toast: document.getElementById("toast").innerText }));
+    menuAt: document.querySelector("#who-menu .who-sect.focus")?.dataset.whoSect ?? null }));
   await ctx.close();
-  return { pass: r.aria === "true" && !r.disabled && !r.panel && /phase 2/.test(r.toast) && !errors.length, detail: { r, errors } };
+  return { pass: r.aria === "true" && !r.disabled && !r.panel && /^needs: say who signs → /.test(title) && r.menuAt === "author" && !errors.length,
+    detail: { title, r, errors } };
 });
 
 test("TC2.scan", "T-C2 · Tempio (copia sotto la radice del bridge), scan di EM/DosCo: ID doppi D.04 e D.11, un file senza ID; Documents: D.02, D.32 e D.33 tutti presenti (nessun «absent»), con la miniatura; ogni orfano ha la miniatura, o dice «empty copy» se i suoi byte sono zeri", async () => {
@@ -5804,27 +5808,32 @@ test("F8.node", "F8 (U17), rifatto su DOVE-CHI-MENU p.4/p.5 · «Chi sei» riman
   const toWhere = await p.evaluate(() => !!document.querySelector("[data-idp-where]"));
   await p.click("[data-idp-where]");
   await p.waitForTimeout(600);
-  const where = await p.evaluate(() => !document.getElementById("conn-pop")?.classList.contains("hidden")
-    && [...document.querySelectorAll("#conn-pop > .conn-sect")].map((x) => x.dataset.sect).includes("nodes"));
+  // MICRO-CHIP-UNICO · «where you are» is the chip's menu now (its «Nodo e
+  // account» holds THE node selector); Settings adds a node with that selector
+  const where = await p.evaluate(() => !!document.querySelector('#who-menu [data-who-sect="where"].focus')
+    && !!document.querySelector('#who-menu [data-who-sect="node"]'));
   await p.keyboard.press("Escape");
   await p.evaluate(() => window.__EM_DRAG__.openNodeSettings());
   await p.waitForTimeout(600);
   const r = await p.evaluate(() => {
     const node = document.getElementById("settings-sect-node"), sync = document.getElementById("settings-sect-sync");
-    const url = document.getElementById("set-node-add");
     return { focus: document.activeElement?.id ?? null, nodeH: node?.querySelector("h4")?.textContent,
       syncH: sync?.querySelector("h4")?.textContent, order: !!node && !!sync && !!(node.compareDocumentPosition(sync) & Node.DOCUMENT_POSITION_FOLLOWING),
-      ph: url?.placeholder, value: url?.value, roomInNode: !!node?.querySelector("#set-hub-room"), signin: !!node?.querySelector("#set-node-signin") };
+      chooser: !!node?.querySelector("#set-node-chooser"), roomInNode: !!node?.querySelector("#set-hub-room"), signin: !!node?.querySelector("#set-node-signin") };
   });
-  await p.fill("#set-node-add", "https://nodo.test");
   await p.click("#set-node-add-btn");
+  await p.waitForSelector("#set-node-chooser [data-nc-typed]", { timeout: 15000 });
+  await p.fill("#set-node-chooser [data-nc-typed]", "https://nodo.test");
+  await p.click('#set-node-chooser [data-group="typed"] [data-act="try"]');
+  await p.waitForSelector('#set-node-chooser [data-group="typed"] .nc-row[data-url="https://nodo.test"] [data-act="use"]', { timeout: 15000 }).catch(() => {});
+  await p.evaluate(() => document.querySelector('#set-node-chooser [data-group="typed"] .nc-row[data-url="https://nodo.test"] [data-act="use"]')?.click());
   const said = '#set-nodes li[data-node="https://nodo.test"] .set-node-said';
   await p.waitForFunction((sel) => /Reachable|does not answer|not a/.test(document.querySelector(sel)?.textContent ?? ""), said, { timeout: 8000 }).catch(() => {});
   const result = await p.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", said);
   await p.screenshot({ path: SHOT("f8-impostazioni-nodo") }).catch(() => {});
   await ctx.close();
-  return { pass: toWhere && where && r.focus === "set-node-add" && r.nodeH === "StratiGraph nodes" && r.syncH === "Synchronised apps" && r.order
-      && r.ph === "for example https://em.localhost:8443" && r.value === "" && !r.roomInNode && !r.signin
+  return { pass: toWhere && where && r.focus === "set-node-add-btn" && r.nodeH === "StratiGraph nodes" && r.syncH === "Synchronised apps" && r.order
+      && r.chooser && !r.roomInNode && !r.signin
       && /Reachable: https:\/\/nodo\.test · StratiGraph Server 0\.9\.1/.test(result) && /ORCID, through the node/.test(result) && !errors.length,
     detail: { toWhere, where, r, result, errors } };
 });
@@ -6004,10 +6013,10 @@ test("E2.nodepw", "E2+E3 · dal desktop, «iD and the node's password»: il nodo
             "emstudio.identities": JSON.stringify({ current: ORCID_ID, known: [{ orcid: ORCID_ID, verified: false }] }) } });
   await p.route(orcid.route.pattern, orcid.route.handler);
   await p.click("#mode-indicator");
-  await p.waitForFunction(() => !!document.querySelector('#conn-pop .conn-node.on [data-act="enter-password"]'), null, { timeout: 8000 }).catch(() => {});
-  const before = await p.evaluate(() => ({ enter: [...document.querySelectorAll('#conn-pop .conn-node.on [data-act^="enter"]')].map((b) => b.dataset.act),
-    access: document.querySelector("#conn-pop .conn-node.on")?.dataset.access }));
-  await p.locator('#conn-pop .conn-node.on [data-act="enter-password"]').click();
+  await p.waitForFunction(() => !!document.querySelector('#who-menu .conn-node.on [data-act="enter-password"]'), null, { timeout: 8000 }).catch(() => {});
+  const before = await p.evaluate(() => ({ enter: [...document.querySelectorAll('#who-menu .conn-node.on [data-act^="enter"]')].map((b) => b.dataset.act),
+    access: document.querySelector("#who-menu .conn-node.on")?.dataset.access }));
+  await p.locator('#who-menu .conn-node.on [data-act="enter-password"]').click();
   await p.waitForTimeout(900);
   const opened = await p.evaluate(() => window.__OPENED__.slice());
   const waiting = await idPanel(p);
@@ -6172,9 +6181,15 @@ test("E4.em", "E4 · Impostazioni › Connessioni, https://sito.test aggiunto (i
   const said = (addr) => `#set-nodes li[data-node="${addr}"] .set-node-said`;
   const settle = (addr) => p.waitForFunction((sel) => { const t = document.querySelector(sel)?.textContent ?? "";
     return t.length > 3 && !/Testing|Provo/.test(t); }, said(addr), { timeout: 12000 }).catch(() => {});
+  // MICRO-CHIP-UNICO p.4 · an address is added with THE node selector (by
+  // hand → «Add»), and tested on its own row at once
   const test = async (addr) => {
-    await p.fill("#set-node-add", addr);
-    await p.click("#set-node-add-btn");
+    await p.evaluate(() => { if (document.getElementById("set-node-chooser").hidden) document.getElementById("set-node-add-btn").click(); });
+    await p.waitForSelector("#set-node-chooser [data-nc-typed]", { timeout: 15000 });
+    await p.fill("#set-node-chooser [data-nc-typed]", addr);
+    await p.click('#set-node-chooser [data-group="typed"] [data-act="try"]');
+    await p.waitForSelector(`#set-node-chooser [data-group="typed"] .nc-row[data-url="${addr}"] [data-act="use"]`, { timeout: 15000 }).catch(() => {});
+    await p.evaluate((a) => document.querySelector(`#set-node-chooser [data-group="typed"] .nc-row[data-url="${a}"] [data-act="use"]`)?.click(), addr);
     await settle(addr);
     await p.waitForTimeout(300);
     return p.evaluate((sel) => ({ text: document.querySelector(sel)?.textContent ?? "", state: document.querySelector(sel)?.dataset.state,
@@ -6325,17 +6340,17 @@ test("TZ.standalone", "T-Z · Su questo computer: la barra ha esattamente quattr
   await p.screenshot({ path: SHOT("tz-barra-standalone"), clip: { x: 0, y: 960, width: 1600, height: 40 } }).catch(() => {});
   await p.click("#mode-indicator");
   await p.waitForTimeout(300);
-  const panel = await p.evaluate(() => ({ open: !document.getElementById("conn-pop")?.classList.contains("hidden"),
-    modes: [...document.querySelectorAll("#conn-pop .conn-mode")].map((b) => b.textContent),
-    sects: [...document.querySelectorAll("#conn-pop .conn-sect")].map((s) => s.dataset.sect ?? "modes") }));
+  const panel = await p.evaluate(() => ({ open: !!document.getElementById("who-menu"),
+    modes: [...document.querySelectorAll("#who-menu .conn-mode")].map((b) => b.textContent),
+    sects: [...document.querySelectorAll("#who-menu .conn-sect")].map((s) => s.dataset.sect ?? "modes") }));
   await p.keyboard.press("Escape");
   // MICRO-DOVE-CHI-MENU p.3 · no «Mode» menu any more: ⇧⌘L opens the same panel
-  await p.evaluate(() => document.getElementById("conn-pop")?.classList.add("hidden"));
+  await p.evaluate(() => document.getElementById("who-menu")?.remove());
   await p.keyboard.press("Shift+Meta+L");
   await p.waitForTimeout(300);
-  const fromMenu = await p.evaluate(() => !document.getElementById("conn-pop")?.classList.contains("hidden")
-    && !!document.querySelector("#conn-pop .conn-mode") && !document.getElementById("dd-mode"));
-  const hubTitle = await p.evaluate(() => document.querySelector('#conn-pop .conn-mode[data-mode="hub"]')?.title ?? "");
+  const fromMenu = await p.evaluate(() => !!document.getElementById("who-menu")
+    && !!document.querySelector("#who-menu .conn-mode") && !document.getElementById("dd-mode"));
+  const hubTitle = await p.evaluate(() => document.querySelector('#who-menu .conn-mode[data-mode="hub"]')?.title ?? "");
   await ctx.close();
   return { pass: barOk(bar) && bar.zones[0].text === "On this computer" && bar.health === "ok" && panel.open
       && JSON.stringify(panel.modes) === JSON.stringify(["On this computer", "With an app", "In a room"])
@@ -6360,7 +6375,7 @@ test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zon
       });
     } } });
   await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
-  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
+  await p.click('#who-menu .conn-mode[data-mode="sidecar"]');
   await p.waitForFunction(() => document.body.classList.contains("sync-active"), null, { timeout: 9000 }).catch(() => {});
   await p.waitForTimeout(800);
   const empty = await barOf(p);
@@ -6369,7 +6384,7 @@ test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zon
   await p.click("#mode-indicator");
   await p.waitForTimeout(300);
   const panel = await p.evaluate(() => {
-    const pop = document.getElementById("conn-pop");
+    const pop = document.getElementById("who-menu");
     return { text: pop.textContent, sects: [...pop.querySelectorAll(".conn-sect")].map((s) => s.dataset.sect ?? "modes"),
       accept: !!pop.querySelector("#sync-control .sync-ctl-btn"), head: pop.querySelector(".conn-where")?.textContent };
   });
@@ -6392,7 +6407,9 @@ test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zon
       && /No graph loaded in Blender/.test(panel.text) && panel.accept && /What you accept from Blender/.test(panel.text)
       // MICRO-DOVE-CHI-MENU p.3 · the panel always has its three sections (the
       // nodes too, with an app): the BAR still says no node in a Sidecar
-      && JSON.stringify(panel.sects.slice(0, 3)) === JSON.stringify(["mode", "apps", "nodes"]) && !/em\.localhost/.test(empty.all)
+      // MICRO-CHIP-UNICO · the panel is the chip's menu: «Dove lavori» holds mode · apps
+      // (the nodes are «Nodo e account»'s)
+      && JSON.stringify(panel.sects.slice(0, 2)) === JSON.stringify(["mode", "apps"]) && !/em\.localhost/.test(empty.all)
       && barOk(loaded) && loaded.health === "ok" && slots.length === 1 && slots2.length === 1 && connects === 1 && !errors.length,
     detail: { empty, panel, loaded, slots, slots2, connects, log1: log1.slice(-4), errors } };
 });
@@ -6429,12 +6446,12 @@ if (K_NODE) test("TR1.live", "T-R1 dal vivo · il pannello Connessione chiede GE
     await p.evaluate(([u, tk]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tk), [K_NODE, tok]);
     await p.waitForFunction(() => /^Room /.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
     await p.click("#mode-indicator");
-    await p.waitForFunction(() => !!document.querySelector('#conn-pop .conn-rooms[data-group="mine"]'), null, { timeout: 15000 }).catch(() => {});
+    await p.waitForFunction(() => !!document.querySelector('#who-menu .conn-rooms[data-group="mine"]'), null, { timeout: 15000 }).catch(() => {});
     const r = await p.evaluate(() => {
-      const g = (k) => [...document.querySelectorAll(`#conn-pop .conn-rooms[data-group="${k}"] li[data-room]`)]
+      const g = (k) => [...document.querySelectorAll(`#who-menu .conn-rooms[data-group="${k}"] li[data-room]`)]
         .map((li) => [li.dataset.room, li.querySelector(".conn-role")?.textContent ?? ""]);
-      return { mine: g("mine"), shared: g("shared"), heads: [...document.querySelectorAll("#conn-pop h5")].map((h) => h.textContent),
-        filter: !!document.querySelector("#conn-pop .conn-rooms-filter") };
+      return { mine: g("mine"), shared: g("shared"), heads: [...document.querySelectorAll("#who-menu h5")].map((h) => h.textContent),
+        filter: !!document.querySelector("#who-menu .conn-rooms-filter") };
     });
     await p.screenshot({ path: SHOT(`tr1-stanze-${user}`) }).catch(() => {});
     await ctx.close();
@@ -6802,7 +6819,7 @@ test("TT1.sidecar", "MICRO T1 · Con Blender: arriva il grafo, poi «On this com
   const baseline = await everyWindowSays(p);
   await workspace(p, "canvas");
   await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
-  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
+  await p.click('#who-menu .conn-mode[data-mode="sidecar"]');
   await p.waitForFunction(() => window.__EM_DRAG__.nodeCount() > 0, null, { timeout: 15000 }).catch(() => {});
   await p.waitForTimeout(1500);
   for (const ws of SPACES) await workspace(p, ws);   // every space mounted on the graph
@@ -6811,7 +6828,7 @@ test("TT1.sidecar", "MICRO T1 · Con Blender: arriva il grafo, poi «On this com
   const before = leftoversOf(await everyWindowSays(p), words, baseline);
   await workspace(p, "canvas");
   await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
-  await p.click('#conn-pop .conn-mode[data-mode="standalone"]');
+  await p.click('#who-menu .conn-mode[data-mode="standalone"]');
   await p.waitForTimeout(1200);
   await p.screenshot({ path: SHOT("tt1-sidecar-dopo-uscita") }).catch(() => {});
   const after = leftoversOf(await everyWindowSays(p), words, baseline);
@@ -6839,7 +6856,7 @@ if (K_NODE) test("TT1.live", "MICRO T1 dal vivo · utente dev in una stanza del 
   await workspace(p, "canvas");
   await p.click("#mode-indicator");
   await p.waitForTimeout(500);
-  await p.locator("#conn-pop button", { hasText: "Leave the room" }).first().click();
+  await p.locator("#who-menu button", { hasText: "Leave the room" }).first().click();
   await p.waitForTimeout(1500);
   await p.screenshot({ path: SHOT("tt1-stanza-dopo-uscita") }).catch(() => {});
   const after = leftoversOf(await everyWindowSays(p), words, baseline);
@@ -6898,14 +6915,16 @@ test("DC3.where", "DOVE-CHI-MENU p.3 · niente «Mode» in alto; ⇧⌘L apre «
     init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: "https://nodo.irraggiungibile.invalid/em", nodes: ["https://nodo.irraggiungibile.invalid/em"] } }) } });
   const mode = await p.evaluate(() => !!document.getElementById("dd-mode"));
   await p.keyboard.press("Shift+Meta+L");
-  await p.waitForFunction(() => document.querySelector("#conn-pop .conn-node.on")?.dataset.reach === "unreachable", null, { timeout: 12000 }).catch(() => {});
-  const panel = await p.evaluate(() => ({ sects: [...document.querySelectorAll("#conn-pop > .conn-sect")].map((s) => s.dataset.sect),
-    text: document.getElementById("conn-pop")?.textContent ?? "",
-    retry: !!document.querySelector('#conn-pop [data-err="unreachable"] [data-act="retry-node"]'),
+  await p.waitForFunction(() => document.querySelector("#who-menu .conn-node.on")?.dataset.reach === "unreachable", null, { timeout: 12000 }).catch(() => {});
+  // MICRO-CHIP-UNICO · «Dove sei» is the chip's menu: its four sections, the
+  // node (that does not answer) in «Nodo e account»
+  const panel = await p.evaluate(() => ({ sects: [...document.querySelectorAll("#who-menu [data-who-sect]")].map((s) => s.dataset.whoSect),
+    text: document.getElementById("who-menu")?.textContent ?? "",
+    retry: !!document.querySelector('#who-menu [data-err="unreachable"] [data-act="retry-node"]'),
     label: document.querySelector("#mode-indicator")?.textContent }));
   await p.screenshot({ path: SHOT("dc3-dove-sei-nodo-irraggiungibile") }).catch(() => {});
   await ctx.close();
-  return { pass: !mode && JSON.stringify(panel.sects) === JSON.stringify(["mode", "apps", "nodes"]) && panel.retry
+  return { pass: !mode && JSON.stringify(panel.sects) === JSON.stringify(["author", "node", "where", "space"]) && panel.retry
       && /non risponde/.test(panel.text) && !/Load failed|Failed to fetch/.test(panel.text) && panel.label === "Sul computer" && !errors.length,
     detail: { mode, panel: { ...panel, text: panel.text.slice(0, 300) }, errors } };
 });
@@ -6963,9 +6982,10 @@ test("DC5.settings", "DOVE-CHI-MENU p.5 · Impostazioni per argomento: Generale 
   await p.waitForTimeout(300);
   const saved = await p.evaluate(() => JSON.parse(localStorage.getItem("emstudio.settings")));
   await ctx.close();
-  return { pass: JSON.stringify(tabs) === JSON.stringify(["Generale", "Identità", "Connessioni", "Visualizzatori", "Avanzate"])
+  // «Componenti aggiuntivi» joined the tabs with MICRO-PREPARA-RITOCCHI
+  return { pass: JSON.stringify(tabs) === JSON.stringify(["Generale", "Identità", "Connessioni", "Visualizzatori", "Avanzate", "Componenti aggiuntivi"])
       && ident.advOpen === false && ident.client === "APP-SANDBOX0001" && ident.base === "https://sandbox.orcid.org"
-      && JSON.stringify(conn.nodes) === JSON.stringify(["https://em.localhost:8443/em"]) && conn.acts.join("|") === "Prova|Rimuovi"
+      && JSON.stringify(conn.nodes) === JSON.stringify(["https://em.localhost:8443/em"]) && conn.acts.join("|") === "Rendi predefinito|Modifica|Prova|Rimuovi"
       && !conn.room && !conn.signin && conn.host === "192.168.1.5" && conn.port === "8790"
       && saved.sync.hubUrl === "https://em.localhost:8443/em" && saved.sync.hubRoom === "sarmitest-16102026"
       && JSON.stringify(saved.sync.nodes) === JSON.stringify(["https://em.localhost:8443/em"]) && saved.sync.port === 8790
