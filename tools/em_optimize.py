@@ -306,7 +306,8 @@ def installed(addon_id: str):
 def _node_version(node: str):
     """``(major, "v26.13.0")`` of a Node binary, or None."""
     try:
-        v = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=10).stdout.strip()
+        v = subprocess.run(child_argv([node, "--version"]), capture_output=True, text=True, timeout=10,
+                           **popen_kw()).stdout.strip()
         return int(v.lstrip("v").split(".")[0]), v
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
@@ -372,7 +373,8 @@ def rosetta_ready() -> bool:
     if platform_key() != "darwin-arm64":
         return True
     try:
-        return subprocess.run(["/usr/bin/arch", "-x86_64", "/usr/bin/true"], capture_output=True, timeout=10).returncode == 0
+        return subprocess.run(["/usr/bin/arch", "-x86_64", "/usr/bin/true"], capture_output=True, timeout=10,
+                              **popen_kw()).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -459,11 +461,13 @@ def machine() -> dict:
         return _MACHINE
     key = platform_key()
     system, arch = key.split("-", 1)
-    cpu = platform.processor() or ""
+    # platform.processor() runs ``uname -p`` with a fork: not on a Mac, where
+    # sysctl below says more (MICRO-BLENDER-SIDECAR)
+    cpu = "" if system == "darwin" else (platform.processor() or "")
     if system == "darwin":
         try:
             cpu = subprocess.run(["/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True,
-                                 text=True, timeout=3).stdout.strip() or cpu
+                                 text=True, timeout=3, **popen_kw()).stdout.strip() or cpu
         except (OSError, subprocess.TimeoutExpired):
             pass
     chip = ("apple_silicon" if system == "darwin" and arch == "arm64"
@@ -475,8 +479,8 @@ def machine() -> dict:
     smi = shutil.which("nvidia-smi")
     if smi:
         try:
-            names = subprocess.run([smi, "--query-gpu=name", "--format=csv,noheader"], capture_output=True,
-                                   text=True, timeout=5).stdout
+            names = subprocess.run(child_argv([smi, "--query-gpu=name", "--format=csv,noheader"]), capture_output=True,
+                                   text=True, timeout=5, **popen_kw()).stdout
             gpus += [{"api": "CUDA", "name": n.strip()} for n in names.splitlines() if n.strip()]
         except (OSError, subprocess.TimeoutExpired):
             pass
@@ -637,7 +641,7 @@ def _install_npm(addon_id: str, job=None) -> dict:
             job.progress = 0.1 + 0.8 * i / len(steps)
             run = job.run_process(cmd, timeout=900, env=env)
         else:
-            run = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+            run = subprocess.run(child_argv(cmd), capture_output=True, text=True, timeout=900, **popen_kw(env))
         if run.returncode != 0:
             raise RuntimeError(f"npm: {(run.stderr or run.stdout or '').strip()[-400:]}")
     try:
@@ -720,7 +724,7 @@ def performance_cores() -> int:
     if sys.platform == "darwin":
         try:
             n = int(subprocess.run(["/usr/sbin/sysctl", "-n", "hw.perflevel0.physicalcpu"], capture_output=True,
-                                   text=True, timeout=3).stdout.strip() or 0)
+                                   text=True, timeout=3, **popen_kw()).stdout.strip() or 0)
             if n > 0:
                 return n
         except (OSError, ValueError, subprocess.TimeoutExpired):
@@ -984,7 +988,8 @@ class Job:
 
     def run_process(self, cmd: list, timeout: float = 3600, env=None):
         """The tool in a process of its own; cancel ends it. → CompletedProcess."""
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        self.proc = subprocess.Popen(child_argv(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                     **popen_kw(env))
         t0 = time.time()
         try:
             while True:
@@ -1334,7 +1339,7 @@ def obj2tiles_tool():
             continue
         version, progress = "", False
         try:
-            run = subprocess.run([c, "--help"], capture_output=True, text=True, timeout=60)
+            run = subprocess.run(child_argv([c, "--help"]), capture_output=True, text=True, timeout=60, **popen_kw())
             text = (run.stdout or "") + (run.stderr or "")
             head = text.strip().splitlines()
             version = head[0].strip() if head else ""
@@ -1457,16 +1462,193 @@ class O2TProgress:
         return None
 
 
-def run_tool(cmd: list, on_line, cancelled, *, stall_s: float = 900, timeout: float = 6 * 3600) -> dict:
+# ── the processes the bridge starts (MICRO-BLENDER-SIDECAR) ─────────────────
+#
+# In the desktop app every Blender died at once, «Blender exited -11», and the
+# same em-bridge started from a terminal worked. The crash reports were the
+# bridge's own, not Blender's: the CHILD segfaulted inside ``fork()``, before
+# ``exec``, in PROJ's ``pthread_atfork`` handler (pyproj, once the globe or a
+# CRS has opened proj.db: ``SQLiteHandleCache`` closes its SQLite handles in
+# the child → ``sqlite3_log`` → ``os_log``, not safe after a fork in a process
+# launched by the GUI). So the bridge never forks to start a tool:
+# ``posix_spawn`` runs no atfork handler. Python takes it by itself for a
+# ``Popen`` with ``close_fds=False`` (our descriptors are not inheritable
+# anyway, PEP 446), no ``cwd``, no ``start_new_session`` and a program with
+# its path (``popen_kw`` / ``child_argv``); ``run_tool`` spawns by hand to
+# have its own session too (``setsid``: a cancel ends the tool's children).
+# The environment is the person's, not the frozen runtime's (``child_env``).
+
+
+def child_env(env=None) -> dict:
+    """The environment for a tool: ``env`` (or ours) without what a frozen
+    bridge put there for ITSELF — PyInstaller's ``_PYI_*``/``_MEI*``, any
+    variable pointing into its unpacked folder (PROJ_DATA, SSL_CERT_FILE,
+    TCL_LIBRARY…; from a PATH-like list only those entries), and the
+    ``LD_LIBRARY_PATH`` / ``DYLD_*`` it changed given back as they were
+    (``*_ORIG``)."""
+    out = dict(os.environ if env is None else env)
+    mei = getattr(sys, "_MEIPASS", "") if getattr(sys, "frozen", False) else ""
+    if not mei:
+        return out
+    mei = os.path.realpath(mei)
+    roots = {mei, getattr(sys, "_MEIPASS", mei)}
+
+    def inside(v: str) -> bool:
+        return any(r and (v == r or v.startswith(r + os.sep)
+                          or os.path.realpath(v).startswith(r + os.sep)) for r in roots if v)
+    for k in list(out):
+        if k.startswith(("_PYI_", "_MEI")):
+            del out[k]
+    for k in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "LIBPATH"):
+        if k + "_ORIG" in out:
+            out[k] = out.pop(k + "_ORIG")
+    for k, v in list(out.items()):
+        parts = v.split(os.pathsep) if os.pathsep in v else [v]
+        keep = [p for p in parts if not inside(p)]
+        if len(keep) == len(parts):
+            continue
+        if keep and any(keep):
+            out[k] = os.pathsep.join(keep)
+        else:
+            del out[k]
+    return out
+
+
+def child_argv(cmd: list) -> list:
+    """The program with its path (``posix_spawn`` is taken only for one with a
+    path; PATH as the tool will see it)."""
+    cmd = list(cmd)
+    if cmd and not os.path.dirname(cmd[0]):
+        found = shutil.which(cmd[0], path=child_env().get("PATH"))
+        if found:
+            cmd[0] = found
+    return cmd
+
+
+def popen_kw(env=None) -> dict:
+    """What a ``subprocess.Popen``/``run`` of a tool adds so that Python
+    spawns it without forking (see above): no descriptor of ours open in it,
+    stdin closed, the person's environment."""
+    kw: dict = {"stdin": subprocess.DEVNULL, "env": child_env(env)}
+    if os.name == "posix":
+        kw["close_fds"] = False
+    return kw
+
+
+def exit_say(name: str, rc, tail=()) -> str:
+    """A tool that failed said in words: the signal that ended it (by name,
+    what it means) and its last lines — not «-11»."""
+    import signal as _sig
+    words = {"SIGSEGV": "segmentation fault", "SIGBUS": "bus error", "SIGILL": "illegal instruction",
+             "SIGABRT": "aborted", "SIGKILL": "killed (out of memory, or stopped from outside)",
+             "SIGTERM": "terminated", "SIGINT": "interrupted", "SIGHUP": "hang-up", "SIGFPE": "arithmetic error",
+             "SIGPIPE": "broken pipe", "SIGTRAP": "trap"}
+    if isinstance(rc, int) and rc < 0:
+        try:
+            sn = _sig.Signals(-rc).name
+        except ValueError:
+            sn = f"signal {-rc}"
+        head = f"{name} was ended by {sn} ({words.get(sn, 'signal')}, exit {rc})"
+    else:
+        head = f"{name} exited {rc}"
+    last = [ln for ln in tail if str(ln).strip()][-6:]
+    return head + (": " + " | ".join(last) if last else " before writing anything")
+
+
+class _Spawned:
+    """A tool started with ``os.posix_spawn`` (no fork), in a session of its
+    own: what ``run_tool`` uses of a ``Popen``. ``quiet``: its output goes
+    nowhere (a program left to run on its own: Blender with its interface)."""
+
+    def __init__(self, cmd: list, env: dict, quiet: bool = False):
+        import signal as _sig
+        r, w = (os.open(os.devnull, os.O_WRONLY), None) if quiet else os.pipe()
+        out = r if quiet else w
+        null = os.open(os.devnull, os.O_RDONLY)
+        try:
+            self.pid = os.posix_spawn(cmd[0], cmd, env, file_actions=[
+                (os.POSIX_SPAWN_DUP2, null, 0), (os.POSIX_SPAWN_DUP2, out, 1), (os.POSIX_SPAWN_DUP2, out, 2)],
+                setsid=True, setsigdef=(_sig.SIGPIPE, _sig.SIGXFSZ))
+        except BaseException:
+            if not quiet:
+                os.close(r)
+            raise
+        finally:
+            os.close(out)
+            os.close(null)
+        self.stdout = None if quiet else open(r, "r", encoding="utf-8", errors="replace", buffering=1)
+        self.returncode = None
+
+    def poll(self):
+        if self.returncode is None:
+            try:
+                pid, status = os.waitpid(self.pid, os.WNOHANG)
+            except ChildProcessError:
+                pid, status = self.pid, 0
+            if pid:
+                self.returncode = os.waitstatus_to_exitcode(status)
+        return self.returncode
+
+    def wait(self, timeout=None):
+        if timeout is None and self.returncode is None:
+            try:
+                self.returncode = os.waitstatus_to_exitcode(os.waitpid(self.pid, 0)[1])
+            except ChildProcessError:
+                self.returncode = 0
+        end = None if timeout is None else time.time() + timeout
+        while self.poll() is None:
+            if end is not None and time.time() > end:
+                raise subprocess.TimeoutExpired([str(self.pid)], timeout)
+            time.sleep(0.05)
+        return self.returncode
+
+    def _signal(self, sig):
+        if self.returncode is not None:
+            return
+        try:
+            os.killpg(self.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            try:
+                os.kill(self.pid, sig)
+            except ProcessLookupError:
+                pass
+
+    def terminate(self):
+        import signal as _sig
+        self._signal(_sig.SIGTERM)
+
+    def kill(self):
+        import signal as _sig
+        self._signal(_sig.SIGKILL)
+
+
+def spawn_tool(cmd: list, env=None):
+    """``cmd`` started without forking, stdout and stderr together in
+    ``.stdout``, stdin closed, a session of its own (POSIX); elsewhere a
+    ``Popen`` in a new process group."""
+    cmd = child_argv(cmd)
+    if hasattr(os, "posix_spawn") and os.path.isabs(cmd[0]):
+        try:
+            return _Spawned(cmd, child_env(env))
+        except NotImplementedError:
+            pass   # a libc without POSIX_SPAWN_SETSID: the Popen below
+    kw = popen_kw(env)
+    if sys.platform == "win32":
+        kw["creationflags"] = 0x00000200   # CREATE_NEW_PROCESS_GROUP
+    return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace", bufsize=1, **kw)
+
+
+def run_tool(cmd: list, on_line, cancelled, *, stall_s: float = 900, timeout: float = 6 * 3600, env=None) -> dict:
     """A tool in a process of its own, its output read line by line (stdout and
     stderr together) while it runs. Ended by ``cancelled()``; KILLED when it
     writes nothing for ``stall_s`` seconds (the round-0 stall of Obj2Tiles
     under Rosetta: log frozen, CPU at 1000%). → ``{returncode, peak_mb,
     seconds, stalled, tail}`` — the peak resident memory of the process itself
-    (``wait4``) where the system says it."""
+    (``wait4``) where the system says it. Started by ``spawn_tool``: never a
+    fork (MICRO-BLENDER-SIDECAR)."""
     import queue
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                            encoding="utf-8", errors="replace", bufsize=1)
+    proc = spawn_tool(cmd, env)
     lines: "queue.Queue" = queue.Queue()
 
     def pump():
@@ -1560,8 +1742,8 @@ def validate_tileset(folder: str, tool=None) -> dict:
     if tool:
         report = folder.rstrip("/\\") + ".validation.json"
         try:
-            run = subprocess.run([tool["node"], tool["main"], "--tilesetFile", ts, "--reportFile", report],
-                                 capture_output=True, text=True, timeout=1800)
+            run = subprocess.run(child_argv([tool["node"], tool["main"], "--tilesetFile", ts, "--reportFile", report]),
+                                 capture_output=True, text=True, timeout=1800, **popen_kw())
             data = json.loads(open(report, encoding="utf-8").read())
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             return {"validator": tool["version"], "ok": False, "errors": 1, "warnings": 0, "infos": 0,
@@ -1864,7 +2046,7 @@ def _tileset_one(job: Job, it: dict, row: dict, tool: dict, pack, refresh) -> di
     if run["returncode"] != 0 or not os.path.isfile(os.path.join(folder, "tileset.json")):
         shutil.rmtree(folder, ignore_errors=True)
         row["state"] = "failed"
-        return {**it, "state": "failed", "error": prog.error or "\n".join(run["tail"][-6:])[-600:] or f"exit {run['returncode']}",
+        return {**it, "state": "failed", "error": prog.error or exit_say("Obj2Tiles", run["returncode"], run["tail"])[-600:],
                 "run": {k: run[k] for k in ("seconds", "peak_mb")}}
     job.say(f"{it['name']}: tileset in {run['seconds']} s" + (f", {run['peak_mb']} MB at most" if run["peak_mb"] else ""))
     row["stage"] = "validation"

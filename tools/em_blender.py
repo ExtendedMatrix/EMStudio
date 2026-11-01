@@ -686,7 +686,7 @@ def probe(blender: str, job=None, timeout: float = 180) -> dict:
     if result.get("ok"):
         out.update({"ok": True, **result["result"]})
     else:
-        out.update({"ok": False, "error": result.get("error") or "\n".join(run["tail"][-6:]) or f"exit {run['returncode']}"})
+        out.update({"ok": False, "error": result.get("error") or O.exit_say("Blender", run["returncode"], run["tail"])})
     with _PLOCK:
         _PROBES[blender] = out
     return out
@@ -757,7 +757,7 @@ def run_op(job, blender: str, args: dict, blend: str = "", timeout: float = 4 * 
     if run["stalled"]:
         raise RuntimeError("Blender wrote nothing for too long and was stopped")
     if not result.get("ok"):
-        raise RuntimeError(result.get("error") or "\n".join(run["tail"][-6:]) or f"Blender exited {run['returncode']}")
+        raise RuntimeError(result.get("error") or O.exit_say("Blender", run["returncode"], run["tail"]))
     res = result.get("result")
     return {"result": res, "seconds": run["seconds"], "peak_mb": run["peak_mb"]}
 
@@ -805,16 +805,20 @@ def open_command(blender: str, blend: str, em_json: str = "", sidecar: bool = Tr
 
 def open_gui(blender: str, blend: str, em_json: str = "", sidecar: bool = True, readonly=None) -> dict:
     """Start it, detached: EMStudio does not wait for (nor end) the person's
-    Blender."""
-    cmd = open_command(blender, blend, em_json, sidecar, readonly)
-    kw: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-    if sys.platform == "win32":
-        kw["creationflags"] = 0x00000008 | 0x00000200   # DETACHED_PROCESS | NEW_PROCESS_GROUP
+    Blender. Spawned, never forked, in a session of its own, with the person's
+    environment (MICRO-BLENDER-SIDECAR: a fork of the app's bridge died in
+    PROJ's atfork handler)."""
+    cmd = O.child_argv(open_command(blender, blend, em_json, sidecar, readonly))
+    env = dict(os.environ, EM_BLEND_READONLY=json.dumps(readonly)) if readonly else None
+    if sys.platform != "win32" and hasattr(os, "posix_spawn") and os.path.isabs(cmd[0]):
+        p = O._Spawned(cmd, O.child_env(env), quiet=True)
+        # reaped when it ends, so it is not left a zombie of the bridge
+        threading.Thread(target=p.wait, daemon=True).start()
     else:
-        kw["start_new_session"] = True
-    if readonly:
-        kw["env"] = dict(os.environ, EM_BLEND_READONLY=json.dumps(readonly))
-    p = subprocess.Popen(cmd, **kw)
+        kw: dict = {**O.popen_kw(env), "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        if sys.platform == "win32":
+            kw["creationflags"] = 0x00000008 | 0x00000200   # DETACHED_PROCESS | NEW_PROCESS_GROUP
+        p = subprocess.Popen(cmd, **kw)
     return {"ok": True, "pid": p.pid, "blend": blend, "em_json": em_json, "sidecar": bool(sidecar),
             "readonly": readonly or None}
 

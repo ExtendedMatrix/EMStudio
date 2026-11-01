@@ -61,6 +61,9 @@ export interface TargetCell {
   single?: string;
   /** a tileset's cell: do its tiles fit the band */
   tiles?: TileFit;
+  /** MICRO-BLENDER-SIDECAR p.4a · its tiles are out of the band and cannot
+   *  be remade here: the master is missing (`retileWithoutMaster`) */
+  retile?: "no_master";
 }
 export interface AssetRow {
   id: string; name: string; kind: "rm" | "container"; description?: string;
@@ -360,7 +363,7 @@ export interface QueueItem {
    *  queue never holds two live items of the same source, target and tool */
   source?: string;
 }
-export type BlockCode = "addon" | "unstamped" | "blender" | "no_source" | "no_blend" | "no_mesh" | "checking" | "cloud" | "author";
+export type BlockCode = "addon" | "unstamped" | "blender" | "no_source" | "no_blend" | "no_mesh" | "no_master" | "checking" | "cloud" | "author";
 /** `cloud` (MICRO-TESTATA-CLOUD): the source is in the cloud, «da scaricare»
  *  — `paths` and `bytes` are what «Scarica e misura» would download */
 export interface Block { code: BlockCode; addon?: string; path?: string; paths?: string[]; bytes?: number }
@@ -839,7 +842,8 @@ export function unplan(plan: Plan, items: readonly QueueItem[]): Plan {
  *  linked N times, EM Tools' «Prepare for a use»). */
 export function toolNeeds(tool: Tool, kind: "files" | "blend" | "none"): { addon: string | null; blender: boolean; block: BlockCode | null } {
   if (tool === "keep") return { addon: null, blender: false, block: null };
-  if (kind === "none") return { addon: null, blender: false, block: "no_source" };
+  // MICRO-BLENDER-SIDECAR p.4a · tiles are remade from the master's meshes
+  if (kind === "none") return { addon: null, blender: false, block: tool === "tileset" ? "no_master" : "no_source" };
   if (tool === "tileset") return kind === "files" ? { addon: "obj2tiles", blender: false, block: null } : { addon: null, blender: false, block: "no_mesh" };
   if (tool === "instance") return kind === "blend" ? { addon: null, blender: true, block: null } : { addon: null, blender: false, block: "no_blend" };
   if (kind === "blend") return { addon: null, blender: true, block: null };
@@ -922,6 +926,33 @@ export function sourceFor(a: AssetRow, tool: Tool, pathOf: (id: string) => strin
   if (file) return { kind: "files", path: file.p, block: "", version: file.v.id };
   if (blend && tool !== "tileset") return blend;
   return { kind: "none", path: "", block: "", version: "" };
+}
+
+/** MICRO-BLENDER-SIDECAR p.4a · a tileset whose tiles do not fit a target
+ *  (Survey2015 → mobile: 1877 tiles over 512 px): s3Dgraphy proposes to
+ *  re-tile it, and Obj2Tiles starts from a mesh of the asset — its master.
+ *  Without one on this computer that proposal could only fail in the queue
+ *  («no file of this asset on this computer to start from»): the cell keeps
+ *  why its tiles are out of the band and says that the master is missing;
+ *  nothing is proposed that cannot be done (keep, with that reason), and
+ *  «Applica e metti in coda» leaves it out. → the cells changed. */
+export function retileWithoutMaster(ans: Pick<AssetListAnswer, "assets">, pathOf: (id: string) => string,
+                                    say: (k: "declare" | "named", names: string) => string): number {
+  let n = 0;
+  for (const a of ans.assets) {
+    for (const c of Object.values(a.targets)) {
+      if (!c?.tiles || c.proposal?.tool !== "tileset") continue;
+      if (sourceFor(a, "tileset", pathOf).kind !== "none") continue;
+      const tm = a.tileset_master;
+      const why = !tm?.declared || !tm.sources.length ? say("declare", "")
+        : say("named", tm.sources.map((x) => x.name).join(", "));
+      c.why = c.why ? `${c.why} · ${why}` : why;
+      c.proposal = { tool: "keep", triangles: null, texture: null, ktx2: false, why };
+      c.retile = "no_master";
+      n++;
+    }
+  }
+  return n;
 }
 
 // ── MICRO-TESTATA-CLOUD · files in the cloud, not downloaded ───────────────

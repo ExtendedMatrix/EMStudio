@@ -1631,12 +1631,13 @@ def _files_route(route, body):
         path = os.path.abspath(os.path.expanduser(body["path"]))
         if not os.path.exists(path):
             raise ValueError(f"not here any more: {path}")
+        import em_optimize as _O   # spawned, never forked (MICRO-BLENDER-SIDECAR)
         if sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", path])
+            subprocess.Popen(["/usr/bin/open", "-R", path], **_O.popen_kw())
         elif os.name == "nt":
-            subprocess.Popen(["explorer", "/select,", path])
+            subprocess.Popen(["explorer", "/select,", path], **_O.popen_kw())
         else:
-            subprocess.Popen(["xdg-open", os.path.dirname(path)])
+            subprocess.Popen(_O.child_argv(["xdg-open", os.path.dirname(path)]), **_O.popen_kw())
         return {"ok": True, "path": path}
     if route == "/file-keep":
         # «Keep it on the disk too»: the node's bytes copied into the project's
@@ -1690,7 +1691,8 @@ def _personal_node(body):
             raise ValueError("which project? a personal node references the files of "
                              "one project tree (open the em.json from its project)")
         cmd += ["--root", root] + (["--lan"] if body.get("lan") else [])
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+    import em_optimize as _O   # spawned, never forked (MICRO-BLENDER-SIDECAR)
+    done = subprocess.run(_O.child_argv(cmd), capture_output=True, text=True, timeout=90, **_O.popen_kw())
     try:
         return json.loads(done.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -1726,8 +1728,8 @@ def _gltfpack_tool():
     import subprocess
     # MICRO-OTTIMIZZA-1 · the add-on downloaded on request (Settings › Add-ons)
     # comes right after the explicit EM_GLTFPACK
+    import em_optimize
     try:
-        import em_optimize
         addon = em_optimize.tool_path("gltfpack") or ""
     except Exception:  # noqa: BLE001 — a broken add-ons folder is no tool
         addon = ""
@@ -1738,7 +1740,8 @@ def _gltfpack_tool():
         if c and os.path.isfile(c) and os.access(c, os.X_OK):
             version = ""
             try:
-                run = subprocess.run([c, "-h"], capture_output=True, text=True, timeout=10)
+                run = subprocess.run([c, "-h"], capture_output=True, text=True, timeout=10,
+                                     **em_optimize.popen_kw())
                 head = (run.stdout or run.stderr or "").strip().splitlines()
                 version = head[0].strip() if head else ""
             except (OSError, subprocess.TimeoutExpired):
@@ -1816,7 +1819,8 @@ def _variant_write(item: dict, params: dict, tool: dict, job=None) -> dict:
         job.say(" ".join([os.path.basename(cmd[0])] + cmd[1:]))
     try:
         run = (job.run_process(cmd, timeout=3600) if job
-               else subprocess.run(cmd, capture_output=True, text=True, timeout=1800))
+               else subprocess.run(O.child_argv(cmd), capture_output=True, text=True, timeout=1800,
+                                   **O.popen_kw()))
     except (OSError, subprocess.TimeoutExpired, TimeoutError) as exc:
         return {**item, "state": "error", "error": str(exc)}
     except O._Cancelled:
@@ -8557,8 +8561,9 @@ def make_handler(api):
                             if tool == "rsvg-convert"
                             else [binary, src, f"--export-filename={out}"])
                     try:
-                        subprocess.run(argv, check=True, capture_output=True,
-                                       timeout=60)
+                        import em_optimize as _O   # never a fork (MICRO-BLENDER-SIDECAR)
+                        subprocess.run(_O.child_argv(argv), check=True, capture_output=True,
+                                       timeout=60, **_O.popen_kw())
                         with open(out, "rb") as fh:
                             return fh.read()
                     except Exception as exc:

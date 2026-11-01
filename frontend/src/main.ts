@@ -35010,8 +35010,10 @@ function trackJob(id: string, kind: string, label: string): BgJob {
   const done = new Promise<BgJob>((res) => { settle = res; });
   const job: BgJob = { id, kind, label, state: "queued", progress: 0, stage: "",
     next: 0, lines: [], done, settle };
-  // MICRO-CODA-MULTICORE · the queue's item whose call is starting: its job
-  if (ownerNow) { job.owner = ownerNow.id; ownerNow.release(); ownerNow = null; }
+  // MICRO-CODA-MULTICORE · the queue's item whose call is starting: its job.
+  // MICRO-BLENDER-SIDECAR p.4b · never an add-on's install: «Download and
+  // install» pressed while an item was starting became that item's job
+  if (ownerNow && kind !== "addon") { job.owner = ownerNow.id; ownerNow.release(); ownerNow = null; }
   bgJobs.set(job.id, job);
   paintJobs();
   pollJobs();
@@ -35343,9 +35345,11 @@ async function installAddon(a: AddonState): Promise<void> {
   tsPlans.clear();
   if (end.state === "done") { const m = t("files.addonInstalled", { name: a.name, version: a.version ?? "" }); toast(m); logInfo(m); }
   else logWarn(jobText(end));
-  if (blockFacts) await loadBlockFacts(true);
+  // MICRO-BLENDER-SIDECAR p.4b · the queue's items waiting for it start now
+  await loadBlockFacts(true);
   renderStorage();
   paintAddonsSettings();
+  paintQueue();
   pumpQueue();
 }
 
@@ -42180,7 +42184,12 @@ async function askAssetList(): Promise<void> {
     const j = await postGraph<AL.AssetListAnswer>("/assets/list", { doc: store.doc, doc_path: currentFilePath ?? "",
       states: statesOf(fileStates()), in_room: !!fileRoom(), progress: token });
     if (!j.ok) { assetUi.error = j.status === 404 ? t("al.oldBridge") : String(j.error ?? j.status); assetUi.ans = null; }
-    else { assetUi.ans = j; assetUi.docKey = assetDocKey(); }
+    else {
+      // MICRO-BLENDER-SIDECAR p.4a · a tileset out of the band with no master
+      // here proposes nothing it cannot do: «manca il master»
+      AL.retileWithoutMaster(j, (id) => fileStateOf(id)?.path ?? "", (k, names) => t(`al.retile.${k}`, { names }));
+      assetUi.ans = j; assetUi.docKey = assetDocKey();
+    }
   } finally { polling = false; assetUi.asking = false; assetUi.progress = null; renderStorage(); void first; }
 }
 
@@ -43341,6 +43350,21 @@ function applyBlocks(): void {
       stamped: (p) => { const v = stampedNow(p); if (v === null) stampUnknown = true; return v; } });
     it.block = b ?? (stampUnknown || !blockFacts ? { code: "checking" } : null);
   }
+  recheckBlocksLater();
+}
+
+/** MICRO-BLENDER-SIDECAR p.4b · an item waiting for an add-on or for Blender
+ *  starts by itself once it is there — installed from its gesture, from
+ *  Settings, from another window or by hand: while one waits for what this
+ *  computer has, that is asked again every 15 s. */
+const FACT_BLOCKS = new Set(["addon", "blender", "checking"]);
+let blockRecheck: ReturnType<typeof setTimeout> | null = null;
+function recheckBlocksLater(): void {
+  if (blockRecheck || !assetQueue.some((x) => x.state === "waiting" && x.block && FACT_BLOCKS.has(x.block.code))) return;
+  blockRecheck = setTimeout(() => {
+    blockRecheck = null;
+    void loadBlockFacts(true).then(() => { applyBlocks(); paintQueue(); pumpQueue(); });
+  }, 15000);
 }
 
 /** The words of a block, and its gesture. */

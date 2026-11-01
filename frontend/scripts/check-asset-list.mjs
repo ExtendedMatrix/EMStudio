@@ -229,6 +229,33 @@ ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk o
   ok(A.coverage(listT, "web").total === 1 && A.sceneCount(listT, "web").triangles === 80
      && A.itemsFor(listT, new Set(["Tile9"]), ["web"], new Map()).length === 0
      && A.applyProposal(new Map(), listT, new Set(["Tile9"]), ["web"]) === 0, "a mesh covered by the tileset: no proposal, out of the count");
+  // MICRO-BLENDER-SIDECAR p.4a · Survey2015 → mobile: its tiles out of the
+  // band, its master not here — no Obj2Tiles that can only fail in the queue
+  const fit = { ok: false, known: true, tiles: 7295, read: 7295, over_triangles: 0, over_texture: 1877, max_triangles: 10145, max_texture_side: 768 };
+  const retile = { state: "todo", loads: "S15.t", why: "le tile non rispettano la fascia: 1877 tile oltre 512 px", tiles: fit,
+                   proposal: { tool: "tileset", triangles: 60000, texture: 512, ktx2: true, why: "rifai le tile nella fascia" } };
+  const survey = (master) => ({ ...asset("Survey2015", {}, [M("S15.m"), { ...tsV, id: "S15.t" }], { mobile: structuredClone(retile) }),
+    kind: "container", tileset_master: master });
+  const SAY = (k, names) => k === "declare" ? "manca il master — dichiara il master" : `manca il master — ${names}`;
+  const s1 = survey(null);
+  const n1 = A.retileWithoutMaster({ assets: [s1] }, () => "", SAY);
+  const c1 = s1.targets.mobile;
+  ok(n1 === 1 && c1.proposal.tool === "keep" && c1.retile === "no_master" && c1.state === "todo"
+     && /le tile non rispettano la fascia/.test(c1.why) && /manca il master/.test(c1.why) && /dichiara il master/.test(c1.proposal.why),
+     "a tileset out of the band, no master here: the reason kept, «manca il master», no new tileset proposed");
+  ok(A.itemsFor([s1], new Set(["Survey2015"]), ["mobile"], new Map()).length === 0
+     && A.selectionItems([s1], [], new Set(["Survey2015"]), ["mobile"], new Map(), BANDS).length === 0,
+     "…and «Applica e metti in coda» queues nothing for it");
+  const s2 = survey({ declared: true, sources: [{ id: "x", name: "Survey2015_full.obj" }], unavailable: "", say_it: "" });
+  A.retileWithoutMaster({ assets: [s2] }, () => "", SAY);
+  ok(/Survey2015_full\.obj/.test(s2.targets.mobile.proposal.why), "a master declared but not here: named");
+  const s3 = survey(null);
+  s3.versions[0] = { ...s3.versions[0], url: "../SB/Survey2015_full.obj" };
+  ok(A.retileWithoutMaster({ assets: [s3] }, (id) => id === "S15.m" ? "/p/SB/Survey2015_full.obj" : "", SAY) === 0
+     && s3.targets.mobile.proposal.tool === "tileset", "its master here: re-tiling stays proposed");
+  ok(A.blockOf("tileset", { kind: "none", path: "" }, have)?.code === "no_master"
+     && A.blockOf("gltfpack", { kind: "none", path: "" }, have)?.code === "no_source",
+     "a tileset asked by hand with nothing to start from: «manca il master», not «no file»");
 }
 
 // ── the bridge ──────────────────────────────────────────────────────────────
