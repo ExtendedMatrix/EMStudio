@@ -237,7 +237,8 @@ ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk o
   const tsV = ver("TS.t", { level: "lod0", level_say: "tileset · in streaming", tileset: true, triangles: null, measured: false,
                             tiles: { tiles: 10, read: 10, max_triangles: 9000, max_texture_side: 512 } });
   ok(A.levelSay(tsV) === "tileset · in streaming" && A.levelSay({ ...tsV, level_say: "lod0 · webXR" }) === "tileset · in streaming"
-     && A.levelSay(ver("x", {})) === "lod0 · webXR", "a tileset's level: «tileset · in streaming», not «lod0»");
+     // MICRO-VERSIONI-PER-USO: a version made for a use is said by its use
+     && A.levelSay(ver("x", {})) === "webXR / Heriverse · 10 tri · 1024 px", "a tileset's level: «tileset · in streaming», not «lod0»");
   const covered = asset("Tile9", { container: "Survey2015" }, [M("Tile9.m"), ver("Tile9.v0", { triangles: 60000 })],
     { web: { state: "na", loads: "Tile9.v0", why: "coperta dal tileset di Survey2015", covered_by: { id: "c", name: "Survey2015", version: "TS.t" },
              proposal: { tool: "keep", triangles: null, texture: null, ktx2: false, why: "coperta" } } });
@@ -380,6 +381,76 @@ ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk o
     const got = names.flatMap((n) => [A.versionFileName(n, "lod1", "mobile"), A.versionFileName(n, "lod0", "aton-heriverse", "gltf_separate")]);
     ok(want.length === got.length && want.every((x, i) => x === got[i]), `the page's names are s3Dgraphy's (${got.length}: ${got[0]} …)`);
   }
+}
+
+// ── MICRO-VERSIONI-PER-USO (E.D., 2 Nov 2026) · versions named by their use ──
+{
+  console.log("MICRO-VERSIONI-PER-USO");
+  // p.1 · the names: by use and numbers, s3Dgraphy's own (use_tag, use_version_name)
+  ok(A.useTag("mobile_webxr", 2000) === "mobile-webxr-2k" && A.useTag("webxr", 53412) === "webxr-53k"
+     && A.useTag("mobile_webxr", 1500) === "mobile-webxr-1.5k" && A.useTag("desktop_realtime") === "desktop-realtime"
+     && A.useTag("mobile_webxr", 2000, 2) === "mobile-webxr-2k-2", "a version's name by its use: mobile-webxr-2k, webxr-53k, -2 beside");
+  ok(A.useFileName("Column_light1", "mobile_webxr", 2000) === "Column_light1@mobile-webxr-2k.glb"
+     && A.useFileName("C", "webxr", 53000, "gltf_separate") === "C@webxr-53k.gltf", "Column_light1@mobile-webxr-2k.glb");
+  ok(JSON.stringify(A.parseUseTag("mobile-webxr-2k-2")) === JSON.stringify({ profile: "mobile_webxr", triangles: 2000, n: 2 })
+     && A.parseUseTag("lod1") === null && A.parseUseTag("manual-2026-10-31") === null, "a use's name read back; lod1 is not one");
+  ok(A.useFileNames("M", "mobile", { tool: "decimate_bake", triangles: 2000 }, "glb", "mobile_webxr").join() === "M@mobile-webxr-2k.glb,M@lod1-mobile.glb,M@lod0-mobile.glb"
+     && A.useFileNames("M", "mobile", { tool: "decimate_bake", triangles: 10 })[0] === "M@lod1-mobile.glb",
+     "the use's name first (bridge ≥ 60), then the names of before; an old bridge: the names of before");
+  // p.2 · what a row says: by its use, never «lod0 · webXR»; a chain «catena LOD n»
+  const v1 = { master: false, tileset: false, level: "lod1", lod_level: "lod1", level_say: "lod1 · mobile webXR", url: "../SB/versions/C@lod1-mobile.glb", triangles: 10200, texture_side: 512 };
+  ok(A.levelSay(v1) === "mobile webXR · 10k tri · 512 px", `a lod1-mobile of before: «${A.levelSay(v1)}»`);
+  ok(A.levelSay({ ...v1, level: "webxr-53k", level_say: "", url: "../SB/versions/C@webxr-53k/C.gltf", triangles: 53100, texture_side: null }) === "webXR / Heriverse · 53k tri",
+     "webXR / Heriverse · 53k tri");
+  ok(A.levelSay({ ...v1, level_say: "lod0 · webXR", url: "../RB/x.glb", level: "lod0" }) === "webXR / Heriverse · 10k tri · 512 px", "«lod0 · webXR» said by its use");
+  ok(A.levelSay({ ...v1, level: "lod3", level_say: "lod3", url: "../RB/LOD3/x.obj", profile: "" }, "t", "catena LOD") === "catena LOD 3"
+     && A.levelSay({ ...v1, profile: "desktop_realtime", level: "x" }) === "desktop realtime · 10k tri · 512 px", "a chain «catena LOD 3»; s3Dgraphy's profile wins");
+  ok(!/lod\d/.test(A.levelSay({ ...v1, level: "mobile-webxr-10k", level_say: "mobile webXR · 10k tri", profile: "mobile_webxr", by_use: true })),
+     "no «lodN» for a version made for a use");
+  // p.3 · the field «Triangoli»: a number written, suggestions 1k / 2k / 5k / 10k
+  ok(A.parseTriangles("2k") === 2000 && A.parseTriangles("2,5k") === 2500 && A.parseTriangles("10.000") === 10000
+     && A.parseTriangles(" 2500 ") === 2500 && A.parseTriangles("") === null && Number.isNaN(A.parseTriangles("tanti")),
+     "2k · 2,5k · 10.000 · 2500 · empty · not a number");
+  ok(A.TRI_SUGGEST.map(A.kilo).join() === "1k,2k,5k,10k", "the suggestions 1k, 2k, 5k, 10k");
+  // p.3 · «Stringi…»: on a covered row and on a form; «Nuova accanto»
+  const sh = { key: "g:1", assets: [{ id: "a1", name: "Column_light1" }, { id: "a2", name: "Column_light2" }], triangles: 10000, textures: [], via: "geometry" };
+  const si = A.shrinkItem("mobile", { triangles: 2000, texture: 512, ktx2: true, tool: "decimate_bake" }, { s: sh, label: "x" });
+  ok(si.shape === "g:1" && si.tool === "instance" && si.asset_ids.length === 2 && si.shrink && si.triangles === 2000, "Stringi a form ×N → ONE item, instances, 2k");
+  const sr = A.shrinkItem("web", { triangles: null, texture: 1024, ktx2: true, tool: A.shrinkTool("files", null, "web") }, { a: { id: "b", name: "B" }, label: "y" });
+  ok(sr.asset_id === "b" && sr.tool === "ktx2" && A.shrinkTool("files", 2000, "mobile") === "gltfpack" && A.shrinkTool("blend", 2000, "mobile") === "decimate_bake",
+     "Stringi a row: decimation on a .blend, gltfpack on a file, KTX2 for a texture only");
+  ok(A.nextBeside("C", "mobile_webxr", 2000, new Set(["C@mobile-webxr-2k.glb", "C@mobile-webxr-2k-2.glb"])) === 3, "Nuova accanto: the first free -n (3)");
+  // p.4 · the second round: Templu-like, every object in its band, the scene not
+  const B = { profile: "mobile_webxr", label_it: "", object_triangles: 10000, object_texture_side: 512, scene_triangles: 300000, scene_download_mb: 20, scene_gpu_mb: 256 };
+  const mk = (id, tri) => ({ id, name: id, kind: "rm", containers: [], branch: "SB", epochs: [], family: "", status: "", findings: [], loaded_why: "", loaded_say: "",
+    audit: { versions: 1, stamped: 1, files_missing: [], modified_after_stamp: [], unchecked: 0, master_declared: null },
+    versions: [{ id: `v_${id}`, master: false, tileset: false, triangles: tri, checksum: `s_${id}`, textures: [], level: "x", level_say: "", measured: true }],
+    targets: { mobile: { state: "ok", loads: `v_${id}`, why: "", proposal: { tool: "keep", triangles: null, texture: null, ktx2: false, why: "" } } } });
+  const cols = Array.from({ length: 25 }, (_, i) => mk(`Column_light${i + 1}`, 10000));
+  const shadows = Array.from({ length: 38 }, (_, i) => mk(`Column_shadow${i + 1}`, 9000));
+  const others = Array.from({ length: 35 }, (_, i) => mk(`Muro${i + 1}`, 2000 + i * 200));
+  const all = [...cols, ...shadows, ...others];
+  const shapes = [{ key: "light", assets: cols, triangles: 10000, textures: [], via: "geometry" }, { key: "shadow", assets: shadows, triangles: 9000, textures: [], via: "geometry" }];
+  const r = A.secondRound(all, "mobile", B, { shapes });
+  ok(r.before > 600000 && r.objectsIn && r.ok && r.after <= 300000, `Templu-like mobile: ${Math.round(r.before / 1000)}k → ${Math.round(r.after / 1000)}k ≤ 300k`);
+  ok(r.rows[0].shape && r.rows.slice(0, 2).every((x) => x.shape), `the forms repeated first (${r.rows.map((x) => `${x.name}×${x.copies}:${x.to}`).slice(0, 3).join(", ")})`);
+  ok(r.rows.every((x) => x.to >= 1000 && x.to < x.from), "never under 1k, always fewer");
+  const over = A.secondRound([mk("Big", 50000), ...others], "mobile", B, { shapes: [] });
+  ok(!over.objectsIn, "an object still over its band: first the objects (no second round)");
+  ok(A.secondRound(others, "mobile", B, { shapes: [] }).rows.length === 0, "a scene inside its band: nothing proposed");
+  // p.5 · the end foreseen, from the durations measured per tool
+  const d = {};
+  A.recordDuration(d, "decimate_bake", 60000); A.recordDuration(d, "decimate_bake", 120000); A.recordDuration(d, "decimate_bake", 90000);
+  ok(A.durationOf(d, "decimate_bake").ms === 90000 && A.durationOf(d, "decimate_bake").measured && !A.durationOf(d, "tileset").measured, "the median of the measured (90 s)");
+  const t0 = Date.parse("2026-11-02T06:30:00");
+  const q5 = [{ id: "r", state: "running", tool: "decimate_bake", started: t0 - 30000 }, { id: "w1", state: "waiting", tool: "decimate_bake" },
+              { id: "w2", state: "waiting", tool: "decimate_bake" }, { id: "x", state: "done", tool: "gltfpack" }];
+  const e1 = A.queueEta(q5, d, t0, 1);
+  ok(e1.items.get("r") === t0 + 60000 && e1.items.get("w2") === t0 + 60000 + 180000 && e1.end === t0 + 240000 && A.clockOf(e1.end) === "06:34",
+     `one lane: fine verso le ${A.clockOf(e1.end)}`);
+  const e2 = A.queueEta(q5, d, t0, 2);
+  ok(e2.end === t0 + 150000, `two lanes: fine verso le ${A.clockOf(e2.end)}`);
+  ok(A.queueEta(q5, d, t0, 1, "pause").end === null, "in Pausa: no end");
 }
 
 // ── the bridge ──────────────────────────────────────────────────────────────

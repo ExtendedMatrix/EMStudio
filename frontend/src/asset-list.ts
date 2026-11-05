@@ -46,6 +46,9 @@ export interface VersionRow {
    *  ≥ 57): how many, how many read, the most triangles and the largest
    *  texture side of one tile */
   tiles?: { tiles: number; read: number; max_triangles: number | null; max_texture_side: number | null } | null;
+  /** MICRO-VERSIONI-PER-USO · the profile it was made for («» for a rung of
+   *  a LOD chain), said by its use; its numbers (s3Dgraphy ≥ this MICRO) */
+  profile?: string; by_use?: boolean; use_params?: Record<string, unknown>;
 }
 export interface Proposal { tool: Tool; triangles: number | null; texture: number | null; ktx2: boolean; why: string }
 export interface TileFit { ok: boolean; known: boolean; tiles: number; read: number; over_triangles: number; over_texture: number;
@@ -108,9 +111,106 @@ export function shownVersion(a: AssetRow, target: TargetKey): VersionRow | null 
 
 /** MICRO-ARCHIVE-ASSET-3 · what a version's level says: a tileset «tileset ·
  *  in streaming» (s3Dgraphy ≥ dev85 says it; before, its «lod0») */
-export function levelSay(v: Pick<VersionRow, "level_say" | "tileset" | "master">, tilesetWords = "tileset · in streaming"): string {
+export function levelSay(v: Pick<VersionRow, "level_say" | "tileset" | "master"> & Partial<VersionRow>, tilesetWords = "tileset · in streaming",
+                         chainWords = "LOD chain"): string {
   if (v.master) return "◆ master";
-  return v.tileset ? tilesetWords : v.level_say;
+  return v.tileset ? tilesetWords : useSayOf(v, chainWords);
+}
+
+// ── MICRO-VERSIONI-PER-USO (E.D., 2 Nov 2026) · versions named by their use ──
+// «lod0 / lod1» on a version made for a use misleads: a LOD is a rung of a
+// chain made as such (3DSC's LOD set, «catena LOD»). A version for a use is
+// named by its use and its numbers — `<asset>@<use>[-<tri>k].glb` — and one
+// use may have several. Mirrors s3Dgraphy's `use_profiles` (use_tag,
+// use_version_name, use_say): `scripts/check-asset-list.mjs` compares them.
+
+/** a target → its profile */
+export const PROFILE_OF: Readonly<Record<TargetKey, string>> = { mobile: "mobile_webxr", web: "webxr", desk: "desktop_realtime", arch: "archive" };
+/** the profiles' destinations (s3Dgraphy's PROFILES) and E.D.'s words */
+const DESTINATION: Readonly<Record<string, string>> = { desktop_realtime: "realtime", webxr: "aton-heriverse", mobile_webxr: "mobile",
+  archive: "archive", preview: "preview", render_offline: "render", print_3d: "print" };
+const USE_WORDS: Readonly<Record<string, string>> = { desktop_realtime: "desktop realtime", webxr: "webXR / Heriverse",
+  mobile_webxr: "mobile webXR", archive: "archivio", preview: "anteprima", render_offline: "rendering offline", print_3d: "stampa 3D" };
+/** the suggestions of the field «Triangoli» */
+export const TRI_SUGGEST: readonly number[] = [1000, 2000, 5000, 10000];
+
+/** `2000` → «2k», `53_412` → «53k», `1500` → «1.5k»; «» when none */
+export function kilo(n: number | null | undefined): string {
+  if (!n || n <= 0) return "";
+  const k = n / 1000;
+  if (k < 10 && Math.round(k * 10) / 10 !== Math.round(k)) return `${Math.round(k * 10) / 10}k`;
+  return `${Math.max(1, Math.round(k))}k`;
+}
+/** s3Dgraphy's `use_tag`: `mobile-webxr-2k` (`-2` for «Nuova accanto») */
+export function useTag(profile: string, triangles?: number | null, n?: number | null): string {
+  const k = kilo(triangles);
+  return `${profile.replace(/_/g, "-")}${k ? `-${k}` : ""}${n && n > 1 ? `-${n}` : ""}`;
+}
+/** s3Dgraphy's `parse_use_tag`: `mobile-webxr-2k` → `{profile, triangles, n}`, null for `lod1` */
+export function parseUseTag(tag: string): { profile: string; triangles: number | null; n: number } | null {
+  const m = /^([a-z0-9-]+?)(?:-(\d+(?:\.\d+)?)k)?(?:-(\d{1,3}))?$/.exec(String(tag ?? "").trim().toLowerCase());
+  if (!m) return null;
+  const id = m[1].replace(/-/g, "_");
+  if (!(id in DESTINATION)) return null;
+  return { profile: id, triangles: m[2] ? Math.round(Number(m[2]) * 1000) : null, n: m[3] ? Number(m[3]) : 1 };
+}
+/** s3Dgraphy's `use_version_name`: `<asset>@<use>[-<tri>k][-n].glb` */
+export function useFileName(model: string, profile: string, triangles?: number | null, packaging = "glb", n?: number | null): string {
+  const safe = model.replace(/[^\p{L}\p{N}_.-]+/gu, "_").replace(/^_+|_+$/g, "") || "model";
+  const ext = ({ gltf_separate: "gltf", stl: "stl" } as Record<string, string>)[packaging] ?? "glb";
+  return `${safe}@${useTag(profile, triangles, n)}.${ext}`;
+}
+/** what the field «Triangoli» says, as a number: «2k» → 2000, «2,5k» →
+ *  2500, «10.000» → 10000, «» → null; NaN for what is not a number */
+export function parseTriangles(text: string): number | null {
+  const s = text.trim().toLowerCase().replace(/\s+/g, "");
+  if (!s) return null;
+  const m = /^(\d+(?:[.,]\d+)?)k$/.exec(s);
+  if (m) return Math.round(Number(m[1].replace(",", ".")) * 1000);
+  const plain = s.replace(/[.,](?=\d{3}(\D|$))/g, "");
+  return /^\d+$/.test(plain) ? Number(plain) : NaN;
+}
+/** the profile of a version: its own (s3Dgraphy ≥ this MICRO), else what its
+ *  level's name or its file's name says (`…@lod1-mobile.glb` → mobile webXR),
+ *  else what «lod1 · mobile webXR» said; «» for a rung of a LOD chain */
+export function profileOfVersion(v: Partial<Pick<VersionRow, "profile" | "level" | "url" | "level_say" | "master">>): string {
+  if (v.master) return "";
+  if (v.profile) return v.profile;
+  const tag = /^([a-z0-9-]+?)(?:-\d+(?:\.\d+)?k)?(?:-\d{1,3})?$/.exec(String(v.level ?? ""));
+  const bySlug = (slug: string): string => { const id = slug.replace(/-/g, "_"); return id in DESTINATION ? id : ""; };
+  if (tag && bySlug(tag[1])) return bySlug(tag[1]);
+  const name = String(v.url ?? "").split(/[\\/]/).filter(Boolean).find((x) => x.includes("@")) ?? "";
+  const at = name.split("@").pop() ?? "";
+  const u = /^([a-z0-9-]+?)(?:-\d+(?:\.\d+)?k)?(?:-\d{1,3})?(?:\.(glb|gltf|stl))?$/.exec(at);
+  if (u && bySlug(u[1])) return bySlug(u[1]);
+  const old = /^(?:lod\d+|manual-[\d-]+?)-(.+?)(?:-[0-9a-f]{8})?(?:\.(glb|gltf|stl))?$/.exec(at);
+  if (old) {
+    const dest = Object.entries(DESTINATION).sort((x, y) => y[1].length - x[1].length)
+      .find(([, d]) => old[1] === d || old[1].startsWith(`${d}-`) || old[1].endsWith(`-${d}`));
+    if (dest) return dest[0];
+  }
+  const said = /^lod\d+ · (.+)$/.exec(String(v.level_say ?? ""));
+  if (said) {
+    const hit = Object.entries(USE_WORDS).find(([, w]) => w === said[1] || w.startsWith(said[1]));
+    if (hit) return hit[0];
+    if (said[1] === "webXR") return "webxr";
+  }
+  return "";
+}
+/** what a version's row says — «mobile webXR · 10k tri · 512 px» for a
+ *  version made for a use, «catena LOD 2» for a rung of a chain; s3Dgraphy's
+ *  own words when it already said them by use (≥ this MICRO) */
+export function useSayOf(v: Partial<VersionRow>, chainWords = "LOD chain"): string {
+  const pid = profileOfVersion(v);
+  if (pid) {
+    const tri = v.triangles ?? (v.use_params?.triangles as number | undefined) ?? null;
+    const side = v.texture_side ?? (v.use_params?.texture_side_px as number | undefined) ?? null;
+    const triSay = tri && tri > 0 ? (tri < 1000 ? String(tri) : kilo(tri)) : "";
+    return `${USE_WORDS[pid] ?? pid}${triSay ? ` · ${triSay} tri` : ""}${side ? ` · ${side} px` : ""}`;
+  }
+  const lvl = /^lod(\d+)$/.exec(String(v.level || v.lod_level || ""));
+  if (lvl) return `${chainWords} ${lvl[1]}`;
+  return String(v.level_say ?? v.level ?? "");
 }
 
 /** What of a version is over a target's band (per object): triangles, texture. */
@@ -384,6 +484,13 @@ export interface QueueItem {
   /** MICRO-GIA-FATTI · the file was written while the race of 1 Nov could
    *  touch it (`raceExposed`): said beside it, «Sostituisci» by default */
   exposed?: boolean;
+  /** MICRO-VERSIONI-PER-USO · «Stringi…»: a new version for the same use
+   *  with fewer triangles / a smaller texture (on a row already covered, or
+   *  a form repeated); `n` > 1: «Nuova accanto» — the name with `-n` */
+  shrink?: boolean; n?: number;
+  /** MICRO-VERSIONI-PER-USO · the second round for the scene: proposed to
+   *  make the target's scene fit its band */
+  round2?: boolean;
 }
 /** MICRO-CODA-VISTA p.4 · who cancelled an item: the person (from the queue,
  *  the status bar's chip, Ottimizza's bar), the bridge restarted (its job
@@ -671,10 +778,22 @@ export function versionFileName(model: string, level: string, destination: strin
   return `${safe}@${level}-${destination}.${ext}`;
 }
 /** The names «Prepara per un uso» may give an item's file, the likelier
- *  first: lod1 when it decimates (the diagnosis' level), else lod0. */
-export function useFileNames(model: string, destination: string, it: Pick<QueueItem, "tool" | "triangles">, packaging = "glb"): string[] {
+ *  first. MICRO-VERSIONI-PER-USO: with `profile` (a bridge ≥ 60) the use's
+ *  name first (`<model>@mobile-webxr-2k.glb`, `-n` for «Nuova accanto»),
+ *  then the names of before — lod1 when it decimates, else lod0. */
+export function useFileNames(model: string, destination: string, it: Pick<QueueItem, "tool" | "triangles"> & Partial<Pick<QueueItem, "n">>,
+                             packaging = "glb", profile = ""): string[] {
   const dec = (it.tool === "decimate_bake" || it.tool === "instance") && !!it.triangles;
-  return (dec ? ["lod1", "lod0"] : ["lod0", "lod1"]).map((l) => versionFileName(model, l, destination, packaging));
+  const old = (dec ? ["lod1", "lod0"] : ["lod0", "lod1"]).map((l) => versionFileName(model, l, destination, packaging));
+  return profile ? [useFileName(model, profile, it.triangles, packaging, it.n), ...old] : old;
+}
+/** «Nuova accanto»: the first `n` (2, 3…) whose name is not among `taken` */
+export function nextBeside(model: string, profile: string, triangles: number | null | undefined, taken: ReadonlySet<string>, packaging = "glb"): number {
+  let n = 2;
+  const strip = (x: string): string => x.replace(/\.gltf$/, "");
+  const names = new Set([...taken].map(strip));
+  while (n < 100 && names.has(strip(useFileName(model, profile, triangles, packaging, n)))) n++;
+  return n;
 }
 
 /** The items «già fatto prima» (among `ids`, or all) */
@@ -1200,4 +1319,199 @@ export function cloudBlock(a: AssetRow, tool: Tool, pathOf: (id: string) => stri
   if (!v) return null;
   const c = cloudOf([a], new Set([v.id]));
   return { code: "cloud", paths: c.paths, bytes: c.bytes };
+}
+
+// ── MICRO-VERSIONI-PER-USO p.3 · «Stringi…» ─────────────────────────────────
+// On a row already covered for a target, or on a form repeated: a NEW version
+// for the same use with fewer triangles / a smaller texture. It goes in the
+// queue like any item; its file is named by the use and the new numbers, and
+// when that name is already in versions/ the page asks Sostituisci / Nuova
+// accanto (`nextBeside`).
+
+/** The item of «Stringi…» for a row (`a`) or a form (`s`) and a target. */
+export function shrinkItem(target: TargetKey, v: { triangles: number | null; texture: number | null; ktx2: boolean; tool: Tool },
+                           o: { a?: AssetRow; s?: Shape; label: string; note?: string }): QueueItem {
+  const rep = o.s ? o.s.assets[0] : o.a!;
+  return { id: queueId(), label: o.label, state: "waiting", note: o.note ?? "", asset_id: rep.id, asset: rep.name,
+           ...(o.s ? { asset_ids: o.s.assets.map((x) => x.id), shape: o.s.key } : {}),
+           target, tool: o.s ? "instance" : v.tool, triangles: v.triangles, texture: v.texture, ktx2: v.ktx2,
+           from: "list", shrink: true };
+}
+
+/** The tool «Stringi» uses on a row: fewer triangles → the decimation (with
+ *  baked normals) of a .blend's master, gltfpack on a file; only a smaller
+ *  texture → KTX2 (or gltfpack for the desktop). */
+export function shrinkTool(kind: "files" | "blend" | "none", triangles: number | null, target: TargetKey): Tool {
+  if (triangles) return kind === "files" ? "gltfpack" : "decimate_bake";
+  return target === "desk" ? "gltfpack" : "ktx2";
+}
+
+// ── MICRO-VERSIONI-PER-USO p.4 · the second round for the scene ─────────────
+// Every object inside its band, the scene not (Templu Mare mobile: 694 k / 300
+// k, the instances drawn ×N): «Applica» proposes to shrink — the forms
+// repeated first, then the heaviest — until the scene fits; shown row by row
+// before anything is queued.
+
+/** One row of the second round: what is shrunk, from how many triangles to
+ *  how many (each copy drawn: ×`copies`). */
+export interface Round2Row { asset_id: string; name: string; shape?: string; asset_ids?: string[]; copies: number; from: number; to: number }
+export interface Round2 { limit: number; before: number; after: number; ok: boolean; rows: Round2Row[]; objectsIn: boolean;
+  /** the objects still over their own band (their names) */
+  over: string[] }
+
+/** Rounded down to a number a person writes: 2 500, 12 000, 45 000. */
+function nice(n: number): number {
+  const step = n >= 20000 ? 1000 : n >= 2000 ? 500 : 100;
+  return Math.max(step, Math.floor(n / step) * step);
+}
+
+/** The triangles a viewer would DRAW for a target after the queue: each
+ *  asset its version (an instance drawn as many times as its copies), or its
+ *  item / plan, or its lightest version. → per asset, and the forms. */
+export function drawnTriangles(assets: readonly AssetRow[], target: TargetKey,
+                               o: { plan?: Plan; queue?: readonly QueueItem[]; shapes?: readonly Shape[]; answeredAt?: number } = {}):
+  Map<string, number> {
+  const out = new Map<string, number>();
+  const live = (o.queue ?? []).filter((x) => x.target === target && x.state !== "failed" && x.state !== "cancelled"
+    && (x.state !== "done" || (o.answeredAt != null && (x.ended ?? 0) > o.answeredAt)));
+  const planShape = new Map<string, Proposal>();
+  for (const s of o.shapes ?? []) {
+    const p = o.plan?.get(`shape:${s.key}`)?.[target];
+    if (p?.tool === "instance") for (const a of s.assets) planShape.set(a.id, p);
+  }
+  for (const a of assets) {
+    const cell = a.targets[target];
+    if (!cell || cell.state === "na") continue;
+    const item = [...live].reverse().find((x) => (x.asset_ids ?? []).includes(a.id)) ?? [...live].reverse().find((x) => x.asset_id === a.id);
+    const p = item ? { triangles: item.triangles ?? null, tool: item.tool } : planShape.get(a.id) ?? o.plan?.get(a.id)?.[target];
+    const cur = cell.loads && cell.state !== "missing" ? a.versions.find((v) => v.id === cell.loads) ?? null : null;
+    // a tileset (made or to make) streams: not an object of the scene
+    if (p?.tool === "tileset" || cell.covered_by) continue;
+    let tri: number;
+    if (p && p.tool && p.tool !== "keep" && p.triangles) tri = p.triangles;
+    else if (cur) { if (cur.tileset) continue; tri = cur.triangles ?? 0; }
+    else tri = lightestVersion(a)?.triangles ?? 0;
+    out.set(a.id, tri);
+  }
+  return out;
+}
+
+/** The second round (p.4): when every object is inside its band and the
+ *  scene is not, the rows to shrink — forms repeated first (heaviest ×
+ *  copies), then the heaviest objects — each to a nicer number, never under
+ *  `floor` triangles nor under a fifth of what it is (then a tenth, then the
+ *  floor, if one round is not enough), until the scene fits. */
+export function secondRound(assets: readonly AssetRow[], target: TargetKey, b: Bands | undefined,
+                            o: { plan?: Plan; queue?: readonly QueueItem[]; shapes?: readonly Shape[]; answeredAt?: number; floor?: number } = {}): Round2 {
+  const limit = b?.scene_triangles ?? 0;
+  const per = drawnTriangles(assets, target, o);
+  const before = [...per.values()].reduce((x, y) => x + y, 0);
+  const objMax = b?.object_triangles ?? null;
+  const over = objMax ? assets.filter((a) => (per.get(a.id) ?? 0) > objMax).map((a) => a.name) : [];
+  const objectsIn = !over.length;
+  const res: Round2 = { limit, before, after: before, ok: !limit || before <= limit, rows: [], objectsIn, over };
+  if (!limit || before <= limit) return res;
+  const floor = o.floor ?? 1000;
+  // the units: a form (its copies together), then each other asset
+  const inShape = new Set<string>();
+  type Unit = { asset_id: string; name: string; shape?: string; asset_ids?: string[]; copies: number; tri: number };
+  const units: Unit[] = [];
+  for (const s of o.shapes ?? []) {
+    const ids = s.assets.map((a) => a.id).filter((id) => per.has(id));
+    if (ids.length < 2) continue;
+    const tri = Math.max(...ids.map((id) => per.get(id) ?? 0));
+    ids.forEach((id) => inShape.add(id));
+    units.push({ asset_id: ids[0], name: s.assets[0].name, shape: s.key, asset_ids: ids, copies: ids.length, tri });
+  }
+  const shapesFirst = units.sort((x, y) => y.tri * y.copies - x.tri * x.copies);
+  const singles: Unit[] = assets.filter((a) => per.has(a.id) && !inShape.has(a.id) && a.kind === "rm")
+    .map((a) => ({ asset_id: a.id, name: a.name, copies: 1, tri: per.get(a.id) ?? 0 }))
+    .sort((x, y) => y.tri - x.tri || x.name.localeCompare(y.name));
+  const order: Unit[] = [...shapesFirst, ...singles];
+  const to = new Map<string, number>(order.map((u) => [u.asset_id, u.tri]));
+  let excess = before - limit;
+  for (const share of [0.2, 0.1, 0]) {
+    for (const u of order) {
+      if (excess <= 0) break;
+      const cur = to.get(u.asset_id)!;
+      const low = Math.max(floor, Math.round(u.tri * share));
+      if (cur <= low) continue;
+      const want = nice(Math.max(low, cur - Math.ceil(excess / u.copies)));
+      const next = Math.max(low, Math.min(cur, want));
+      if (next >= cur) continue;
+      excess -= (cur - next) * u.copies;
+      to.set(u.asset_id, next);
+    }
+    if (excess <= 0) break;
+  }
+  for (const u of order) {
+    const n = to.get(u.asset_id)!;
+    if (n < u.tri) res.rows.push({ asset_id: u.asset_id, name: u.name, ...(u.shape ? { shape: u.shape, asset_ids: u.asset_ids } : {}),
+                                   copies: u.copies, from: u.tri, to: n });
+  }
+  res.after = before - res.rows.reduce((x, r) => x + (r.from - r.to) * r.copies, 0);
+  res.ok = res.after <= limit;
+  return res;
+}
+
+// ── MICRO-VERSIONI-PER-USO p.5 · when the queue will end ───────────────────
+
+/** What one item of each tool lasted, measured (ms): the median of the last
+ *  ones — kept by the page across sessions. */
+export type Durations = Partial<Record<string, number[]>>;
+/** what an item lasts before anything was measured (ms), per tool */
+export const DEFAULT_DURATION: Readonly<Record<string, number>> = {
+  decimate_bake: 90_000, instance: 120_000, gltfpack: 20_000, ktx2: 30_000, tileset: 600_000, keep: 0, optimize: 30_000 };
+const KEEP_LAST = 12;
+/** A duration measured for a tool: kept (the last twelve). */
+export function recordDuration(d: Durations, tool: string, ms: number): Durations {
+  if (!(ms > 0) || !tool) return d;
+  d[tool] = [...(d[tool] ?? []), Math.round(ms)].slice(-KEEP_LAST);
+  return d;
+}
+/** The duration of one item of `tool`: the median of the measured ones, else
+ *  the default; `measured` says which. */
+export function durationOf(d: Durations, tool: string): { ms: number; measured: boolean } {
+  const xs = [...(d[tool] ?? [])].sort((x, y) => x - y);
+  if (xs.length) return { ms: xs[Math.floor(xs.length / 2)], measured: true };
+  return { ms: DEFAULT_DURATION[tool] ?? 60_000, measured: false };
+}
+/** When each item and the whole queue should end (ms since the epoch): the
+ *  running ones from when they started, the waiting ones in order on
+ *  `slots` lanes (in Pausa: none starts — no end). → `{items, end, measured}`
+ *  (`measured`: every tool in it has a measured duration). */
+export function queueEta(q: readonly QueueItem[], d: Durations, now: number, slots = 1, mode: QueueMode = "run"):
+  { items: Map<string, number>; end: number | null; measured: boolean } {
+  const items = new Map<string, number>();
+  const lanes: number[] = [];
+  let measured = true;
+  const dur = (it: QueueItem): number => {
+    const x = durationOf(d, it.tool ?? (it.from === "optimize" ? "optimize" : ""));
+    if (!x.measured) measured = false;
+    return x.ms;
+  };
+  for (const it of q) {
+    if (it.state !== "running") continue;
+    const end = Math.max(now + 1000, (it.started ?? now) + dur(it));
+    items.set(it.id, end);
+    lanes.push(end);
+  }
+  const waiting = q.filter((x) => x.state === "waiting");
+  if (mode === "pause" && waiting.length) return { items, end: null, measured };
+  while (lanes.length < Math.max(1, slots)) lanes.push(now);
+  lanes.sort((x, y) => x - y);
+  for (const it of waiting) {
+    const start = lanes.shift()!;
+    const end = start + dur(it);
+    items.set(it.id, end);
+    lanes.push(end);
+    lanes.sort((x, y) => x - y);
+  }
+  const ends = [...items.values()];
+  return { items, end: ends.length ? Math.max(...ends) : null, measured };
+}
+/** «07:42» */
+export function clockOf(ms: number): string {
+  const t = new Date(ms);
+  return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
 }

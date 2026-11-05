@@ -346,7 +346,9 @@ def emtools_pd():
         # MICRO-PREPARA-RITOCCHI: a bundled table OLDER than the bridge's (no
         # ALIASES: the profiles before E.D.'s names) is replaced by the
         # bridge's, so both speak of the same profiles
-        if mine and os.path.isfile(mine) and not hasattr(UP, "ALIASES"):
+        # MICRO-VERSIONI-PER-USO: likewise a table without the names by use
+        # (USE_SLUGS) — Blender 5.2 bundles dev89, whose names are «lodN»
+        if mine and os.path.isfile(mine) and not (hasattr(UP, "ALIASES") and hasattr(UP, "USE_SLUGS")):
             # `import importlib.util` here made `importlib` a LOCAL of the whole
             # function: with this branch not taken the last line failed
             # (UnboundLocalError) — every «Prepare for a use» on a .blend

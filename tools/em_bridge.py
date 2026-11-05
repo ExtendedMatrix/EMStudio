@@ -2284,7 +2284,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: their heads (tileset.json or the stored members of a .3tz, never the
 #: geometry) and passes them to s3Dgraphy (``tiles=``): a tileset «ok» for a
 #: target only if its tiles fit the band, and then it covers its meshes.
-BRIDGE_LEVEL = 59   # 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 60   # 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -4435,6 +4435,8 @@ def make_handler(api):
                 model = str(body.get("model") or os.path.splitext(os.path.basename(blend))[0])
                 level = str(body.get("level") or "lod0")
                 folder = UP.versions_folder(blend)
+                # MICRO-VERSIONI-PER-USO · a use's name (``mobile-webxr-2k``)
+                # is the file's: ``<model>@mobile-webxr-2k.glb``
                 name = UP.version_file_name(model, level, prof)
                 path = os.path.join(folder, name[:-5] if name.endswith(".gltf") else name)
                 exists = os.path.exists(path)
@@ -5214,6 +5216,16 @@ def make_handler(api):
                     software=body.get("software") or None,
                     author=str(body.get("author") or "") or None,
                     at=str(body.get("at") or "") or None)
+            # MICRO-VERSIONI-PER-USO · a version made for a use: its profile and
+            # numbers (s3Dgraphy names it by its use — never a revision of
+            # another use's version at the same «lodN»)
+            if body.get("profile"):
+                import inspect
+                from s3dgraphy.resources import versions as _V
+                if "profile" in inspect.signature(_V.add_version).parameters:
+                    kwargs["profile"] = str(body["profile"])
+                    up = body.get("use_params")
+                    kwargs["use_params"] = up if isinstance(up, dict) else None
             try:
                 try:
                     out = api.add_version(graph, master, **kwargs)

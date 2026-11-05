@@ -2872,6 +2872,19 @@ window.__EM_SCENE__ = () => {
   // MICRO-CODA-VISTA-2 · Archive's view by its tab (the Mode), for the checks
   archiveView: (k: string) => { const w = windowsOf().find((x) => x.type === "storage"); if (w) setArchiveView(w, k as "files"); },
   queueItems: () => assetQueue.map((x) => ({ ...x })),
+  /** MICRO-VERSIONI-PER-USO · the second round for a target on the selection as
+   *  «Applica» would see it (the proposal applied to a copy of the plan) */
+  secondRound: (k: string) => {
+    const ans = assetUi.ans;
+    if (!ans) return null;
+    const ts = [k as AL.TargetKey];
+    const bands = { [k]: ans.targets[k as AL.TargetKey].bands } as Record<AL.TargetKey, AL.Bands>;
+    const plan: AL.Plan = new Map([...assetUi.plan].map(([x, v]) => [x, { ...v }]));
+    AL.applyProposal(plan, ans.assets, assetUi.sel, ts, { shapes: shapesOf(ans).list, bands });
+    const items = AL.selectionItems(ans.assets, shapesOf(ans).list, assetUi.sel, ts, plan, bands);
+    const r = AL.secondRound(ans.assets, k as AL.TargetKey, bands[k as AL.TargetKey], { plan, queue: [...assetQueue, ...items], shapes: shapesOf(ans).list, answeredAt });
+    return { items: items.length, itemsTri: items.map((x) => x.triangles), ...r };
+  },
   /** MICRO-GIA-FATTI · the answer's own state of each asset for a target (not the queue's) */
   assetCells: (k: AL.TargetKey) => (assetUi.ans?.assets ?? []).map((a) => ({ id: a.id, name: a.name, state: a.targets[k]?.state ?? "",
     why: a.targets[k]?.why ?? "", versions: a.versions.filter((v) => !v.master).map((v) => v.name) })),
@@ -13924,7 +13937,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 59;   // 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 60;   // 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -36153,7 +36166,8 @@ function assetDiskVersions(folder: string, a: AL.AssetRow): HTMLElement {
     cb.title = t("al.diskPickTitle");
     cb.onchange = () => { if (cb.checked) useState.gone.add(r.name); else useState.gone.delete(r.name); renderStorage(); };
     c0.appendChild(cb);
-    const inGraph = `${gv.level_say}${gv.loaded_by.length ? ` · ${t("al.loadedBy", { targets: gv.loaded_by.map((k) => t(`al.t.${k}`)).join(", ") })}` : ""}`;
+    const gvSay = AL.levelSay(gv, t("al.tilesetStreaming"), t("al.chainLod"));
+    const inGraph = `${gvSay}${gv.loaded_by.length ? ` · ${t("al.loadedBy", { targets: gv.loaded_by.map((k) => t(`al.t.${k}`)).join(", ") })}` : ""}`;
     for (const val of [r.name, inGraph, r.triangles?.toLocaleString() ?? "—", useMb(r.bytes), r.stamp ? "✓" : "—"]) {
       const td = tr.insertCell();
       td.textContent = val;
@@ -36862,6 +36876,8 @@ async function registerVersionNow(o: OptOut, pre: Pick<OptimizePreset, "lod" | "
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ doc: store.doc, source: o.source, em_json: currentFilePath ?? "", master_id: master ?? "",
       locator: rel(o.path!), sha256: o.sha256, bytes: o.bytes, level: pre.lod, destination: pre.destination, use: pre.use,
+      // MICRO-VERSIONI-PER-USO · a version made for a use: its profile and numbers
+      ...useOfLevel(pre.lod, params),
       measures: f ? { texture_count: f.texture_count, texture_side_px: f.texture_side_px ?? undefined } : undefined,
       primitives: f ? { faces: f.faces, vertices: f.vertices } : primitives,
       parameters: params, technique: how?.technique ?? "decimation", tool: how?.tool ?? "gltfpack",
@@ -36880,6 +36896,18 @@ async function registerVersionNow(o: OptOut, pre: Pick<OptimizePreset, "lod" | "
   });
   logInfo(t(j.revises ? "files.optRevision" : "files.optVersion", { name: baseName(o.path!), level: pre.lod }), j.version_id ? [j.version_id] : undefined);
   return null;
+}
+
+/** MICRO-VERSIONI-PER-USO · `{profile, use_params}` of a version whose level
+ *  is a use's name (`mobile-webxr-2k`), else nothing (a LOD chain's rung) */
+function useOfLevel(level: string, params: Record<string, unknown>): { profile?: string; use_params?: Record<string, number> } {
+  const tag = AL.parseUseTag(level);
+  if (!tag) return {};
+  const up: Record<string, number> = {};
+  if (tag.triangles) up.triangles = tag.triangles;
+  const side = Number(params.texture_side ?? params.texturePx ?? 0);
+  if (side > 0) up.texture_side_px = side;
+  return { profile: tag.profile, use_params: up };
 }
 
 /** MICRO-CODA-VISTA-2 p.5 · «1 variant written, 0 stamped as derived, 1
@@ -42626,18 +42654,21 @@ function assetListView(win: Win): HTMLElement {
     prop.disabled = !n;
     prop.onclick = () => {
       AL.applyProposal(assetUi.plan, ans.assets, assetUi.sel, targets, { shapes: shapesOf(ans).list, bands });
-      void toQueue(AL.selectionItems(ans.assets, shapesOf(ans).list, assetUi.sel, targets, assetUi.plan, bands, { shape: shapeLabel, one: oneLabel }));
+      const items = AL.selectionItems(ans.assets, shapesOf(ans).list, assetUi.sel, targets, assetUi.plan, bands, { shape: shapeLabel, one: oneLabel });
+      // MICRO-VERSIONI-PER-USO p.4 · every object in its band but the scene
+      // not: the second round proposed (row by row) before anything is queued
+      void secondRoundAsked(ans, targets, items).then((more) => {
+        if (more === null) { renderStorage(); return; }
+        void toQueue([...items, ...more]);
+      });
     };
     const or = document.createElement("span");
     or.className = "files-hint";
     or.textContent = t("al.orSet");
-    const tri = document.createElement("input");
-    tri.type = "number";
-    tri.min = "0";
-    tri.step = "1000";
-    tri.placeholder = t("al.col.tri");
+    // MICRO-VERSIONI-PER-USO p.3 · a number to write (2k, 2500, 10.000), with
+    // the suggestions 1k / 2k / 5k / 10k — not a menu
+    const tri = triField(null, t("al.col.tri"));
     tri.dataset.al = "bulk-tri";
-    tri.className = "al-num";
     const tex = document.createElement("select");
     tex.dataset.al = "bulk-tex";
     for (const s of ["", "4096", "2048", "1024", "512"]) { const o = document.createElement("option"); o.value = s; o.textContent = s || t("al.texture"); tex.appendChild(o); }
@@ -42658,7 +42689,7 @@ function assetListView(win: Win): HTMLElement {
     set.disabled = !n;
     set.onclick = () => {
       const k = AL.setInBulk(assetUi.plan, ans.assets, assetUi.sel, targets, { tool: tool.value as AL.Tool | "",
-        triangles: tri.value ? Number(tri.value) : null, texture: tex.value ? Number(tex.value) : null, ktx2: ktx.checked },
+        triangles: triValue(tri), texture: tex.value ? Number(tex.value) : null, ktx2: ktx.checked },
         { shapes: shapesOf(ans).list, bands });
       toast(tn("al.setDone", k));
       renderStorage();
@@ -42911,6 +42942,37 @@ function toolWords(tool: AL.Tool, kind: "files" | "blend" | "none" | null): stri
   return base;
 }
 
+/** MICRO-VERSIONI-PER-USO p.3 · the field «Triangoli»: a number to write
+ *  («2k», «2500», «10.000»), its suggestions 1k / 2k / 5k / 10k from one
+ *  datalist of the page */
+function triField(value: number | null | undefined, placeholder: string): HTMLInputElement {
+  if (!document.getElementById("al-tri-suggest")) {
+    const dl = document.createElement("datalist");
+    dl.id = "al-tri-suggest";
+    for (const n of AL.TRI_SUGGEST) { const o = document.createElement("option"); o.value = AL.kilo(n); dl.appendChild(o); }
+    document.body.appendChild(dl);
+  }
+  const f = document.createElement("input");
+  f.type = "text";
+  f.inputMode = "numeric";
+  f.className = "al-num al-tri";
+  f.placeholder = placeholder;
+  f.setAttribute("list", "al-tri-suggest");
+  f.autocomplete = "off";
+  f.value = value != null ? AL.kilo(value) === `${value / 1000}k` ? AL.kilo(value) : String(value) : "";
+  f.title = t("al.triTitle");
+  return f;
+}
+/** the number written (null when empty); undefined — said, and the field
+ *  given back — when it is not a number */
+function triValue(f: HTMLInputElement): number | null | undefined {
+  const v = AL.parseTriangles(f.value);
+  if (v === null || Number.isFinite(v)) return v;
+  toast(t("al.triBad", { text: f.value }));
+  f.value = "";
+  return undefined;
+}
+
 /** MICRO-ARCHIVE-ASSET-2 · a form repeated: ONE row «forma ripetuta ×N» with
  *  the numbers of one copy, its checkbox (all its copies), ▸ its copies, and
  *  per target ONE proposal — a mesh reduced + N instances. */
@@ -42949,7 +43011,7 @@ function shapeRow(tb: HTMLElement, sh: AL.Shape, mine: AL.AssetRow[], targets: A
     const td = document.createElement("td"); td.className = cls; td.textContent = text; td.title = title || text; return td;
   };
   tr.append(td0, tdn,
-    c(one ? one.level_say : "—", "", t(sharedNow ? "al.shapeOneFile" : "al.shapeOneCopy")),
+    c(one ? AL.levelSay(one, t("al.tilesetStreaming"), t("al.chainLod")) : "—", "", t(sharedNow ? "al.shapeOneFile" : "al.shapeOneCopy")),
     sharedNow ? c(one ? `${fmtN(one.triangles)} · ${t("al.shapeOneFileShort")}` : "—", "n", t("al.shapeOneFile"))
       : c(one ? `${fmtN(one.triangles)} ×${mine.length}` : "—", "n", t("al.shapeTriTitle", { one: fmtN(one?.triangles), n: String(mine.length), all: fmtN((one?.triangles ?? 0) * mine.length) })),
     c(fmtMB(one?.size_bytes)), c(fmtMB(one?.gpu_bytes), "n"),
@@ -42978,6 +43040,8 @@ function shapeTargetCell(sh: AL.Shape, k: AL.TargetKey, b: AL.Bands | undefined,
     u.textContent = p.why;
     u.title = p.why;
     td.appendChild(u);
+    // MICRO-VERSIONI-PER-USO p.3 · a form already one file: «Stringi…»
+    if (k !== "arch") td.appendChild(shrinkButton(k, { s: sh }));
     return td;
   }
   const set = (field: "tool" | "triangles" | "texture" | "ktx2", v: string | number | boolean | null): void => {
@@ -43001,13 +43065,9 @@ function shapeTargetCell(sh: AL.Shape, k: AL.TargetKey, b: AL.Bands | undefined,
   }
   tool.value = p.tool === "instance" ? "instance" : "keep";
   tool.onchange = () => set("tool", tool.value);
-  const tri = document.createElement("input");
-  tri.type = "number";
-  tri.className = "al-num";
-  tri.placeholder = "tri";
-  tri.value = p.triangles != null ? String(p.triangles) : "";
+  const tri = triField(p.triangles, "tri");
   tri.title = t("al.shapeMeshTri");
-  tri.onchange = () => set("triangles", tri.value);
+  tri.onchange = () => { const v = triValue(tri); if (v !== undefined) set("triangles", v); };
   const tex = document.createElement("select");
   for (const sv of ["", "4096", "2048", "1024", "512"]) { const o = document.createElement("option"); o.value = sv; o.textContent = sv || "px"; tex.appendChild(o); }
   tex.value = p.texture != null ? String(p.texture) : "";
@@ -43021,6 +43081,8 @@ function shapeTargetCell(sh: AL.Shape, k: AL.TargetKey, b: AL.Bands | undefined,
   if (p.edited) { const e = document.createElement("b"); e.textContent = "✎ "; box.appendChild(e); }
   box.append(tool, tri, tex, kx);
   td.appendChild(box);
+  // MICRO-VERSIONI-PER-USO p.3 · a form repeated can always be shrunk
+  td.appendChild(shrinkButton(k, { s: sh }));
   return td;
 }
 
@@ -43183,7 +43245,7 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
   if (st.modified) stampTd.textContent += ` · ${t("al.modified")}`;
   if (a.audit.files_missing.length) stampTd.textContent += ` · ${tn("al.filesMissing", a.audit.files_missing.length)}`;
   tr.append(td0, tdn,
-    cell(v ? AL.levelSay(v, t("al.tilesetStreaming")) : "—", "", v ? (v.tiles ? tilesTitle(v) : v.measured ? t("al.measured") : t("al.estimatedOne")) : ""),
+    cell(v ? AL.levelSay(v, t("al.tilesetStreaming"), t("al.chainLod")) : "—", "", v ? (v.tiles ? tilesTitle(v) : v.measured ? t("al.measured") : t("al.estimatedOne")) : ""),
     v?.tiles ? cell(tilesTri(v), "n", tilesTitle(v)) : cell(fmtN(v?.triangles), `n${ob.tri ? " over" : ""}`),
     cell(fmtMB(v?.size_bytes)),
     cell(fmtMB(v?.gpu_bytes) + (v && !v.measured && v.gpu_bytes != null ? "*" : ""), "n", v && !v.measured ? t("al.estimatedOne") : ""),
@@ -43230,7 +43292,7 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
       state.title = t("al.cloud.versionTitle", { mb: fmtMB(x.cloud_bytes ?? 0), path: x.cloud_paths.join("\n") });
       state.append(" ", cloudButton({ paths: x.cloud_paths, bytes: x.cloud_bytes ?? 0 }, "al-hydrate-version", true));
     }
-    vr.append(cell(""), name, cell(AL.levelSay(x, t("al.tilesetStreaming")), "", x.tiles ? tilesTitle(x) : ""),
+    vr.append(cell(""), name, cell(AL.levelSay(x, t("al.tilesetStreaming"), t("al.chainLod")), "", x.tiles ? tilesTitle(x) : ""),
       x.tiles ? cell(tilesTri(x), "n", tilesTitle(x)) : cell(fmtN(x.triangles), `n${obv.tri ? " over" : ""}`), cell(fmtMB(x.size_bytes)),
       cell(fmtMB(x.gpu_bytes) + (!x.measured && x.gpu_bytes != null ? "*" : ""), "n"),
       x.tiles?.max_texture_side ? cell(`${x.tiles.max_texture_side} ${t("al.perTile")}`, "n", tilesTitle(x))
@@ -43309,6 +43371,8 @@ function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLT
     u.textContent = ` ${t("al.coveredByShape", { n: String(sh.assets.length) })}`;
     td.title = t(done ? "al.coveredByShapeDone" : "al.coveredByShapeTitle", { n: String(sh.assets.length), first: sh.assets[0].name });
     td.appendChild(u);
+    // MICRO-VERSIONI-PER-USO p.3 · its form can be shrunk from here too
+    if (done && k !== "arch") td.appendChild(shrinkButton(k, { s: sh }));
     return td;
   }
   // MICRO-ARCHIVE-ASSET-3 · a mesh covered by its container's tileset: grey,
@@ -43326,9 +43390,12 @@ function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLT
   if (c.state === "ok" && !p.edited) {
     const u = document.createElement("small");
     const v = a.versions.find((x) => x.id === c.loads);
-    u.textContent = v ? ` ${v.master ? "master" : v.tileset ? t("al.tilesetShort") : v.level}` : "";
+    // MICRO-VERSIONI-PER-USO · said by its use («mobile webXR · 10k tri»), never «lod1»
+    u.textContent = v ? ` ${v.master ? "master" : v.tileset ? t("al.tilesetShort") : AL.useSayOf(v, t("al.chainLod"))}` : "";
     u.title = c.why;
     td.appendChild(u);
+    // MICRO-VERSIONI-PER-USO p.3 · covered: «Stringi…» (a new version for the same use)
+    if (k !== "arch" && v && !v.master && !v.tileset) td.appendChild(shrinkButton(k, { a }));
     return td;
   }
   if (c.state === "na" || k === "arch") {
@@ -43352,13 +43419,9 @@ function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLT
   }
   tool.value = p.tool;
   tool.onchange = () => { AL.editProposal(assetUi.plan, a, k, "tool", tool.value); renderStorage(); };
-  const tri = document.createElement("input");
-  tri.type = "number";
-  tri.className = "al-num";
-  tri.placeholder = "tri";
-  tri.value = p.triangles != null ? String(p.triangles) : "";
+  const tri = triField(p.triangles, "tri");
   tri.dataset.alProp = `${a.id}|${k}|triangles`;
-  tri.onchange = () => { AL.editProposal(assetUi.plan, a, k, "triangles", tri.value); renderStorage(); };
+  tri.onchange = () => { const v = triValue(tri); if (v !== undefined) { AL.editProposal(assetUi.plan, a, k, "triangles", v); renderStorage(); } };
   const tex = document.createElement("select");
   tex.dataset.alProp = `${a.id}|${k}|texture`;
   for (const s of ["", "4096", "2048", "1024", "512"]) { const o = document.createElement("option"); o.value = s; o.textContent = s || "px"; tex.appendChild(o); }
@@ -43723,6 +43786,35 @@ function viaQueue(label: string, run: () => Promise<void>): boolean {
   return true;
 }
 
+/** MICRO-VERSIONI-PER-USO p.5 · the durations measured per tool, kept across
+ *  sessions: the end foreseen of each item and of the whole queue */
+const TOOL_DURATIONS_KEY = "emstudio.toolDurations";
+const toolDurations: AL.Durations = (() => { try { return JSON.parse(localStorage.getItem(TOOL_DURATIONS_KEY) ?? "{}") as AL.Durations; } catch { return {}; } })();
+function noteDuration(tool: string, ms: number): void {
+  AL.recordDuration(toolDurations, tool, ms);
+  try { localStorage.setItem(TOOL_DURATIONS_KEY, JSON.stringify(toolDurations)); } catch { /* private mode: this session only */ }
+}
+function queueEtaNow(): ReturnType<typeof AL.queueEta> {
+  return AL.queueEta(assetQueue, toolDurations, Date.now(), queueRoom().slots, queueMode);
+}
+/** «fine verso le 07:42» (or «in pausa»), and each row's own end */
+function paintEta(): void {
+  const eta = queueEtaNow();
+  const live = assetQueue.some((x) => x.state === "waiting" || x.state === "running");
+  for (const el of document.querySelectorAll<HTMLElement>("[data-al-eta]")) {
+    const words = !live ? "" : eta.end == null ? t("al.eta.paused")
+      : `${t("al.eta.end", { at: AL.clockOf(eta.end) })}${eta.measured ? "" : ` ${t("al.eta.guess")}`}`;
+    if (el.textContent !== words) el.textContent = words;
+    el.dataset.end = eta.end != null ? String(eta.end) : "";
+    el.title = t("al.eta.title");
+  }
+  for (const el of document.querySelectorAll<HTMLElement>("[data-al-eta-item]")) {
+    const end = eta.items.get(el.dataset.alEtaItem!);
+    const words = end != null ? `~${AL.clockOf(end)}` : "";
+    if (el.textContent !== words) el.textContent = words;
+  }
+}
+
 function pumpQueue(): void {
   applyBlocks();
   const it = AL.nextToRun(assetQueue, queueMode, queueRoom());
@@ -43756,6 +43848,8 @@ function pumpQueue(): void {
       }
     }
     it.replace = false;
+    // MICRO-VERSIONI-PER-USO p.5 · what an item of this tool lasted, kept
+    if (it.state === "done" && it.started && !it.before) noteDuration(it.tool ?? (it.from === "optimize" ? "optimize" : ""), it.ended - it.started);
     if (it.state === "failed" && it.before) logInfo(`${it.label}: ${itemOutcome(it)}`);
     else if (it.state === "failed") logWarn(`${it.label}: ${it.note}`);
     if (it.state === "cancelled") logInfo(`${it.label}: ${cancelWords(it.cancel)}`);
@@ -43990,6 +44084,7 @@ async function foundBefore(items: readonly AL.QueueItem[]): Promise<AL.Found[]> 
   const ans = assetUi.ans;
   if (!ans || !items.length) return [];
   if (!useState.profiles) await loadUseProfiles().catch(() => undefined);
+  await namesByUse();
   const lists = new Map<string, Promise<FsListing | null>>();
   const entryOf = async (path: string): Promise<FsListing["entries"][number] | null> => {
     const dir = paths.dirname(path);
@@ -44015,7 +44110,7 @@ async function foundBefore(items: readonly AL.QueueItem[]): Promise<AL.Found[]> 
       const prof = useState.profiles?.find((p) => p.id === ITEM_PROFILE[it.target!]);
       if (!prof || prof.packaging === "stl") continue;
       const folder = paths.join(paths.dirname(paths.normalize(paths.toPosix(src.path))), "versions");
-      for (const file of AL.useFileNames(src.block || a.name, prof.destination, it, prof.packaging)) {
+      for (const file of AL.useFileNames(src.block || a.name, prof.destination, it, prof.packaging, byUseNames ? prof.id : "")) {
         // a glTF packed apart is a folder (the bridge's path drops `.gltf`)
         const name = file.endsWith(".gltf") ? file.slice(0, -5) : file;
         const path = paths.join(folder, name);
@@ -44053,6 +44148,163 @@ async function foundBefore(items: readonly AL.QueueItem[]): Promise<AL.Found[]> 
  *  and what its default is), and the answers: as marked (the default, OK),
  *  use them all (registered), replace them all, decide row by row. → the
  *  answer, or null (Annulla: nothing queued). */
+/** MICRO-VERSIONI-PER-USO p.3 · «Stringi…» on a row already covered for a
+ *  target (`a`) or on a form repeated (`s`): a NEW version for the same use
+ *  with fewer triangles / a smaller texture — asked (the numbers written,
+ *  1k / 2k / 5k / 10k suggested), then in the queue. Its file is named by the
+ *  use and the new numbers; when that name is already in versions/ the page
+ *  asks «Sostituisci» or «Nuova accanto» (the same name with `-2`, `-3`…). */
+async function shrinkAsked(k: AL.TargetKey, o: { a?: AL.AssetRow; s?: AL.Shape }): Promise<void> {
+  const rep = o.s ? o.s.assets[0] : o.a;
+  if (!rep || k === "arch") return;
+  if (!(await namesByUse())) { toast(t("al.shrink.oldBridge")); return; }
+  const now = o.s ? (AL.shapeShared(o.s, k) ? AL.shownVersion(rep, k) : AL.shapeKey(rep)?.v ?? null) : AL.shownVersion(rep, k);
+  const name = o.s ? `${t("al.shape", { n: String(o.s.assets.length) })} ${rep.name}` : rep.name;
+  const body = document.createElement("div");
+  body.className = "al-shrink";
+  body.dataset.alShrink = k;
+  const p = document.createElement("p");
+  p.className = "files-hint";
+  p.textContent = t("al.shrink.now", { what: now ? AL.useSayOf(now, t("al.chainLod")) : "—", target: t(`al.t.${k}`) });
+  const half = now?.triangles ? Math.max(1000, Math.round(now.triangles / 2000) * 1000) : 2000;
+  const tri = triField(half, t("al.col.tri"));
+  tri.dataset.alShrinkTri = "";
+  const tex = document.createElement("select");
+  tex.dataset.alShrinkTex = "";
+  for (const sv of ["", "2048", "1024", "512", "256"]) { const op = document.createElement("option"); op.value = sv; op.textContent = sv ? `${sv} px` : t("al.shrink.texSame"); tex.appendChild(op); }
+  const kl = document.createElement("label");
+  const kc = document.createElement("input");
+  kc.type = "checkbox";
+  kc.checked = k !== "desk";
+  kl.append(kc, " KTX2");
+  const row = document.createElement("div");
+  row.className = "al-shrink-row";
+  const l1 = document.createElement("label");
+  l1.append(`${t("al.col.tri")} `, tri);
+  const l2 = document.createElement("label");
+  l2.append(`${t("al.texture")} `, tex);
+  row.append(l1, l2, kl);
+  body.append(p, row);
+  const a1 = await openDialog({ kind: "shrink", title: t("al.shrink.title", { name }), message: t("al.shrink.ask"), body, ok: t("al.shrink.ok") });
+  if (!a1.ok) return;
+  const triangles = triValue(tri) ?? null;
+  const texture = tex.value ? Number(tex.value) : null;
+  if (!triangles && !texture) { toast(t("al.shrink.nothing")); return; }
+  if (triangles && now?.triangles && triangles >= now.triangles) { toast(t("al.shrink.notLess", { now: fmtN(now.triangles) })); return; }
+  const kind = o.a ? AL.sourceFor(o.a, "decimate_bake", (id) => fileStateOf(id)?.path ?? "").kind : "blend";
+  const tool = AL.shrinkTool(kind === "none" ? "files" : kind, triangles, k);
+  const label = `${name} → ${t(`al.t.${k}`)} · ${t("al.shrink.short")} ${triangles ? `${AL.kilo(triangles)} tri` : ""}${texture ? ` ${texture} px` : ""}`.trim();
+  const it = AL.shrinkItem(k, { triangles, texture, ktx2: kc.checked, tool }, { a: o.a, s: o.s, label, note: t("al.shrink.note") });
+  // the name taken already: Sostituisci, or a new one beside it
+  const tag = (n?: number): string => `@${AL.useTag(ITEM_PROFILE[k], triangles, n)}`;
+  const there = async (): Promise<AL.Found | null> =>
+    (await foundBefore([it]).catch(() => [] as AL.Found[])).find((f) => f.name.includes(tag(it.n))) ?? null;
+  const hit = await there();
+  if (hit) {
+    const a2 = await openDialog({ kind: "shrink-exists", title: t("al.shrink.existsTitle"), message: t("al.shrink.exists", { name: hit.name }),
+      ok: t("al.shrink.beside"), choices: [{ key: "replace", label: t("al.before.replace"), title: t("al.shrink.replaceTitle") }] });
+    if (!a2.ok) return;
+    if (a2.choice === "replace") { it.decide = "replace"; it.replace = true; }
+    else {
+      for (let n = 2; n < 20; n++) { it.n = n; if (!(await there())) break; }
+    }
+  }
+  queueAdd([it]);
+  const file = rep.name + tag(it.n);
+  const m = t("al.shrink.queued", { name: it.label, file });
+  toast(m);
+  logInfo(m);
+  renderStorage();
+}
+/** MICRO-VERSIONI-PER-USO p.4 · the second round for the scene: for each
+ *  target whose scene (the instances drawn ×N) stays over its band once the
+ *  items are made, while every object is inside its own, the rows to shrink —
+ *  the forms repeated first, then the heaviest — shown with their triangles
+ *  before anything is queued. → the items to add (the rows already among
+ *  `items` get their new triangles in place), [] when none, null: Annulla. */
+async function secondRoundAsked(ans: AL.AssetListAnswer, targets: readonly AL.TargetKey[], items: AL.QueueItem[]): Promise<AL.QueueItem[] | null> {
+  const shapes = shapesOf(ans).list;
+  const rounds: { k: AL.TargetKey; r: AL.Round2 }[] = [];
+  for (const k of targets) {
+    const b = ans.targets[k]?.bands;
+    if (k === "arch" || !b?.scene_triangles) continue;
+    const pending = items.filter((x) => x.target === k);
+    const r = AL.secondRound(ans.assets, k, b, { plan: assetUi.plan, queue: [...assetQueue, ...pending], shapes, answeredAt });
+    // the scene already inside its band (before any second round): nothing to ask
+    if (r.before <= r.limit) continue;
+    if (!r.objectsIn) {
+      const names = r.over.slice(0, 6).join(", ") + (r.over.length > 6 ? ` +${r.over.length - 6}` : "");
+      logInfo(t("al.r2.objectsFirst", { target: t(`al.t.${k}`), now: AL.kilo(r.before), limit: AL.kilo(r.limit), names }));
+      continue;
+    }
+    if (r.rows.length) rounds.push({ k, r });
+  }
+  if (!rounds.length) return [];
+  const body = document.createElement("div");
+  body.className = "al-r2";
+  body.dataset.alR2 = String(rounds.reduce((x, y) => x + y.r.rows.length, 0));
+  for (const { k, r } of rounds) {
+    const h = document.createElement("p");
+    h.dataset.alR2Target = k;
+    h.dataset.after = String(r.after);
+    h.dataset.limit = String(r.limit);
+    const b = document.createElement("b");
+    b.textContent = t(`al.t.${k}`);
+    const scene = t("al.r2.scene", { before: AL.kilo(r.before), after: AL.kilo(r.after), limit: AL.kilo(r.limit) });
+    h.append(b, ` — ${scene}${r.ok ? "" : ` ${t("al.r2.stillOver")}`}`);
+    const ul = document.createElement("ul");
+    ul.className = "al-r2-list";
+    for (const row of r.rows) {
+      const li = document.createElement("li");
+      li.dataset.alR2Row = row.shape ? `shape:${row.shape}` : row.asset_id;
+      li.dataset.to = String(row.to);
+      li.textContent = `${row.shape ? `⧉ ×${row.copies} ` : ""}${row.name}: ${fmtN(row.from)} → ${fmtN(row.to)} tri`
+        + (row.copies > 1 ? ` (×${row.copies} = −${AL.kilo((row.from - row.to) * row.copies)})` : "");
+      ul.appendChild(li);
+    }
+    body.append(h, ul);
+  }
+  const n = rounds.reduce((x, y) => x + y.r.rows.length, 0);
+  const a = await openDialog({ kind: "second-round", title: t("al.r2.title"), message: t("al.r2.ask"), body,
+    ok: t("al.r2.ok", { n: String(n) }), choices: [{ key: "only", label: t("al.r2.only"), title: t("al.r2.onlyTitle") }] });
+  if (!a.ok) return null;
+  if (a.choice === "only") return [];
+  const out: AL.QueueItem[] = [];
+  const byShape = new Map(shapes.map((x) => [x.key, x]));
+  for (const { k, r } of rounds) {
+    const b = ans.targets[k].bands;
+    for (const row of r.rows) {
+      const mine = items.find((x) => x.target === k && (row.shape ? x.shape === row.shape : !x.shape && x.asset_id === row.asset_id));
+      if (mine) { mine.triangles = row.to; mine.round2 = true; continue; }
+      const s = row.shape ? byShape.get(row.shape) : undefined;
+      const a2 = s ? undefined : ans.assets.find((x) => x.id === row.asset_id);
+      if (!s && !a2) continue;
+      const kind = a2 ? AL.sourceFor(a2, "decimate_bake", (id) => fileStateOf(id)?.path ?? "").kind : "blend";
+      const shapeWord = s ? `${t("al.shape", { n: String(row.copies) })} ` : "";
+      const label = `${shapeWord}${row.name} → ${t(`al.t.${k}`)} · ${t("al.r2.short")} ${AL.kilo(row.to)} tri`;
+      const it = AL.shrinkItem(k, { triangles: row.to, texture: b.object_texture_side, ktx2: k !== "desk",
+        tool: AL.shrinkTool(kind === "none" ? "files" : kind, row.to, k) }, { a: a2, s, label, note: t("al.r2.note") });
+      it.round2 = true;
+      out.push(it);
+    }
+  }
+  logInfo(t("al.r2.done", { n: String(n), targets: rounds.map((x) => `${t(`al.t.${x.k}`)} ${AL.kilo(x.r.after)} / ${AL.kilo(x.r.limit)}`).join(", ") }));
+  return out;
+}
+
+/** the button «Stringi…» of a cell */
+function shrinkButton(k: AL.TargetKey, o: { a?: AL.AssetRow; s?: AL.Shape }): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "ghost al-shrink-btn";
+  b.dataset.action = "al-shrink";
+  b.dataset.alShrinkFor = o.s ? `shape:${o.s.key}|${k}` : `${o.a!.id}|${k}`;
+  b.textContent = t("al.shrink.btn");
+  b.title = t("al.shrink.btnTitle");
+  b.onclick = (e) => { e.stopPropagation(); void shrinkAsked(k, o); };
+  return b;
+}
+
 async function askBefore(found: readonly AL.Found[]): Promise<AL.BeforeHow | null> {
   const d = AL.beforeDefault(found);
   const body = document.createElement("div");
@@ -44363,6 +44615,7 @@ function paintRunBars(): void {
     const it = assetQueue.find((x) => x.id === el.dataset.alTime);
     if (it) el.textContent = AL.itemTime(it);
   }
+  paintEta();
 }
 setInterval(() => { if (assetQueue.some((x) => x.state === "running")) paintRunBars(); }, 1000);
 
@@ -44400,7 +44653,10 @@ function queueView(win: Win): HTMLElement {
   const sl = document.createElement("span");
   sl.className = "al-sched files-hint";
   sl.dataset.alSched = "";
-  bar.append(queueModeSeg(), queueShareControl("al-share"), sl);
+  const eta = document.createElement("span");
+  eta.className = "al-eta files-hint";
+  eta.dataset.alEta = "";
+  bar.append(queueModeSeg(), queueShareControl("al-share"), sl, eta);
   host.appendChild(bar);
   const fl = document.createElement("div");
   fl.className = "al-tools al-qfilters";
@@ -44606,8 +44862,17 @@ function queueRowInto(tr: HTMLTableRowElement, it: AL.QueueItem, held: boolean):
   const pr = c("al-qprogress");
   if (it.state === "running") pr.appendChild(runBar(it));
   const tm = c("n al-qtime");
-  tm.dataset.alTime = it.id;
-  tm.textContent = AL.itemTime(it);
+  const tmv = document.createElement("span");
+  tmv.dataset.alTime = it.id;
+  tmv.textContent = AL.itemTime(it);
+  tm.appendChild(tmv);
+  // MICRO-VERSIONI-PER-USO p.5 · when it should end («~07:42»)
+  if (it.state === "waiting" || it.state === "running") {
+    const e = document.createElement("small");
+    e.className = "al-eta-item";
+    e.dataset.alEtaItem = it.id;
+    tm.append(" ", e);
+  }
   const out = c(`al-qout al-tone-${tone}`);
   out.dataset.alOut = it.id;
   out.textContent = it.state === "running" ? "" : itemOutcome(it, held);
@@ -44763,14 +45028,24 @@ function paintQueue(): void {
 }
 
 /** the use profile of a target */
-const ITEM_PROFILE: Readonly<Record<AL.TargetKey, string>> = { mobile: "mobile_webxr", web: "webxr", desk: "desktop_realtime", arch: "archive" };
+const ITEM_PROFILE: Readonly<Record<AL.TargetKey, string>> = AL.PROFILE_OF;
+/** MICRO-VERSIONI-PER-USO · the bridge names a version made for a use by its
+ *  use (≥ 60): the items' level is then `mobile-webxr-2k`, never «lod1» —
+ *  with an older bridge the names of before (a mobile lod1 beside a web lod1
+ *  would again be its revision) */
+let byUseNames = false;
+async function namesByUse(): Promise<boolean> { byUseNames = await bridgeLevelAtLeast(60); return byUseNames; }
+/** the level (the name) of an item's version: by its use and numbers */
+function itemLevel(it: AL.QueueItem, fallback: string): string {
+  return byUseNames && it.target ? AL.useTag(ITEM_PROFILE[it.target], it.triangles, it.n) : fallback;
+}
 /** gltfpack's preset for a list item on a file of its asset (its profile's,
  *  the ratio to the triangles asked, the texture side, KTX2) */
 function itemPreset(it: AL.QueueItem, a: AL.AssetRow, version: string): OptimizePreset {
   const base = OPTIMIZE_PRESETS.find((p) => p.id === presetForProfile(ITEM_PROFILE[it.target!])) ?? OPTIMIZE_PRESETS[0];
   const from = a.versions.find((v) => v.id === version);
   const ratio = it.tool === "ktx2" ? 1 : it.triangles && from?.triangles ? Math.min(1, it.triangles / from.triangles) : base.ratio;
-  return { ...base, ratio, texturePx: it.texture ?? 0, ktx2: !!it.ktx2, meshopt: true };
+  return { ...base, lod: itemLevel(it, base.lod), ratio, texturePx: it.texture ?? 0, ktx2: !!it.ktx2, meshopt: true };
 }
 
 /** What a list item does when its turn comes: the tool on the asset's
@@ -44779,6 +45054,7 @@ function itemPreset(it: AL.QueueItem, a: AL.AssetRow, version: string): Optimize
 async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   const a = assetUi.ans?.assets.find((x) => x.id === it.asset_id);
   if (!a || !it.tool || !it.target) return t("al.noAsset");
+  await namesByUse();
   const win = windowsOf().find((w) => w.type === "storage");
   if (!win) return t("blend.prepareNoArchive");
   const src = AL.sourceFor(a, it.tool, (id) => fileStateOf(id)?.path ?? "");
@@ -44842,7 +45118,7 @@ async function runAssetItem(it: AL.QueueItem): Promise<string | null> {
   useState.measured.set(useKey([], src.path), m as never);
   it.phase = "make";
   paintRunBars();
-  return runJudged(() => applyUse(src.path, d, ids, src.block || a.name, levelFor(d, ids), params), it);
+  return runJudged(() => applyUse(src.path, d, ids, src.block || a.name, itemLevel(it, levelFor(d, ids)), params), it);
 }
 
 /** A row clicked: on the right, Ottimizza on that asset (the version it
@@ -44887,7 +45163,7 @@ function assetDetail(win: Win, a: AL.AssetRow): HTMLElement {
   vt.appendChild(hr);
   for (const v of a.versions) {
     const tr = document.createElement("tr");
-    for (const s of [v.master ? "◆ master" : v.level_say, fmtN(v.triangles), fmtMB(v.size_bytes), fmtMB(v.gpu_bytes) + (v.measured ? "" : "*"),
+    for (const s of [AL.levelSay(v, t("al.tilesetStreaming"), t("al.chainLod")), fmtN(v.triangles), fmtMB(v.size_bytes), fmtMB(v.gpu_bytes) + (v.measured ? "" : "*"),
       v.texture_side ? String(v.texture_side) : "—", (v.made?.at ? v.made.at.slice(0, 10) : "—") + (v.modified_after_stamp ? ` · ${t("al.modified")}` : "")]) {
       const td = document.createElement("td");
       td.textContent = s;
