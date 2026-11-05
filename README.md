@@ -179,6 +179,18 @@ frontend and just reload; edit the Python exporter and restart the bridge
 (Ctrl-C, re-run `./dev.sh`). The bridge needs a Python that can import
 s3Dgraphy (pandas + lxml) — `dev.sh` prefers `../s3Dgraphy/.venv`.
 
+The web variants (Ottimizza, «Prepara per un uso») need **gltfpack**
+(meshoptimizer, MIT). The bridge looks for it in `EM_GLTFPACK`, then the
+add-on folder, then the PATH. To install the add-on from a shell — the same
+pinned release and sha256 as Settings › Add-ons, into
+`~/.config/emstudio/addons/gltfpack/<version>/` — and see which one the bridge
+will run:
+
+```bash
+./em.sh gltfpack           # installs it if missing, prints the bridge's path
+./em.sh gltfpack --check   # …and queues a real variant on a glb copied into /tmp
+```
+
 **Importing a yEd GraphML.** Batch interop runs on the Python reference
 implementation (see `docs/adr-001`, Addendum C):
 

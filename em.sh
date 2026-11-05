@@ -25,6 +25,12 @@
 #   ./em.sh wasm                 Rebuild em-core → WASM (needs Rust/cargo).
 #   ./em.sh all    [s3Dgraphy]   sync → wasm → build (sync/wasm best-effort).
 #   ./em.sh dev    [args…]       Start the dev stack (bridge + Vite → ./dev.sh).
+#   ./em.sh gltfpack [--check]   gltfpack for the bridge: the add-on of Settings ›
+#                                Add-ons (meshoptimizer's official release, pinned
+#                                version and sha256) into the app's data folder,
+#                                if it is not there; then the path the bridge
+#                                uses. `--check` also queues a real variant on a
+#                                glb copied into /tmp (check-gltfpack-addon.mjs).
 #
 #   ./em.sh version              What version is set, per file.
 #   ./em.sh inc                  Bump the dev counter (1.6.0-dev.2 → -dev.3).
@@ -116,6 +122,48 @@ do_build() {
     (cd "$FE" && npm install)
   fi
   (cd "$FE" && npm run build)
+}
+
+# ── gltfpack, the bridge's add-on ────────────────────────────────────────────
+#
+# The SAME install as Settings › Add-ons (`em_optimize.install`): the build
+# pinned in `tools/em_optimize.py` ADDONS — its URL on github.com/zeux/
+# meshoptimizer/releases and the sha256 of its zip, a wrong digest installs
+# nothing — into `<state>/addons/gltfpack/<version>/` (`EM_BRIDGE_STATE_DIR`,
+# default ~/.config/emstudio; `EM_ADDONS_DIR` overrides the folder). Nothing is
+# downloaded when that version is already there. Then the bridge's own lookup
+# (`_gltfpack_tool`: EM_GLTFPACK, the add-on, the PATH, beside the bridge) says
+# which one it will run.
+
+do_gltfpack() {
+  local py="$ROOT/../s3Dgraphy/.venv/bin/python"
+  [[ -x "$py" ]] || py="$(command -v python3)"
+  log "gltfpack for the bridge (meshoptimizer, MIT — the add-on of Settings › Add-ons)"
+  PYTHONPATH="$ROOT/tools" "$py" - <<'PY'
+import em_optimize as O
+st = O.addon_state("gltfpack")
+have = st["installed"]
+if not st["available"]:
+    raise SystemExit(f"meshoptimizer publishes no gltfpack for {st['platform']}: "
+                     "set EM_GLTFPACK to one you built, or put it on the PATH")
+if have and have.get("version") == st["version"]:
+    print(f"  already installed: gltfpack {have['version']} ({have['asset']}, sha256 {have['sha256']})")
+else:
+    print(f"  download {st['url']}\n  pinned sha256 {st['sha256']}")
+    have = O.install("gltfpack")["installed"]
+    print(f"  installed: gltfpack {have['version']} in {have['path']}")
+PY
+  local s3d="$ROOT/../s3Dgraphy/src" dtc="$ROOT/../dtcstamp"
+  PYTHONPATH="$ROOT/tools:$s3d:$dtc" "$py" - <<'PY'
+import em_bridge
+t = em_bridge._gltfpack_tool()
+if not t:
+    raise SystemExit("  the bridge finds no gltfpack")
+print(f"  the bridge runs: {t['path']} ({t['version']}{', the add-on' if t['addon'] else ''})")
+PY
+  if [[ "${1:-}" == "--check" ]]; then
+    node "$FE/scripts/check-gltfpack-addon.mjs"
+  fi
 }
 
 # ── the app version ──────────────────────────────────────────────────────────
@@ -805,6 +853,7 @@ case "$cmd" in
   wasm) do_wasm ;;
   build) do_build ;;
   dev) "$ROOT/dev.sh" "$@" ;;
+  gltfpack) do_gltfpack "$@" ;;
   all)
     do_sync "$@" || warn "sync skipped (no s3Dgraphy source found) — using the vendored copies"
     do_wasm || warn "WASM skipped (needs Rust/cargo) — reusing the vendored .wasm"
