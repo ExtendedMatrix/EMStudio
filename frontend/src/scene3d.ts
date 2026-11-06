@@ -61,6 +61,7 @@ import { medianPoint, pickUnder, type LastPick } from "./space-selection";
 import { altReleaseDue, altSide, bigTurn, pickByDistance, screenShare, SSE_PX, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
+import { estimateMb, lighterThatFits, mbSay, roomFor, type Weight } from "./memory-guard";
 
 export interface SceneItem {
   kind: "rm" | "proxy";
@@ -121,6 +122,12 @@ export interface SceneItem {
   /** what the graph knows of the file: `size_bytes`, `primitives.points` */
   bytes?: number | null;
   points?: number | null;
+  /** MICRO-MEMORIA-SESSIONE p.1 · …its triangles and its texture's side (the
+   *  guard of memory estimates the page's cost from them), and the other
+   *  versions it could draw instead (proposed when it does not fit) */
+  tris?: number | null;
+  textureSide?: number | null;
+  lighter?: Array<{ versionId: string; label: string; bytes?: number | null; tris?: number | null; textureSide?: number | null }>;
 }
 
 export interface SceneTexts {
@@ -138,6 +145,11 @@ export interface SceneTexts {
   openTileset: string;
   loadAnyway: string;
   lodNote: (n: number) => string;
+  /** MICRO-MEMORIA-SESSIONE p.1 · a model the memory has no room for: its
+   *  estimate, the room left, which one decided (the ceiling, the machine) */
+  memoryOver?: (name: string, need: string, room: string, by: "ceiling" | "machine") => string;
+  /** …«Carica <versione> (≈ n MB)» */
+  useVersion?: (label: string, mb: string) => string;
   /** MICRO-SPAZIO-3D · the box zoom armed, the modal's hint */
   boxZoom?: string;
   modalHint?: string;
@@ -370,6 +382,12 @@ export interface SpaceSceneOptions {
   onLoadOutcome?: (key: string, label: string, url: string, error: unknown | null) => void;
   /** MICRO-3DTILES · the threshold and the tiles' memory (the Preferences) */
   limit?: { bytes: number; points: number };
+  /** MICRO-MEMORIA-SESSIONE p.1 · the guard of memory: the scene's ceiling (the
+   *  Preferences) and what the machine has free (the bridge; null = unknown),
+   *  read at each rebuild; a model gated, and the version the person chose instead */
+  memory?: () => { ceilingMb: number; availableMb: number | null };
+  onMemoryGate?: (g: { key: string; label: string; need: number; room: number; by: "ceiling" | "machine"; lighter: string | null }) => void;
+  onLighter?: (rmId: string, versionId: string) => void;
   tilesMemoryMB?: number;
   /** MICRO-SPAZIO-3D-2 · the navigation's Preferences, read at every press */
   nav?: () => SceneNavPrefs;
@@ -481,6 +499,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   // the probes' seam: what the scene holds, and where a unit sits on screen
   const probe = host as unknown as {
     __space?: () => unknown;
+    /** MICRO-MEMORIA-SESSIONE p.1 · what the guard counts (MB) and its two numbers */
+    __spaceGuard?: () => unknown;
     __spaceScreenOf?: (id: string) => { x: number; y: number } | null;
     __spaceCamera?: () => number[];
     /** MICRO-GIZMO-ASSI · the navigation gizmo, the camera's matrices, a camera set */
@@ -818,13 +838,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const rootWatched = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
       const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual",
-                                 source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"]): Promise<Live | null> => {
+                                 source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"], memoryMB?: number): Promise<Live | null> => {
         let live = layers.get(url);
         if (live) { live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
         // MICRO-TILESET-CONTENITORE · a container's tileset refines by itself
         // (its tiles by the distance): «Manuale» stays one click away on its bar
-        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}),
+        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: memoryMB ?? opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}),
           ...(source ? { source } : {}), ...(relocate ? { relocate } : {}) });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
@@ -1649,8 +1669,66 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
       };
 
+      // MICRO-MEMORIA-SESSIONE p.1 · the guard of memory: what this generation
+      // has taken (MB, estimated), and the gate before each file is fetched.
+      // True = not loaded: the strip proposes the version that fits (or the
+      // tileset) and «Carica comunque»; the caller is told (a toast, the Log)
+      let memUsed = 0;
+      /** the guard decides in the ORDER of the items (the scene's order), not in
+       *  the order their HEADs come back: the same models are held back at every
+       *  rebuild. Each item waits for the one before to be DECIDED (not loaded) */
+      let memTurn: Promise<void> = Promise.resolve();
+      const memInTurn = (fn: (wait: () => Promise<void>, pass: () => void) => Promise<void>): Promise<void> => {
+        const prev = memTurn;
+        let done!: () => void;
+        memTurn = new Promise<void>((r) => { done = r; });
+        return fn(() => prev, () => done()).finally(() => done());
+      };
+      /** «Carica comunque» said to the guard (apart from the threshold's: a file
+       *  let past the size threshold is still weighed against the room) */
+      const memForced = new Set<string>();
+      probe.__spaceGuard = () => ({ usedMb: memUsed, ...(opts.memory?.() ?? {}) });
+      const memGate = (key: string, item: SceneItem, u: string, w: Weight, el: HTMLElement | null, later: SceneItem[]): boolean => {
+        if (!opts.memory) return false;
+        const need = estimateMb(w);
+        if (need == null) return false;          // nothing known: the threshold's HEAD said what it could
+        if (memForced.has(u)) { memUsed += need; return false; }
+        const m = opts.memory();
+        const r = roomFor(memUsed, need, m.ceilingMb, m.availableMb);
+        if (r.ok) { memUsed += need; return false; }
+        const say = opts.texts.memoryOver?.(item.label, mbSay(need), mbSay(r.room), r.by) ?? `${item.label}: ~${mbSay(need)} > ${mbSay(r.room)}`;
+        drawn.set(key, { item, as: "gated", url: u });
+        later.push({ ...item, state: "missing", label: say });
+        const lighter = lighterThatFits((item.lighter ?? []).map((v) => ({ ...v, est: estimateMb(v) })), r.room);
+        const strip = el ?? stripOf(item);
+        strip.dataset.memGate = "1";
+        if (lighter && opts.onLighter) {
+          const b = document.createElement("button");
+          b.type = "button"; b.className = "scn-tg"; b.dataset.gate = "lighter";
+          b.textContent = opts.texts.useVersion?.(lighter.label, mbSay(lighter.est ?? 0)) ?? lighter.label;
+          b.addEventListener("click", () => opts.onLighter!(item.id, lighter.versionId));
+          strip.appendChild(b);
+        }
+        if (item.tileset && !strip.querySelector('[data-gate="tileset"]')) {
+          const b = document.createElement("button");
+          b.type = "button"; b.className = "scn-tg"; b.dataset.gate = "tileset";
+          b.textContent = opts.texts.openTileset;
+          b.addEventListener("click", () => { useTileset.add(key); rebuild?.(); });
+          strip.appendChild(b);
+        }
+        const g = document.createElement("button");
+        g.type = "button"; g.className = "scn-tg"; g.dataset.gate = "memory";
+        g.textContent = opts.texts.loadAnyway;
+        g.addEventListener("click", () => { memForced.add(u); rebuild?.(); });
+        strip.appendChild(g);
+        opts.onMemoryGate?.({ key, label: item.label, need, room: r.room, by: r.by, lighter: lighter?.label ?? null });
+        return true;
+      };
+
       rebuild = () => {
         const gen = ++generation;
+        memUsed = 0;
+        memTurn = Promise.resolve();
         // MICRO-GIS-BASE (E.D., 2 Nov 2026: «scrivi se la precedente viene liberata») ·
         // a model that changed version (its mode, the hardware profile, a level
         // chosen) gives the file it drew back to the GPU when nothing else draws it
@@ -1668,6 +1746,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         strips.appendChild(flowStrip);
         strips.appendChild(altStrip);
         const pending: Promise<void>[] = [];
+        // MICRO-MEMORIA-SESSIONE p.1 · the tilesets take their room AFTER the
+        // models are decided (a model cannot shrink, a tileset can: its ceiling
+        // becomes what is left) — released when the last model's turn is done
+        let releaseTiles!: () => void;
+        const tilesTurn = new Promise<void>((r) => { releaseTiles = r; });
         const later: SceneItem[] = [];      // contours and labels: after the meshes, around them
         const used = new Set<string>();
         for (const item of items) {
@@ -1683,11 +1766,27 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             continue;
           }
           if (tsUrl) {
+            // MICRO-MEMORIA-SESSIONE p.1 · a tileset adapts: its ceiling is the
+            // tiles' (Preferences) or what the models left of the scene's, the
+            // smaller; under 64 MB left it is gated like a model (a 64 MB weight)
+            const tilesMb = Math.max(64, opts.tilesMemoryMB ?? 512);
+            const fresh = !layers.has(tsUrl);
             used.add(tsUrl);
             drawn.set(key, { item, as: "pending", url: tsUrl });
             const el = stripOf(item);
-            pending.push(ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : undefined,
-              tsUrl === item.url ? item.tilesSource : undefined, tsUrl === item.url ? item.tilesRelocate : undefined).then(async (live) => {
+            pending.push(tilesTurn.then<Live | null | "held">(() => {
+              let tsMb = tilesMb;
+              if (opts.memory && fresh && gen === generation && !disposed) {
+                const m = opts.memory();
+                tsMb = Math.min(tilesMb, roomFor(memUsed, 0, m.ceilingMb, m.availableMb).room);
+                if (tsMb < 64 && memGate(key, item, tsUrl, { bytes: Math.ceil(64 * 1024 * 1024 / 3) }, el, later)) return "held";
+                tsMb = Math.max(64, tsMb);
+                if (!memForced.has(tsUrl)) memUsed += tsMb;
+              }
+              return ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : undefined,
+                tsUrl === item.url ? item.tilesSource : undefined, tsUrl === item.url ? item.tilesRelocate : undefined, tsMb);
+            }).then(async (live) => {
+              if (live === "held") return;
               if (gen !== generation || disposed) return;
               if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
               live.layer.object.userData.tiles = true;
@@ -1726,9 +1825,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             // MICRO-SPAZIO-3D-3 p.10 · a flow of LOD: the version drawn before
             // (a rebuild keeps it), else the lightest
             drawn.set(key, { item, as: "pending" });
-            pending.push((async () => {
+            pending.push(memInTurn(async (memWait, memPass) => {
               const prev = flowState.get(key)?.current;
               const v = item.flow!.find((x) => x.id === prev) ?? item.flow!.find((x) => x.id === item.flowStart) ?? item.flow![item.flow!.length - 1];
+              // MICRO-MEMORIA-SESSIONE p.1 · the flow starts from its lightest: if even that has no room, asked
+              await memWait();
+              const held = gen === generation && memGate(key, item, v.url, { bytes: v.bytes ?? null }, null, later);
+              memPass();
+              if (held) return;
               const got = await loadV(v);
               if (gen !== generation || disposed) return;
               opts.onLoadOutcome?.(key, item.label, v.url, "fail" in got ? got.err ?? null : null);
@@ -1750,7 +1854,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               flowBytes.set(v.url, v.bytes ?? 0);
               // MICRO-PROVA-DEV48 p.3 · the label says it from the first drawing («auto · derivata lod4»)
               opts.onVersionDrawn?.(item.id, v.id);
-            })());
+            }));
             continue;
           }
           if (item.state === "resident" && item.url && item.kind === "rm") {
@@ -1762,7 +1866,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             if (isSet && !lodSets.has(base)) lodSets.set(base, probeLods(base));
             const el = isSet || opts.limit ? stripOf(item) : null;
             drawn.set(key, { item, as: "pending" });
-            pending.push((async () => {
+            pending.push(memInTurn(async (memWait, memPass) => {
               const set = isSet ? await lodSets.get(base)! : [];
               const lvl = lodChoice.get(key) ?? set[set.length - 1]?.level;
               const chosen = set.find((x) => x.level === lvl);
@@ -1786,8 +1890,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               }
               // the threshold: what the graph knows, else a HEAD
               const lim = opts.limit;
+              // MICRO-MEMORIA-SESSIONE p.1 · the size the guard weighs too (the graph's, else the HEAD's)
+              let sized: number | null = (u === base ? item.bytes : null) ?? chosen?.bytes ?? null;
               if (lim && !forced.has(u)) {
-                const bytes = (u === base ? item.bytes : null) ?? chosen?.bytes ?? (item.obj ? null : await headBytes(u));
+                const bytes = sized ?? (item.obj ? null : await headBytes(u));
+                sized = bytes ?? null;
                 const pts = u === base ? item.points ?? null : null;
                 if (gen !== generation || disposed) return;
                 if ((bytes != null && bytes > lim.bytes) || (pts != null && pts > lim.points)) {
@@ -1810,6 +1917,17 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                   return;
                 }
               }
+              // MICRO-MEMORIA-SESSIONE p.1 · the guard of memory, the last door before the fetch
+              const own = u === base;
+              if (opts.memory && sized == null && !item.obj && !(own && item.tris)) {
+                sized = await headBytes(u);
+                if (gen !== generation || disposed) return;
+              }
+              await memWait();
+              const held = gen === generation && !disposed && memGate(key, item, u, { bytes: sized, tris: own ? item.tris : null,
+                points: own ? item.points : null, textureSide: own ? item.textureSide : null }, el, later);
+              memPass();
+              if (held || gen !== generation || disposed) return;
               if (el && !el.querySelector("select")) el.remove();
               const got = await (item.obj ? loadObj(u, item.obj.modifier) : load(u));
               if (gen !== generation || disposed) return;
@@ -1833,7 +1951,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               drawn.set(key, { item, as: "mesh", url: u });
               // MICRO-SPAZIO-3D-3 p.10 · the version drawn is known now: the Outliner's dot follows
               opts.onVersionDrawn?.(item.id, "");
-            })());
+            }));
             continue;
           }
           if (item.state === "resident" && item.url) {
@@ -1901,6 +2019,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           } else later.push(item);
         }
         for (const [u, l] of layers) if (!used.has(u)) { l.layer.dispose(); layers.delete(u); }
+        // every model has its turn queued: the tilesets go when the last one is decided
+        void memTurn.then(() => releaseTiles());
         void Promise.all(pending).then(() => {
           if (gen !== generation || disposed) return;
           const b = extent();

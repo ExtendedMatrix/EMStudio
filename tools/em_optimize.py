@@ -1291,6 +1291,46 @@ def memory_total_mb() -> int:
         return 8192
 
 
+def memory_available_mb() -> int | None:
+    """MICRO-MEMORIA-SESSIONE p.1 · what this machine has FREE now, MB — what a
+    page about to load a model can count on (the guard of memory). macOS: the
+    free, inactive, speculative and purgeable pages of ``vm_stat`` (what the
+    system gives back without swapping); Linux: ``MemAvailable``; Windows:
+    ``ullAvailPhys``. None when it cannot be read."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class _MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            st = _MS()
+            st.dwLength = ctypes.sizeof(_MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
+            return int(st.ullAvailPhys // (1024 * 1024))
+        if sys.platform == "darwin":
+            import re
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=3).stdout
+            m = re.search(r"page size of (\d+) bytes", out)
+            page = int(m.group(1)) if m else 4096
+            pages = 0
+            for key in ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"):
+                k = re.search(rf"^{key}:\s+(\d+)", out, re.M)
+                if k:
+                    pages += int(k.group(1))
+            return int(pages * page // (1024 * 1024)) if pages else None
+        with open("/proc/meminfo", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except (OSError, ValueError, AttributeError, subprocess.SubprocessError):
+        return None
+    return None
+
+
 def memory_ceiling_mb() -> int:
     """The ceiling the tileset jobs never pass together: 60% of this machine's
     memory (the rest is the system's, EMStudio's and the browser's), or

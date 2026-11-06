@@ -2284,7 +2284,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: their heads (tileset.json or the stored members of a .3tz, never the
 #: geometry) and passes them to s3Dgraphy (``tiles=``): a tileset «ok» for a
 #: target only if its tiles fit the band, and then it covers its meshes.
-BRIDGE_LEVEL = 61   # 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 62   # 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3240,6 +3240,12 @@ def make_handler(api):
                     self._json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 422)
                     return
                 self._json({"ok": True, **ins})
+            elif route == "/machine/memory":
+                # MICRO-MEMORIA-SESSIONE p.1 · the guard of memory: what this
+                # machine has in all and free now, before a page loads a model
+                import em_optimize as O
+                self._json({"ok": True, "total_mb": O.memory_total_mb(),
+                            "available_mb": O.memory_available_mb()})
             elif route == "/fs/roots":
                 if not self._fs_gate():
                     return

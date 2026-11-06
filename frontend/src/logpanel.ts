@@ -80,6 +80,73 @@ export function logEntries(): readonly LogEntry[] {
   return entries;
 }
 
+// ── copying (E.D., 1 Nov 2026: «si deve poter copiare ciò che si legge») ──────
+
+/** What the drawer shows of the ring: «solo la selezione» (an entry must name one
+ *  of the ids) and the words written in its filter (the line's text, its level
+ *  word, the names of the nodes it names, its hour — case and accents ignored). */
+export interface LogFilter {
+  onlyIds?: ReadonlySet<string> | null;
+  text?: string;
+  nameOf?: (id: string) => string | null;
+}
+
+const fold = (s: string): string => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+export function filterEntries(list: readonly LogEntry[], f: LogFilter = {}): LogEntry[] {
+  const only = f.onlyIds ?? null;
+  const words = fold(String(f.text ?? "")).split(/\s+/).filter(Boolean);
+  return list.filter((e) => {
+    if (only && !e.ids?.some((id) => only.has(id))) return false;
+    if (!words.length) return true;
+    const hay = fold(entryText(e, f.nameOf));
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/** ONE line as it is copied: the hour, the level's mark, the message and the
+ *  names of the nodes it is about — what the drawer shows, in plain text. */
+export function entryText(e: LogEntry, nameOf?: (id: string) => string | null): string {
+  const names = (e.ids ?? []).map((id) => nameOf?.(id) ?? null).filter((n): n is string => !!n);
+  return `${entryClock(e)} ${LEVEL_MARK[e.level]} ${e.message}${names.length ? ` [${names.join(", ")}]` : ""}`;
+}
+
+/** Several lines, OLDEST FIRST (a pasted log is read top to bottom, unlike the
+ *  drawer, which puts the newest on top), under a head that says the day — the
+ *  lines carry the hour only. A ring that crosses midnight says both days. */
+export function entriesText(list: readonly LogEntry[], nameOf?: (id: string) => string | null, head?: string): string {
+  const days = [...new Set(list.map((e) => dayOf(e.wall)))];
+  const top = [head, days.length ? days.join(" → ") : null].filter(Boolean).join(" · ");
+  return [top, ...list.map((e) => entryText(e, nameOf))].filter((l) => l !== "").join("\n") + "\n";
+}
+
+function dayOf(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** The clipboard, with the old door when the new one refuses (a WebView without
+ *  a user gesture still in hand, a page not in a secure context). True: copied. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+
 export function clearLog(): void {
   entries.length = 0;
   listener?.();
@@ -274,6 +341,11 @@ export type RevealFn = (nodeId: string) => void;
 export interface LogPanelOptions {
   onlyIds?: ReadonlySet<string> | null;
   nameOf?: (id: string) => string | null;
+  /** MICRO-MEMORIA-SESSIONE p.3 · the words of the drawer's filter */
+  text?: string;
+  /** …and a line's «Copia» (the panel does not own the clipboard's words) */
+  onCopy?: (text: string) => void;
+  copyLabel?: string;
 }
 
 export function renderLogPanel(
@@ -358,10 +430,7 @@ export function renderLogPanel(
   }
 
   // — activity —
-  const only = opts.onlyIds ?? null;
-  const shown = only
-    ? entries.filter((e) => e.ids?.some((id) => only.has(id)))
-    : entries;
+  const shown = filterEntries(entries, { onlyIds: opts.onlyIds ?? null, text: opts.text, nameOf: opts.nameOf });
   const actHead = el("div", "log-section", `Activity (${shown.length})`);
   const clear = el("button", "log-clear", "clear");
   clear.addEventListener("click", () => clearLog());
@@ -382,6 +451,14 @@ export function renderLogPanel(
       const a = el("button", "log-node-link", name);
       a.addEventListener("click", () => onReveal(id));
       li.append(" ", a);
+    }
+    // MICRO-MEMORIA-SESSIONE p.3 · «Copia» of the line: its hour, its text
+    if (opts.onCopy) {
+      const c = el("button", "log-copy", opts.copyLabel ?? "Copy") as HTMLButtonElement;
+      c.type = "button";
+      c.dataset.logCopy = "1";
+      c.addEventListener("click", () => opts.onCopy!(entryText(e, opts.nameOf)));
+      li.append(" ", c);
     }
     log.appendChild(li);
   }

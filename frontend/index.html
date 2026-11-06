@@ -388,7 +388,10 @@
         <b data-i18n="log.drawerTitle">Log · what happened</b>
         <span class="log-drawer-lead" data-i18n="log.drawerLead">The document’s history. The current state lives in Warnings.</span>
         <span class="grow"></span>
+        <input id="log-filter" class="log-filter" type="search" spellcheck="false" data-i18n-placeholder="log.filterPh" placeholder="filter…" aria-label="Filter the log">
         <label class="log-drawer-sel"><input type="checkbox" id="log-only-sel"> <span data-i18n="log.onlySel">selection only</span></label>
+        <button id="log-copy-shown" class="log-copy-all" type="button" disabled>Copy filtered</button>
+        <button id="log-copy-all" class="log-copy-all" type="button" data-i18n="log.copyAll">Copy all</button>
         <button id="log-drawer-close" class="log-drawer-close" type="button" aria-label="Close">×</button>
       </header>
       <div id="log-drawer-body" class="log-drawer-body"></div>
@@ -720,6 +723,12 @@
               <input id="set-tiles-memory-mb" type="text" inputmode="numeric" />
             </label>
             <p class="settings-hint" id="set-tiles-memory-hint"></p>
+            <!-- MICRO-MEMORIA-SESSIONE p.1 · the scene's memory, the guard's ceiling -->
+            <label
+              ><span data-i18n="settings.sceneMemoryMB">Scene memory ceiling (MB)</span>
+              <input id="set-scene-memory-mb" type="text" inputmode="numeric" />
+            </label>
+            <p class="settings-hint" id="set-scene-memory-hint"></p>
             <!-- MICRO-OTTIMIZZA-3 · the tiles kept on disk, beside their memory -->
             <label
               ><span data-i18n="settings.tileCacheMB">Tile cache on disk (MB)</span>

@@ -163,6 +163,9 @@ import {
   onLogChange,
   renderLogPanel,
   versionBanner,
+  copyText,
+  entriesText,
+  filterEntries,
 } from "./logpanel";
 import { DocumentStore, setRoomAuthor, stripYedDrawing } from "./model";
 import { clearFiltersHiding, installTableTools } from "./table-tools";
@@ -382,7 +385,7 @@ import {
   openEmJson,
   readEmJsonPath,
   writeEmJson,
-  saveAsEmJson,
+  pickSaveEmJson,
   openGraphml,
   saveTtl,
   setWindowTitle,
@@ -409,6 +412,9 @@ import {
 } from "./tauri";
 import { guessKind, mightBeTileset, planDesktopDrop, positionsArePhysical, toCssPoint, TILESET_TARGETS } from "./desktop-drop";
 import * as paths from "./paths";
+import * as SR from "./save-rebase";
+import * as MG from "./memory-guard";
+import * as SK from "./session-keep";
 import * as AL from "./asset-list";
 import { blendBlock, findMisplaced, type Misplaced } from "./version-misplaced";
 import * as who from "./who-chip";
@@ -1097,6 +1103,11 @@ const LOG_DRAWER_KEY = "emstudio.logdrawer.h";
 const logDrawer = {
   open: false,
   onlySel: false,
+  /** MICRO-MEMORIA-SESSIONE p.3 · the words of the drawer's filter */
+  text: "",
+  /** a redraw asked while the person was selecting text in the drawer: done
+   *  when the selection is let go (a new line must not take it from under them) */
+  held: false,
   h: ((): number => {
     try {
       const v = Number(localStorage.getItem(LOG_DRAWER_KEY));
@@ -2529,6 +2540,10 @@ window.__EM_SCENE__ = () => {
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
   selected: () => [...selectedIds],
+  /** MICRO-MEMORIA-SESSIONE · a line in the Log (p.3), the session's copy written now (p.2) */
+  logLine: (m: string) => logInfo(m),
+  sessionCopy: () => writeSessionCopy(),
+  sessionRecord: () => sessionRecord(),
   /** MICRO-CONTENTS-2 · the path is a breadcrumb now, not a field to fill: a
    *  bench sends a File window (the first, or `winId`) to a folder */
   storageGo: (path: string | null, winId?: string) => {
@@ -3735,6 +3750,7 @@ function sameEdge(a: EmEdge, b: EmEdge): boolean {
 }
 
 function select(nodeId: string | null): void {
+  scheduleSessionCopy();   // MICRO-MEMORIA-SESSIONE p.2 · the selection is part of the view kept
   // MICRO-AUTORI-LAYOUT p.5 · a node of the Multigraph is a node of ITS graph:
   // that graph comes in front (the Inspector shows the active graph), then the
   // node is selected there — the graph's node shows the graph and its paradata
@@ -6608,6 +6624,7 @@ function wireStore(s: DocumentStore): void {
  * layout decision afterwards; a plain switch does neither.
  */
 function activateSlot(id: string, opts: { rebuildOnly?: boolean } = {}): void {
+  scheduleSessionCopy();
   const target = emtree.get(id);
   if (!target) return;
   showDocument(target, opts);
@@ -7171,6 +7188,166 @@ function loadContainerDocument(
       { label: t("open.emptyKeep"), run: () => logInfo(t("open.emptyKept", { name })) },
     ]);
   }
+}
+
+// ── MICRO-MEMORIA-SESSIONE p.2 · the session kept ─────────────────────────────
+//
+// A safety copy of the session (`session-keep.ts`): written 1.5 s after a change
+// (at most 8 s after the first one waiting), when the page is hidden, and when
+// the view changes; a heartbeat every 5 s. A file's content is copied only when
+// its path cannot give it back (unsaved, no path, a browser), and only when its
+// graphs changed since the last copy (`DocumentStore.rev`).
+
+function scheduleSessionCopy(): void {
+  if (!SK.live.keeping) return;
+  const now = Date.now();
+  if (!SK.live.firstWait) SK.live.firstWait = now;
+  if (SK.live.timer != null) clearTimeout(SK.live.timer);
+  const wait = Math.max(0, Math.min(1500, SK.live.firstWait + 8000 - now));
+  SK.live.timer = window.setTimeout(() => void writeSessionCopy(), wait);
+}
+
+/** the session as it is now (the files' content only where needed) */
+function sessionRecord(): SK.KeptSession {
+  const canRead = isTauri();
+  const files: SK.KeptFile[] = [];
+  const seen = new Set<string>();
+  const sigOf = (slots: GraphSlot[]) => slots.map((sl) => `${sl.id}:${sl.store.rev}:${sl.store.dirty ? 1 : 0}`).join(",");
+  const textFor = (key: string, sig: string, make: () => string): string => {
+    const k = SK.live.texts.get(key);
+    if (k && k.sig === sig) return k.text;
+    const text = make();
+    SK.live.texts.set(key, { sig, text });
+    seen.add(key);
+    return text;
+  };
+  let activeFile: number | null = null;
+  const activeF = emtree.activeFile();
+  for (const f of emtree.files) {
+    const slots = emtree.slotsOf(f.id);
+    const dirty = emtree.fileDirty(f.id);
+    const room = f.room && !f.path ? { id: f.room.id, title: f.room.title, node: f.room.node } : null;
+    const kept: SK.KeptFile = { path: f.path, name: f.name, dirty, ...(room ? { room } : {}) };
+    if (SK.keepsText(kept, canRead)) kept.text = textFor(f.id, sigOf(slots) + (f.dirty ? "+" : ""), () => JSON.stringify(fileContainer(f, { bump: false })));
+    if (f === activeF) activeFile = files.length;
+    files.push(kept);
+  }
+  // the graphs with no file yet («Senza file»), when something was done in them
+  const loose = emtree.slotsOf(null).filter((sl) => !isUntouchedSeed(sl));
+  if (loose.length) {
+    if (!activeF && emtree.active() && loose.includes(emtree.active()!)) activeFile = files.length;
+    files.push({ path: null, name: defaultFileName(), dirty: loose.some((sl) => sl.store.dirty),
+      text: textFor("(loose)", sigOf(loose), () => JSON.stringify(fileContainer(null, { bump: false }))) });
+  }
+  for (const k of [...SK.live.texts.keys()]) if (!seen.has(k) && !emtree.file(k) && k !== "(loose)") SK.live.texts.delete(k);
+  const act = emtree.active();
+  return { id: SK.live.id, started: SK.live.started, at: Date.now(), files,
+    activeGraphId: act ? String((act.store.doc.graph as Record<string, unknown>).graph_id ?? act.id) : null, activeFile,
+    selected: selectedId, view };
+}
+
+let sessionWriting: Promise<void> = Promise.resolve();
+function writeSessionCopy(): Promise<void> {
+  if (SK.live.timer != null) { clearTimeout(SK.live.timer); SK.live.timer = null; }
+  SK.live.firstWait = 0;
+  if (!SK.live.keeping) return sessionWriting;
+  sessionWriting = sessionWriting.then(async () => {
+    try {
+      const rec = sessionRecord();
+      await SK.putKept(rec);
+      if (!SK.live.closedClean) SK.writeBeat({ id: SK.live.id, beat: Date.now(), clean: false });
+    } catch (e) {
+      logWarn(t("session.copyFailed", { why: e instanceof Error ? e.message : String(e) }));
+    }
+  });
+  return sessionWriting;
+}
+
+/** the copy of before, back: the files (a copy's content, else read from their
+ *  path, a room entered again), unsaved ones unsaved again, the graph in front,
+ *  the selection and the view */
+async function restoreSession(rec: SK.KeptSession): Promise<number> {
+  let back = 0;
+  for (const f of rec.files) {
+    try {
+      if (f.room) { await openRecentFile({ kind: "room", node: f.room.node, room: f.room.id, name: f.room.title, path: null, ts: Date.now() }); back++; continue; }
+      let text = f.text ?? null;
+      if (!text && f.path) text = (await readEmJsonPath(f.path).catch(() => null))?.text ?? null;
+      if (!text) { logWarn(t("session.fileLost", { name: f.name })); continue; }
+      const before = new Set(emtree.files.map((x) => x.id));
+      loadContainerDocument(JSON.parse(text), f.name, f.path);
+      const file = emtree.files.find((x) => !before.has(x.id));
+      if (file && f.dirty) {
+        file.dirty = true;
+        for (const sl of emtree.slotsOf(file.id)) sl.store.dirty = true;
+      }
+      back++;
+    } catch (e) {
+      logWarn(t("session.fileLost", { name: `${f.name} (${e instanceof Error ? e.message : String(e)})` }));
+    }
+  }
+  const front = rec.activeGraphId ? emtree.slots.find((sl) => String((sl.store.doc.graph as Record<string, unknown>).graph_id ?? sl.id) === rec.activeGraphId) : null;
+  if (front && emtree.active() !== front) activateSlot(front.id, { rebuildOnly: false });
+  if (rec.view && (["matrix", "graph", "dtc"] as string[]).includes(rec.view)) setView(rec.view as ViewKind);
+  if (rec.selected && store?.node(rec.selected)) jumpTo(rec.selected);
+  refreshEMTree();
+  updateToolbar();
+  return back;
+}
+
+/** at the start: the copy of before (taken back, offered, or let go), then
+ *  this session's own copy and heartbeat */
+async function startSessionKeeping(): Promise<void> {
+  const beat = SK.readBeat();
+  SK.writeBeat({ id: SK.live.id, beat: Date.now(), clean: false });
+  let recs: SK.KeptSession[] = [];
+  try { recs = await SK.allKept(); } catch (e) { logWarn(t("session.copyFailed", { why: e instanceof Error ? e.message : String(e) })); }
+  const prev = recs.filter((r) => r.id !== SK.live.id).sort((a, b) => b.at - a.at)[0] ?? null;
+  const what = SK.decideRestore(prev, beat, Date.now());
+  const sessionWin = window as unknown as { __EM_SESSION__?: { decided: string; prev: string | null; restored?: number } };
+  sessionWin.__EM_SESSION__ = { decided: what, prev: prev?.id ?? null };
+  const names = (r: SK.KeptSession) => r.files.map((f) => f.room?.title ?? f.name).join(", ");
+  if (prev && what === "auto") {
+    const n = await restoreSession(prev);
+    sessionWin.__EM_SESSION__.restored = n;
+    const say = t(prev.files.some((f) => f.dirty) ? "session.resumedUnsaved" : "session.resumed", { hm: SK.clockOf(prev.at), names: names(prev) });
+    logInfo(say);
+    toast(say);
+    void SK.dropKept(prev.id).catch(() => undefined);
+  } else if (prev && what === "ask") {
+    const say = t("session.askResume", { hm: SK.clockOf(prev.at), names: names(prev) });
+    logInfo(say);
+    toastAsk(say, [
+      { label: t("session.resume"), run: () => { void restoreSession(prev).then((n) => {
+          sessionWin.__EM_SESSION__!.restored = n;
+          logInfo(t("session.resumed", { hm: SK.clockOf(prev.at), names: names(prev) }));
+          void SK.dropKept(prev.id).catch(() => undefined);
+          scheduleSessionCopy();
+        }); } },
+      { label: t("session.discard"), run: () => { logInfo(t("session.discarded", { hm: SK.clockOf(prev.at) })); void SK.dropKept(prev.id).catch(() => undefined); } },
+    ], 60000);
+  } else if (prev) void SK.dropKept(prev.id).catch(() => undefined);
+  // the copies of long ago (an «ask» never answered): the two newest are kept
+  for (const id of SK.staleIds(recs, SK.live.id)) if (id !== prev?.id) void SK.dropKept(id).catch(() => undefined);
+  SK.live.keeping = true;
+  DocumentStore.anyChange = scheduleSessionCopy;
+  window.setInterval(() => {
+    const b = SK.readBeat();
+    // another window of the same profile took the heartbeat: this one only copies
+    if (!SK.live.closedClean && (!b || b.id === SK.live.id)) SK.writeBeat({ id: SK.live.id, beat: Date.now(), clean: false });
+  }, SK.BEAT_MS);
+  // hidden (the app in the background, a tab left): the copy now; gone with
+  // nothing unsaved: the session ended clean, nothing to take back
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") void writeSessionCopy(); });
+  window.addEventListener("pagehide", () => {
+    // (an untouched «Senza file» seed is not unsaved work: `anyDirty` counts it)
+    const unsaved = emtree.files.some((f) => emtree.fileDirty(f.id)) || emtree.slotsOf(null).some((sl) => sl.store.dirty && !isUntouchedSeed(sl));
+    if (!unsaved) { SK.live.closedClean = true; SK.writeBeat({ id: SK.live.id, beat: Date.now(), clean: true }); }
+    else void writeSessionCopy();
+  });
+  // …and back from the browser's page cache: alive again
+  window.addEventListener("pageshow", (e) => { if (e.persisted) { SK.live.closedClean = false; scheduleSessionCopy(); } });
+  scheduleSessionCopy();
 }
 
 /** G5 · nothing in it but what New makes: at most one epoch, its paradata box
@@ -10111,22 +10288,41 @@ async function saveFile(file: OpenFile): Promise<boolean> {
 
 /** Save a file under a new path (desktop) — the file's path changes, and its
  *  graphs follow. In a browser it is a download with a fresh name.
- *  `defaultPath`: where the desktop dialog proposes it (a GraphML's folder). */
+ *  `defaultPath`: where the desktop dialog proposes it (a GraphML's folder).
+ *
+ *  MICRO-MEMORIA-SESSIONE p.4 (E.D., 1 Nov 2026: v7 saved on the Desktop → 536
+ *  files missing) · the urls are written relative to the em.json: in another
+ *  folder they would name nothing. The dialog first proposes the file's own
+ *  folder; a path in another one asks — «Riscrivi i percorsi (n)» (the default:
+ *  every url names the same file from the new place), «Scegli nella cartella
+ *  del progetto», or Cancel. Never an em.json with broken urls without saying it. */
 async function saveFileAs(file: OpenFile, defaultPath: string | null = null): Promise<boolean> {
   await askShelfHome(file);
-  const doc = fileContainer(file);
-  const text = JSON.stringify(doc, null, 1);
+  const base = saveBaseOf(file);
   if (isTauri()) {
     try {
-      const path = await saveAsEmJson(text, defaultPath ?? downloadNameFor(file));
-      if (!path) return false; // user cancelled
+      const plan = await askSavePlace(file, base, defaultPath ?? (base ? paths.join(paths.dirname(base), downloadNameFor(file)) : downloadNameFor(file)));
+      if (!plan) return false; // cancelled
+      const { path, rows } = plan;
+      if (rows.length) rebaseOpenFile(file, rows);
+      const doc = fileContainer(file);
+      await writeEmJson(path, JSON.stringify(doc, null, 1));
       emtree.setFilePath(file.id, path, baseName(path));
       for (const slot of emtree.slotsOf(file.id)) slot.seedSig = undefined;
       currentFilePath = emtree.active()?.path ?? path;
       addRecent({ path, name: baseName(path) }, Date.now());
       markFileSaved(file, doc);
       info.textContent = `saved ${baseName(path)}`;
-      toast(t("save.savedToast", { file: baseName(path) }));
+      if (rows.length) {
+        const say = t("saveAs.rewritten", { n: String(rows.length), file: baseName(path) });
+        logInfo(`${say} — ${rows.slice(0, 3).map((r) => `${r.from} → ${r.to}`).join(" · ")}${rows.length > 3 ? " · …" : ""}`);
+        toast(say);
+        // the files are asked again from the new place: the bar says what is missing, if anything
+        spaceMarks.notFound.clear();
+        void checkFiles();
+        refreshSurfaces("scene");
+        refreshSurfaces("viewer");
+      } else toast(t("save.savedToast", { file: baseName(path) }));
       updateToolbar();
       refreshEMTree();
       return true;
@@ -10135,12 +10331,94 @@ async function saveFileAs(file: OpenFile, defaultPath: string | null = null): Pr
       return false;
     }
   }
+  // a browser downloads: where the file lands is not known here, so the urls
+  // cannot be rewritten — said BEFORE, when the document has relative ones
+  const doc = fileContainer(file);
+  const n = SR.relativeUrlCount(doc);
+  if (n) {
+    const a = await openDialog({ kind: "save-download-relative", title: t("saveAs.title"),
+      message: t("saveAs.download", { n: String(n), folder: base ? paths.dirname(base) : t("saveAs.itsFolder") }),
+      ok: t("saveAs.downloadOk") });
+    if (!a.ok) return false;
+  }
+  const text = JSON.stringify(doc, null, 1);
   browserDownload(text, downloadNameFor(file));
   markFileSaved(file, doc);
   toast(t("save.downloadedToast", { file: downloadNameFor(file) }));
   updateToolbar();
   refreshEMTree();
   return true;
+}
+
+/** the em.json the file's relative urls are read from: its path, else the
+ *  path a graph of it came with (an imported GraphML) */
+function saveBaseOf(file: OpenFile): string | null {
+  const p = file.path ?? emtree.slotsOf(file.id).find((s) => s.path)?.path ?? null;
+  return p ? paths.toPosix(p) : null;
+}
+
+/** p.4 · where, and what changes there: the picked path and the urls to rewrite
+ *  (none in the same folder). Null: cancelled. */
+async function askSavePlace(file: OpenFile, base: string | null, proposed: string): Promise<{ path: string; rows: SR.RebaseRow[] } | null> {
+  let path = await pickSaveEmJson(proposed);
+  for (;;) {
+    if (!path) return null;
+    path = paths.toPosix(path);
+    const doc = fileContainer(file, { bump: false });
+    if (!base) {
+      // no folder of origin (a browser drop, a room): the relative urls cannot
+      // be read from anywhere — said, not rewritten
+      const n = SR.relativeUrlCount(doc);
+      if (n) {
+        const a = await openDialog({ kind: "save-no-base", title: t("saveAs.title"), message: t("saveAs.noBase", { n: String(n) }), ok: t("saveAs.anyway") });
+        if (!a.ok) return null;
+      }
+      return { path, rows: [] };
+    }
+    if (SR.sameFolder(base, path)) return { path, rows: [] };
+    const rows = SR.rebasePlan(doc, base, path);
+    if (!rows.length) return { path, rows };
+    const a = await openDialog({ kind: "save-elsewhere", title: t("saveAs.title"),
+      message: t("saveAs.elsewhere", { n: String(rows.length), from: paths.dirname(base), to: paths.dirname(path) }),
+      ok: t("saveAs.rewrite", { n: String(rows.length) }),
+      choices: [{ key: "project", label: t("saveAs.inProject"), title: paths.dirname(base) }] });
+    if (!a.ok) return null;
+    if (a.choice !== "project") return { path, rows };
+    path = await pickSaveEmJson(paths.join(paths.dirname(base), baseName(path)));
+  }
+}
+
+/** p.4 · the rewritten urls in what is open of the file: its graphs, the corpus
+ *  and the shelf it is home of, its closed graphs. Not an edit (the same files,
+ *  named from another place): no undo step, no operation sent. */
+function rebaseOpenFile(file: OpenFile, rows: SR.RebaseRow[]): void {
+  const byGraph = new Map<string, SR.RebaseRow[]>();
+  for (const r of rows) byGraph.set(r.graph, [...(byGraph.get(r.graph) ?? []), r]);
+  const inStore = (st: DocumentStore, gid: string): boolean => {
+    const rs = byGraph.get(gid);
+    if (!rs) return false;
+    for (const r of rs) {
+      const n = st.node(r.id);
+      if (n) n.data = { ...((n.data ?? {}) as Record<string, unknown>), url: r.to } as EmNode["data"];
+    }
+    st.touch();
+    byGraph.delete(gid);
+    return true;
+  };
+  for (const slot of emtree.slotsOf(file.id))
+    inStore(slot.store, String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id));
+  const corpus = corpusHomeFileId === file.id ? documentationCorpus({ create: false }) : null;
+  if (corpus) inStore(corpus, String((corpus.doc.graph as Record<string, unknown>).graph_id ?? "dtc"));
+  const shelf = shelfHomeFileId === file.id ? projectShelfSection() : null;
+  const shelfId = shelf ? String(shelf.graph_id ?? "shelf") : null;
+  if (shelf && shelfId && byGraph.has(shelfId)) {
+    const sec = JSON.parse(JSON.stringify(shelf)) as Record<string, unknown>;
+    SR.applyRebase({ graphs: { [shelfId]: sec } }, byGraph.get(shelfId)!);
+    shelfQuietly(() => adoptProjectShelf(sec));
+    byGraph.delete(shelfId);
+  }
+  // the closed graphs (and a retained shelf / corpus), as they will be written
+  SR.applyRebase({ graphs: file.retained }, [...byGraph.values()].flat());
 }
 
 /**
@@ -13938,7 +14216,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 61;   // 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 62;   // 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -16745,6 +17023,18 @@ function openSettings(section?: string): void {
   const tmh = document.getElementById("set-tiles-memory-hint");
   if (tmh) tmh.textContent = t("settings.tilesMemoryHint", { mb: grouped(TILES_MEMORY_MB),
     gb: String((navigator as { deviceMemory?: number }).deviceMemory ?? "?") });
+  // MICRO-MEMORIA-SESSIONE p.1 · the scene's ceiling: empty = the machine's
+  const sm = numIn("set-scene-memory-mb");
+  if (sm) sm.value = s.viewer.sceneMemoryMB ? grouped(s.viewer.sceneMemoryMB) : "";
+  const smh = document.getElementById("set-scene-memory-hint");
+  const sayScene = () => {
+    if (sm) sm.placeholder = grouped(sceneCeilingMb(true));
+    if (smh) smh.textContent = t("settings.sceneMemoryHint", { mb: grouped(sceneCeilingMb(true)),
+      machine: machineMemory.total ? MG.mbSay(machineMemory.total) : "?",
+      free: machineMemory.available != null ? MG.mbSay(machineMemory.available) : "?" });
+  };
+  sayScene();
+  void refreshMachineMemory(true).then(sayScene);
   // MICRO-OTTIMIZZA-3 · the tiles kept on disk: the ceiling, what is held, «Svuota»
   const tc = numIn("set-tile-cache-mb");
   if (tc) tc.value = grouped(s.viewer.tileCacheMB ?? TILE_CACHE_MB);
@@ -17109,6 +17399,8 @@ settingsModal.addEventListener("click", (e) => {
       lodLimitMB: posNum("set-lod-limit-mb", LOD_LIMIT_MB),
       lodLimitPoints: posNum("set-lod-limit-points", LOD_LIMIT_POINTS),
       tilesMemoryMB: Math.max(64, posNum("set-tiles-memory-mb", TILES_MEMORY_MB)),
+      sceneMemoryMB: ((v) => (!v.trim() ? 0 : Math.max(256, posNum("set-scene-memory-mb", 0))))(
+        (document.getElementById("set-scene-memory-mb") as HTMLInputElement | null)?.value ?? ""),
       tileCacheMB: ((v) => (v.trim() === "0" ? 0 : posNum("set-tile-cache-mb", TILE_CACHE_MB)))(
         (document.getElementById("set-tile-cache-mb") as HTMLInputElement | null)?.value ?? ""),
       emulate3Button: !!(document.getElementById("set-nav-emulate3") as HTMLInputElement | null)?.checked,
@@ -20900,6 +21192,21 @@ function renderLogButton(): void {
   b.title = t("log.buttonTip");
 }
 
+/** the name a log line gives a node it is about */
+function logNameOf(id: string): string | null {
+  const n = storeOfNode(id)?.node(id);
+  return n ? String(n.name || n.id) : null;
+}
+/** «solo la selezione»'s ids, or null */
+function logOnlyIds(): Set<string> | null {
+  return logDrawer.onlySel ? new Set(selectedIds.size ? selectedIds : selectedId ? [selectedId] : []) : null;
+}
+/** MICRO-MEMORIA-SESSIONE p.3 · the person is selecting text in the drawer */
+function selectingInLog(body: HTMLElement): boolean {
+  const s = document.getSelection();
+  return !!s && !s.isCollapsed && s.rangeCount > 0 && body.contains(s.getRangeAt(0).commonAncestorContainer);
+}
+
 function renderLogDrawer(): void {
   const el = document.getElementById("log-drawer");
   const body = document.getElementById("log-drawer-body");
@@ -20907,18 +21214,40 @@ function renderLogDrawer(): void {
   el.classList.toggle("hidden", !logDrawer.open);
   el.style.height = `${logDrawer.h}px`;
   if (!logDrawer.open) return;
-  const sel = logDrawer.onlySel
-    ? new Set(selectedIds.size ? selectedIds : selectedId ? [selectedId] : [])
-    : null;
+  // MICRO-MEMORIA-SESSIONE p.3 · a new line arriving while text is selected
+  // waits: redrawing would take the selection away under the mouse
+  if (selectingInLog(body)) { logDrawer.held = true; paintLogCopyButtons(); return; }
+  logDrawer.held = false;
+  const sel = logOnlyIds();
   preservingScroll(body, () =>
     renderLogPanel(body, store?.doc ?? null, EM_VERSION, revealFromWarning, {
       onlyIds: sel,
-      nameOf: (id) => {
-        const n = storeOfNode(id)?.node(id);
-        return n ? String(n.name || n.id) : null;
-      },
+      nameOf: logNameOf,
+      text: logDrawer.text,
+      copyLabel: t("log.copyLine"),
+      onCopy: (line) => void copyLogText(line, 1),
     }),
   );
+  paintLogCopyButtons();
+}
+
+/** «Copia i filtrati (n)» — live only when a filter is on */
+function paintLogCopyButtons(): void {
+  const all = document.getElementById("log-copy-all") as HTMLButtonElement | null;
+  const shown = document.getElementById("log-copy-shown") as HTMLButtonElement | null;
+  if (all) { all.textContent = t("log.copyAll"); all.title = t("log.copyAllTip", { n: logEntries().length }); }
+  if (!shown) return;
+  const filtering = logDrawer.onlySel || !!logDrawer.text.trim();
+  const n = filtering ? filterEntries(logEntries(), { onlyIds: logOnlyIds(), text: logDrawer.text, nameOf: logNameOf }).length : 0;
+  shown.textContent = t("log.copyShown", { n });
+  shown.disabled = !filtering || !n;
+  shown.title = t("log.copyShownTip");
+}
+
+/** copied → said in a toast, with how many lines; refused → said too */
+async function copyLogText(text: string, lines: number): Promise<void> {
+  const ok = await copyText(text);
+  toast(!ok ? t("log.copyFailed") : lines === 1 ? t("log.copiedOne") : t("log.copied", { n: lines }));
 }
 
 function setLogDrawerOpen(open: boolean): void {
@@ -20934,6 +21263,26 @@ document.getElementById("log-drawer-close")?.addEventListener("click", () =>
 document.getElementById("log-only-sel")?.addEventListener("change", (e) => {
   logDrawer.onlySel = (e.target as HTMLInputElement).checked;
   renderLogDrawer();
+});
+// MICRO-MEMORIA-SESSIONE p.3 · the filter, «Copia tutto», «Copia i filtrati»
+document.getElementById("log-filter")?.addEventListener("input", (e) => {
+  logDrawer.text = (e.target as HTMLInputElement).value;
+  renderLogDrawer();
+});
+document.getElementById("log-copy-all")?.addEventListener("click", () => {
+  const all = logEntries();
+  void copyLogText(entriesText(all, logNameOf, `EMStudio ${__EMSTUDIO_VERSION__} · Log`), all.length);
+});
+document.getElementById("log-copy-shown")?.addEventListener("click", () => {
+  const shown = filterEntries(logEntries(), { onlyIds: logOnlyIds(), text: logDrawer.text, nameOf: logNameOf });
+  const words = [logDrawer.text.trim() ? `«${logDrawer.text.trim()}»` : "", logDrawer.onlySel ? t("log.onlySel") : ""].filter(Boolean).join(", ");
+  void copyLogText(entriesText(shown, logNameOf, `EMStudio ${__EMSTUDIO_VERSION__} · Log · ${words}`), shown.length);
+});
+// the redraw held during a selection, done when it is let go
+document.addEventListener("selectionchange", () => {
+  if (!logDrawer.held) return;
+  const body = document.getElementById("log-drawer-body");
+  if (body && !selectingInLog(body)) renderLogDrawer();
 });
 // the top edge resizes it (≥120 px, ≤70 % of the window), remembered per viewer
 document.querySelector<HTMLElement>(".log-drawer-grip")?.addEventListener("pointerdown", (e) => {
@@ -28351,6 +28700,64 @@ function keepMeasure(url: string, m: { tris: number; verts: number; box: [[numbe
   putMeasure(fp, { tris: m.tris, verts: m.verts, ...(m.box ? { box: m.box } : {}), by: `EMStudio ${__EMSTUDIO_VERSION__}` });
 }
 
+// ── MICRO-MEMORIA-SESSIONE p.1 · the guard of memory ─────────────────────────
+/** what the bridge says of this machine's memory (MB), and when it was asked */
+const machineMemory: { total: number | null; available: number | null; at: number } = { total: null, available: null, at: 0 };
+/** asked again at most every 10 s (a scene built, the Preferences opened); a
+ *  bridge before level 62 has no /machine/memory: the ceiling alone decides */
+async function refreshMachineMemory(force = false): Promise<void> {
+  if (!force && Date.now() - machineMemory.at < 10_000) return;
+  machineMemory.at = Date.now();
+  try {
+    const r = await fetch(`${await bridgeUrl()}/machine/memory`, { cache: "no-store" });
+    if (!r.ok) return;
+    const j = await r.json() as { total_mb?: number; available_mb?: number | null };
+    machineMemory.total = typeof j.total_mb === "number" ? j.total_mb : null;
+    machineMemory.available = typeof j.available_mb === "number" ? j.available_mb : null;
+  } catch { /* no bridge: the ceiling alone */ }
+}
+/** the scene's ceiling: the Preferences', else the machine's (a quarter of it);
+ *  `auto`: the machine's, whatever the Preferences say (the field's placeholder) */
+function sceneCeilingMb(auto = false): number {
+  const set = getSettings().viewer.sceneMemoryMB;
+  if (!auto && set && set > 0) return set;
+  const dm = (navigator as { deviceMemory?: number }).deviceMemory;
+  return MG.sceneMemoryDefaultMB(machineMemory.total ?? (dm ? dm * 1024 : null));
+}
+/** what a scene's guard reads at each rebuild */
+const sceneMemory = (): { ceilingMb: number; availableMb: number | null } => {
+  void refreshMachineMemory();
+  return { ceilingMb: sceneCeilingMb(), availableMb: machineMemory.available };
+};
+/** a model the guard did not load: said once per model and estimate, in the Log
+ *  and in a toast that names the way on (the strip has the buttons) */
+const memoryToldOf = new Set<string>();
+function onMemoryGate(g: { key: string; label: string; need: number; room: number; by: "ceiling" | "machine"; lighter: string | null }): void {
+  const sig = `${g.key}|${g.need}`;
+  if (memoryToldOf.has(sig)) return;
+  memoryToldOf.add(sig);
+  const say = t(g.lighter ? "mem.gatedLighter" : "mem.gated", { x: g.label, need: MG.mbSay(g.need), room: MG.mbSay(g.room),
+    by: t(g.by === "machine" ? "mem.byMachine" : "mem.byCeiling"), v: g.lighter ?? "" });
+  logWarn(say);
+  toast(say);
+}
+/** the other versions a model could draw, with what the guard weighs them by */
+function memoryAlternatives(rm: SpaceRM, drawnId: string | undefined): NonNullable<SceneItem["lighter"]> {
+  return drawableVersions(rm).filter((v) => v.id !== drawnId && v.format !== "tiles" && v.format !== "obj")
+    .map((v) => ({ versionId: v.id, label: autoLevelName(rm, v), bytes: v.bytes ?? null, tris: hardwareTris(v), textureSide: textureSideOf(v) }));
+}
+const hardwareTris = (v: RmVersion): number | null => {
+  const e = hardwareEntry(v);
+  return typeof e.primitives?.triangles === "number" ? e.primitives.triangles : null;
+};
+/** the texture side a version was made with (its step's use_params), or null */
+function textureSideOf(v: RmVersion): number | null {
+  const par = (((v.step ?? {}) as Record<string, unknown>).parameters ?? {}) as Record<string, unknown>;
+  const up = (par.use_params ?? {}) as Record<string, unknown>;
+  const side = up.texture_side_px ?? par.texture_side_px;
+  return typeof side === "number" && side > 0 ? side : null;
+}
+
 /** What a model draws, by its mode: the file (manual, by use), or the flow (auto). */
 function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowStart?: string; versionId?: string; obj?: { modifier?: (u: string) => string }; bytes?: number | null } {
   const vs = drawableVersions(rm);
@@ -29776,6 +30183,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
       lodNote: (n) => t("lod.note", { n: String(n) }),
+      memoryOver: (name, need, room, by) => t("mem.over", { x: name, need, room, by: t(by === "machine" ? "mem.byMachine" : "mem.byCeiling") }),
+      useVersion: (label, mb) => t("mem.useVersion", { v: label, mb }),
       boxZoom: t("s3.boxZoom"), modalHint: t("s3.modalHint"),
       viewName, centreEmpty: t("s3.centreEmpty"), stats: sceneStatsWords,
       // MICRO-SPAZIO-COMPATTO p.3–4 · the stats in short, the tileset's chip
@@ -29852,6 +30261,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     },
     // MICRO-3DTILES · the threshold and the tiles' memory (Preferences)
     limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },
+    // MICRO-MEMORIA-SESSIONE p.1 · the guard of memory
+    memory: sceneMemory, onMemoryGate,
+    onLighter: (rmId, vid) => { setVersionMode([rmId], "manual", vid); logInfo(t("mem.chose", { x: currentSpace()?.rms.find((r) => r.id === rmId)?.name ?? rmId })); },
     tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
     isFocused: () => activeWin().id === win.id,
     overlay: (k) => space3dShown(k, win.id),
@@ -30255,7 +30667,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined,
         // MICRO-3DTILES · the tileset of the same model, and the weight
         tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles", win.id) ? r.tileset.url || undefined : undefined,
-        bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null });
+        bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
+        // MICRO-MEMORIA-SESSIONE p.1 · what the guard weighs, and what it can propose instead
+        tris: pv ? hardwareTris(pv) : null, textureSide: pv ? textureSideOf(pv) : null,
+        ...(isTiles ? {} : { lighter: memoryAlternatives(r, plan.versionId) }) });
     }
     if (space3dShown("s3_proxies", win.id))
       for (const u of sum.withProxy) {
@@ -47808,6 +48223,8 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
       lodNote: (n) => t("lod.note", { n: String(n) }),
+      memoryOver: (name, need, room, by) => t("mem.over", { x: name, need, room, by: t(by === "machine" ? "mem.byMachine" : "mem.byCeiling") }),
+      useVersion: (label, mb) => t("mem.useVersion", { v: label, mb }),
       viewName, centreEmpty: t("s3.centreEmpty"), stats: sceneStatsWords,
       gizmo: { axis: (_a, view) => { const name = t(VIEW_NAMES[view]);
           return t("s3.gzView", { view: name, viewLow: name.charAt(0).toLocaleLowerCase(getLocale()) + name.slice(1), key: VIEW_KEYS[view] }); },
@@ -47858,6 +48275,8 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     // the threshold of the Preferences, as the Space: a single file over it (no
     // lighter version to start from) is asked, with its tileset proposed
     limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },
+    // MICRO-MEMORIA-SESSIONE p.1 · the guard of memory
+    memory: sceneMemory, onMemoryGate,
     tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
     isFocused: () => activeWin().id === win.id,
     // the document's scene: the models and their tileset; no proxies, no sketches, no labels
@@ -54013,6 +54432,9 @@ if (window.__EM_TEST_DATA__) {
     loadContainerDocument(window.__EM_TEST_DATA__, "embedded test data");
   else loadDocument(window.__EM_TEST_DATA__, "embedded test data");
 }
+// MICRO-MEMORIA-SESSIONE p.2 · the session of before, taken back when the WebView
+// fell (said), offered when it ended unsaved; then this one is kept
+if (!window.__EM_TEST_DATA__ || new URLSearchParams(location.search).has("keepSession")) void startSessionKeeping();
 // B2/B3 · LAST, once the app can open a document: the files this launch was
 // given (argv, the macOS open event) and the bridge's launch notices
 if (isTauri()) void onDesktopQueue(() => void drainDesktopQueue()).then(() => drainDesktopQueue());

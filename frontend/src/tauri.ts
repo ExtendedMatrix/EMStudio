@@ -102,6 +102,13 @@ export async function saveAsEmJson(
   return path;
 }
 
+/** MICRO-MEMORIA-SESSIONE p.4 · the native «Save as» dialog alone → the chosen
+ *  path, or null: the page decides what to write once it knows WHERE (the urls
+ *  relative to the em.json are rewritten for another folder) */
+export async function pickSaveEmJson(defaultPath: string): Promise<string | null> {
+  return picked(await save({ defaultPath: toNative(defaultPath), filters: EM_FILTERS }));
+}
+
 /** Native folder picker → the chosen absolute path, or null.
  *
  * StratiMiner needs a FOLDER, and the path is all it needs: the bridge does the

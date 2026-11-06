@@ -133,6 +133,10 @@ export interface ViewerSettings {
   lodLimitPoints: number;
   /** the memory ceiling of a tileset's automatic refinement, MB */
   tilesMemoryMB: number;
+  /** MICRO-MEMORIA-SESSIONE p.1 · the ceiling of what the scene holds (the
+   *  models drawn, estimated before each is loaded), MB; 0 or absent = the
+   *  machine's (a quarter of its memory, `sceneMemoryDefaultMB`) */
+  sceneMemoryMB?: number;
   /** MICRO-OTTIMIZZA-3 · the ceiling of the tiles kept ON DISK (the browser's
    *  Cache Storage, `tile-cache.ts`), MB; 0 = no persistent cache */
   tileCacheMB: number;

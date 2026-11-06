@@ -443,8 +443,16 @@ export class DocumentStore {
 
   private emit(): void {
     this.dirty = true;
+    this.rev++;
     for (const fn of this.listeners) fn();
+    DocumentStore.anyChange?.();
   }
+
+  /** MICRO-MEMORIA-SESSIONE p.2 · how many times the document changed (the
+   *  session's safety copy rewrites a file only when this moved), and one
+   *  hook told of a change in ANY store (the copy is scheduled from there) */
+  rev = 0;
+  static anyChange: (() => void) | null = null;
 
   private emitOp(op: GraphOp): void {
     if (this.suppressOp) return;
