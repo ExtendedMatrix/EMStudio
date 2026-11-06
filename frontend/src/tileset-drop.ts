@@ -46,6 +46,9 @@ export interface TreeSource {
   kind: "files" | "zip" | "bridge" | "mixed";
   list(dir: string): Promise<string[]>;
   read(path: string): Promise<Uint8Array | null>;
+  /** MICRO-DROP-3TZ-GRANDE · whether a FILE is there without listing (a
+   *  canonical .3tz's index): `recognise` asks it for `tileset.json` first */
+  has?(path: string): Promise<boolean>;
 }
 
 /** The reader the tiles engine is handed: a path of the SERVED tree (with
@@ -57,17 +60,29 @@ const TILE_EXT = /\.(b3dm|glb|gltf|i3dm|pnts|cmpt|subtree)$/i;
 
 // ── trees ────────────────────────────────────────────────────────────────────
 
-function listFrom(paths: Iterable<string>): (dir: string) => Promise<string[]> {
-  const byDir = new Map<string, Set<string>>();
-  for (const p of paths) {
-    const parts = p.split("/").filter(Boolean);
-    for (let i = 0; i < parts.length; i++) {
-      const dir = parts.slice(0, i).map((x) => `${x}/`).join("");
-      const name = i === parts.length - 1 ? parts[i] : `${parts[i]}/`;
-      (byDir.get(dir) ?? byDir.set(dir, new Set()).get(dir)!).add(name);
+/** paths indexed between two yields to the page (MICRO-DROP-3TZ-GRANDE: the
+ *  236 607 of a 6.5 GB archive in one piece held it) */
+const PATHS_PER_SLICE = 20000;
+
+/** The listing of a tree known by its paths — built at the first `list`, in
+ *  slices that let the page go (`paths` may be a promise: a lazy directory). */
+function listFrom(paths: Iterable<string> | (() => Promise<Iterable<string>>)): (dir: string) => Promise<string[]> {
+  let built: Promise<Map<string, Set<string>>> | null = null;
+  const build = async (): Promise<Map<string, Set<string>>> => {
+    const byDir = new Map<string, Set<string>>();
+    let n = 0;
+    for (const p of typeof paths === "function" ? await paths() : paths) {
+      if (++n % PATHS_PER_SLICE === 0) await new Promise((r) => setTimeout(r, 0));
+      const parts = p.split("/").filter(Boolean);
+      for (let i = 0; i < parts.length; i++) {
+        const dir = parts.slice(0, i).map((x) => `${x}/`).join("");
+        const name = i === parts.length - 1 ? parts[i] : `${parts[i]}/`;
+        (byDir.get(dir) ?? byDir.set(dir, new Set()).get(dir)!).add(name);
+      }
     }
-  }
-  return async (dir) => [...(byDir.get(dir) ?? [])].sort();
+    return byDir;
+  };
+  return async (dir) => [...((await (built ??= build())).get(dir) ?? [])].sort();
 }
 
 /** Files dropped from the system (or picked): `path` relative to the drop,
@@ -176,9 +191,15 @@ async function summary(tree: TreeSource, dir: string): Promise<string> {
 export async function recognise(tree: TreeSource, label: string, zipped = false): Promise<Recognised> {
   const out = (o: Partial<Recognised>): Recognised => ({ form: "unknown", ready: false, preparable: false,
     name: label.replace(/\.(3tz|zip)$/i, ""), says: "", entry: "", prefix: "", root: null, ...o });
+  // 1 · tileset.json at the top — MICRO-DROP-3TZ-GRANDE: a canonical .3tz
+  //     says so by its index, nothing listed (a 6.5 GB archive's directory is
+  //     16.8 MB, 236 607 names)
+  if (tree.has && zipped && await tree.has(ENTRY)) {
+    const root = await readJson(tree, ENTRY);
+    return out({ form: "package", ready: true, entry: ENTRY, root, says: `A tileset package (${ENTRY} at its root)` });
+  }
   const top = await tree.list("");
   const dirs = top.filter((n) => n.endsWith("/"));
-  // 1 · tileset.json at the top
   if (top.includes(ENTRY)) {
     const root = await readJson(tree, ENTRY);
     return zipped
@@ -295,6 +316,9 @@ export function position(doc: Record<string, unknown> | null): Position {
 export function servedSource(tree: TreeSource, rec: Recognised, recentre: boolean):
     TilesetReader & { served: string[]; firstTileAt: number | null } {
   const served: string[] = [];
+  // MICRO-DROP-3TZ-GRANDE · the root read once (the renderer and the Space ask
+  // it more than once: through a .3tz each is a request)
+  let rootBytes: Promise<Uint8Array | null> | null = null;
   const out = {
     served,
     /** when the first TILE (not a json) was handed to the renderer */
@@ -302,7 +326,10 @@ export function servedSource(tree: TreeSource, rec: Recognised, recentre: boolea
     readEntry: async (path: string): Promise<Uint8Array | null> => {
       const p = path.replace(/^\/+/, "");
       if (p === ENTRY) {
-        const raw = await gunzipIfGzip(await tree.read(rec.entry));
+        // (a failed read is not kept: asked again, it is read again)
+        const kept = await (rootBytes ??= tree.read(rec.entry).then(gunzipIfGzip)
+          .catch((e) => { rootBytes = null; throw e; }));
+        const raw = kept ? kept.slice() : null;
         if (!raw) return null;
         served.push(p);
         if (!recentre || position(rec.root).kind !== "earth") return raw;
@@ -348,16 +375,24 @@ export async function treeOfDrop(files: Array<{ path: string; blob: Blob }>): Pr
 }
 
 /** A .3tz by its index when it is canonical (its tiles one read each), any
- *  other zip by its directory. */
+ *  other zip by its directory.
+ *  MICRO-DROP-3TZ-GRANDE · the canonical one is opened as the 3D Tiles plugin
+ *  opens it — the tail, then the index (2 requests) — and `has` answers from
+ *  the index. The names are listed only when `list` is asked (a package whose
+ *  tileset.json is not at its root): from the directory already in hand, else
+ *  the whole directory then, read in slices. Until 6 Nov it was ALWAYS read
+ *  as well (ZipArchive.open): for TempluMare_2013.3tz 2 more requests, 16.8 MB
+ *  and ~0.3 s of the page's thread before anything was shown. */
 export async function openArchive(src: ByteSource): Promise<TreeSource> {
-  try {
-    const a = await Archive3tz.open(src);
-    // the canonical index finds by path, it does not list: the directory does
-    const z = await ZipArchive.open(src);
-    return { kind: "zip", list: listFrom(z.names()), read: (p) => a.readEntry(p) };
-  } catch {
-    return zipTree(src);
-  }
+  let a: Archive3tz;
+  try { a = await Archive3tz.open(src); }
+  catch { return zipTree(src); }
+  return {
+    kind: "zip",
+    list: listFrom(async () => a.names() ?? (await ZipArchive.open(src)).names()),
+    read: (p) => a.readEntry(p),
+    has: async (p) => a.has(p),
+  };
 }
 
 // ── «Attacca all'epoca…» ─────────────────────────────────────────────────────

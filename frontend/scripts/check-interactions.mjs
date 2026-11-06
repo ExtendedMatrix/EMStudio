@@ -10779,6 +10779,39 @@ test("TD4.scene", "tileset trascinato · sulla Scena 3D (X.json dallo Storage): 
     detail: { prevented, bar, layer, closed, errors } };
 });
 
+// MICRO-DROP-3TZ-GRANDE · E.D. dropped TempluMare_2013.3tz (6.5 GB, on the Earth)
+// on the Space with TempluMare v7 open: the scene had framed the temple (y ≈ 490 m),
+// the preview, centred at the origin, stayed out of the camera — no tile ever
+// asked, the bar «1 file letti · prima tile a …» for ever. The camera put far from
+// the origin first (as the temple put it); the dropped preview is framed when its
+// root's volume arrives, and its tiles come.
+test("TD7.frame", "tileset trascinato · sulla Scena che guarda altrove (il Tempio a 490 m): l'anteprima centrata all'origine si inquadra all'arrivo della radice e le sue tile arrivano (prima: «1 file letti · prima tile a …» per sempre)", async () => {
+  const { dir } = await tsdBench("td7");
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "space" });
+  const win = await winOf(p, "scene");
+  await p.waitForTimeout(800);
+  await p.evaluate(() => document.querySelector(".scn-host").__spaceSetCam({ pos: [120, 620, 170], target: [8, 538, -5] }));
+  await p.waitForTimeout(300);
+  const camBefore = await p.evaluate(() => document.querySelector(".scn-host").__spaceCamera());
+  await tsdDropPath(p, win, { path: `${dir}/disco_rs.json`, type: "file", name: "disco_rs.json", ext: "json" });
+  const bar = await tsdWait(p, () => tsdBar(p, win));
+  const layer = await tsdWait(p, () => p.evaluate(() => {
+    const l = (document.querySelector(".scn-host")?.__spaceTiles?.() ?? []).find((x) => String(x.id).startsWith("preview:"));
+    return l && l.files.length ? { files: l.files.length, box: l.box } : null;
+  }), 40000);
+  const camAfter = await p.evaluate(() => document.querySelector(".scn-host").__spaceCamera());
+  // the bar's line ticks every 700 ms
+  const status = await tsdWait(p, () => p.evaluate((w) => {
+    const x = document.querySelector(`.tile-area[data-win="${w}"] .tsp-status`)?.textContent ?? "";
+    return x && !x.includes("…") ? x : null;
+  }, win), 5000);
+  await p.screenshot({ path: SHOT("td7-scena-inquadra") }).catch(() => {});
+  await ctx.close();
+  // the target moved from the temple's height to the preview's (near the origin)
+  return { pass: !!bar && !!layer && Math.abs(camAfter[4]) < 100 && Math.abs(camBefore[4] - 538) < 1 && !!status && !errors.length,
+    detail: { camBefore, camAfter, status, layer, errors } };
+});
+
 test("TD5.refuse", "tileset trascinato · uno zip senza tileset dice che cosa c'è dentro; un .em.json trascinato sul Viewer non è preso dal tileset (va ad aprire il documento come prima)", async () => {
   const { dir } = await tsdBench("td5");
   execFileSync("python3", ["-I", "-c", "import sys,zipfile\nz=zipfile.ZipFile(sys.argv[1],'w');z.writestr('note/leggimi.txt','x');z.close()", `${dir}/niente.zip`]);

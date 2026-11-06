@@ -15,6 +15,14 @@
  *     answering without CORS (the browser hides the status);
  *   - the bytes came and could not be read → decoding.
  *
+ * MICRO-DROP-3TZ-GRANDE (6 Nov 2026) · «slow» (OneDrive downloading it) only
+ * when the BRIDGE says the file is in the cloud — `X-EM-File: cloud-only` on
+ * its answer to the HEAD (or a 409). A file on this disk whose HEAD answers
+ * 2xx and whose bytes the loader never had is «unread»: the bytes were asked
+ * and the page did not read them — said with the range asked and the name.
+ * Measured: E.D.'s 6.5 GB .3tz was local, the bridge answered every range in
+ * ~2 ms, and the Log blamed OneDrive.
+ *
  * Pure apart from the two probes, which are injected (`check-load-failure.mjs`).
  */
 
@@ -27,7 +35,8 @@ export type LoadCause =
   | "down"         // nothing answers at that base (the bridge on another port, not started)
   | "cors"         // the bridge answers, the browser hid the answer
   | "decode"       // the bytes came, the loader could not read them
-  | "slow"         // it answers to a HEAD, its bytes did not arrive (a slow disk, OneDrive downloading it)
+  | "slow"         // the bridge says it is in the cloud (X-EM-File), its bytes did not arrive: OneDrive downloading it
+  | "unread"       // on this disk (a HEAD answers 2xx), its bytes asked and not read by the page
   | "http";        // another HTTP status
 
 export interface LoadFailure {
@@ -36,11 +45,18 @@ export interface LoadFailure {
   status: number | null;
   error: string | null;
   cause: LoadCause;
+  /** the byte range the page had asked and not read (`bytes=a-b`), when known */
+  range: string | null;
 }
 
+/** What a HEAD said: its status and whether the bridge marked the file as
+ *  in the cloud (`X-EM-File: cloud-only`). A bare number is a status alone. */
+export type HeadAnswer = number | { status: number; cloud?: boolean } | null;
+
 export interface Probes {
-  /** HEAD the URL: its status, or null when nothing answered */
-  head: (url: string) => Promise<number | null>;
+  /** HEAD the URL: its status (and the bridge's cloud mark), or null when
+   *  nothing answered */
+  head: (url: string) => Promise<HeadAnswer>;
   /** the bridge's `/health` at a base: its level, or null when nothing answered */
   health: (base: string) => Promise<{ bridge_level?: number } | null>;
   /** the level this page wants (`BRIDGE_LEVEL_WANTED`) */
@@ -54,6 +70,13 @@ export function statusOf(e: unknown): number | null {
   const s = typeof x?.response?.status === "number" ? x.response.status
     : typeof x?.status === "number" ? x.status : null;
   return s && s > 0 ? s : null;
+}
+
+/** The range an error says it had asked (`bytes=a-b`): `tiles3tz.ts`'s
+ *  sources put it on the error they throw, a tileset layer on its outcome. */
+export function rangeOf(e: unknown): string | null {
+  const r = (e as { range?: unknown } | null)?.range;
+  return typeof r === "string" && r ? r : null;
 }
 
 /** The error in a line, for the Log. */
@@ -102,7 +125,7 @@ export async function diagnose(name: string, url: string, error: unknown, probes
   const bridge = isBridgeFile(url);
   const base = baseOf(url);
   const out = (cause: LoadCause, status: number | null): LoadFailure =>
-    ({ name, url, status, error: errorText(error), cause });
+    ({ name, url, status, error: errorText(error), cause, range: rangeOf(error) });
   const older = async (): Promise<boolean> => {
     if (!bridge || !base) return false;
     const h = await probes.health(base).catch(() => null);
@@ -114,10 +137,16 @@ export async function diagnose(name: string, url: string, error: unknown, probes
     return out("decode", null);
   }
   const silent = status == null;
-  if (status == null && base) status = await probes.head(url).catch(() => null);
+  let cloud = false;
+  if (status == null && base) {
+    const h = await probes.head(url).catch(() => null);
+    status = typeof h === "number" ? h : h?.status ?? null;
+    cloud = typeof h === "object" && !!h?.cloud;
+  }
   if (status != null) {
-    // there, and its bytes did not come: not a decoding (nothing was read)
-    if (status >= 200 && status < 300) return out(silent ? "slow" : "decode", status);
+    // there, and its bytes did not come: not a decoding (nothing was read) —
+    // OneDrive only when the bridge says the file is in the cloud
+    if (status >= 200 && status < 300) return out(!silent ? "decode" : cloud ? "slow" : "unread", status);
     // an older bridge has neither the route nor the folder of the open em.json
     if ((status === 404 || status === 403) && await older()) return out("older", status);
     return out(causeOfStatus(status, bridge), status);

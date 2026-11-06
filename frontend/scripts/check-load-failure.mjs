@@ -8,6 +8,10 @@
 //      200 + unreadable bytes (decoding); a port where nobody listens (the
 //      bridge on 8766, the page asking 8765); a bridge of level 33 (dev.55's)
 //      that has no /fs/doc and answers 403 → «older».
+//   3. MICRO-DROP-3TZ-GRANDE · «slow» (OneDrive) only when the bridge marks the
+//      file in the cloud (`X-EM-File: cloud-only` on the HEAD); a local file
+//      whose bytes the page did not read is «unread», with the range asked —
+//      the rules, and a real bridge with `EM_BRIDGE_FAKE_CLOUD`.
 //
 //   node scripts/check-load-failure.mjs
 import * as esbuild from "esbuild";
@@ -49,7 +53,18 @@ eq(await d(new TypeError("Failed to fetch"), mock(null, null)), ["down", null], 
 eq(await d(new TypeError("Load failed"), mock(null, { bridge_level: 34 })), ["cors", null], "no answer but the bridge is up: the browser hid it (CORS)");
 eq(await d(new TypeError("Failed to fetch"), mock(null, { bridge_level: 30 })), ["older", null], "no answer from an old bridge (its 404 without CORS): older");
 eq(await d({ type: "error", message: "tileset: tileset.json" }, mock(404, { bridge_level: 34 })), ["missing", 404], "a tileset's root that did not come: the HEAD says 404");
-eq(await d({ type: "error", message: "tileset: no root" }, mock(200, { bridge_level: 34 })), ["slow", 200], "a tileset that answers a HEAD and whose root did not come: slow (OneDrive downloading it)");
+eq(await d({ type: "error", message: "tileset: no root" }, mock(200, { bridge_level: 34 })), ["unread", 200], "a tileset that answers a HEAD and whose root did not come, no cloud mark: unread (not OneDrive)");
+eq(await d({ type: "error", message: "tileset: no root" }, mock({ status: 200, cloud: false }, { bridge_level: 34 })), ["unread", 200], "a HEAD 200 without X-EM-File: the file is local, «unread»");
+eq(await d({ type: "error", message: "tileset: no root" }, mock({ status: 200, cloud: true }, { bridge_level: 34 })), ["slow", 200], "a HEAD 200 with X-EM-File: cloud-only: OneDrive downloading it, «slow»");
+eq(await d(new TypeError("Load failed"), mock({ status: 409, cloud: true }, { bridge_level: 34 })), ["cloud-only", 409], "a HEAD 409 (cloud-only) as an object: «cloud-only»");
+{
+  const big = "http://127.0.0.1:8765/fs/file?path=%2FUsers%2Fed%2FOneDrive%2FTempluMare_2013.3tz";
+  const f = await L.diagnose("TempluMare_2013.3tz", big, { type: "error", message: "tileset: no root", range: "bytes=6553194739-6553260380" }, mock({ status: 200, cloud: false }, { bridge_level: 63 }));
+  eq([f.cause, f.status, f.range, f.name], ["unread", 200, "bytes=6553194739-6553260380", "TempluMare_2013.3tz"], "the 6.5 GB archive: «unread», with the range the layer had asked and the name");
+  const g = await L.diagnose("x", big, Object.assign(new TypeError("Load failed"), { range: "bytes=-262144" }), mock(200, { bridge_level: 63 }));
+  eq([g.cause, g.range], ["unread", "bytes=-262144"], "a source's network error carries its range (tiles3tz httpSource)");
+  eq(L.rangeOf(new Error("x")), null, "an error without a range: none");
+}
 eq(L.statusOf({ status: 0 }), null, "a RoadError of no answer has no status");
 const log = new L.FailureLog();
 const f1 = await L.diagnose("A", AT, http(403), mock(null, { bridge_level: 34 }));
@@ -67,14 +82,15 @@ writeFileSync(`${study}/RB/bad.glb`, "glTF-fake");
 const freePort = () => new Promise((res) => { const s = netServer(); s.listen(0, () => { const p = s.address().port; s.close(() => res(p)); }); });
 const port = await freePort();
 const br = spawn(PY, [`${TOOLS}em_bridge.py`, "--port", String(port), "--fs-root", `${dir}/served`, "--s3dgraphy", `${S3D}src`],
-                 { env: { ...process.env, EM_BRIDGE_STATE_DIR: `${dir}/.state` }, stdio: ["ignore", "pipe", "pipe"] });
+                 { env: { ...process.env, EM_BRIDGE_STATE_DIR: `${dir}/.state`, EM_BRIDGE_FAKE_CLOUD: "/RB/cloudy\\.3tz$" }, stdio: ["ignore", "pipe", "pipe"] });
 let blog = "";
 br.stdout.on("data", (b) => { blog += b; });
 br.stderr.on("data", (b) => { blog += b; });
 const B = `http://127.0.0.1:${port}`;
 const H0 = { Origin: "http://localhost:5173" };
 const probes = {
-  head: (u) => fetch(u, { method: "HEAD", headers: H0 }).then((r) => r.status, () => null),
+  // as the page asks it (main.ts failureProbes): the status and the cloud mark
+  head: (u) => fetch(u, { method: "HEAD", headers: H0 }).then((r) => ({ status: r.status, cloud: r.headers.get("X-EM-File") === "cloud-only" }), () => null),
   health: (b) => fetch(`${b}/health`, { headers: H0 }).then((r) => (r.ok ? r.json() : null), () => null),
   wanted: 34,
 };
@@ -93,6 +109,16 @@ if (up) {
   eq([f.cause, f.status], ["missing", 404], "real bridge, the folder served, the file not there: 404");
   f = await L.diagnose("bad", bad, await load(bad), probes);
   eq([f.cause, f.status], ["decode", null], "real bridge, the bytes served but unreadable: decoding");
+  // MICRO-DROP-3TZ-GRANDE · a tileset whose root did not come: a local file is
+  // «unread» (not OneDrive), one the bridge marks in the cloud «slow»
+  writeFileSync(`${study}/RB/local.3tz`, "PK-local");
+  writeFileSync(`${study}/RB/cloudy.3tz`, "PK-cloudy");
+  await fetch(`${B}/fs/doc`, { method: "POST", headers: { ...H0, "Content-Type": "application/json" }, body: JSON.stringify({ em_json: `${study}/EM/s.em.json`, locators: ["../RB/local.3tz", "../RB/cloudy.3tz"] }) });
+  const noRoot = { type: "error", message: "tileset: no root", range: "bytes=-262144" };
+  f = await L.diagnose("local.3tz", at(B, `${study}/RB/local.3tz`), noRoot, probes);
+  eq([f.cause, f.status, f.range], ["unread", 200, "bytes=-262144"], "real bridge, a local .3tz whose root did not come: «unread» with its range, not OneDrive");
+  f = await L.diagnose("cloudy.3tz", at(B, `${study}/RB/cloudy.3tz`), noRoot, probes);
+  eq([f.cause, f.status], ["slow", 200], "real bridge, a .3tz the bridge marks cloud-only (X-EM-File): «slow», OneDrive");
   // the page asking 8765 while the bridge is elsewhere: nobody listens there
   const dead = await freePort();
   const wrong = at(`http://127.0.0.1:${dead}`, `${study}/RB/bad.glb`);

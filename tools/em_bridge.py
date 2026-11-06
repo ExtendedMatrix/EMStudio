@@ -512,7 +512,10 @@ def _file_state(path) -> str:
         return "missing"
     if os.path.isdir(_long_path(path)):
         return "folder"
-    return "cloud-only" if _cloud_only(st) else "ok"
+    # MICRO-DROP-3TZ-GRANDE · the same rule as the resolver's (a 0-block file in
+    # a cloud folder, the tests' EM_BRIDGE_FAKE_CLOUD): `X-EM-File` on /fs/file
+    # is what the page's Log blames OneDrive on, and nothing else
+    return "cloud-only" if _cloud_only(st) or _is_cloud_placeholder(path) else "ok"
 
 
 #: how far above the em.json's folder its relative locators may open a folder

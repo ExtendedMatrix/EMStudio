@@ -93,6 +93,13 @@ export interface SceneItem {
   /** MICRO-TILESET-CARTELLA · a dropped tileset (a preview): its files from
    *  this reader, `url` only its name in the scene */
   tilesSource?: { readEntry(path: string): Promise<Uint8Array | null> };
+  /** MICRO-DROP-3TZ-GRANDE · frame it when its root's volume arrives (once a
+   *  layer): a dropped tileset is what the reader asked to see. Measured on
+   *  TempluMare_2013.3tz dropped on E.D.'s Space with TempluMare v7 open: the
+   *  scene had framed the temple (y ≈ 490 m) and the preview, centred at the
+   *  origin, stayed out of the camera — the renderer never asks a tile it does
+   *  not see, and the bar said «1 file read · first tile at …» for ever */
+  frameOnArrival?: boolean;
   /** MICRO tileset, shift e epoche · the tileset's frame (a CRS minus a shift):
    *  the layer is relocated into the study's frame (`TilesLayer.relocate`) */
   tilesRelocate?: { key: string; fn: RelocateFn } | null;
@@ -836,6 +843,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       let T: any = null;
       /** the tilesets whose late root is watched (once each: a kept layer outlives the rebuilds) */
       const rootWatched = new WeakSet<object>();
+      /** MICRO-DROP-3TZ-GRANDE · the layers already framed on their arrival */
+      const framedOnArrival = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
       const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual",
                                  source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"], memoryMB?: number): Promise<Live | null> => {
@@ -1845,13 +1854,22 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               // (the renderer does not always say it: a refused tileset.json left
               // `failed` empty and the root never ready, measured on a 403)
               if (!live.layer.rootReady()) {
-                opts.onLoadOutcome?.(key, item.label, tsUrl, { type: "error", message: `tileset: ${tst.failed ?? "no root"}` });
+                const range = live.layer.asking().join(", ") || null;
+                opts.onLoadOutcome?.(key, item.label, tsUrl, { type: "error", message: `tileset: ${tst.failed ?? "no root"}`, ...(range ? { range } : {}) });
                 if (!rootWatched.has(live.layer)) {
                   rootWatched.add(live.layer);
                   const l = live.layer;
                   l.onChange(() => { if (l.rootReady()) opts.onLoadOutcome?.(key, item.label, tsUrl, null); });
                 }
               } else opts.onLoadOutcome?.(key, item.label, tsUrl, null);
+              if (item.frameOnArrival && !framedOnArrival.has(live.layer)) {
+                // a root later than the 8 s of `ready` is framed when it comes
+                const l = live.layer;
+                framedOnArrival.add(l);
+                const go = () => { if (!disposed) api.frameKeys?.([`rm:${item.id}`]); };
+                if (l.rootReady()) go();
+                else { const off = l.onChange(() => { if (l.rootReady()) { queueMicrotask(off); go(); } }); }
+              }
               const bb = live.layer.bounds();
               if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), `rm k-rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "tiles", url: tsUrl });

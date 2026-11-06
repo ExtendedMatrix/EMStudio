@@ -27168,14 +27168,15 @@ const modelFailures = new FailureLog();
 let modelFailuresOf = "";
 const modelFailed = new Map<string, string>();   // key → the url that failed, until it is drawn
 const failureProbes: Probes = {
-  head: (u) => fetch(u, { method: "HEAD" }).then((r) => r.status, () => null),
+  // MICRO-DROP-3TZ-GRANDE · the bridge's cloud mark rides with the status
+  head: (u) => fetch(u, { method: "HEAD" }).then((r) => ({ status: r.status, cloud: r.headers.get("X-EM-File") === "cloud-only" }), () => null),
   health: (b) => fetch(`${b}/health`).then((r) => (r.ok ? r.json() : null), () => null),
   wanted: BRIDGE_LEVEL_FS_DOC,
 };
 function failureWords(f: LoadFailure): string {
   let base = "";
   try { base = new URL(f.url).origin; } catch { /* not a URL */ }
-  return t(`load.cause.${f.cause}`, { base });
+  return t(`load.cause.${f.cause}`, { base, name: f.name, range: f.range ?? t("load.someRange") });
 }
 function shownUrl(u: string): string {
   try { return decodeURIComponent(u); } catch { return u; }
@@ -27319,9 +27320,10 @@ const viewerDroppedMounts = new Map<string, { id: string; host: HTMLElement; han
 const droppedUrl = (d: DroppedTileset): string => `preview-tileset://${d.id}/tileset.json`;
 
 async function droppedFrom(tree: TreeSource, label: string, zipped: boolean,
-    disk?: DroppedTileset["disk"], bytes?: number | null): Promise<DroppedTileset | null> {
+    disk?: DroppedTileset["disk"], bytes?: number | null, known?: Recognised): Promise<DroppedTileset | null> {
   let rec: Recognised;
-  try { rec = await recognise(tree, label, zipped); } catch (e) { toast(t("tsp.unreadable", { x: label, why: String(e) })); return null; }
+  // MICRO-DROP-3TZ-GRANDE · a tree already recognised is not read again (a .3tz: a request)
+  try { rec = known ?? await recognise(tree, label, zipped); } catch (e) { toast(t("tsp.unreadable", { x: label, why: String(e) })); return null; }
   if (rec.form === "unknown") { toast(rec.says); logWarn(rec.says); return null; }
   const pos = position(rec.root);
   const recentred = pos.kind === "earth";
@@ -27420,7 +27422,7 @@ async function droppedFromPath(path: string, type: "dir" | "file"): Promise<Drop
         const beside = (await bridgeTree(parent, fns).list("")).filter((n) => tops.includes(n));
         if (beside.length) return droppedFrom(unionTree(inner, topOnly(bridgeTree(parent, fns), beside)), base, true, { dropped: p }, bytes);
       }
-      return droppedFrom(inner, base, true, rec0.form === "package" ? { dropped: p, archive: p } : { dropped: p }, bytes);
+      return droppedFrom(inner, base, true, rec0.form === "package" ? { dropped: p, archive: p } : { dropped: p }, bytes, rec0);
     }
     if (/\.json$/i.test(base)) {
       if (base.toLowerCase() === "tileset.json")
@@ -31782,7 +31784,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const previewItem: SceneItem | null = preview ? {
       kind: "rm", id: `preview:${preview.resourceId ?? preview.url}`, label: preview.label, state: "resident",
       url: preview.url, resourceId: preview.resourceId,
-      ...(dropTs ? { tiles: "directory" as const, tilesSource: dropTs.reader } : {}) } : null;
+      ...(dropTs ? { tiles: "directory" as const, tilesSource: dropTs.reader, frameOnArrival: true } : {}) } : null;
     // MICRO-TILESET-CARTELLA · the bar of a dropped tileset, over the scene
     tsp.textContent = "";
     tsp.classList.toggle("hidden", !dropTs);

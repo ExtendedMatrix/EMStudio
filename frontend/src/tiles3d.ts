@@ -190,6 +190,9 @@ export interface TilesLayer {
   boxOf(uri: string): any | null;
   /** the tileset.json has arrived: `bounds()` is the root's volume */
   rootReady(): boolean;
+  /** MICRO-DROP-3TZ-GRANDE · the byte ranges of its archive asked and not yet
+   *  answered (`bytes=a-b`): what the Log names when the root does not come */
+  asking(): string[];
   /** MICRO-PROVA-DEV48 p.2 · the LEAF tiles' boxes in the world (three's frame),
    *  read from the tileset.json and its external ones through the renderer's
    *  own road (a `.3tz`, a room's store) — no tile loaded; once per layer */
@@ -349,6 +352,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   // and the plugin answers every file of it from the archive — opened from its
   // end (the index), then each tile at its offset (tiles3tz.ts)
   let archivePlugin: any = null;
+  let archiveSrc: any = null;
   if (opts.source && T.Tiles3tzPlugin) {
     const base = T.archiveBase();
     archivePlugin = new T.Tiles3tzPlugin(Promise.resolve(opts.source), base);
@@ -356,7 +360,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   } else if ((opts.archive || isArchive3tzUrl(url)) && T.Tiles3tzPlugin) {
     const base = T.archiveBase();
     // MICRO-SPAZIO-FIRMATO · a .3tz of the room's store is read signed
-    const archive = T.sourceFor(url, roadFetch as typeof fetch).then((src: any) => T.Archive3tz.open(src));
+    const archive = T.sourceFor(url, roadFetch as typeof fetch).then((src: any) => T.Archive3tz.open(archiveSrc = src));
     // MICRO-OTTIMIZZA-3 · its tiles kept on disk under the archive's identity
     archivePlugin = new T.Tiles3tzPlugin(archive, base, tileCache());
     url = `${base}tileset.json`;
@@ -690,6 +694,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
     },
     // with a frame, the root is ready where it will stay: once relocated (or refused)
     rootReady: () => rootReady && !(relocKey && relocState?.key !== relocKey),
+    asking: () => [...(archiveSrc?.describe?.().asking ?? [])],
     relocate(key, fn) {
       const k = fn ? key : "";
       if (k === relocKey) return;

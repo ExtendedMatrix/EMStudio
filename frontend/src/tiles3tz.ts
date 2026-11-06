@@ -42,7 +42,9 @@ export interface ByteSource {
   /** what it is, and — for HTTP — whether the server honoured `Range`; the
    *  URL and the validator of the archive (`ETag`), the persistent tile
    *  cache's key (`tile-cache.ts`) */
-  describe(): { kind: "blob" | "http"; ranges: boolean | null; downloaded: number; url?: string; etag?: string | null };
+  describe(): { kind: "blob" | "http"; ranges: boolean | null; downloaded: number; url?: string; etag?: string | null;
+                /** MICRO-DROP-3TZ-GRANDE · the ranges asked and not yet answered */
+                asking?: string[] };
 }
 
 export function blobSource(blob: Blob): ByteSource {
@@ -66,8 +68,19 @@ export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globa
   let total: number | null = null;
   let etag: string | null = null;
   let downloaded = 0;
-  /** the answer to a `Range`: its bytes (206), or the whole archive kept (200) */
+  const asking = new Set<string>();
+  /** the answer to a `Range`: its bytes (206), or the whole archive kept (200).
+   *  MICRO-DROP-3TZ-GRANDE · an error carries the range asked (and the status):
+   *  the Log says which bytes did not come (`load-failure.ts rangeOf`) */
   const ask = async (range: string): Promise<Uint8Array | null> => {
+    asking.add(range);
+    try { return await answer(range); }
+    catch (e) {
+      if (e && typeof e === "object" && !("range" in e)) Object.assign(e, { range });
+      throw e;
+    } finally { asking.delete(range); }
+  };
+  const answer = async (range: string): Promise<Uint8Array | null> => {
     const r = await fetchFn(url, { headers: { Range: range } });
     etag ??= r.headers.get("etag");
     if (r.status === 206) {
@@ -78,7 +91,7 @@ export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globa
       downloaded += b.byteLength;
       return b;
     }
-    if (!r.ok) throw new Error(`${url}: ${r.status}`);
+    if (!r.ok) throw Object.assign(new Error(`${url}: ${r.status}`), { status: r.status });
     ranges = false;
     whole = new Uint8Array(await r.arrayBuffer());
     downloaded += whole.byteLength;
@@ -110,7 +123,7 @@ export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globa
       return { bytes: w.subarray(Math.max(0, w.byteLength - length)), size: w.byteLength };
     },
     read: grab,
-    describe: () => ({ kind: "http", ranges, downloaded, url, etag }),
+    describe: () => ({ kind: "http", ranges, downloaded, url, etag, asking: [...asking] }),
   };
 }
 
@@ -258,14 +271,23 @@ async function openEnd(src: ByteSource, tailBytes: number, cdMax: number) {
   return { size, zip64, records, cdSize, cd, cdTail, bytesAt, reads: () => reads };
 }
 
+/** MICRO-DROP-3TZ-GRANDE · records parsed between two yields to the page: a
+ *  directory of 236 607 records (TempluMare_2013, 16.8 MB) held the page's
+ *  thread ~0.3 s in one piece */
+export const RECORDS_PER_SLICE = 16384;
+const yieldToPage = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
 /** Every record of a central directory: path → where its bytes are. The last
- *  record's path too (a 3tz's must be the index). */
-function parseDirectory(cd: Uint8Array): { dir: Map<string, DirEntry>; last: string; lastEntry: DirEntry | null } {
+ *  record's path too (a 3tz's must be the index). A long directory is read in
+ *  slices, the page let go between them. */
+async function parseDirectory(cd: Uint8Array): Promise<{ dir: Map<string, DirEntry>; last: string; lastEntry: DirEntry | null }> {
   const cv = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
   const dir = new Map<string, DirEntry>();
   const dec = new TextDecoder();
   let last = "", lastEntry: DirEntry | null = null;
+  let n = 0;
   for (let p = 0; p + 46 <= cd.length && cv.getUint32(p, true) === SIG_CDH;) {
+    if (++n % RECORDS_PER_SLICE === 0) await yieldToPage();
     const nlen = cv.getUint16(p + 28, true), xlen = cv.getUint16(p + 30, true), clen = cv.getUint16(p + 32, true);
     let csize = cv.getUint32(p + 20, true), usize = cv.getUint32(p + 24, true), lho = cv.getUint32(p + 42, true);
     const name = normalizePath(dec.decode(cd.subarray(p + 46, p + 46 + nlen)));
@@ -346,7 +368,7 @@ export class Archive3tz {
   static async open(src: ByteSource, opts: OpenOptions = {}): Promise<Archive3tz> {
     const end = await openEnd(src, opts.tailBytes ?? TAIL_BYTES, opts.cdMaxBytes ?? CD_MAX_BYTES);
     if (end.cd) {
-      const { dir, last, lastEntry } = parseDirectory(end.cd);
+      const { dir, last, lastEntry } = await parseDirectory(end.cd);
       // the LAST directory record is the index (specification)
       if (last !== INDEX_NAME || !lastEntry) throw new Error(`not a 3tz: the last entry is not ${INDEX_NAME}`);
       if (lastEntry.method !== 0) throw new Error(`${INDEX_NAME} must be stored, not compressed (method ${lastEntry.method})`);
@@ -373,7 +395,7 @@ export class Archive3tz {
       rec = findIndexRecord(cdTail);
     }
     if (rec < 0) throw new Error(`not a 3tz: the last entry is not ${INDEX_NAME}`);
-    const { dir } = parseDirectory(cdTail.subarray(rec));
+    const { dir } = await parseDirectory(cdTail.subarray(rec));
     const at = dir.get(INDEX_NAME)!;
     if (at.method !== 0) throw new Error(`${INDEX_NAME} must be stored, not compressed (method ${at.method})`);
     const index = await readLocal(src, INDEX_NAME, at.lho, at);
@@ -381,6 +403,14 @@ export class Archive3tz {
     return new Archive3tz(src, null, index, { entries: index.length / 24, indexBytes: at.csize, openReads: end.reads() + 1,
                                               zip64: end.zip64, directory: "index" });
   }
+
+  /** MICRO-DROP-3TZ-GRANDE · every file's path when the archive was opened by
+   *  its central directory (it is in hand); null when opened by the index,
+   *  which finds by path and does not list */
+  names(): string[] | null { return this.dir ? [...this.dir.keys()] : null; }
+
+  /** whether `path` is in the archive — by the directory or the index, no request */
+  has(path: string): boolean { return this.offsetOf(path) !== null; }
 
   /** The local header offset of `path`, or null (the directory; else a
    *  binary search on the MD5 in the index). */
@@ -427,7 +457,7 @@ export class ZipArchive {
   static async open(src: ByteSource, opts: OpenOptions = {}): Promise<ZipArchive> {
     // no index to fall back on: the directory is read whatever its length
     const end = await openEnd(src, opts.tailBytes ?? TAIL_BYTES, Infinity);
-    const { dir } = parseDirectory(end.cd!);
+    const { dir } = await parseDirectory(end.cd!);
     dir.delete(INDEX_NAME);
     return new ZipArchive(src, dir, end.zip64);
   }

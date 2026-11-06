@@ -19,7 +19,7 @@
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, openAsBlob, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openAsBlob, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 
 const SRC = new URL("../src/", import.meta.url).pathname;
@@ -30,6 +30,10 @@ const load = async (what) => {
 };
 const D = await load(`export * from "./tileset-drop"; export { plainGraph } from "./resources";
   export { blobSource, ZipArchive, gunzipIfGzip } from "./tiles3tz";`);
+
+/** a ByteSource that counts its reads and bytes */
+const counted = (src) => { let n = 0, bytes = 0; return { ...src, read: async (o, l) => { n++; const b = await src.read(o, l); bytes += b.length; return b; },
+  reads: () => n, bytes: () => bytes }; };
 
 let checks = 0;
 const fails = [];
@@ -165,7 +169,35 @@ m.write_3tz(sys.argv[2],sys.argv[3])`, A3, dir, `${WORK}/canon.3tz`]);
   eq(txt(await D.servedSource(t.tree, r, false).readEntry("Geometry/lod1_0.b3dm")), "c1", "…its tile read through the index");
   const names = (await t.tree.list("")).join(",");
   ok(!names.includes("@3dtilesIndex1@"), "…the index is not a file of the tree");
+  // MICRO-DROP-3TZ-GRANDE · recognised by its index, nothing listed: the tail and tileset.json
+  const c = counted(D.blobSource(await fileBlob(`${WORK}/canon.3tz`)));
+  const r2 = await D.recognise(await D.openArchive(c), "canon.3tz", true);
+  eq([r2.form, c.reads()], ["package", 2], "…recognised with 2 reads (the tail, tileset.json), not its directory read twice");
 } else console.log("· 3DSC's archive_3tz.py not beside: the canonical .3tz case skipped");
+
+// MICRO-DROP-3TZ-GRANDE · E.D.'s 6.5 GB archive (236 607 entries, ZIP64, its
+// directory 16.8 MB: opened by the index), read in place when it is here
+const BIG = process.env.BIG_3TZ ?? `${process.env.HOME}/Library/CloudStorage/OneDrive-CNR/Dottorato Bucarest/14_EM_1.6_lavoro/TempluMare_v2_for_3DR_2026-10-06/RB/cesium/TempluMare_2013.3tz`;
+if (existsSync(BIG)) {
+  // read by position: node's openAsBlob says this file's size modulo 2³² (node 26:
+  // 2 281 030 216 B) — node's limit, not the page's (the bridge's ranges past 4 GB answer)
+  const fd = openSync(BIG, "r"), size = statSync(BIG).size;
+  const c = counted({ size: async () => size, describe: () => ({ kind: "blob", ranges: true, downloaded: 0 }),
+    read: async (o, l) => { const buf = Buffer.alloc(l); const n = readSync(fd, buf, 0, l, o); return new Uint8Array(buf.buffer, buf.byteOffset, n); } });
+  const t0 = performance.now();
+  const tree = await D.openArchive(c);
+  const r = await D.recognise(tree, "TempluMare_2013.3tz", true);
+  const openReads = c.reads(), openBytes = c.bytes(), openMs = Math.round(performance.now() - t0);
+  const s = D.servedSource(tree, r, true);
+  const doc = JSON.parse(txt(await s.readEntry("tileset.json")));
+  const r0 = c.reads();
+  const tile = await s.readEntry(doc.root.content.uri);
+  console.log(`· TempluMare_2013.3tz (${(statSync(BIG).size / 1e9).toFixed(2)} GB): ${r.form} in ${openMs} ms, ${openReads} reads, ${(openBytes / 1e6).toFixed(1)} MB; root tile ${tile?.length} B in ${c.reads() - r0} read`);
+  eq(r.form, "package", "the 6.5 GB .3tz: a package");
+  ok(openReads <= 3 && openBytes < 7e6, `…opened and recognised by the index: ${openReads} reads, ${openBytes} B (the tail, the index, tileset.json; not the 16.8 MB directory)`);
+  eq([!!tile, c.reads() - r0], [true, 1], "…its root tile in ONE read");
+  closeSync(fd);
+} else console.log(`· ${BIG}: not here, the 6.5 GB case skipped`);
 
 {
   const gz = new Uint8Array(execFileSync("python3", ["-I", "-c", "import gzip,sys;sys.stdout.buffer.write(gzip.compress(b'b3dm-plain'))"]));
