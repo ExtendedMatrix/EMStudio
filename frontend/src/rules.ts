@@ -995,6 +995,29 @@ export function packagingName(p: string): string {
   return _PACKAGING_RULE.labels?.[p] ?? (typeof en === "string" ? en : p);
 }
 
+// MICRO-TIMBRA-MASTER · the two KINDS OF MASTER (very_high_resolution,
+// complete): the datamodel's (`ResourceNode.properties.master_kind`, node
+// datamodel 1.6.42) with their names in the translations (`master_kinds`)
+const _MASTER_KIND_RULE: { values?: Record<string, string>; labels?: Record<string, string> } = ((nodeDatamodel as unknown as {
+  reference_nodes?: { ResourceNode?: { properties?: { master_kind?: { values?: Record<string, string>; labels?: Record<string, string> } } } };
+}).reference_nodes?.ResourceNode?.properties?.master_kind) ?? {};
+const _MASTER_KIND_TRANSLATIONS = (
+  datamodelTranslations as { master_kinds?: Record<string, { label?: Record<string, string | boolean> }> }
+).master_kinds ?? {};
+
+/** The kinds of master the datamodel declares, in its order. */
+export function masterKinds(): string[] {
+  return Object.keys(_MASTER_KIND_RULE.values ?? {});
+}
+
+/** A kind of master's name in the active locale, then the datamodel's English
+ *  label, then the value itself. */
+export function masterKindName(k: string): string {
+  const loc = _MASTER_KIND_TRANSLATIONS[k]?.label?.[getLocale()];
+  if (typeof loc === "string" && loc.trim()) return loc;
+  return _MASTER_KIND_RULE.labels?.[k] ?? k;
+}
+
 /** The genres the datamodel declares for a US, in its order. */
 export function stratigraphicKinds(): string[] {
   return Object.keys(_US_KIND_RULE.values ?? {});

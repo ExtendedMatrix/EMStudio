@@ -316,3 +316,45 @@ export async function pdfPageCount(url: string): Promise<number | null> {
     return null;
   }
 }
+
+
+/** MICRO-TIMBRA-MASTER · s3Dgraphy's sign of a master file
+ *  (`resources.master_stamp.mark` through the bridge): null when it is not a
+ *  master, or when the bridge is older than it (501). */
+export interface MasterMark {
+  master: boolean; kind: string | null; state: "unstamped" | "stamped" | "changed_after_stamp" | "unverified";
+  sign: string; gesture: string | null; label: string; why: string; at: string | null;
+}
+export async function masterMark(path: string, tier?: string, kind?: string): Promise<MasterMark | null> {
+  const q = new URLSearchParams({ path });
+  if (tier) q.set("tier", tier);
+  if (kind) q.set("kind", kind);
+  try {
+    const res = await fetch(`${await base()}/master/mark?${q}`);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { ok?: boolean; mark?: MasterMark | null };
+    return body.ok ? body.mark ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
+/** MICRO-TIMBRA-MASTER p.2 · the photogrammetric chain of a Metashape project,
+ *  one stamp per step: the plan (`write` false: nothing hashed) or written. */
+export interface ChainStep { step: string; label: string; name: string; folder: string; inputs: string[];
+  resource_id: string; master_kind?: string | null }
+export interface ChainAnswer { ok: boolean; error?: string; chunk?: { id: string; label: string };
+  steps?: ChainStep[]; pending?: { step: string; label: string; why: string }[]; warnings?: string[]; written?: string[] }
+export async function photogrammetryChain(psx: string, opts: { chunk?: string; write?: boolean;
+    operator?: { id: string; label?: string } } = {}): Promise<ChainAnswer> {
+  try {
+    const res = await fetch(`${await base()}/stamp/photogrammetry-chain`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ psx, chunk: opts.chunk, write: !!opts.write, operator: opts.operator }) });
+    const body = (await res.json().catch(() => ({}))) as ChainAnswer & { error?: string };
+    if (!res.ok) return { ok: false, error: body.error || `HTTP ${res.status}` };
+    return body;
+  } catch {
+    return { ok: false, error: "em-bridge is not answering" };
+  }
+}

@@ -11414,3 +11414,10 @@ td.al-cloud { color: var(--accent-ink); }
 .gis-acts input[type="number"] { width: 5em; }
 .gis-inspect { margin-top: 6px; font-size: 12px; }
 .scn-hw { font-variant-numeric: tabular-nums; }
+
+/* MICRO-TIMBRA-MASTER · the sign of a master: seen when it asks for a hand */
+.storage-master, .al-master { font-size: 11px; color: var(--text-faint); margin-left: 6px; white-space: nowrap; }
+.storage-master-todo, .al-master-todo { color: #b45309; font-weight: 600; }
+.storage-master-stamp { font-size: 11px; margin-left: 6px; padding: 0 6px; }
+.master-chain ol { margin: 6px 0 0 18px; padding: 0; }
+.master-chain li[data-pending] { opacity: .75; }

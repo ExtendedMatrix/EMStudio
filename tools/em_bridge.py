@@ -3197,6 +3197,15 @@ def make_handler(api):
                 if not self._fs_gate():
                     return
                 self._fs_file(_fs_at_path(parsed.path), body=body)
+            elif route == "/master/mark":
+                # MICRO-TIMBRA-MASTER p.1 · the sign of a master file — «master
+                # not stamped · very high resolution» — asked of s3Dgraphy
+                # (resources.master_stamp), never decided here
+                if not self._fs_gate():
+                    return
+                q = urllib.parse.parse_qs(parsed.query)
+                self._master_mark((q.get("path") or [""])[0], (q.get("tier") or [""])[0] or None,
+                                  (q.get("kind") or [""])[0] or None)
             elif route == "/fs/checksum":
                 if not self._fs_gate():
                     return
@@ -3580,6 +3589,16 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._stamp_identity(body)
+            elif route == "/stamp/photogrammetry-chain":
+                # MICRO-TIMBRA-MASTER p.2 · the whole photogrammetric chain of a
+                # Metashape project, one stamp per step (s3Dgraphy's
+                # importer.metashape_chain): the plan, or the stamps written
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._photogrammetry_chain(body)
             elif route == "/stamp/emit":
                 # DTCEMS2 · COMPORRE UN PASSO E TIMBRARLO. Tutto il lavoro lo fa
                 # s3Dgraphy attraverso `api`: qui si monta un grafo minuscolo con
@@ -3838,6 +3857,63 @@ def make_handler(api):
                 self.send_error(404, "unknown endpoint")
 
         # ── DTCEMS1 · il timbro: si LEGGE, e l'unica scrittura è una pista ──
+
+        def _master_mark(self, raw, tier=None, kind=None):
+            """``{ok, mark}``: s3Dgraphy's ``master_stamp.mark`` of a file —
+            None when it is not a master; 501 on an s3dgraphy before it."""
+            full, err = self._fs_resolve(raw, want="file")
+            if err:
+                self._fail(*err)
+                return
+            try:
+                from s3dgraphy.resources import master_stamp as MS
+            except ImportError:
+                self._fail(501, "this s3dgraphy has no resources.master_stamp (MICRO-TIMBRA-MASTER, "
+                                "6 Nov 2026): point the bridge at a newer checkout")
+                return
+            try:
+                self._json({"ok": True, "mark": MS.mark(full, tier=tier, declared_kind=kind)})
+            except Exception as exc:  # noqa: BLE001 — a file that cannot be read is said
+                self._json({"ok": False, "error": str(exc)})
+
+        def _photogrammetry_chain(self, body):
+            """``POST /stamp/photogrammetry-chain`` ``{psx, chunk?, write?,
+            operator?}`` → ``{ok, chunk, steps: [{step, label, name, folder,
+            inputs, master_kind}], pending, warnings, written?}``. Without
+            ``write`` nothing is hashed (the plan); with it every image set and
+            mesh is hashed and the stamps are written beside the photographs'
+            folders and the .psx — never over a stamp already there."""
+            full, err = self._fs_resolve(str(body.get("psx") or ""), want="file")
+            if err:
+                self._fail(*err)
+                return
+            try:
+                from s3dgraphy.importer.metashape_chain import photogrammetric_chain, write_chain
+                from s3dgraphy.importer.metashape_project import read_metashape_project
+            except ImportError:
+                self._fail(501, "this s3dgraphy has no importer.metashape_chain (MICRO-TIMBRA-MASTER, "
+                                "6 Nov 2026): point the bridge at a newer checkout")
+                return
+            write = bool(body.get("write"))
+            op = body.get("operator") if isinstance(body.get("operator"), dict) else None
+            try:
+                project = read_metashape_project(full)
+                chain = photogrammetric_chain(project, chunk=body.get("chunk") or None, operator=op,
+                                              digests=write)
+                out = {"ok": True, "chunk": chain["chunk"], "pending": chain["pending"],
+                       "warnings": chain["warnings"],
+                       "steps": [{"step": st["step"], "label": st["label"], "name": st["name"],
+                                  "folder": st["folder"], "inputs": st["inputs"],
+                                  "resource_id": st["stamp"]["self"]["resource_id"],
+                                  "master_kind": st["stamp"]["self"].get("master_kind")}
+                                 for st in chain["steps"]]}
+                if write:
+                    out["written"] = write_chain(chain)
+                self._json(out)
+            except LookupError as exc:
+                self._fail(404, str(exc))
+            except Exception as exc:  # noqa: BLE001
+                self._json({"ok": False, "error": str(exc)})
 
         def _stamp_identity(self, body):
             """La forza di una o più identità, chiesta a s3Dgraphy.

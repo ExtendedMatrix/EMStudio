@@ -642,6 +642,9 @@ import {
   type FsEntry,
   type FsListing,
 } from "./storage";
+import { masterMark, photogrammetryChain, type MasterMark } from "./storage";
+import { looksLikeMaster, markText, needsStamp, gestureOf } from "./master-mark";
+import { masterKindName } from "./rules";
 import {
   DEFAULT_ASSET_LICENSE,
   RESIDENCIES,
@@ -43824,7 +43827,33 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
     const obv = AL.overBand(x, b0);
     const stv = cell(x.made?.at ? x.made.at.slice(0, 10) : "—", x.modified_after_stamp ? "al-mod" : "", x.made_say);
     if (x.modified_after_stamp) stv.textContent += ` · ${t("al.modified")}`;
-    if (!x.stamped) stv.textContent += ` · ${t("al.unstamped")}`;
+    if (!x.stamped && !x.master) stv.textContent += ` · ${t("al.unstamped")}`;
+    // MICRO-TIMBRA-MASTER p.1 · the master: its sign and its kind, seen, and
+    // «Timbra» right there (the graph's master_kind, else its textures say it)
+    if (x.master) {
+      const node = store?.doc?.graph?.nodes.find((n) => n.id === x.id);
+      const declared = (node?.data as Record<string, unknown> | undefined)?.master_kind;
+      const kind = typeof declared === "string" ? declared
+        : (x.textures.length || (x.texture_count ?? 0) > 0) ? "complete" : x.texture_count === 0 ? "very_high_resolution" : null;
+      const state = !x.stamped ? "unstamped" : x.modified_after_stamp ? "changed_after_stamp" : "stamped";
+      const tag = document.createElement("span");
+      tag.className = "al-master" + (needsStamp(state) ? " al-master-todo" : "");
+      tag.dataset.masterState = state;
+      if (kind) tag.dataset.masterKind = kind;
+      tag.textContent = " " + markText(state, kind, t, masterKindName);
+      stv.appendChild(tag);
+      const path = x.url && !x.url.startsWith("blend://") ? fileStateOf(x.id)?.path ?? "" : "";
+      if (state === "unstamped" && path) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ghost al-fix";
+        b.dataset.action = "master-stamp";
+        b.textContent = t("master.stamp");
+        b.title = t("master.stampHint");
+        b.onclick = (e) => { e.stopPropagation(); void stampFromQueue(path); };
+        stv.appendChild(b);
+      }
+    }
     const state = cell(x.state ? t(`al.file.${x.state}`, undefined, x.state.replace(/_/g, " ")) : t("al.file.unchecked"),
       x.state === "missing" || x.state === "empty_copy" ? "over" : x.in_cloud ? "al-cloud" : "");
     state.colSpan = targets.length;
@@ -44214,6 +44243,9 @@ function recheckBlocksLater(): void {
 
 /** The words of a block, and its gesture. */
 function blockWords(b: AL.Block): string {
+  // MICRO-TIMBRA-MASTER · a source that is a master says so first
+  if (b.code === "unstamped" && b.path && !b.stamp_of && looksLikeMaster(b.path))
+    return `${t("master.state.unstamped")} — ${t("al.block.unstamped", { file: baseName(b.path) })}`;
   if (b.code === "unstamped" && b.stamp_of)
     return t(b.stamp_of.master ? "al.block.unstampedMaster" : "al.block.unstampedOther",
       { file: b.path ? baseName(b.path) : "", at: b.stamp_of.at, level: b.stamp_of.level });
@@ -46788,6 +46820,118 @@ function blendFolderCentre(win: Win, blend: string): HTMLElement {
   return centre;
 }
 
+/** MICRO-TIMBRA-MASTER p.2 · «Timbra la catena fotogrammetrica…» on a .psx:
+ *  the plan of the active chunk (nothing hashed), one row per step with its
+ *  inputs — the texturing with TWO, the reduced mesh and the oriented photos —
+ *  what the project does not hold yet said; then the stamps written. */
+async function stampPhotogrammetryChain(psx: string): Promise<void> {
+  const plan = await photogrammetryChain(psx);
+  if (!plan.ok) { toast(plan.error || t("storage.bridgeDown")); return; }
+  const body = document.createElement("div");
+  body.className = "master-chain";
+  body.dataset.masterChain = plan.chunk?.id ?? "";
+  const lead = document.createElement("p");
+  lead.textContent = t("master.chainLead");
+  body.appendChild(lead);
+  const list = document.createElement("ol");
+  const steps = plan.steps ?? [];
+  const sets = steps.filter((x) => x.step === "acquisition").length;
+  let shownSets = false;
+  for (const st of steps) {
+    if (st.step === "acquisition") {
+      if (shownSets) continue;
+      shownSets = true;
+    }
+    const li = document.createElement("li");
+    li.dataset.step = st.step;
+    li.textContent = st.step === "acquisition"
+      ? `${t("master.chainStep.acquisition")} · ${sets} × ${st.label.replace(/^photographs /, "")}${sets > 1 ? " …" : ""}`
+      : `${t(`master.chainStep.${st.step}`)} · ${st.label}` + (st.master_kind ? ` · ${masterKindName(st.master_kind).toLowerCase()}` : "")
+        + (st.inputs.length > 1 && st.step !== "alignment" ? ` (${st.inputs.length} ⟵)` : "");
+    list.appendChild(li);
+  }
+  for (const p of plan.pending ?? []) {
+    const li = document.createElement("li");
+    li.dataset.step = p.step;
+    li.dataset.pending = "1";
+    li.className = "files-hint";
+    li.textContent = `${t(`master.chainStep.${p.step}`)} — ${t("master.chainPending", { why: p.why })}`;
+    list.appendChild(li);
+  }
+  body.appendChild(list);
+  const me = currentIdentity();
+  const ans = await openDialog({ title: t("master.chainTitle", { chunk: plan.chunk?.label ?? "" }), body,
+    kind: "photogrammetry-chain", ok: t("master.chainWrite", { n: String(steps.length) }) });
+  if (!ans.ok) return;
+  if (!me?.orcid) { toast(t("master.chainNoAuthor")); return; }
+  const done = await photogrammetryChain(psx, { write: true, chunk: plan.chunk?.id,
+    operator: { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") } });
+  if (!done.ok) { toast(done.error || t("storage.bridgeDown")); return; }
+  const kept = (done.written ?? []).filter((w) => w.endsWith("(kept)")).length;
+  toast(t("master.chainWritten", { n: String((done.written ?? []).length - kept), kept: String(kept) }));
+  logInfo(`${t("master.chainTitle", { chunk: plan.chunk?.label ?? "" })}: ${(done.written ?? []).length} stamps`);
+  renderStorage();
+}
+
+/** MICRO-TIMBRA-MASTER · s3Dgraphy's marks of the master files seen, by path
+ *  (and mtime: a file changed is asked again); "asking" while the bridge works */
+const masterMarks = new Map<string, { mtime: number; mark: MasterMark | null | "asking" }>();
+
+/** The graph's word on a file: `tier` and `master_kind` of the resource that
+ *  cites it, when one does. */
+function graphMasterFacts(path: string): { tier?: string; kind?: string } {
+  const ids = new Set(filesUses(path).map((u) => u.id));
+  const n = ids.size ? store?.doc?.graph?.nodes.find((x) => ids.has(x.id)) : undefined;
+  const d = (n?.data ?? {}) as Record<string, unknown>;
+  return { tier: typeof d.tier === "string" ? d.tier : undefined,
+           kind: typeof d.master_kind === "string" ? d.master_kind : undefined };
+}
+
+/** The sign of a master file on its Archive row (asked of the bridge once per
+ *  mtime): «⚠ master non timbrato · altissima risoluzione» and «Timbra», which
+ *  opens the stamp of this file; a stamped master shows its kind, quietly. */
+function paintMasterSign(row: HTMLElement, name: HTMLElement, entry: FsEntry, stamped: boolean): void {
+  const facts = graphMasterFacts(entry.path);
+  if (!looksLikeMaster(entry.path, facts.tier)) return;
+  const had = masterMarks.get(entry.path);
+  if (!had || had.mtime !== entry.mtime) {
+    masterMarks.set(entry.path, { mtime: entry.mtime, mark: "asking" });
+    void masterMark(entry.path, facts.tier, facts.kind).then((m) => {
+      masterMarks.set(entry.path, { mtime: entry.mtime, mark: m });
+      renderStorage();
+    });
+    return;
+  }
+  const m = had.mark;
+  if (!m || m === "asking") return;
+  const tag = document.createElement("span");
+  tag.className = "storage-master" + (needsStamp(m.state) ? " storage-master-todo" : "");
+  tag.dataset.masterState = m.state;
+  if (m.kind) tag.dataset.masterKind = m.kind;
+  tag.textContent = markText(m.state, m.kind, t, masterKindName);
+  tag.title = m.why || "";
+  name.after(tag);
+  row.dataset.master = m.state;
+  const g = gestureOf(m.state);
+  if ((g === "stamp" || g === "restamp") && !stamped === (g === "stamp")) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "storage-master-stamp";
+    b.dataset.action = "master-stamp";
+    b.textContent = t(g === "stamp" ? "master.stamp" : "master.restamp");
+    b.title = t(g === "stamp" ? "master.stampHint" : "master.restampHint");
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void fsList(paths.dirname(entry.path)).then(async (listing) => {
+        await ensureFolderCover(listing);
+        const it = listing.entries.find((x) => x.path === entry.path);
+        if (it) openDraft([it], listing);
+      }, () => toast(t("storage.bridgeDown")));
+    });
+    tag.after(b);
+  }
+}
+
 function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement {
   const row = document.createElement("div");
   row.className = "storage-row" + (entry.outside ? " storage-outside" : "");
@@ -46885,6 +47029,10 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
     no.title = cover.memberOf.has(entry.path) ? t("files.inASet") : t("files.notStamped");
     seal.appendChild(no);
   }
+  // MICRO-TIMBRA-MASTER p.1 · a MASTER as it arrives: the sign, seen, with
+  // its kind and the gesture that stamps it here
+  if (entry.type === "file" && !isStampPath(entry.path) && cover && !cover.memberOf.has(entry.path))
+    paintMasterSign(row, name, entry, !!own);
   // CAMPAGNA · a member of a file set is IN a stamp, not unstamped: said here
   const door = cover?.memberOf.get(entry.path);
   if (door && door !== entry.path) {
@@ -47032,6 +47180,9 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
         }, () => toast(t("storage.bridgeDown")));
       });
     }
+    // MICRO-TIMBRA-MASTER p.2 · a Metashape project: its whole chain, stamped
+    if (/\.psx$/i.test(entry.name))
+      item(t("master.chain"), "stamp-photogrammetry-chain", () => { void stampPhotogrammetryChain(entry.path); });
     if (/\.(em\.json|emj|graphml)$/i.test(entry.name))
       item(t("storage.openDoc", { name: entry.name }), "open-doc-here", () => { void openFromStorage(entry.path); },
         currentFilePath === entry.path ? t("storage.alreadyOpen") : undefined);
