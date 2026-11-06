@@ -35,6 +35,20 @@ for (const c of table.cases) {
   eq({ id: got.entry ? got.entry.id : null, reason: got.reason, use: got.use, note: Boolean(got.note) }, c.expect, c.name);
 }
 
+// 1b · the version for the HARDWARE (E.D., 2 Nov 2026; MICRO-GIS-BASE): s3Dgraphy's
+//      `choose_for_hardware` table through `chooseForHardware`
+{
+  const HV = new URL("../src/assets/version_for_hardware_cases.json", import.meta.url).pathname;
+  const HS = new URL("../../../s3Dgraphy/src/s3dgraphy/JSON_config/version_for_hardware_cases.json", import.meta.url).pathname;
+  if (existsSync(HS)) eq(readFileSync(HV, "utf8"), readFileSync(HS, "utf8"), "the vendored hardware table is s3Dgraphy's");
+  for (const c of JSON.parse(readFileSync(HV, "utf8")).cases) {
+    const got = M.chooseForHardware(c.entries, c.hardware);
+    if (c.expect.id === null) { eq(got, null, c.name); continue; }
+    eq({ id: got.entry ? got.entry.id : null, reason: got.reason, note: Boolean(got.note) }, c.expect, c.name);
+  }
+  assert.throws(() => M.chooseForHardware([], "tablet")); n++;
+}
+
 // 2 · the chain
 const sum = (c) => "sha256:" + c.repeat(64);
 const nodes = [

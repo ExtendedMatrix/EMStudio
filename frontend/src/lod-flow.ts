@@ -216,8 +216,11 @@ export function pickByDistance(versions: readonly FlowVersion[], dist: number, f
 
 /** The modes of a model's versions: the one chosen, the one of the device's
  *  use, or the distance. */
-/** MICRO-GLOBO-INTERAZIONE p.4 · `light`, the default: the lightest version (`lightestVersion`) */
-export type VersionMode = "manual" | "use" | "auto" | "light";
+/** MICRO-GLOBO-INTERAZIONE p.4 · `light`: the lightest version (`lightestVersion`).
+ *  MICRO-GIS-BASE (E.D., 2 Nov 2026) · `profile`, the default: the version made
+ *  for the hardware profile (`chooseForHardware`), the lightest only when
+ *  nothing is made for it */
+export type VersionMode = "manual" | "use" | "auto" | "light" | "profile";
 
 /**
  * MICRO-TILESET-CONTENITORE p.3 · a CONTAINER and its tileset in the automatic

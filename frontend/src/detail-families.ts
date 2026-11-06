@@ -151,7 +151,7 @@ export const NODE_FAMILY_TABLE: NodeFamilyDef[] = [
   { key: "resources", classes: ["ResourceNode", "ResourceFileNode"], matrix: false, graph: true },
   {
     key: "georef",
-    classes: ["GeoPositionNode", "RegistrationTransformNode", "GCPSetNode"],
+    classes: ["GeoPositionNode", "RegistrationTransformNode", "GCPSetNode", "LandscapeSurfaceNode"],
     matrix: false, graph: true,
   },
   {

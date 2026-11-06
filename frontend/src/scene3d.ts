@@ -262,6 +262,9 @@ export interface SpaceSceneHandle {
   startModal(mode: ModalMode): boolean;
   /** MICRO-GEOGLOBO · the globe of the Space (null: none) */
   setGeo(g: GeoDriver | null): void;
+  /** MICRO-GIS-BASE · the GIS layers of the graph (`gis-scene.ts`): a second
+   *  driver beside the globe, drawn with or without the territory */
+  setGis(g: GeoDriver | null): void;
   /** MICRO-GEOREF-GRAFO p.3 · the box of the models drawn (three's axes), null while none has come */
   contentBox(): [V3, V3] | null;
 }
@@ -468,6 +471,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   let api: Partial<SpaceSceneHandle> = {};
   /** MICRO-GEOGLOBO · the globe, and the scene's parts once the engine is up */
   let geo: GeoDriver | null = null;
+  let gis: GeoDriver | null = null;
   let geoCtx: GeoCtx | null = null;
   let cursorAt: V3 = [0, 0, 0];
   let cursorSet = false;
@@ -644,6 +648,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         });
       };
       (probe as Record<string, unknown>).__spaceCacheKeys = () => [...cache.keys()].map((k) => k.replace(/^obj\u0000/, "obj:"));
+      // MICRO-GIS-BASE · what the GPU holds (three's own count): a version left behind shows here
+      (probe as Record<string, unknown>).__spaceMemory = () => ({ geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
+        programs: renderer.info.programs?.length ?? null, cached: cache.size });
       // MICRO-PROVA-DEV47 p.3a · an OBJ version (the survey's levels of the
       // author, RB/LOD0–2 of Templu Mare): the .obj, the .mtl it calls, the
       // textures the .mtl calls, every file through the set's addresses. The
@@ -697,6 +704,28 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       /** a version of the flow: a glb, or an OBJ of the author's */
       const loadV = (v: FlowVersion): Promise<Loaded> => (v.obj ? loadObj(v.url, v.obj.modifier) : load(v.url));
+      /** the file each model drew at the last rebuild (outside the flow, which evicts its own) */
+      const lastUrlOf = new Map<string, string>();
+      let releasedCount = 0;
+      const releaseReplaced = () => {
+        const keyOf = (it: SceneItem) => (it.obj ? `obj\u0000${it.url}` : String(it.url));
+        const inUse = new Set<string>();
+        for (const it of items) {
+          if (it.url) inUse.add(keyOf(it));
+          for (const part of it.parts ?? []) inUse.add(part.url);
+          for (const v of it.flow ?? []) inUse.add(cacheKeyOf(v));
+        }
+        for (const [k, was] of lastUrlOf) {
+          const it = items.find((i) => `${i.kind}:${i.id}` === k);
+          if (!it || !it.url || it.flow?.length) continue;
+          const now = keyOf(it);
+          // the probes' seam: `__EM_KEEP_REPLACED__` keeps the old behaviour, to measure it
+          if (now !== was && !inUse.has(was) && cache.has(was) && !(window as unknown as { __EM_KEEP_REPLACED__?: boolean }).__EM_KEEP_REPLACED__) { evict(was); releasedCount++; }
+        }
+        lastUrlOf.clear();
+        for (const it of items) if (it.url && !it.flow?.length && !isTilesetUrl(it.url) && !it.tiles) lastUrlOf.set(`${it.kind}:${it.id}`, keyOf(it));
+      };
+      (probe as Record<string, unknown>).__spaceReleased = () => releasedCount;
       const cacheKeyOf = (v: FlowVersion): string => (v.obj ? `obj\u0000${v.url}` : v.url);
       const failed = (item: SceneItem, why: FetchFailure): SceneItem => ({ ...item, state: why });
       let framed = false;
@@ -1622,6 +1651,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
 
       rebuild = () => {
         const gen = ++generation;
+        // MICRO-GIS-BASE (E.D., 2 Nov 2026: «scrivi se la precedente viene liberata») ·
+        // a model that changed version (its mode, the hardware profile, a level
+        // chosen) gives the file it drew back to the GPU when nothing else draws it
+        releaseReplaced();
         content.clear();
         labels.textContent = "";
         anchors.length = 0;
@@ -2368,6 +2401,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         stepAnim(performance.now());
         // MICRO-GEOGLOBO · the globe moves the camera in its mode (its hands, a flight)
         if (geo) geo.update();
+        if (gis) gis.update();
         if (!geo?.ownsPointer()) { level(); controls.update(); }
         const live = liveLayers();
         // MICRO-TILESET-CONTENITORE p.3 · the container's side at every frame, BEFORE the tiles
@@ -3253,6 +3287,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         rafWin.cancelAnimationFrame(raf);
         geo?.detach();
         geo = null;
+        gis?.detach();
+        gis = null;
         dropPendingPick();
         for (const l of layers.values()) l.layer.dispose();
         layers.clear();
@@ -3402,6 +3438,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         },
       };
       if (geo) geo.attach(geoCtx);
+      if (gis) gis.attach(geoCtx);
       rebuild();
       syncSketches();
       tick();
@@ -3449,6 +3486,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       if (g === geo) return;
       geo?.detach();
       geo = g;
+      if (g && geoCtx) g.attach(geoCtx);
+    },
+    setGis: (g) => {
+      if (g === gis) return;
+      gis?.detach();
+      gis = g;
       if (g && geoCtx) g.attach(geoCtx);
     },
   };

@@ -202,9 +202,12 @@ export interface Space3dPrefs {
   collapsed?: string[];
   /** p.10 · how each model chooses its version: manual (the one picked), the
    *  device's use, or the distance; absent = by use */
-  versionModes?: Record<string, { mode: "manual" | "use" | "auto" | "light"; versionId?: string }>;
+  versionModes?: Record<string, { mode: "manual" | "use" | "auto" | "light" | "profile"; versionId?: string }>;
   /** p.10 · the use «Per uso» asks (web in a browser, realtime in the desktop, unless changed) */
   deviceUse?: string;
+  /** MICRO-GIS-BASE (E.D., 2 Nov 2026) · the hardware profile the Space loads
+   *  for (desktop | web | mobile); absent = read from the machine */
+  hardware?: "desktop" | "web" | "mobile";
   /** p.12 · a container with its tileset's alternative: models, the tileset, or the distance (absent = auto) */
   altModes?: Record<string, "models" | "tileset" | "auto" | "use">;
 }

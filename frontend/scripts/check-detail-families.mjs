@@ -106,7 +106,8 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
   // the types born after the snapshot (datamodel 1.6.37/1.6.47, 24 Oct: the
   // horizons, their periodizations and the edge between them) are not in it:
   // they are compared apart, below (MICRO-SUITE-VERDE)
-  const NEW_N = new Set(["horizon", "periodization"]), NEW_E = new Set(["is_in_periodization"]);
+  // MICRO-GIS-BASE (nodes 1.6.40, 6 Nov): the landscape surface, with the georeference
+  const NEW_N = new Set(["horizon", "periodization", "landscape_surface"]), NEW_E = new Set(["is_in_periodization"]);
   const hidden = (vis, all = false) => ({
     n: nodeTypes.filter((t) => (all || !NEW_N.has(t)) && (() => { const l = F.nodeLeaf(t); return l && !vis.has(l); })()).sort(),
     e: edgeTypes.filter((t) => (all || !NEW_E.has(t)) && (() => { const l = F.edgeLeaf(t); return l && !vis.has(l); })()).sort(),
@@ -116,8 +117,9 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
   for (const v of ["graph", "dtc", "multigraph", "graphs"])
     eq(hidden(F.defaultVisibleLeaves(v), true), { n: [], e: [] }, `the ${v} view shows every type by default`);
   // the horizons and periodizations: time's references, not lanes — off in the Matrix
-  eq(hidden(F.defaultVisibleLeaves("matrix"), true).n.filter((t) => NEW_N.has(t)), ["horizon", "periodization"],
-    "the Matrix hides the horizons and their periodizations by default (they are not its lanes)");
+  eq(hidden(F.defaultVisibleLeaves("matrix"), true).n.filter((t) => NEW_N.has(t)), ["horizon", "landscape_surface", "periodization"],
+    "the Matrix hides the horizons and their periodizations by default (they are not its lanes), and the landscape surface as the georeference");
+  eq(F.nodeFamilyOf("landscape_surface"), "georef", "a landscape surface is with the georeference");
   eq(F.nodeFamilyOf("horizon"), "epochs", "a horizon is with the epochs");
   for (const k of ["full", "harris", "em-compact", "em-complete"])
     eq(hidden(F.TEMPLATES.find((x) => x.key === k).leaves), frozen[k], `the template «${k}» hides what it hid`);

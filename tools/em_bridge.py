@@ -2284,7 +2284,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: their heads (tileset.json or the stored members of a .3tz, never the
 #: geometry) and passes them to s3Dgraphy (``tiles=``): a tileset «ok» for a
 #: target only if its tiles fit the band, and then it covers its meshes.
-BRIDGE_LEVEL = 60   # 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 61   # 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3219,6 +3219,27 @@ def make_handler(api):
                 if not self._fs_gate():
                     return
                 self._geo_get(parsed, route, body=body)
+            elif route == "/gis/inspect":
+                # MICRO-GIS-BASE · what a GIS file is: format, CRS from the file, bbox (+ WGS 84)
+                if not self._fs_gate():
+                    return
+                q = urllib.parse.parse_qs(parsed.query)
+                path = self._geo_inside((q.get("path") or [""])[0])
+                if not path or not os.path.exists(_long_path(path)):
+                    self._fail(404, "no such file (or outside the served roots)")
+                    return
+                try:
+                    from s3dgraphy.gis import inspect_layer
+                except ImportError as exc:
+                    self._fail(501, f"this s3dgraphy has no gis.inspect_layer (MICRO-GIS-BASE): {exc}")
+                    return
+                try:
+                    ins = inspect_layer(path, layer=(q.get("layer") or [None])[0] or None,
+                                        z_field=(q.get("z_field") or [None])[0] or None)
+                except Exception as exc:  # noqa: BLE001 — a file it cannot read is said
+                    self._json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 422)
+                    return
+                self._json({"ok": True, **ins})
             elif route == "/fs/roots":
                 if not self._fs_gate():
                     return
@@ -3679,6 +3700,25 @@ def make_handler(api):
                     return
                 fn = self._compose_plan if route == "/blend/compose-plan" else self._master_place
                 status, out = fn(body if isinstance(body, dict) else {})
+                self._json(out, status)
+            elif route in ("/gis/features", "/gis/surface", "/graph/gis-ingest",
+                           "/graph/landscape-surface", "/graph/gis-contours"):
+                # MICRO-GIS-BASE · the GIS layers: read (s3Dgraphy, no GDAL),
+                # drawn in the scene's CRS, brought into the graph as a delta
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                try:
+                    from s3dgraphy.gis import inspect_layer as _il  # noqa: F401
+                except ImportError as exc:
+                    self._fail(501, f"this s3dgraphy reads no GeoPackage/GeoJSON/GeoTIFF "
+                                    f"(MICRO-GIS-BASE is needed): {exc}")
+                    return
+                status, out = self._gis_post(route, body if isinstance(body, dict) else {})
                 self._json(out, status)
             elif route in ("/consolidate", "/graph/compose-plan", "/graph/before-after", "/graph/tileset-whole",
                            "/graph/register-new-version", "/graph/tileset-master", "/assets/list"):
@@ -6912,6 +6952,140 @@ def make_handler(api):
                         "entries": entries})
 
         # ── MICRO-GEOGLOBO · the globe (`em_geotiles.py`) ───────────────
+
+        def _gis_delta(self, graph, fn):
+            """``_delta_of`` kept to what ``fn`` touched: that one compares the
+            EXPORTED data with the data in memory, and on Templu Mare v6 a layer
+            brought in came back with 783 nodes «changed» by the export's own
+            normalisation (measured 6 Nov 2026) — a change nobody made."""
+            dump = lambda n: json.dumps(getattr(n, "data", None) or {}, sort_keys=True, default=str)
+            before = {n.node_id: dump(n) for n in graph.nodes}
+            got, delta = self._delta_of(graph, fn)
+            touched = {n.node_id for n in graph.nodes if n.node_id in before and dump(n) != before[n.node_id]}
+            delta["nodes_changed"] = [c for c in delta.get("nodes_changed") or [] if c.get("id") in touched]
+            return got, delta
+
+        def _gis_path_of(self, graph, rid, em_folder):
+            """The file of a gis_layer resource on this disk: its url (or its
+            entry point's) against the em.json's folder."""
+            n = graph.find_node_by_id(rid)
+            if n is None:
+                raise ValueError(f"{rid!r} is not a node of this graph")
+            d = getattr(n, "data", {}) or {}
+            url = str(d.get("url") or "")
+            if not url:
+                for e in graph.edges:
+                    if e.edge_type == "has_file" and e.edge_source == rid:
+                        f = graph.find_node_by_id(e.edge_target)
+                        fd = getattr(f, "data", {}) or {}
+                        if fd.get("role", "") in ("entry_point", "") or str(fd.get("url", "")).lower().endswith(".shp"):
+                            url = str(fd.get("url") or fd.get("path") or "")
+                            if url.lower().endswith(".shp") or fd.get("role") == "entry_point":
+                                break
+            if not url:
+                raise ValueError(f"{rid} names no file")
+            full = url if os.path.isabs(os.path.expanduser(url)) else os.path.join(em_folder or "", url)
+            full = self._geo_inside(os.path.normpath(os.path.expanduser(full)))
+            if not full or not os.path.exists(_long_path(full)):
+                raise FileNotFoundError(f"{url}: not on this disk (or outside the served roots)")
+            return full, d
+
+        def _gis_post(self, route, body):
+            """MICRO-GIS-BASE · ``/gis/features {path, scene_crs, layer?,
+            z_field?, feature_key?, crs?}`` → the features in the scene's CRS;
+            ``/gis/surface {dem, image?, scene_crs, step?}`` → the ground as a
+            grid of heights (and the image's texture coordinates);
+            ``/graph/gis-ingest {doc, doc_path, path, layer?, z_field?,
+            feature_key?, crs?, attach_to?}`` → the layer as a resource, a delta;
+            ``/graph/landscape-surface {doc, dem_id, image_id?, site_id?,
+            step_m?}`` → the LandscapeSurfaceNode, a delta;
+            ``/graph/gis-contours {doc, doc_path, dem_id, interval, base?}`` →
+            the contours written beside the DEM (a name never taken), the
+            derived layer and its DTC step, a delta, and its stamp beside it."""
+            import em_gis as GI
+            try:
+                if route == "/gis/features":
+                    path = self._geo_inside(body.get("path"))
+                    if not path or not os.path.exists(_long_path(path)):
+                        return 404, {"ok": False, "error": "no such file (or outside the served roots)"}
+                    return 200, GI.features_in(path, body.get("scene_crs"), layer=body.get("layer") or None,
+                                               z_field=body.get("z_field") or None,
+                                               feature_key=body.get("feature_key") or None,
+                                               crs=body.get("crs") or None)
+                if route == "/gis/surface":
+                    dem = self._geo_inside(body.get("dem"))
+                    img = self._geo_inside(body.get("image")) if body.get("image") else None
+                    if not dem or not os.path.isfile(_long_path(dem)):
+                        return 404, {"ok": False, "error": "no such DEM (or outside the served roots)"}
+                    if body.get("image") and (not img or not os.path.isfile(_long_path(img))):
+                        return 404, {"ok": False, "error": "no such image (or outside the served roots)"}
+                    step = float(body["step"]) if body.get("step") else None
+                    return 200, GI.surface_grid(dem, body.get("scene_crs"), image_path=img, step=step,
+                                                dem_crs=body.get("dem_crs") or None,
+                                                image_crs=body.get("image_crs") or None)
+                if not isinstance(body.get("doc"), dict):
+                    return 400, {"ok": False, "error": "the graph open in EMStudio is wanted ('doc')"}
+                from s3dgraphy import gis as SG
+                graph, em_folder = self._graph_of(body)
+                if route == "/graph/gis-ingest":
+                    path = self._geo_inside(body.get("path"))
+                    if not path or not os.path.exists(_long_path(path)):
+                        return 404, {"ok": False, "error": "no such file (or outside the served roots)"}
+                    # the locator: relative to the em.json's folder (both real paths: /tmp is
+                    # /private/tmp on macOS, and a relpath across the two climbed to the root)
+                    em_real = os.path.realpath(em_folder) if em_folder else ""
+                    url = os.path.relpath(os.path.realpath(path), em_real) if em_real else os.path.basename(path)
+                    if url.startswith(".." + os.sep + ".." + os.sep + ".."):
+                        url = path
+                    got, delta = self._gis_delta(graph, lambda: SG.add_gis_layer(
+                        graph, path, url=url.replace(os.sep, "/"), layer=body.get("layer") or None,
+                        z_field=body.get("z_field") or None, feature_key=body.get("feature_key") or None,
+                        crs=body.get("crs") or None, attach_to=body.get("attach_to") or None))
+                    return 200, {"ok": True, "resource_id": got["resource_id"], "warnings": got["warnings"],
+                                 "inspect": {k: v for k, v in got["inspect"].items() if k != "features"},
+                                 "delta": delta}
+                if route == "/graph/landscape-surface":
+                    step = float(body["step_m"]) if body.get("step_m") else None
+                    got, delta = self._gis_delta(graph, lambda: SG.add_landscape_surface(
+                        graph, str(body.get("dem_id") or ""), image_id=body.get("image_id") or None,
+                        site_id=body.get("site_id") or None, step_m=step))
+                    return 200, {"ok": True, **got, "delta": delta}
+                if route == "/graph/gis-contours":
+                    dem_id = str(body.get("dem_id") or "")
+                    interval = float(body.get("interval") or 0)
+                    if not interval > 0:
+                        return 400, {"ok": False, "error": "the interval must be a positive number of metres"}
+                    dem_path, dd = self._gis_path_of(graph, dem_id, em_folder)
+                    rows, aff, nodata, crs = GI.dem_rows(dem_path)
+                    out_path = GI.contours_beside(dem_path, interval)
+                    url = (os.path.relpath(os.path.realpath(out_path), os.path.realpath(em_folder)).replace(os.sep, "/")
+                           if em_folder else os.path.basename(out_path))
+                    sw = [{"name": "EMStudio em-bridge", "version": str(BRIDGE_LEVEL)},
+                          {"name": "s3dgraphy", "version": str(getattr(__import__("s3dgraphy"), "__version__", ""))}]
+                    got, delta = self._gis_delta(graph, lambda: SG.add_contours(
+                        graph, dem_id, rows, aff, interval=interval, out_path=out_path, url=url,
+                        crs=dd.get("crs") or crs, nodata=nodata, base=float(body.get("base") or 0),
+                        author=str(body.get("author") or "") or None, software=sw))
+                    stamp_path = None
+                    try:
+                        from s3dgraphy import api as _api
+                        stamp = _api.emit_stamp(graph, got["resource_id"])
+                        clean = {k: v for k, v in stamp.items() if not str(k).startswith("_")}
+                        stamp_path = out_path + ".stamp.json"
+                        with open(stamp_path, "w", encoding="utf-8") as fh:
+                            json.dump(clean, fh, ensure_ascii=False, indent=2)
+                    except Exception as exc:  # noqa: BLE001 — the layer stays, the stamp is said missing
+                        got["warnings"].append(f"no stamp written: {exc}")
+                    return 200, {"ok": True, "resource_id": got["resource_id"], "process_id": got["process_id"],
+                                 "lines": got["lines"], "levels": got["levels"], "path": out_path,
+                                 "stamp": stamp_path, "warnings": got["warnings"], "delta": delta}
+                return 404, {"ok": False, "error": "unknown gis route"}
+            except FileNotFoundError as exc:
+                return 404, {"ok": False, "error": str(exc)}
+            except ImportError as exc:
+                return 501, {"ok": False, "error": f"a dependency is missing in this bridge ({exc})"}
+            except ValueError as exc:
+                return 422, {"ok": False, "error": str(exc)}
 
         def _geo_inside(self, raw):
             """A folder or file named by the page, inside the served roots."""

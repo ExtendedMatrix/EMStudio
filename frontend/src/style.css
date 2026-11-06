@@ -11389,3 +11389,18 @@ td.al-cloud { color: var(--accent-ink); }
 }
 .al-hydrate { margin-bottom: 8px; }
 .al-hydrate .files-hint { margin: 4px 0; }
+
+/* MICRO-GIS-BASE · the graph's GIS layers in the Space */
+.gis-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+.gis-label { position: absolute; left: 0; top: 0; padding: 0 4px; font: 11px/16px system-ui, sans-serif; color: #fff;
+  background: rgba(20, 20, 20, 0.72); border-left: 3px solid #ff6600; border-radius: 2px; white-space: nowrap;
+  margin: -8px 0 0 6px; will-change: transform; }
+.gis-panel { right: auto; left: 12px; }
+.gis-list { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; margin: 6px 0; }
+.gis-row { display: flex; flex-direction: column; gap: 2px; padding: 3px 4px; border-bottom: 1px solid rgba(127, 127, 127, 0.2); }
+.gis-row label { display: flex; gap: 6px; align-items: center; }
+.gis-row small { opacity: 0.75; }
+.gis-acts { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.gis-acts input[type="number"] { width: 5em; }
+.gis-inspect { margin-top: 6px; font-size: 12px; }
+.scn-hw { font-variant-numeric: tabular-nums; }

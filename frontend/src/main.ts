@@ -262,8 +262,9 @@ import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
 import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type Probes } from "./load-failure";
-import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
+import { chooseForHardware, chooseVersion, HARDWARE, SCENE_USES, USES, type Hardware, type HardwareEntry } from "./asset-versions";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
+import { mountGisSpace, type GisSpaceDeps } from "./gis-space";
 import { epsgOf, georefSummary, parseShiftTxt } from "./georef";
 import {
   actFor, documentNode, documentsOf, effective, entering, frameData, newIngress, stampParameters,
@@ -13937,7 +13938,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 60;   // 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 61;   // 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -28128,12 +28129,65 @@ function groupMenuEntries(models: string[], x: number, y: number): Array<{ label
 
 /** The use «Per uso» asks: web in a browser, realtime in the desktop, unless the person changed it. */
 function deviceUse(): string { return space3dPrefs().deviceUse ?? (isTauri() ? "realtime" : "web"); }
+/**
+ * MICRO-GIS-BASE (E.D., 2 Nov 2026) · the HARDWARE PROFILE the Space loads for:
+ * the person's choice (the chip in the Space's bar), else read from the machine
+ * — a phone, a tablet or a stand-alone headset (the user agent, a coarse
+ * pointer on a small screen) is «mobile»; the desktop app on a real GPU is
+ * «desktop» (a robust desktop: the realtime versions); a browser, or the app
+ * on a software renderer (SwiftShader, llvmpipe), is «web».
+ */
+let hardwareSeen: Hardware | null = null;
+let hardwareWhy = "";
+function detectHardware(): Hardware {
+  if (hardwareSeen) return hardwareSeen;
+  const ua = navigator.userAgent || "";
+  const uad = (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData;
+  const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+  const small = Math.min(screen.width || 9999, screen.height || 9999) < 820;
+  if (uad?.mobile || /Android|iPhone|iPad|iPod|Mobile|OculusBrowser|Quest|Pico/i.test(ua) || (coarse && small)) {
+    hardwareSeen = "mobile";
+    hardwareWhy = uad?.mobile ? "userAgentData.mobile" : /Android|iPhone|iPad|iPod|Mobile|OculusBrowser|Quest|Pico/i.test(ua) ? "user agent" : "coarse pointer, small screen";
+    return hardwareSeen;
+  }
+  let gpu = "";
+  try {
+    const c = document.createElement("canvas");
+    const gl = (c.getContext("webgl2") || c.getContext("webgl")) as WebGLRenderingContext | null;
+    const ext = gl?.getExtension("WEBGL_debug_renderer_info");
+    gpu = gl ? String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? "") : "";
+    (gl?.getExtension("WEBGL_lose_context") as { loseContext?: () => void } | null)?.loseContext?.();
+  } catch { gpu = ""; }
+  const software = !gpu || /SwiftShader|llvmpipe|softpipe|Software|Microsoft Basic Render/i.test(gpu);
+  hardwareSeen = isTauri() && !software ? "desktop" : "web";
+  hardwareWhy = `${isTauri() ? "desktop app" : "browser"}${gpu ? `, ${gpu}` : ""}`;
+  return hardwareSeen;
+}
+function hardwareProfile(): Hardware { return space3dPrefs().hardware ?? detectHardware(); }
+/** a version of the Space as `chooseForHardware` reads it: its profile from its
+ *  step (`parameters.profile`, the level's name) or its file's name */
+function hardwareEntry(v: RmVersion): HardwareEntry {
+  const d = (v.data ?? {}) as Record<string, unknown>;
+  const step = (v.step ?? {}) as Record<string, unknown>;
+  const par = (step.parameters ?? {}) as Record<string, unknown>;
+  const prim = (d.primitives ?? {}) as Record<string, unknown>;
+  const tris = typeof v.tris === "number" ? v.tris : typeof prim.triangles === "number" ? prim.triangles : null;
+  return { id: v.id, master: !!v.master, use: v.uses ?? [], lod_level: v.lod,
+    size_bytes: typeof v.bytes === "number" ? v.bytes : typeof d.size_bytes === "number" ? d.size_bytes : undefined,
+    ...(tris ? { primitives: { triangles: tris } } : {}),
+    profile: AL.profileOfVersion({ profile: typeof par.profile === "string" ? par.profile : undefined,
+      level: typeof par.level === "string" ? par.level : undefined, url: v.url, master: !!v.master }),
+    made_at: String(step.modified_at ?? step.created_at ?? "") };
+}
+/** the chip's words: «desktop», «web», «mobile», and why */
+const hardwareWord = (h: Hardware): string => t(`hw.${h}`);
 function versionModeOf(rmId: string): { mode: VersionMode; versionId?: string } {
   // MICRO-TILESET-CONTENITORE p.3 · a member of a container whose tileset is in
   // «Automatico» draws, near, with its own automatic LOD (unless the person chose)
   const a = spaceAltInfo.get(rmId);
   // MICRO-GLOBO-INTERAZIONE p.4 · nobody chose: the lightest version (E.D.)
-  return space3dPrefs().versionModes?.[rmId] ?? { mode: a && a.role === "models" && a.mode === "auto" ? "auto" : "light" };
+  // MICRO-GIS-BASE (E.D., 2 Nov 2026) · nobody chose: the version for the hardware profile
+  return space3dPrefs().versionModes?.[rmId] ?? { mode: a && a.role === "models" && a.mode === "auto" ? "auto" : "profile" };
 }
 /** The mode of some models (a container's: all of its members), per person. */
 function setVersionMode(rmIds: string[], mode: VersionMode, versionId?: string): void {
@@ -28240,7 +28294,14 @@ function levelWhyNot(_rm: SpaceRM, v: RmVersion): string {
  */
 function rmFlow(rm: SpaceRM): FlowVersion[] {
   const lv = rmLevels(rm);
-  const vs = drawableVersions(rm).filter((v) => v.format !== "tiles" && !v.master);
+  // MICRO-GIS-BASE (E.D., 2 Nov 2026) · the distance never asks, on a web or
+  // mobile profile, a version over the profile's band nor a big one (a lod0 of
+  // 223 MB on a phone); on the desktop the flow is as it was
+  const hw = hardwareProfile();
+  const band = HARDWARE[hw].band;
+  const vs0 = drawableVersions(rm).filter((v) => v.format !== "tiles" && !v.master);
+  const light = hw === "desktop" ? vs0 : vs0.filter((v) => !isHeavy(v) && !(band != null && typeof v.tris === "number" && v.tris > band));
+  const vs = light.length ? light : vs0;
   const authors = vs.filter((v) => lv.get(v.id)?.origin === "author");
   const finest = authors.length > 1 ? authors.reduce((a, b) => ((lv.get(a.id)?.authorOrd ?? 99) <= (lv.get(b.id)?.authorOrd ?? 99) ? a : b)) : null;
   return buildChain(vs.map((v) => {
@@ -28303,6 +28364,17 @@ function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowS
   }
   if (m.mode === "manual" && m.versionId) {
     const v = vs.find((x) => x.id === m.versionId);
+    if (v) return asPlan(v);
+  }
+  // MICRO-GIS-BASE (E.D., 2 Nov 2026) · the default: the version made for the
+  // hardware profile (desktop → realtime, web → webXR, mobile → mobile webXR),
+  // the heaviest in its band; the lightest only when nothing is made for it.
+  // A tileset is a packaging, not a version for a profile: only when nothing else opens
+  if (m.mode === "profile") {
+    const files = vs.filter((v) => v.format !== "tiles");
+    const pool = files.length ? files : vs;
+    const ch = chooseForHardware(pool.map(hardwareEntry), hardwareProfile());
+    const v = ch?.entry ? pool.find((x) => x.id === ch.entry!.id) : undefined;
     if (v) return asPlan(v);
   }
   // MICRO-GLOBO-INTERAZIONE p.4 · the default (E.D., 23 Oct 2026: «sempre la versione
@@ -28404,12 +28476,31 @@ function drawnVersionOf(rm: SpaceRM): RmVersion | null {
   }
   return null;
 }
+/** MICRO-GIS-BASE · the chip's menu: the three profiles (the machine's marked), and «as the machine says» */
+function openHardwareMenu(x: number, y: number): void {
+  const now = hardwareProfile();
+  const chosen = space3dPrefs().hardware;
+  const set = (h: Hardware | undefined) => {
+    const p = { ...space3dPrefs() };
+    if (h) p.hardware = h; else delete p.hardware;
+    setSpace3dPrefs(p);
+    logInfo(t("hw.log", { hw: hardwareWord(hardwareProfile()), how: t(h ? "hw.byHand" : "hw.byMachine") }));
+  };
+  spaceMenu(x, y, t("hw.menuHead"), [
+    ...(["desktop", "web", "mobile"] as const).map((h) => ({
+      label: `${now === h ? "●" : "·"} ${t(`hw.${h}Long`)}${detectHardware() === h ? ` · ${t("hw.thisMachine")}` : ""}`,
+      act: `hw:${h}`, run: () => set(h) })),
+    "sep",
+    { label: t("hw.auto", { hw: hardwareWord(detectHardware()) }), act: "hw:auto", disabled: !chosen, run: () => set(undefined) },
+  ]);
+}
 /** «Versioni»: the three modes, for the models given (a menu's entries). */
 function versionMenuEntries(rmIds: string[]): Array<{ label: string; act: string; run: () => void; disabled?: boolean }> {
   const sp = currentSpace();
   const withVersions = rmIds.filter((id) => (sp?.rms.find((r) => r.id === id)?.versions?.length ?? 0) > 1);
   const off = !withVersions.length;
   return [
+    { label: t("ver.modeProfile", { hw: hardwareWord(hardwareProfile()) }), act: "ver-profile", disabled: off, run: () => setVersionMode(withVersions, "profile") },
     { label: t("ver.modeLight"), act: "ver-light", disabled: off, run: () => setVersionMode(withVersions, "light") },
     { label: t("ver.modeAuto"), act: "ver-auto", disabled: off, run: () => setVersionMode(withVersions, "auto") },
     { label: t("ver.modeUse", { use: deviceUse() }), act: "ver-use", disabled: off, run: () => setVersionMode(withVersions, "use") },
@@ -28459,7 +28550,8 @@ async function chooseLevels(pairs: Array<[string, string]>): Promise<boolean> {
   for (const [rmId, vid] of pairs) setVersionMode([rmId], "manual", vid);
   return true;
 }
-const modeWord = (m: VersionMode): string => t(m === "manual" ? "lod.chipManual" : m === "auto" ? "lod.chipAuto" : m === "light" ? "lod.chipLight" : "lod.chipUse");
+const modeWord = (m: VersionMode): string => m === "profile" ? t("lod.chipProfile", { hw: hardwareWord(hardwareProfile()) })
+  : t(m === "manual" ? "lod.chipManual" : m === "auto" ? "lod.chipAuto" : m === "light" ? "lod.chipLight" : "lod.chipUse");
 /** The levels some models share, by their short name («LOD2», «intero»), with the version of each */
 function sharedLevels(rmIds: string[]): Array<{ short: string; pairs: Array<[string, string]> }> {
   const sp = currentSpace();
@@ -28502,6 +28594,7 @@ function lodMenuEntries(rmIds: string[]): Array<{ label: string; act: string; ru
       out.push({ label: t("lod.fixedAll", { lod: g.short, n: String(g.pairs.length) }), act: `lod:${g.short}`, run: () => { void chooseLevels(g.pairs); } });
   }
   out.push("sep",
+    { label: t("ver.modeProfile", { hw: hardwareWord(hardwareProfile()) }), act: "ver-profile", run: () => setVersionMode(withVersions, "profile") },
     { label: t("ver.modeLight"), act: "ver-light", run: () => setVersionMode(withVersions, "light") },
     { label: t("ver.modeAuto"), act: "ver-auto", run: () => setVersionMode(withVersions, "auto") },
     { label: t("ver.modeUse", { use: deviceUse() }), act: "ver-use", run: () => setVersionMode(withVersions, "use") });
@@ -28566,7 +28659,7 @@ function renderLodSection(host: HTMLElement, sp: Space | null): void {
   }
   const modes = new Set(withVersions.map((id) => versionModeOf(id).mode));
   const on = modes.size === 1 ? [...modes][0] : "";
-  seg("lod-mode", [["light", t("lod.light")], ["manual", t("tl.manual")], ["use", t("lod.byUse")], ["auto", t("tl.auto")]], on, (v) => {
+  seg("lod-mode", [["profile", t("lod.profile", { hw: hardwareWord(hardwareProfile()) })], ["light", t("lod.light")], ["manual", t("tl.manual")], ["use", t("lod.byUse")], ["auto", t("tl.auto")]], on, (v) => {
     if (v === "manual") {
       // Manual: the version each draws now stays
       for (const id of withVersions) { const rm = sp?.rms.find((r) => r.id === id); const dv = rm ? drawnVersionOf(rm) : null; setVersionMode([id], "manual", dv?.id); }
@@ -28627,8 +28720,8 @@ function renderVersionsInto(host: HTMLElement, rmId: string): boolean {
   const row = (lab: string, el: HTMLElement) => { const d = document.createElement("label"); d.className = "ver-row"; const s = document.createElement("span"); s.textContent = lab; d.append(s, el); host.appendChild(d); };
   const mode = document.createElement("select");
   mode.dataset.ver = "mode";
-  for (const [v, k] of [["light", "ver.modeLightShort"], ["auto", "ver.modeAuto"], ["use", "ver.modeUseShort"], ["manual", "ver.modeManualShort"]] as const) {
-    const o = document.createElement("option"); o.value = v; o.textContent = t(k, { use: deviceUse() }); o.selected = m.mode === v; mode.appendChild(o);
+  for (const [v, k] of [["profile", "ver.modeProfileShort"], ["light", "ver.modeLightShort"], ["auto", "ver.modeAuto"], ["use", "ver.modeUseShort"], ["manual", "ver.modeManualShort"]] as const) {
+    const o = document.createElement("option"); o.value = v; o.textContent = t(k, { use: deviceUse(), hw: hardwareWord(hardwareProfile()) }); o.selected = m.mode === v; mode.appendChild(o);
   }
   mode.addEventListener("change", () => setVersionMode([rmId], mode.value as VersionMode, mode.value === "manual" ? drawnV?.id : undefined));
   row(t("ver.mode"), mode);
@@ -28745,7 +28838,7 @@ function wholeWins(groupId: string, sp: Space | null = currentSpace()): boolean 
   const chosen = space3dPrefs().versionModes ?? {};
   let sum = 0;
   for (const id of covers) {
-    if (chosen[id] && chosen[id].mode !== "light") return false;
+    if (chosen[id] && chosen[id].mode !== "light" && chosen[id].mode !== "profile") return false;
     const r = sp.rms.find((x) => x.id === id);
     const b = r ? rmVersionPlan(r).bytes ?? r.resource?.bytes ?? null : null;
     if (typeof b === "number") sum += b;
@@ -29835,8 +29928,28 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     redrawBar: () => refresh(),
     log: (m) => logWarn(m),
   });
+  // MICRO-GIS-BASE · the graph's GIS layers in this Space: drawn, shown/hidden, brought in
+  const gisSpace = mountGisSpace({
+    host, handle, t: (k, v) => t(k, v), person: () => overlayPerson(),
+    doc: () => (store?.doc ?? null) as ReturnType<GisSpaceDeps["doc"]>,
+    docPath: () => emtree.activeFile()?.path ?? currentFilePath,
+    bridge: () => bridgeUrl(), toast,
+    log: (m) => logWarn(m),
+    redrawBar: () => refresh(),
+    ingest: (path, layer) => gisIngest(path, layer),
+    surface: (dem, image) => gisSurface(dem, image),
+    contours: (dem, interval) => gisContours(dem, interval),
+  });
   const onBar = (e: Event) => {
     if (geoSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
+    if (gisSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
+    const hwb = (e.target as HTMLElement).closest<HTMLElement>("[data-hw]");
+    if (hwb) {
+      e.stopPropagation();
+      const r = hwb.getBoundingClientRect();
+      openHardwareMenu(r.left, r.bottom + 4);
+      return;
+    }
     const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close],[data-act='back']");
     if (!b) return;
     e.stopPropagation();
@@ -29961,7 +30074,15 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     fr.dataset.frame = "1";
     fr.textContent = "⤢";
     fr.title = t("space.frame");
-    bar.append(back, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr, ...geoSpace.barButtons());
+    // MICRO-GIS-BASE (E.D., 2 Nov 2026) · the hardware profile the scene loads for: seen, and changed here
+    const hwb = document.createElement("button");
+    hwb.type = "button";
+    hwb.className = "scn-tg scn-hw";
+    hwb.dataset.hw = hardwareProfile();
+    hwb.textContent = t("hw.chip", { hw: hardwareWord(hardwareProfile()) });
+    hwb.title = t(space3dPrefs().hardware ? "hw.titleChosen" : "hw.titleRead", { hw: hardwareWord(hardwareProfile()), why: (detectHardware(), hardwareWhy) });
+    bar.append(back, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr, hwb, ...geoSpace.barButtons(), ...gisSpace.barButtons());
+    gisSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
     // than one row) or run past its edge → the menu, for this drawing
@@ -30117,8 +30238,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       const nmS = rmShown(r.id, sp);
       // MICRO-SPAZIO-3D-3 p.10 · the version by its mode (manual, by use, the distance)
       const plan = isTiles ? {} : rmVersionPlan(r);
-      items.push({ kind: "rm", id: r.id, label: nmS && nmS.shown !== nmS.technical ? `${nmS.shown}${nmS.level ? ` · ${nmS.level}` : ""}` : r.name, state: r.resource?.state ?? "missing",
-        url: plan.url ?? spaceFileUrl(r.resource), resourceId: r.resource?.id, ...(plan.obj ? { obj: plan.obj } : {}),
+      // MICRO-GIS-BASE · the version the plan draws is the one a failed fetch marks
+      // (it marked the scene's choice by use: a mobile version absent from the disk
+      // left the model «missing» on every profile after, its web version included)
+      const pv = plan.versionId ? r.versions?.find((v) => v.id === plan.versionId) : undefined;
+      items.push({ kind: "rm", id: r.id, label: nmS && nmS.shown !== nmS.technical ? `${nmS.shown}${nmS.level ? ` · ${nmS.level}` : ""}` : r.name, state: pv?.resource?.state ?? r.resource?.state ?? "missing",
+        url: plan.url ?? spaceFileUrl(r.resource), resourceId: pv?.resource?.id ?? r.resource?.id, ...(plan.obj ? { obj: plan.obj } : {}),
         ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}),
         // MICRO-TILESET-CONTENITORE · every mode: the scene says what the container draws
         ...(alt ? { alt: { group: alt.group, role: alt.role, err: alt.err, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group,
@@ -30152,7 +30277,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     handle.syncSketches();
   };
   refresh();
-  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); geoSpace.destroy(); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
 }
 
 /** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
@@ -42157,7 +42282,7 @@ async function composeBlendDialog(blend: string): Promise<void> {
 
 // ── the delta of a background Blender ───────────────────────────────────────
 
-function applyBlendDelta(delta: GraphDelta | undefined | null): string {
+function applyBlendDelta(delta: GraphDelta | undefined | null, key = "blend.deltaApplied"): string {
   if (!store || !delta) return "";
   if (!(delta.nodes_added?.length || delta.nodes_changed?.length || delta.edges_added?.length)) return "";
   const st = store;
@@ -42170,7 +42295,7 @@ function applyBlendDelta(delta: GraphDelta | undefined | null): string {
     hasEdge: (id) => st.doc.graph.edges.some((e) => e.id === id),
   };
   const got = applyGraphDelta(ds, delta);
-  const line = t("blend.deltaApplied", { added: String(got.added), changed: String(got.changed), edges: String(got.edges) });
+  const line = t(key, { added: String(got.added), changed: String(got.changed), edges: String(got.edges) });
   if (got.skipped.length) logWarn(t("blend.deltaSkipped", { ids: got.skipped.join(", ") }));
   toastUndo(line, st);
   refreshInspector();
@@ -45804,6 +45929,52 @@ function tickedUpdates(blend: string, f: BlendFolder): CheckRow[] {
   if (!ticks?.size) return [];
   return updateRows(ba, (id) => fileStateOf(id)?.path ?? "").filter((u) => ticks.has(u.name))
     .map((u) => ({ ...u, tick: true }) as unknown as CheckRow);
+}
+
+/** MICRO-GIS-BASE · a GIS file brought into the graph (s3Dgraphy's readers in
+ *  the bridge, `/graph/gis-ingest`): a `gis_layer` resource, one undo step. The
+ *  site, when the graph has one, refers to it (`has_linked_resource`). */
+async function gisIngest(path: string, layer: string | null): Promise<string | null> {
+  const st = store;
+  if (!st || refuseReadOnly()) return null;
+  const site = st.doc.graph.nodes.find((n) => n.node_type === "LocationNodeGroup" && (n.data as Record<string, unknown> | undefined)?.level === "sito");
+  const j = await postGraph<{ resource_id?: string; warnings?: string[]; delta?: GraphDelta; inspect?: Record<string, unknown> }>("/graph/gis-ingest",
+    { doc: st.doc, doc_path: currentFilePath ?? "", path, ...(layer ? { layer } : {}), ...(site ? { attach_to: site.id } : {}) });
+  if (!j.ok || !j.delta) return t("gis.failed", { why: String(j.error ?? j.status) });
+  applyBlendDelta(j.delta, "gis.deltaApplied");
+  for (const w of j.warnings ?? []) logWarn(`GIS · ${w}`, [j.resource_id ?? ""]);
+  logInfo(t("gis.ingested", { name: paths.basename(path), crs: String(j.inspect?.crs ?? "—"), fmt: String(j.inspect?.gis_format ?? "") }), [j.resource_id ?? ""]);
+  refreshSurfaces("scene");
+  return null;
+}
+/** …the ground of the landscape: a LandscapeSurfaceNode on a DEM layer (and an image layer) */
+async function gisSurface(demId: string, imageId: string | null): Promise<string | null> {
+  const st = store;
+  if (!st || refuseReadOnly()) return null;
+  const site = st.doc.graph.nodes.find((n) => n.node_type === "LocationNodeGroup" && (n.data as Record<string, unknown> | undefined)?.level === "sito");
+  const j = await postGraph<{ surface_id?: string; warnings?: string[]; delta?: GraphDelta }>("/graph/landscape-surface",
+    { doc: st.doc, doc_path: currentFilePath ?? "", dem_id: demId, ...(imageId ? { image_id: imageId } : {}), ...(site ? { site_id: site.id } : {}) });
+  if (!j.ok || !j.delta) return t("gis.failed", { why: String(j.error ?? j.status) });
+  applyBlendDelta(j.delta, "gis.deltaApplied");
+  logInfo(t("gis.surfaced", { name: String(st.node(demId)?.name ?? demId) }), [j.surface_id ?? "", demId]);
+  refreshSurfaces("scene");
+  return null;
+}
+/** …the contours of a DEM layer every `interval` metres: a derived, stamped layer */
+async function gisContours(demId: string, interval: number): Promise<string | null> {
+  const st = store;
+  if (!st || refuseReadOnly()) return null;
+  if (!currentFilePath) return t("gis.needSaved");
+  const who = currentIdentity()?.orcid ?? "";
+  const j = await postGraph<{ resource_id?: string; lines?: number; levels?: number[]; path?: string; stamp?: string | null; warnings?: string[]; delta?: GraphDelta }>(
+    "/graph/gis-contours", { doc: st.doc, doc_path: currentFilePath, dem_id: demId, interval, ...(who ? { author: who } : {}) });
+  if (!j.ok || !j.delta) return t("gis.failed", { why: String(j.error ?? j.status) });
+  applyBlendDelta(j.delta, "gis.deltaApplied");
+  for (const w of j.warnings ?? []) logWarn(`GIS · ${w}`, [j.resource_id ?? ""]);
+  logInfo(t("gis.contoured", { n: String(j.lines ?? 0), levels: String(j.levels?.length ?? 0), v: String(interval), path: String(j.path ?? ""),
+    stamp: j.stamp ? paths.basename(j.stamp) : "—" }), [j.resource_id ?? "", demId]);
+  refreshSurfaces("scene");
+  return null;
 }
 
 /** MICRO-CONSOLIDA-2 · «Registra come nuova versione»: the version's file

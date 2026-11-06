@@ -88,6 +88,10 @@ cp "$CFG/em_qualia_types.json" "$DST/"
 # the cases of the alternatives (s3Dgraphy 1.6.37, E.D. 17 Oct 2026): the contract
 # scripts/check-alternatives.mjs passes, like version_for_cases.json
 [ -f "$CFG/alternative_cases.json" ] && cp "$CFG/alternative_cases.json" "$DST/"
+# the cases of the version for the HARDWARE (s3Dgraphy, MICRO-GIS-BASE, E.D. 2 Nov
+# 2026): the contract scripts/check-version-for.mjs passes with chooseForHardware
+[ -f "$CFG/version_for_cases.json" ] && cp "$CFG/version_for_cases.json" "$DST/"
+[ -f "$CFG/version_for_hardware_cases.json" ] && cp "$CFG/version_for_hardware_cases.json" "$DST/"
 mkdir -p "$DST/icons2d"
 # BOTH raster and vector. Only `*.png` was copied here, which is why EMStudio drew
 # no SVG icons even after 28 of them shipped in s3Dgraphy: the renderer prefers

@@ -194,3 +194,86 @@ export function versionsOf(g: VersionGraph, assetId: string): VersionEntry[] {
   walk(assetId, 0);
   return out;
 }
+
+// ── the version for the HARDWARE (E.D., 2 Nov 2026) ─────────────────────────
+
+/** The hardware profiles of the Space and the use profile each loads — the
+ *  table of s3Dgraphy's `HARDWARE_PROFILES`, with the uses and the band of
+ *  triangles per object of each profile (`use_profiles.PROFILES`). */
+export type Hardware = "desktop" | "web" | "mobile";
+export const HARDWARE: Readonly<Record<Hardware, { profile: string; uses: readonly string[]; band: number | null }>> = {
+  desktop: { profile: "desktop_realtime", uses: ["realtime"], band: 500_000 },
+  web: { profile: "webxr", uses: ["heriverse", "aton", "web"], band: 50_000 },
+  mobile: { profile: "mobile_webxr", uses: ["mobile_ar"], band: 10_000 },
+};
+
+export interface HardwareEntry extends VersionEntry {
+  /** the profile it was made for (s3Dgraphy's `entry_profile`; «» for none) */
+  profile?: string;
+  primitives?: { triangles?: number; faces?: number };
+  use_params?: { triangles?: number };
+  made_at?: string;
+}
+export interface HardwareChoice {
+  entry: HardwareEntry | null;
+  reason: "profile" | "lightest" | "master" | "none";
+  profile: string;
+  note: string;
+}
+
+const trisOf = (e: HardwareEntry): number | null => {
+  for (const v of [e.primitives?.triangles, e.primitives?.faces, e.use_params?.triangles]) if (typeof v === "number" && v > 0) return Math.trunc(v);
+  return null;
+};
+const sizeKey = (e: HardwareEntry): Array<number | string> => {
+  const known = typeof e.size_bytes === "number";
+  return [known ? 0 : 1, known ? (e.size_bytes as number) : 0, -lodOrdinal(e), String(e.id)];
+};
+const cmpKeys = (a: Array<number | string>, b: Array<number | string>): number => {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  return 0;
+};
+
+/**
+ * s3Dgraphy's `choose_for_hardware`, the TS twin (its cases:
+ * `version_for_hardware_cases.json`, `scripts/check-version-for.mjs`): the
+ * versions MADE FOR the profile (by name or by one of its uses), the heaviest
+ * in its band of triangles per object; none in the band — the lightest of
+ * them, said; triangles unknown — the one named for it, most recent; nothing
+ * made for it — the LIGHTEST version there is, said; no version — the master.
+ */
+export function chooseForHardware(entries: HardwareEntry[], hw: Hardware): HardwareChoice | null {
+  const h = HARDWARE[hw];
+  if (!h) throw new Error(`hardware must be one of ${Object.keys(HARDWARE).join(", ")}, got ${hw}`);
+  const all = (entries || []).filter(Boolean);
+  if (!all.length) return null;
+  const pid = h.profile;
+  const versions = all.filter((e) => !e.master);
+  const madeFor = (e: HardwareEntry) => (e.profile ?? "") === pid || (e.use ?? []).some((u) => h.uses.includes(u));
+  const mine = versions.filter(madeFor);
+  if (mine.length) {
+    const known = mine.map((e) => [e, trisOf(e)] as const);
+    if (known.every(([, t]) => t != null)) {
+      const fit = known.filter(([, t]) => h.band == null || (t as number) <= h.band);
+      if (fit.length) {
+        const best = [...fit].sort((a, b) => ((b[1] as number) - (a[1] as number)) || cmpKeys(sizeKey(a[0]), sizeKey(b[0])))[0][0];
+        return { entry: best, reason: "profile", profile: pid, note: "" };
+      }
+      const best = [...known].sort((a, b) => ((a[1] as number) - (b[1] as number)) || cmpKeys(sizeKey(a[0]), sizeKey(b[0])))[0][0];
+      return { entry: best, reason: "profile", profile: pid, note: `no ${pid} version within ${h.band} triangles per object: the lightest of them` };
+    }
+    const named = mine.filter((e) => (e.profile ?? "") === pid);
+    if (named.length) {
+      const best = [...named].sort((a, b) => cmpKeys([String(a.made_at ?? ""), String(a.id)], [String(b.made_at ?? ""), String(b.id)])).pop()!;
+      return { entry: best, reason: "profile", profile: pid, note: "" };
+    }
+    return { entry: [...mine].sort((a, b) => cmpKeys(sizeKey(a), sizeKey(b)))[0], reason: "profile", profile: pid, note: "" };
+  }
+  if (versions.length) {
+    return { entry: [...versions].sort((a, b) => cmpKeys(sizeKey(a), sizeKey(b)))[0], reason: "lightest", profile: pid,
+      note: `no version made for ${pid}: the lightest version instead` };
+  }
+  const master = all.find((e) => e.master);
+  if (!master) return { entry: null, reason: "none", profile: pid, note: "nothing to load" };
+  return { entry: master, reason: "master", profile: pid, note: `no version for ${pid}: the master is loaded` };
+}
