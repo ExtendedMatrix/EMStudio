@@ -174,6 +174,7 @@ back button returns to the full canvas.
 | konva / PixiJS / Cytoscape.js | MIT | yes |
 | dagre (if ever used for graph view) | MIT | yes |
 | ELK / elkjs | EPL-2.0 OR GPL-3.0-or-later (Secondary License declared) | yes — but unused (architectural: see §4.1) |
+| 3d-tiles-renderer-3tz 0.2.0 (E.D., the `.3tz` reader extracted from `frontend/src/tiles3tz.ts`; a GitHub dependency pinned to a commit in `frontend/package.json`, bundled into the frontend) | MIT | yes |
 | JointJS+ | commercial | no — excluded |
 | **Add-ons** (not shipped: downloaded on request, version and sha256 pinned in `tools/em_optimize.py`, called as separate programs) | | |
 | gltfpack 1.3 / 1.2 (meshoptimizer, Arseny Kapoulkine) | MIT | yes |

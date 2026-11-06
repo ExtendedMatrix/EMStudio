@@ -31,8 +31,10 @@ const load = async (what) => {
 const D = await load(`export * from "./tileset-drop"; export { plainGraph } from "./resources";
   export { blobSource, ZipArchive, gunzipIfGzip } from "./tiles3tz";`);
 
-/** a ByteSource that counts its reads and bytes */
+/** a ByteSource that counts its reads and bytes (its tail too: MICRO-3TZ-DAL-PACCHETTO,
+ *  `blobSource` has one now, the package's — the last bytes and the size in one read) */
 const counted = (src) => { let n = 0, bytes = 0; return { ...src, read: async (o, l) => { n++; const b = await src.read(o, l); bytes += b.length; return b; },
+  ...(src.tail ? { tail: async (l) => { n++; const t = await src.tail(l); bytes += t.bytes.length; return t; } } : {}),
   reads: () => n, bytes: () => bytes }; };
 
 let checks = 0;
@@ -203,6 +205,44 @@ if (existsSync(BIG)) {
   const gz = new Uint8Array(execFileSync("python3", ["-I", "-c", "import gzip,sys;sys.stdout.buffer.write(gzip.compress(b'b3dm-plain'))"]));
   eq(txt(await D.gunzipIfGzip(gz)), "b3dm-plain", "a gzipped tile inflated");
   eq(txt(await D.gunzipIfGzip(new TextEncoder().encode("b3dm"))), "b3dm", "…a plain one left as it is");
+}
+
+// ── hostile archives (MICRO-3TZ-DAL-PACCHETTO: the package's limits, kept) ──
+{
+  // a zip bomb (300 MB of zeros, ~300 KB deflated) in a canonical .3tz and in a
+  // plain zip; a .3tz whose end record says its directory is ~4 GB long
+  execFileSync("python3", ["-I", "-c", `import hashlib,struct,sys,zipfile
+def write(path, files, index):
+    with zipfile.ZipFile(path, 'w') as z:
+        for n, d in files: z.writestr(zipfile.ZipInfo(n), d, compress_type=zipfile.ZIP_DEFLATED)
+        if index:
+            keys = sorted(((hashlib.md5(i.filename.encode()).digest(), i.header_offset) for i in z.infolist()),
+                          key=lambda k: (int.from_bytes(k[0][:8], 'little'), int.from_bytes(k[0][8:], 'little')))
+            z.writestr(zipfile.ZipInfo('@3dtilesIndex1@'), b''.join(h + struct.pack('<Q', o) for h, o in keys))
+ts = b'{"asset":{"version":"1.0"},"geometricError":1,"root":{"geometricError":0,"content":{"uri":"bomb.b3dm"}}}'
+w = sys.argv[1]
+write(w + '/bomb.3tz', [('tileset.json', ts), ('bomb.b3dm', bytes(300 << 20))], True)
+write(w + '/bomb.zip', [('tileset.json', ts), ('bomb.b3dm', bytes(300 << 20))], False)
+write(w + '/liar.3tz', [('tileset.json', ts), ('bomb.b3dm', b'b3dm')], True)
+b = bytearray(open(w + '/liar.3tz', 'rb').read())
+struct.pack_into('<I', b, len(b) - 22 + 12, 0xfffffff0)
+open(w + '/liar.3tz', 'wb').write(b)`, WORK]);
+  const why = async (p) => { try { await p; return null; } catch (e) { return String(e?.message ?? e); } };
+  for (const name of ["bomb.3tz", "bomb.zip"]) {
+    const { tree, label, zipped } = await D.treeOfDrop([{ path: name, blob: await fileBlob(`${WORK}/${name}`) }]);
+    const r = await D.recognise(tree, label, zipped);
+    const served = D.servedSource(tree, r, false);
+    const said = [];
+    served.onFail = (p, e) => said.push([p, String(e?.message ?? e)]);
+    const w = await why(served.readEntry("bomb.b3dm"));
+    ok(r.form === "package" && /decompressed size is over the limit of 268435456 bytes/.test(w ?? ""),
+      `${name}: a zip bomb's tile refused while it inflates (${w})`);
+    eq(said.map(([p]) => p), ["bomb.b3dm"], "…and the refusal handed to the caller (the Log)");
+    eq(txt(await served.readEntry("tileset.json"))?.slice(0, 9), '{"asset":', "…the other entries still read");
+  }
+  const w = await why(D.treeOfDrop([{ path: "liar.3tz", blob: await fileBlob(`${WORK}/liar.3tz`) }]));
+  ok(/central directory does not end before the end records/.test(w ?? ""),
+    `a .3tz whose directory runs past its end records: refused, as a .3tz and as a plain zip (${w})`);
 }
 
 // ── the position line ────────────────────────────────────────────────────────

@@ -314,8 +314,12 @@ export function position(doc: Record<string, unknown> | null): Position {
  * without it — its own frame, centred where its volume says.
  */
 export function servedSource(tree: TreeSource, rec: Recognised, recentre: boolean):
-    TilesetReader & { served: string[]; firstTileAt: number | null } {
+    TilesetReader & { served: string[]; firstTileAt: number | null; onFail: ((path: string, e: unknown) => void) | null } {
   const served: string[] = [];
+  /** MICRO-3TZ-DAL-PACCHETTO · a read refused (an archive's limits: an entry
+   *  over 256 MB, inflated or not) is said: the caller writes it in the Log */
+  const failing = <T>(p: string, read: Promise<T>): Promise<T> =>
+    read.catch((e) => { out.onFail?.(p, e); throw e; });
   // MICRO-DROP-3TZ-GRANDE · the root read once (the renderer and the Space ask
   // it more than once: through a .3tz each is a request)
   let rootBytes: Promise<Uint8Array | null> | null = null;
@@ -323,11 +327,12 @@ export function servedSource(tree: TreeSource, rec: Recognised, recentre: boolea
     served,
     /** when the first TILE (not a json) was handed to the renderer */
     firstTileAt: null as number | null,
+    onFail: null as ((path: string, e: unknown) => void) | null,
     readEntry: async (path: string): Promise<Uint8Array | null> => {
       const p = path.replace(/^\/+/, "");
       if (p === ENTRY) {
         // (a failed read is not kept: asked again, it is read again)
-        const kept = await (rootBytes ??= tree.read(rec.entry).then(gunzipIfGzip)
+        const kept = await (rootBytes ??= failing(p, tree.read(rec.entry).then(gunzipIfGzip))
           .catch((e) => { rootBytes = null; throw e; }));
         const raw = kept ? kept.slice() : null;
         if (!raw) return null;
@@ -339,7 +344,7 @@ export function servedSource(tree: TreeSource, rec: Recognised, recentre: boolea
         delete root.transform;
         return new TextEncoder().encode(JSON.stringify({ ...doc, root }));
       }
-      const b = await tree.read(rec.prefix + p);
+      const b = await failing(p, tree.read(rec.prefix + p));
       if (b) {
         served.push(p);
         if (out.firstTileAt === null && TILE_EXT.test(p) && typeof performance !== "undefined") out.firstTileAt = performance.now();

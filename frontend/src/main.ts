@@ -27323,7 +27323,7 @@ async function droppedFrom(tree: TreeSource, label: string, zipped: boolean,
     disk?: DroppedTileset["disk"], bytes?: number | null, known?: Recognised): Promise<DroppedTileset | null> {
   let rec: Recognised;
   // MICRO-DROP-3TZ-GRANDE · a tree already recognised is not read again (a .3tz: a request)
-  try { rec = known ?? await recognise(tree, label, zipped); } catch (e) { toast(t("tsp.unreadable", { x: label, why: String(e) })); return null; }
+  try { rec = known ?? await recognise(tree, label, zipped); } catch (e) { droppedUnreadable(label, e); return null; }
   if (rec.form === "unknown") { toast(rec.says); logWarn(rec.says); return null; }
   const pos = position(rec.root);
   const recentred = pos.kind === "earth";
@@ -27332,7 +27332,20 @@ async function droppedFrom(tree: TreeSource, label: string, zipped: boolean,
     reader: servedSource(tree, rec, recentred), bytes: bytes ?? null, t0: performance.now(), ...(disk ? { disk } : {}) };
   droppedTilesets.set(id, d);
   logInfo(`${rec.says} · ${pos.line}`);
+  // MICRO-3TZ-DAL-PACCHETTO · a file of it refused (the archive's limits: a
+  // zip bomb, an entry over 256 MB) is said in the Log as a model is
+  // («… i byte sono arrivati ma non si leggono»); a network error is not:
+  // a drop's path is not a URL the probes could ask
+  d.reader.onFail = (p, e) => { if (!isNetworkError(e)) noteModelLoad(null, d.label, `${label}/${p}`, e); };
   return d;
+}
+
+/** MICRO-3TZ-DAL-PACCHETTO · a drop that cannot be read (a damaged or hostile
+ *  archive: a directory past its end) is said in the toast AND in the Log */
+function droppedUnreadable(name: string, e: unknown): void {
+  const line = t("tsp.unreadable", { x: name, why: String((e as Error)?.message ?? e) });
+  toast(line);
+  logWarn(line);
 }
 
 /** The files of a drop from the system, folders walked. The entries are taken
@@ -27375,7 +27388,10 @@ function dropLooksLikeTileset(list: Array<{ entry: any; file: File | null }>): b
 
 async function droppedFromFiles(files: Array<{ path: string; blob: Blob }>): Promise<DroppedTileset | null> {
   if (!files.length) return null;
-  const { tree, label, zipped } = await treeOfDrop(files);
+  let opened: Awaited<ReturnType<typeof treeOfDrop>>;
+  try { opened = await treeOfDrop(files); }
+  catch (e) { droppedUnreadable(files[0].path.split("/")[0] || files[0].path, e); return null; }
+  const { tree, label, zipped } = opened;
   const bytes = files.reduce((s, f) => s + f.blob.size, 0);
   return droppedFrom(tree, label, zipped, undefined, bytes);
 }
@@ -27433,7 +27449,7 @@ async function droppedFromPath(path: string, type: "dir" | "file"): Promise<Drop
     }
   } catch (e) {
     if (e instanceof BridgeDownError) { toast(t("storage.bridgeDown")); return null; }
-    toast(t("tsp.unreadable", { x: base, why: String((e as Error)?.message ?? e) }));
+    droppedUnreadable(base, e);
     return null;
   }
   return null;

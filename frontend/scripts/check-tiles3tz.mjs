@@ -45,10 +45,9 @@ function fileSource(path) {
 }
 
 // ── MD5 ─────────────────────────────────────────────────────────────────────
-for (const s of ["", "tileset.json", "Data/c01/e0222.b3dm", "Data/città.b3dm", "x".repeat(200)]) {
-  const mine = Buffer.from(Z.md5(new TextEncoder().encode(s))).toString("hex");
-  eq(mine, createHash("md5").update(s, "utf8").digest("hex"), `md5 of ${JSON.stringify(s.slice(0, 20))} is RFC 1321's`);
-}
+// MICRO-3TZ-DAL-PACCHETTO · the MD5 of the index keys is the package's (its
+// test: RFC 1321's vectors); here it is proved where it is used — TempluMare
+// read THROUGH its index (below, `cdMaxBytes` lowered), every path found
 
 // ── the conformance cases of dtcstamp ───────────────────────────────────────
 const CONF = process.env.DTCSTAMP_CONFORMANCE ?? new URL("../../../dtcstamp/conformance/", import.meta.url).pathname;
@@ -100,6 +99,18 @@ if (existsSync(`${BASE}/TempluMare_cesium.3tz`)) {
   ok(await same("Data/c01/e0222.b3dm"), "…a tile (Data/c01/e0222.b3dm) from the archive = the folder's");
   const tTile = performance.now() - t1;
   eq(await a.readEntry("Data/not-there.b3dm"), null, "…an entry that is not there is null");
+  // through the index: the MD5 of each path, a binary search (the package's)
+  const ai = await Z.Archive3tz.open(fileSource(`${BASE}/TempluMare_cesium.3tz`), { cdMaxBytes: 1024 });
+  const paths = ["tileset.json", "Data/c01/e0222.b3dm"];
+  for (const rel of readdirSync(`${BASE}/TempluMare_cesium/Data`).slice(0, 3)) {
+    const sub = `${BASE}/TempluMare_cesium/Data/${rel}`;
+    if (statSync(sub).isDirectory()) paths.push(`Data/${rel}/${readdirSync(sub)[0]}`);
+  }
+  eq([ai.stats.directory, paths.every((p) => ai.has(p)), ai.has("Data/not-there.b3dm")], ["index", true, false],
+    `…opened by its index (MD5 of the path): ${paths.length} paths found, a missing one not`);
+  const viaIndex = await ai.readEntry("Data/c01/e0222.b3dm");
+  ok(viaIndex && Buffer.compare(Buffer.from(viaIndex), readFileSync(`${BASE}/TempluMare_cesium/Data/c01/e0222.b3dm`)) === 0,
+    "…and a tile read through the index = the folder's");
   console.log(`  TempluMare.3tz: open ${tOpen.toFixed(1)} ms (${a.stats.openReads} reads), one tile ${tTile.toFixed(1)} ms`);
 } else console.log(`  (skipped: ${BASE}/TempluMare_cesium.3tz not here)`);
 
