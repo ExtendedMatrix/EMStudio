@@ -348,6 +348,8 @@ import {
 import {
   edgeAt,
   hitAddPhase,
+  hitRmChip,
+  drawnRmChips,
   drawnAdornmentHits,
   hitAdornmentBadge,
   hitInstanceBadge,
@@ -737,6 +739,8 @@ import { adaptDraft } from "./views/stamps";
 import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel, typeDescription, typeLabel as datamodelTypeLabel, endReasonLabel } from "./rules";
 import { epochInstances, instanceTransform, instanceTypes, planInstance } from "./epoch-instances";
 import { continuityLinks, dropContinuity, END_REASONS, END_REASON_DEFAULT, endOfUnit, endReasonDescription, endReasonOf, endReasonPredicate, endReasonWritten, planContinuity, type EndReason } from "./continuity";
+import { followersOf } from "./followers";
+import { documentRmDocs, epochRmCounts } from "./rm-chips";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
@@ -2624,9 +2628,11 @@ window.__EM_SCENE__ = () => {
     const cy = n.y + n.h / 2;
     return s.lanes.find((l) => cy >= l.y && cy < l.y + l.height)?.id ?? null;
   },
-  lanes: () => (scene()?.lanes ?? []).map((l) => ({ id: l.id, y: l.y, h: l.height })),
+  lanes: () => (scene()?.lanes ?? []).map((l) => ({ id: l.id, y: l.y, h: l.height, rm: l.rmCount ?? 0 })),
   memberOf: (id: string) => scene()?.memberOf?.get(id) ?? null,
   bands: () => (scene()?.subBands ?? []).map((b) => ({ lane: b.laneId, phase: b.phaseId, y: b.y, h: b.height })),
+  // MICRO-MATRIX-FASI · the RM chips as drawn (canvas px), the lanes' height
+  rmChips: () => drawnRmChips(),
   /** the node a press at canvas point (sx, sy) would take */
   hitAt: (sx: number, sy: number) => {
     const s = scene();
@@ -5936,6 +5942,18 @@ function filteredView(opts: { wholeGraph?: boolean;
                    label: t(hollow ? "s3.badgeEmpty" : "s3.badge"), ...(hollow ? { hollow: true } : {}) });
         adornments.set(id, arr);
       }
+  }
+  // MICRO-MATRIX-FASI p.3 · the same on the documents: their RMDoc (hollow:
+  // declared without a file). A click opens the Space on it. Every document
+  // carries it, drawn or not: a master the Matrix does not draw lends it to
+  // its instances (views/matrix.ts)
+  {
+    for (const [id, r] of documentRmDocs(doc)) {
+      const arr = adornments.get(id) ?? [];
+      arr.push({ ornamentId: `${RMDOC_BADGE}${r.rm}`, kind: "has_rmdoc",
+                 label: t(r.full ? "rmchip.doc" : "rmchip.docEmpty"), ...(r.full ? {} : { hollow: true }) });
+      adornments.set(id, arr);
+    }
   }
   return {
     nodes: vNodes,
@@ -11647,8 +11665,21 @@ const outlinerCallbacks: NodeListCallbacks = {
   // STRUTTURA · MARKED where they are: the WARNINGS of a unit and of what its
   // paradata group holds — hints are not marked, so the list stays quiet
   warningsOf: (id) => warningsByUnit().get(id) ?? [],
+  // MICRO-MATRIX-FASI p.3 · the epochs' RM, one count per document change
+  rmOfEpoch: (id) => (store ? epochRmCountsNow(store.doc).get(id) ?? 0 : 0),
+  openEpochInSpace: (id) => openEpochInSpace(id),
   isTemporalProperty: (id) => !!store?.epochOfTemporalProperty(id),
 };
+
+/** MICRO-MATRIX-FASI p.3 · `epochRmCounts`, remembered per document state */
+let rmCountsMemo: { doc: unknown; nodes: number; edges: number; v: Map<string, number> } | null = null;
+function epochRmCountsNow(doc: EmDocument): Map<string, number> {
+  const m = rmCountsMemo;
+  if (m && m.doc === doc && m.nodes === doc.graph.nodes.length && m.edges === doc.graph.edges.length && !scenesDirty) return m.v;
+  const v = epochRmCounts(doc);
+  rmCountsMemo = { doc, nodes: doc.graph.nodes.length, edges: doc.graph.edges.length, v };
+  return v;
+}
 
 /**
  * "The outliner", as every caller in this file still spells it — and now a verb
@@ -12063,17 +12094,18 @@ function placeInEpochLane(changes: [string, string, string][]): void {
   const archLanes = st.doc.layout?.swimlanes ?? [];
   const placed = new Map<string, { x: number; y: number }>();
   const settled = settledPlaces();
-  for (const [id, , to] of changes) {
+  const put = (id: string, to: string): void => {
     const drawn = s.byId.get(id);
     const sn = drawn && { ...drawn, ...settled(drawn) };
-    if (!sn || sn.collapsed || sn.instanceOf || s.memberOf?.has(id) || s.groupsById?.has(id)) continue;
-    if (isContinuityType(sn.node.node_type)) continue;
+    if (!sn || sn.collapsed || sn.instanceOf || s.memberOf?.has(id) || s.groupsById?.has(id)) return;
+    if (s.arrangedIn?.has(id)) return;   // in an open paradata group: its box carries it
+    if (isContinuityType(sn.node.node_type)) return;
     const band = s.subBands?.find((b) => b.phaseId === to && !b.residual) ?? s.lanes.find((l) => l.id === to);
-    if (!band) continue;
+    if (!band) return;
     // already in the lane: the hand put it there (a drag), or an undo/redo
     // put the view back with the step (`setViewHistory`)
     const cy = sn.y + sn.h / 2;
-    if (cy >= band.y && cy <= band.y + band.height) continue;
+    if (cy >= band.y && cy <= band.y + band.height) return;
     const at = freePlaceInBand(s, id, sn, band);
     const dx = at.x - sn.x, dy = at.y - sn.y;
     if (view?.[id]) view[id] = { ...view[id], x: view[id].x + dx, y: view[id].y + dy };
@@ -12083,7 +12115,21 @@ function placeInEpochLane(changes: [string, string, string][]): void {
     if (a && !(al && a.y + a.h / 2 >= al.y && a.y + a.h / 2 <= al.y + al.height))
       st.moveNodesBy([id], dx, dy, false);
     placed.set(id, at);
+  };
+  // MICRO-MATRIX-FASI p.2 · what depends only on the node (its properties, the
+  // extractors read only from it, their combiner) goes with it, in the same
+  // step: it has no epoch of its own. A property other nodes hold stays, and
+  // the Log says so.
+  const edges = st.liveEdges();
+  const sharedSaid: string[] = [];
+  for (const [id, , to] of changes) {
+    put(id, to);
+    const f = followersOf(edges, id);
+    for (const fid of f.follow) put(fid, to);
+    for (const p of f.shared) sharedSaid.push(t("matrix.followShared", {
+      prop: String(st.node(p)?.name ?? p), node: String(st.node(id)?.name ?? id) }));
   }
+  for (const m of sharedSaid) logInfo(m, []);
   if (!placed.size || !view) { if (placed.size) scenesDirty = true; return; }
   // MEASURED, as for a drop: the lanes' translations differ from lane to lane,
   // so look where the node landed and correct the view by the difference (no
@@ -27806,6 +27852,8 @@ const sceneBars = new Map<string, HTMLElement>();
 const spaceLayerSections = new Map<string, () => HTMLElement>();
 /** the ornament id of a unit's «ha 3D» badge: not a node, a door */
 const HAS3D_BADGE = "has3d:";
+/** MICRO-MATRIX-FASI p.3 · …and of a document's «RMDoc» badge (+ the RMDoc's id) */
+const RMDOC_BADGE = "rmdoc:";
 
 /**
  * MICRO-SPAZIO-3D p.5 · a click on «ha 3D»: the Space (this workspace's, else
@@ -27834,6 +27882,52 @@ function openUnitInSpace(unitId: string): void {
     if (Date.now() - t0 < 15000) setTimeout(tryFrame, 250);
   };
   setTimeout(tryFrame, 250);
+}
+/** MICRO-MATRIX-FASI p.3 · the Space window to open (this workspace's, else
+ *  the «Spazio» workspace's), the view left pushed for «Indietro» */
+function spaceWindowForDoor(): string | null {
+  pushView();
+  let win = windowsOf().find((w) => w.type === "scene");
+  if (!win) { setWorkspace("space"); win = windowsOf().find((w) => w.type === "scene"); }
+  if (!win) { toast(t("scene.noScene")); return null; }
+  spaceIsolated = null;
+  selectWindow(win.id);
+  return win.id;
+}
+/** …a click on a document's RMDoc: the Space on the RMDoc's epoch, the RMDoc
+ *  selected and framed once drawn */
+function openRmInSpace(rmId: string): void {
+  if (!store) return;
+  const sp = currentSpace();
+  const id = spaceWindowForDoor();
+  if (!id) return;
+  if (sp) { const ep = spaceEpochFor(rmId, sp); if (ep) spaceEpochId = ep; }
+  quietPick = true;
+  try { select(rmId); } finally { quietPick = false; }
+  refreshInspector();
+  refreshSurfaces("scene");
+  const t0 = Date.now();
+  const tryFrame = () => {
+    const h = sceneHandles.get(id);
+    if (h?.frameKeys([`rm:${rmId}`])) return;
+    if (Date.now() - t0 < 15000) setTimeout(tryFrame, 250);
+  };
+  setTimeout(tryFrame, 250);
+}
+/** …a click on an epoch's (or a phase's) RM chip: the Space on that epoch —
+ *  a phase shows only its models, the mother all of its phases' */
+function openEpochInSpace(epochId: string): void {
+  if (!store) return;
+  const id = spaceWindowForDoor();
+  if (!id) return;
+  spaceEpochId = epochId;
+  // the Chronology and the Inspector follow, as for a pick in the bar
+  quietPick = true;
+  try { select(epochId); } finally { quietPick = false; }
+  spaceEpochId = epochId;
+  refreshInspector();
+  refreshSurfaces("scene");
+  setTimeout(() => sceneHandles.get(id)?.frame(), 400);
 }
 /** the overlays that are CONTENT (what is drawn), not decorators: the general
  *  switch leaves them as they are — switching the overlays off does not empty
@@ -53125,6 +53219,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     insertPending = null;
     pdTagPending = null;
     addPhasePending = null;
+    rmChipPending = null;
     dateInvitePending = null;
     bandSelectPending = null;
     adornmentPending = null;
@@ -53175,6 +53270,13 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const pd = hitPdTag(lx, ly);
       if (pd) {
         pdTagPending = pd;
+        armChip();
+        return;
+      }
+      // MICRO-MATRIX-FASI p.3 · the RM chip beside an epoch's (a phase's) name
+      const rc = view === "dtc" ? null : hitRmChip(lx, ly);
+      if (rc) {
+        rmChipPending = rc;
         armChip();
         return;
       }
@@ -53730,6 +53832,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         openUnitInSpace(id.slice(HAS3D_BADGE.length));
         return;
       }
+      // MICRO-MATRIX-FASI p.3 · a document's RMDoc: the Space, on it
+      if (!moved && id.startsWith(RMDOC_BADGE) && hitAdornmentBadge(rx, ry) === id) {
+        openRmInSpace(id.slice(RMDOC_BADGE.length));
+        return;
+      }
       if (!moved && hitAdornmentBadge(rx, ry) === id) {
         // PROPRIETA · the property chip of a unit opens and closes its group
         if (isImplicitGroup(id)) toggleImplicit(id);
@@ -53744,6 +53851,12 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const id = pdDecoratorPending;
       pdDecoratorPending = null;
       if (!moved && hitPdDecorator(rx, ry) === id) select(id);
+      return;
+    }
+    if (rmChipPending) {
+      const id = rmChipPending;
+      rmChipPending = null;
+      if (!moved && hitRmChip(rx, ry) === id) openEpochInSpace(id);
       return;
     }
     // phase band label click → select that phase (residual → the epoch)
@@ -54158,6 +54271,8 @@ let instanceBadgePending: string | null = null; // FONTE · an instance's badge 
 let pdChipPending: { group: string; shift: boolean } | null = null;
 let pdDecoratorPending: string | null = null; // PD tablet pressed → select group on click
 let bandSelectPending: string | null = null; // phase band label pressed → select on click
+/** MICRO-MATRIX-FASI p.3 · an epoch's RM chip pressed → the Space on click */
+let rmChipPending: string | null = null;
 let addPhasePending: string | null = null; // epoch "+" button pressed → add phase on click
 let dateInvitePending: string | null = null; // E5 · an undated epoch's «add» pressed
 let hoverInsertBoundary: number | null = null; // EM-mode insert-epoch: hovered lane boundary

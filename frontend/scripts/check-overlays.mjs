@@ -33,7 +33,7 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "rights").items.map((i) => i.key),
     ["author", "author_ai", "license", "embargo", "inherited"], "authorship and rights: the four ornaments and the inherited");
   eq(new Set(O.OVERLAY_KEYS).size, O.OVERLAY_KEYS.length, "every overlay once");
-  eq(O.OVERLAY_KEYS.length, 45, "forty-five overlays: twenty-two of the graph, twenty-three of the Space (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics; MICRO-GLIFI-OVERLAY-CONTINUITA p.3: the continuity, in Time; MICRO-SERVSF-FINE-ISTANZE p.3: the instances, in Objects)");
+  eq(O.OVERLAY_KEYS.length, 47, "forty-seven overlays: twenty-four of the graph, twenty-three of the Space (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics; MICRO-GLIFI-OVERLAY-CONTINUITA p.3: the continuity, in Time; MICRO-SERVSF-FINE-ISTANZE p.3: the instances, in Objects; MICRO-MATRIX-FASI p.3: a document's RMDoc and an epoch's RM, in 3D)");
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "time").items.map((i) => i.key), ["lane_pd_tag", "date_invite", "continuity"], "Time: the epoch's tag, the invitation, the continuity");
   // every overlay is drawn somewhere: the renderers name it (a key nobody draws
   // would be a box that switches nothing)
@@ -48,7 +48,7 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
   // the liquid Graph draws two of them, the box views all
   eq(O.overlayItemsFor("graph").map((i) => i.key), ["pd_chip", "genre"], "the liquid Graph: the paradata chip and the genre letter");
   for (const v of ["matrix", "dtc", "multigraph", "soloing"])
-    eq(O.overlayItemsFor(v).length, 22, `${v}: every overlay of the graph`);
+    eq(O.overlayItemsFor(v).length, 24, `${v}: every overlay of the graph`);
   eq(O.overlayItemsFor("space").map((i) => i.key), ["s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_cursor", "s3_navgizmo", "s3_epoch_box", "s3_stats",
     "s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch",
     "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles", "s3_sketches", "s3_instances", "s3_sel_outline", "s3_gizmo",

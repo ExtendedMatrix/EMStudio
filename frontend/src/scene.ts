@@ -85,6 +85,8 @@ export interface SceneEdge {
 export interface Lane {
   id: string;
   label: string;
+  /** MICRO-MATRIX-FASI p.3 · the RM the Space shows for this epoch (its phases' too) */
+  rmCount?: number;
   y: number;
   height: number;
   /** the epoch's own colour (data.color, e.g. #CCFFCC) — tints the swimlane */
@@ -122,6 +124,8 @@ export interface SubBand {
   /** the phase EpochNode id, or the parent epoch id for the residual band */
   phaseId: string;
   label: string;
+  /** MICRO-MATRIX-FASI p.3 · the RM the Space shows for this phase */
+  rmCount?: number;
   color?: string;
   /** world-space top of the band */
   y: number;

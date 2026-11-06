@@ -44,6 +44,8 @@ export type OverlayKey =
   // 3D
   | "version_format"
   | "has_3d"
+  | "has_rmdoc"
+  | "epoch_rm"
   // MICRO-SPAZIO-3D · the Space's own (the 3D viewport, as Blender's Overlays);
   // MICRO-GIZMO-ASSI · the labels three (models, proxies, sketches), the axes
   // three, the navigation gizmo
@@ -138,6 +140,10 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     // MICRO-SPAZIO-3D p.5 · the badge «ha 3D» of a unit with a proxy (and its
     // hollow sign for a geometry without a file): the 2D glyph `proxy`
     { key: "has_3d", kind: "proxy" },
+    // MICRO-MATRIX-FASI p.3 · a document's RMDoc (hollow: declared without a
+    // file) and, on an epoch's or a phase's chip, how many RM it has
+    { key: "has_rmdoc", kind: "representation_model_doc" },
+    { key: "epoch_rm", kind: "representation_model" },
   ] },
   { key: "drawing", items: [
     { key: "genre", text: "M", liquid: true },

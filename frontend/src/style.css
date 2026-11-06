@@ -11498,3 +11498,18 @@ td.al-cloud { color: var(--accent-ink); }
 .gis-panel.gis-in-data { display: flex; flex-direction: column; gap: 4px; }
 .gis-in-data .gis-row label { display: flex; align-items: center; gap: 4px; }
 .gis-in-data button { font: inherit; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-panel); color: var(--text); padding: 1px 6px; cursor: pointer; }
+
+/* MICRO-MATRIX-FASI p.3 · the RM chip beside an epoch in «By epoch» */
+.nl-rmchip {
+  flex: none;
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 10px var(--font-mono);
+  line-height: 15px;
+  cursor: pointer;
+}
+.nl-rmchip:hover { color: var(--accent); border-color: var(--accent); }

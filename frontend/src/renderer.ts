@@ -417,6 +417,18 @@ let addPhaseHits: { id: string; cx: number; cy: number; r: number }[] = [];
 export function drawnAddPhase(): { id: string; cx: number; cy: number; r: number }[] {
   return addPhaseHits.map((h) => ({ ...h }));
 }
+/** MICRO-MATRIX-FASI p.3 · the RM chips beside an epoch's or a phase's name →
+ *  the epoch id (screen px, rebuilt each draw) */
+let rmChipHits: { id: string; n: number; x: number; y: number; w: number; h: number }[] = [];
+export function hitRmChip(sx: number, sy: number): string | null {
+  for (const t of rmChipHits)
+    if (sx >= t.x && sx <= t.x + t.w && sy >= t.y && sy <= t.y + t.h) return t.id;
+  return null;
+}
+/** …as drawn, for the checks */
+export function drawnRmChips(): { id: string; n: number; x: number; y: number; w: number; h: number }[] {
+  return rmChipHits.map((r) => ({ ...r }));
+}
 export function hitAddPhase(sx: number, sy: number): string | null {
   for (const t of addPhaseHits)
     if ((sx - t.cx) ** 2 + (sy - t.cy) ** 2 <= t.r * t.r) return t.id;
@@ -1781,7 +1793,7 @@ export function render(
         continue;
       }
       const b = ads[i];
-      if ((["author", "author_ai", "license", "embargo", "has_3d"] as string[]).includes(b.kind)) markOverlay(b.kind as OverlayKey);
+      if ((["author", "author_ai", "license", "embargo", "has_3d", "has_rmdoc"] as string[]).includes(b.kind)) markOverlay(b.kind as OverlayKey);
       if (b.inherited) markOverlay("inherited");
       // MICRO-SPAZIO-3D · «ha 3D» is drawn with the proxy's glyph; HOLLOW (a
       // geometry and nothing in it) attenuated, in a dashed frame — and still a
@@ -1793,7 +1805,9 @@ export function render(
       if (b.inherited) ctx.globalAlpha = 0.5;
       const pad = badgePx * BADGE_ICON_INSET;
       // SHIFT-A fase 6b · the ornament's own paths, when the datamodel has them
-      const bg = b.kind === "has_3d" ? glyphByKey("proxy") : glyphFor(b.kind);
+      // MICRO-MATRIX-FASI p.3 · a document's RMDoc with the RMDoc glyph
+      const bg = b.kind === "has_3d" ? glyphByKey("proxy")
+        : b.kind === "has_rmdoc" ? glyphByKey("representation_model_doc") : glyphFor(b.kind);
       const img = bg ? null : imageFor(b.kind);
       if (bg) {
         const side = badgePx - 2 * pad;
@@ -2047,6 +2061,34 @@ export function render(
   laneChipHits = [];
   bandLabelHits = [];
   dateInviteHits = [];
+  rmChipHits = [];
+  // MICRO-MATRIX-FASI p.3 · the RM chip: the RM glyph and how many, beside the
+  // name chip, as «ha 3D» beside a unit (a click: the Space on that epoch)
+  const drawRmChip = (id: string, n: number, x: number, y: number): void => {
+    markOverlay("epoch_rm");
+    const h = 18;
+    ctx.save();
+    ctx.font = canvasFont(700, 10.5);
+    const txt = String(n);
+    const tw = ctx.measureText(txt).width;
+    const g = glyphByKey("representation_model");
+    const w = 4 + (g ? 14 : 0) + 3 + tw + 6;
+    ctx.fillStyle = canvasTheme().handleFill;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, 4);
+    else ctx.rect(x, y, w, h);
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = canvasTheme().chipBorder;
+    ctx.stroke();
+    if (g) drawGlyph(ctx, g, x + 4, y + 2, 14, 14, glyphInk());
+    ctx.fillStyle = labelOn(canvasTheme().handleFill);
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(txt, x + 4 + (g ? 14 : 0) + 3, y + h / 2 + 0.5);
+    ctx.restore();
+    rmChipHits.push({ id, n, x, y, w, h });
+  };
   for (const lane of scene.lanes) {
     const sy = lane.y * vp.scale + vp.y;
     const sh = lane.height * vp.scale;
@@ -2167,6 +2209,7 @@ export function render(
     if (hasWarn) drawWarn(textX + nameW + 4, ty + 6);
     if (hasPd)
       drawPdTag(chipX + chipW - PD_TAG_W - 6, ty - 1, lane.paradataGroupId!);
+    if (lane.rmCount && !lane.horizon && ov("epoch_rm")) drawRmChip(lane.id, lane.rmCount, chipX + chipW + 4, ty - 2);
     // "+" quick-add-phase button: a small circle in the epoch's colour hanging
     // off the coloured rail just below the name chip. Lanes ARE top-level epochs
     // (phases don't render as lanes), so this only ever adds a phase to an epoch.
@@ -2251,8 +2294,10 @@ export function render(
   // fase II» inside Età contemporanea reads «fase II»).
   if (scene.subBands?.length) {
     const laneLabelOf = new Map(scene.lanes.map((l) => [l.id, l.label]));
+    // MICRO-MATRIX-FASI p.1 · a lane's RM chip is part of its head: no phase
+    // label over it either
     const clash = (x: number, y: number, w: number, h: number) =>
-      laneChipHits.find((r) => x < r.x + r.w && r.x < x + w && y < r.y + r.h && r.y < y + h) ?? null;
+      [...laneChipHits, ...rmChipHits].find((r) => x < r.x + r.w && r.x < x + w && y < r.y + r.h && r.y < y + h) ?? null;
     for (const sb of scene.subBands) {
       const sy = sb.y * vp.scale + vp.y;
       const sh = sb.height * vp.scale;
@@ -2263,8 +2308,12 @@ export function render(
       // rail; drawing another bar there would just double it.
       if (!sb.residual && sb.color) {
         const railX = RAIL + (sb.depth ?? 0) * 16;
-        const y0 = Math.max(sy, 0);
+        let y0 = Math.max(sy, 0);
         const y1 = Math.min(sy + sh, viewH);
+        // MICRO-MATRIX-FASI p.1 · the rail never crosses the epoch's chip (it
+        // cut «XX sec» into «X sec»): it starts under it
+        for (const r of laneChipHits)
+          if (railX < r.x + r.w && railX + 4 > r.x && y0 < r.y + r.h && r.y < y1) y0 = Math.max(y0, r.y + r.h + 2);
         if (y1 > y0) {
           ctx.save();
           ctx.globalAlpha = 0.9;
@@ -2352,6 +2401,7 @@ export function render(
       if (hasWarn) drawWarn(bandTextX + nameW + 4, ty + 5);
       if (hasPd)
         drawPdTag(chipX + chipW - PD_TAG_W - 5, ty - 1, sb.paradataGroupId!);
+      if (sb.rmCount && ov("epoch_rm")) drawRmChip(sb.phaseId, sb.rmCount, chipX + chipW + 4, ty - 1);
       // the chip is a click target → select the phase (residual → the epoch)
       bandLabelHits.push({ id: sb.phaseId, x: chipX, y: ty - 1, w: chipW, h: chipH });
     }

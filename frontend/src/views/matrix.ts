@@ -16,6 +16,8 @@ import type { EmDocument } from "../types";
 import { threedInstances, viewIndex, viewInstances, type ViewInstance } from "../paradata-view";
 import { paradataGroupScene, reattachedReadings } from "./pd-arrange";
 import { isRemoved } from "../crdt";
+import { ownerMap } from "../followers";
+import { epochRmCounts } from "../rm-chips";
 import { t } from "../i18n";
 import { ancestorsOf, endReasonLabel, isContinuityType, isVirtualType } from "../rules";
 import { continuityKind, continuityLinks, continuityPlace, endReasonOf, endReasonWritten } from "../continuity";
@@ -48,10 +50,12 @@ export interface RestackMemo {
   band: Map<string, number>;
   /** lane id → the upward growth (`top`) of the lane */
   top: Map<string, number>;
+  /** MICRO-MATRIX-FASI · lane id → what its bands held (order and nodes) */
+  sig: Map<string, string>;
 }
 
 export function newRestackMemo(): RestackMemo {
-  return { key: "", band: new Map(), top: new Map() };
+  return { key: "", band: new Map(), top: new Map(), sig: new Map() };
 }
 
 export const GROUP_HEADER = 20;
@@ -96,6 +100,7 @@ export function buildMatrixScene(
     memo.key = memoKey ?? "";
     memo.band.clear();
     memo.top.clear();
+    memo.sig.clear();
   }
   // A layoutOverride (a VIEW layout computed by em-core on the filtered
   // subgraph) recompacts the Matrix when detail-rings hide nodes, so hidden
@@ -243,6 +248,12 @@ export function buildMatrixScene(
   // give each lane its epoch's PDG id so the renderer draws the "PD" tag
   for (const lane of scene.lanes)
     lane.paradataGroupId = pdgOfEpochNode.get(lane.id);
+  // MICRO-MATRIX-FASI p.3 · …and how many RM the Space shows for it
+  const rmCounts = epochRmCounts(doc);
+  for (const lane of scene.lanes) {
+    const n = rmCounts.get(lane.id);
+    if (n) lane.rmCount = n;
+  }
 
   // MICRO-PROPRIETA-PARADATI p.2 · a paradata node born after the archival
   // layout (an extractor added from the Inspector, its new document, the
@@ -547,6 +558,11 @@ export function buildMatrixScene(
           h,
           node: masterNode,
           instanceOf: r.master,
+          // MICRO-MATRIX-FASI p.3 · a document's instance shows its RMDoc too
+          ...(() => {
+            const rd = view?.adornments?.get(r.master)?.filter((b) => b.kind === "has_rmdoc");
+            return rd?.length ? { adornments: rd } : {};
+          })(),
           instanceBadge: { owner: r.owner, ownerName: r.owner_name, ownerKind: r.owner_kind, group: g.id },
           ...(r.removed ? { trace: true } : {}),
           ...((r as { countLabel?: string | null }).countLabel ? { countLabel: (r as { countLabel?: string }).countLabel } : {}),
@@ -769,9 +785,24 @@ export function buildMatrixScene(
       }
       return cur;
     };
+    // MICRO-MATRIX-FASI p.2 · a property, an extractor, a combiner with no
+    // epoch of its own is in the phase of the node it depends on
+    const ownerOf = ownerMap(doc.graph.edges);
+    // MICRO-MATRIX-FASI p.1 · the phases in the order of time, newest on top:
+    // the start, else the end, else a name that IS a year («2013», «2015»),
+    // else after the dated ones (and among themselves as they were made)
     const num = (v: unknown): number => {
-      const n = Number(v);
+      const n = v == null || v === "" ? NaN : Number(v);
       return Number.isFinite(n) ? n : -Infinity;
+    };
+    const timeOf = (id: string): number => {
+      const d = nodeById.get(id)?.data as Record<string, unknown> | undefined;
+      const st = num(d?.start_time);
+      if (st > -Infinity) return st;
+      const en = num(d?.end_time);
+      if (en > -Infinity) return en;
+      const m = /^\s*(-?\d{1,4})\b/.exec(String(nodeById.get(id)?.name ?? ""));
+      return m ? Number(m[1]) : -Infinity;
     };
     for (let li = 0; li < scene.lanes.length; li++) {
       const lane = scene.lanes[li];
@@ -790,11 +821,10 @@ export function buildMatrixScene(
       const collect = (id: string, depth: number): void => {
         const subs = (childPhases.get(id) ?? [])
           .slice()
-          .sort(
-            (a, b) =>
-              num(nodeById.get(b)?.data?.start_time) -
-              num(nodeById.get(a)?.data?.start_time),
-          );
+          .sort((a, b) => {
+            const ta = timeOf(a), tb = timeOf(b);
+            return ta === tb ? 0 : tb > ta ? 1 : -1;
+          });
         for (const s of subs) collect(s, depth + 1);
         bandOrder.push(id);
         bandDepth.set(id, depth);
@@ -804,9 +834,13 @@ export function buildMatrixScene(
       const bandIndex = new Map(bandOrder.map((k, i) => [k, i]));
       // which sub-tree phase, if any, does a node resolve to?
       const phaseFor = (id: string): string | undefined => {
-        // direct attribution wins
-        const direct = phaseOfNode.get(id);
-        if (direct && topEpochOf(direct) === lane.id) return direct;
+        // direct attribution wins; else the owner's (p.2), up the chain
+        let cur: string | undefined = id;
+        for (let k = 0; cur && k < 6; k++) {
+          const direct = phaseOfNode.get(cur);
+          if (direct) return topEpochOf(direct) === lane.id ? direct : undefined;
+          cur = ownerOf.get(cur);
+        }
         return undefined;
       };
       // gather this lane's nodes, grouped by root block
@@ -859,6 +893,46 @@ export function buildMatrixScene(
           bandIndex.get(best ?? fallbackKey) ?? bandOrder.length - 1,
         );
       }
+      // MICRO-MATRIX-FASI p.2 · a follower left far from its node (its node
+      // moved to another phase, the file written before the rule) is drawn
+      // just above it, as a property above its owner; one the hand placed, or
+      // that sits near its node, stays where it is. View only: the gesture
+      // that moves the node writes the follower's place (main.ts).
+      const handPlaced = new Set(doc.layout?.hand_placed ?? []);
+      const FAR = 400;
+      for (const [root, kids] of rootKids) {
+        if (kids.length !== 1 || kids[0].id !== root) continue;
+        const sn = kids[0];
+        const o = ownerOf.get(sn.id);
+        const on = o ? scene.byId.get(o) : undefined;
+        if (!on || handPlaced.has(sn.id) || phaseOfNode.has(sn.id) || laneOfNode(on) !== li) continue;
+        if (Math.abs(sn.y + sn.h / 2 - (on.y + on.h / 2)) <= FAR) continue;
+        sn.x = on.x + on.w / 2 - sn.w / 2;
+        sn.y = on.y - sn.h - 24;
+      }
+      // MICRO-MATRIX-FASI p.1 · a band is as tall as what it holds: an empty
+      // stretch inside it taller than BAND_VOID closes up. Measured on
+      // TempluMare_v7: the em-core view layout left the phases' units at the
+      // old phase lanes' height (y ≈ 2800–2950) and the documents at the top
+      // (y ≈ 30), so «2015» was 2256 px with its nodes in two rows at its ends.
+      // Whole blocks move (a root with all it carries), in their order.
+      const BAND_VOID = 60;
+      for (let bi = 0; bi < bandOrder.length; bi++) {
+        const blocks: { kids: SceneNode[]; top: number; bottom: number }[] = [];
+        for (const [root, kids] of rootKids) {
+          if (rootBand.get(root) !== bi) continue;
+          blocks.push({ kids, top: Math.min(...kids.map((k) => k.y)), bottom: Math.max(...kids.map((k) => k.y + k.h)) });
+        }
+        blocks.sort((a, b) => a.top - b.top);
+        let end = -Infinity;
+        let acc = 0;
+        for (const b of blocks) {
+          const gap = b.top - acc - end;
+          if (Number.isFinite(end) && gap > BAND_VOID) acc += gap - BAND_VOID;
+          if (acc) for (const k of b.kids) k.y -= acc;
+          end = Math.max(end, b.bottom - acc);
+        }
+      }
       // per-band bbox (over all member nodes) at current positions
       const bMinY = bandOrder.map(() => Infinity);
       const bMaxY = bandOrder.map(() => -Infinity);
@@ -875,10 +949,20 @@ export function buildMatrixScene(
       // rigidly. An empty PHASE band still renders as a thin labelled strip (its
       // "PD" tag + name) so a freshly-created / unit-less phase is visible and
       // can receive dropped units; an empty residual band is skipped.
-      const EMPTY_BAND_H = 26;
-      // reserve space at the lane top for the epoch header chip so the first
-      // band (its label) doesn't overlap it
-      const LANE_TOP_RESERVE = 40;
+      // MICRO-MATRIX-FASI p.1 · every band keeps a head of its own for its chip
+      // (name and dates, 30 px), and its content starts under it; an empty
+      // phase is just its head. The lane keeps room for its own chip and its
+      // «+» before the first band.
+      const BAND_HEAD = 36;
+      const EMPTY_BAND_H = BAND_HEAD;
+      const LANE_TOP_RESERVE = 58;
+      // the remembered translations hold while the bands hold the same nodes in
+      // the same order: a node moved to another phase, a phase dated or added,
+      // re-flows this lane (a node nudged inside its band still stays put)
+      const sig = bandOrder.map((k, bi) => `${k}:${[...rootBand].filter(([, b]) => b === bi).map(([r]) => r).sort().join(",")}`).join(";");
+      const sigK = `${lane.id}|§sig`;
+      const laneFrozen = frozen && memo!.sig.get(sigK) === sig;
+      memo?.sig.set(sigK, sig);
       let cursor = lane.y + LANE_TOP_RESERVE;
       let firstBand = true;
       for (let bi = 0; bi < bandOrder.length; bi++) {
@@ -886,16 +970,19 @@ export function buildMatrixScene(
         const isResidual = key === lane.id;
         const hasContent = Number.isFinite(bMinY[bi]);
         if (!hasContent && isResidual) continue; // empty residual → skip
-        const h = hasContent ? bMaxY[bi] - bMinY[bi] : EMPTY_BAND_H;
+        const h = hasContent ? bMaxY[bi] - bMinY[bi] + BAND_HEAD : EMPTY_BAND_H;
         // TOCCARE · the band's translation: remembered while the structure is
         // the same (see RestackMemo), so its content — including a node just
         // moved by hand — is never re-anchored to the band top
         const memoK = `${lane.id}|${key}`;
-        const delta = hasContent
-          ? frozen && memo!.band.has(memoK)
+        let delta = hasContent
+          ? laneFrozen && memo!.band.has(memoK)
             ? memo!.band.get(memoK)!
-            : cursor - bMinY[bi]
+            : cursor + BAND_HEAD - bMinY[bi]
           : 0;
+        // never a band over the one above it (p.1): a remembered translation
+        // that would put it there gives way to the running cursor
+        if (hasContent && bMinY[bi] + delta - BAND_HEAD < cursor) delta = cursor + BAND_HEAD - bMinY[bi];
         if (hasContent) {
           memo?.band.set(memoK, delta);
           for (const [id, b] of nodeBand)
@@ -906,7 +993,7 @@ export function buildMatrixScene(
         }
         // the band's rect is where its content IS (with a fresh delta that is
         // `cursor`, as before); an empty band takes the running cursor
-        const bandY = hasContent ? bMinY[bi] + delta : cursor;
+        const bandY = hasContent ? bMinY[bi] + delta - BAND_HEAD : cursor;
         subBands.push({
           laneId: lane.id,
           phaseId: key,
@@ -928,6 +1015,7 @@ export function buildMatrixScene(
             : asStr(nodeById.get(key)?.data?.start_time),
           end: isResidual ? undefined : asStr(nodeById.get(key)?.data?.end_time),
           warn: isResidual ? undefined : warnIds?.has(key),
+          ...(!isResidual && rmCounts.get(key) ? { rmCount: rmCounts.get(key) } : {}),
         });
         firstBand = false;
         cursor = Math.max(cursor, bandY + h + BAND_GAP);
@@ -973,8 +1061,15 @@ export function buildMatrixScene(
     for (const [laneId, extent] of bandExtentByLane) {
       const li = laneIndexOf.get(laneId);
       if (li == null) continue;
+      // MICRO-MATRIX-FASI p.1 · a lane cut into phases is as tall as its
+      // phases: it grows to hold them, and shrinks to them too (the lane of
+      // the archival layout was drawn for the units before the phases; a 400 px
+      // empty «XX sec» over a row of squashed nodes, measured on TempluMare_v6)
       const over = extent + LANE_PAD - (origY[li] + origH[li]);
-      if (over > 0) bottom[li] = Math.max(bottom[li], over);
+      let below = -Infinity;
+      for (const sn of scene.nodes)
+        if (laneOf.get(sn.id) === li) below = Math.max(below, sn.y + sn.h + LANE_PAD - (origY[li] + origH[li]));
+      bottom[li] = Math.max(over, below, -origH[li] + 1);
     }
     let cursor = origY[0] - top[0]; // keep the first lane roughly anchored
     const nodeShift = scene.lanes.map(() => 0);

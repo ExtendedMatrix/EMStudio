@@ -50,6 +50,10 @@ export interface NodeListCallbacks {
   /** STUDIO · the WARNINGS on a node (not the hints): a row carries a discreet
    *  ▲ when there are any, and its tooltip says what they are. Absent = none. */
   warningsOf?: (id: string) => string[];
+  /** MICRO-MATRIX-FASI p.3 · the RM an epoch (a phase) shows in the Space, and
+   *  the door to it: a chip beside the epoch's name, as in the Matrix */
+  rmOfEpoch?: (id: string) => number;
+  openEpochInSpace?: (id: string) => void;
   /** AUDIT N7 · an epoch's temporal property (absolute_time_start/end): a
    *  bound of the epoch, not a row of its own in the A–Z list */
   isTemporalProperty?: (id: string) => boolean;
@@ -276,6 +280,20 @@ export function buildNodeList(
       const span = document.createElement("span");
       span.className = "nl-span";
       span.textContent = epochSpan(ep.node);
+      const rmN = groupCb.rmOfEpoch?.(ep.node.id) ?? 0;
+      if (rmN) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "nl-rmchip";
+        chip.dataset.rmEpoch = ep.node.id;
+        chip.textContent = `RM ${rmN}`;
+        chip.title = t("rmchip.epoch", { n: String(rmN) });
+        chip.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          groupCb.openEpochInSpace?.(ep.node.id);
+        });
+        sec.head.appendChild(chip);
+      }
       sec.head.appendChild(span);
       sec.label.addEventListener("click", (ev) => {
         // the NAME of an epoch is a node you can select; the triangle and the
