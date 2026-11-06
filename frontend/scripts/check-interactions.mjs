@@ -25,6 +25,7 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { EXPERIMENTAL_ON, withExperimental } from "./experimental-env.mjs";
 
 const require = createRequire(import.meta.url);
 const TD = new URL("../testdata/", import.meta.url).pathname;
@@ -72,7 +73,8 @@ const withShelf = (name, shelf) => {
 };
 
 const { chromium } = await playwright();
-const browser = await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined });
+// EMSTUDIO_EXPERIMENTAL=1 · the switch «Funzioni sperimentali» on in every page (experimental-env.mjs)
+const browser = withExperimental(await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined }));
 
 /** A fresh page on a fixture, in a language, with an optional workspace. */
 async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init, hook, query = "", route, wsRoute } = {}) {
@@ -1070,7 +1072,8 @@ test("10.header", "l'intestazione del grafo: tipo, modo a segmenti, nessun «⋯
   const r = await p.evaluate(() => {
     const bar = document.querySelector('[data-win="canvas:1"] .tile-bar') ?? document.querySelector(".tile-active .tile-bar");
     return {
-      seg: [...bar.querySelectorAll(".win-seg button")].map((b) => b.textContent),
+      // (the lab's Epochs ⇄ Horizons is a control of its own, `.win-bands-seg`)
+      seg: [...bar.querySelectorAll(".win-seg:not(.win-bands-seg) button")].map((b) => b.textContent),
       menus: [...bar.querySelectorAll(".win-menu-toggle")].map((b) => b.textContent.trim()),
       graphWords: (bar.innerText.match(/\bGrafo\b|\bGraph\b/g) ?? []).length,
       tools: [...document.querySelectorAll("#dd-tools .dd-menu button")].map((b) => b.textContent.trim()),
@@ -6125,7 +6128,7 @@ const keycloakLogin = (authorizeUrl, user, password) => {
 // `Origin: tauri://localhost` is measured with curl in the night's report.
 if (process.env.LIVE_NODE) test("E2.live", "E2 dal vivo · il nodo del dev stack: «iD and the node's password» con l'utente dev del realm em-dev — il login vero di Keycloak torna per org.extendedmatrix.emstudio:/oidc-return, lo scambio del codice passa, /v1/whoami dice dev e l'identità è attestata dal nodo", async () => {
   const node = process.env.LIVE_NODE.replace(/\/+$/, "");
-  const live = await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined, args: ["--disable-web-security"] });
+  const live = withExperimental(await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined, args: ["--disable-web-security"] }));
   const ctx = await live.newContext({ viewport: { width: 1600, height: 1000 }, ignoreHTTPSErrors: true });
   const p = await ctx.newPage();
   const errors = [];
@@ -12226,6 +12229,11 @@ if (process.env.TEMPLU_V4) test("PP.templu", "Proprietà e paradati · MICRO-PRO
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, out, errors } };
 });
+
+// EXPERIMENTAL · the site and its door (cases-site-door.mjs): only with the
+// switch «Funzioni sperimentali» on (EMSTUDIO_EXPERIMENTAL=1)
+if (EXPERIMENTAL_ON)
+  (await import("./cases-site-door.mjs")).register({ test, browser, PORT, BRIDGE, benchFile, workspace, readFileSync, existsSync });
 
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));

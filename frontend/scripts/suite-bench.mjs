@@ -37,7 +37,7 @@
 //   GT16_STUDY  …/OneDrive-CNR/…/T6.5/TempluMare_v2_for_3DR_2026-10-06
 //   S3DGRAPHY_DIR (its .venv runs the bridges)  ../../s3Dgraphy
 import { spawn, execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir, platform } from "node:os";
 
@@ -95,6 +95,24 @@ const gt16 = (group) => {
   }
   return `${at}/EM`;
 };
+// EXPERIMENTAL · the site's cases (cases-site-door.mjs), with the switch on: a
+// copy of the GT16 and, in its GIS/, two SYNTHETIC GeoJSON point layers around
+// its anchor in the graph's grid (EPSG:3844) — no survey of the site is read
+let SITE_V4 = "";
+if (process.env.EMSTUDIO_EXPERIMENTAL === "1") {
+  SITE_V4 = `${gt16("site")}/TempluMare_v4.em.json`;
+  const gis = SITE_V4.replace(/\/EM\/[^/]+$/, "/GIS");
+  mkdirSync(gis, { recursive: true });
+  const g = JSON.parse(readFileSync(SITE_V4, "utf8"));
+  const geo = Object.values(g.graphs ?? { g: g.graph }).flatMap((m) => m.nodes ?? []).find((n) => n.node_type === "geo_position")?.data ?? {};
+  const [x0, y0] = [Number(geo.shift_x ?? 0), Number(geo.shift_y ?? 0)];
+  const layer = (k, dx) => JSON.stringify({ type: "FeatureCollection",
+    crs: { type: "name", properties: { name: "urn:ogc:def:crs:EPSG::3844" } },
+    features: Array.from({ length: 12 }, (_, i) => ({ type: "Feature", properties: { code: `${k}${i + 1}` },
+      geometry: { type: "Point", coordinates: [x0 + dx + (i % 4) * 5, y0 - 10 + Math.floor(i / 4) * 10, 490 + i * 0.25] } })) });
+  writeFileSync(`${gis}/points_a.geojson`, layer("A", -20));
+  writeFileSync(`${gis}/points_b.geojson`, layer("B", 15));
+}
 const EMPTY = `${BENCH}/empty`;
 mkdirSync(EMPTY);
 mkdirSync(`${BENCH}/files`);
@@ -173,6 +191,7 @@ try {
     GEOREF_V4: `${gt16("georef")}/TempluMare_v4.em.json`, GEOREF_BRIDGE: B,
     TEMPIO_FILE: `${BENCH}/files/tempio.em.json`, G3_FILE: `${BENCH}/files/G3-sanpietro.em.json`,
     A_SANPIETRO: `${BENCH}/files/A_sanpietro.em.json`, SUITE_BENCH: BENCH,
+    ...(SITE_V4 ? { SITE_V4, SITE_BRIDGE: B } : {}),   // EXPERIMENTAL · the site's cases
   };
   if (!env.SHOTS) { env.SHOTS = `${BENCH}/shots`; mkdirSync(env.SHOTS); }
   console.log(`suite-bench: ${BENCH} · Vite ${vite} · bridge ${bridge} (fs-root) · bridge ${empty} (empty)`);

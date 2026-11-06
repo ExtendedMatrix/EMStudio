@@ -36,6 +36,15 @@
 import type { EmDocument } from "./types";
 import { sha256Hex } from "./sha256";
 import { contentSignature, mergePayloads } from "./crdt";
+import { isPeriodizationsSection, PERIODIZATIONS_MEMBER_ID } from "./horizons";
+import { EXPERIMENTAL } from "./experimental";
+
+/** EXPERIMENTAL · the Periodizations member read apart, by its marker, like the
+ *  shelf and the DTC corpus (reading rule 5, §3). Off — the default, the switch
+ *  «Funzioni sperimentali» off — it opens as a study graph, as before, and is
+ *  written back as it was. A check sets it by hand (`setPeriodizationsApart`). */
+let periodizationsApart = EXPERIMENTAL;
+export function setPeriodizationsApart(on: boolean): void { periodizationsApart = on; }
 
 // P4.1 · re-exported so a caller that has the container has the algebra too:
 // the merge of two files and the application of one operation are the same
@@ -94,6 +103,9 @@ export interface ParsedContainer {
    *  study's graphs must not meet it, and the bug that would cause is a
    *  provenance forest drawn as a stratigraphic matrix. */
   corpus: GraphSection | null;
+  /** EXPERIMENTAL · the HORIZONS member (periodizations), when the
+   *  container carries one and it is read apart (`setPeriodizationsApart`) */
+  periodizations?: GraphSection | null;
   activeGraphId: string | null;
   /** true when the source was a legacy single-graph document */
   wasLegacy: boolean;
@@ -269,6 +281,7 @@ export function parseContainer(doc: unknown): ParsedContainer {
   const nodeIds: Record<string, string[]> = {};
   let shelf: GraphSection | null = null;
   let corpus: GraphSection | null = null;
+  let periodizations: GraphSection | null = null;
   for (const [memberId, section] of Object.entries(doc.graphs)) {
     if (!section || typeof section !== "object") {
       // One broken member must not cost the rest of the project.
@@ -281,6 +294,10 @@ export function parseContainer(doc: unknown): ParsedContainer {
     }
     if (isCorpusSection(section)) {
       corpus = section;
+      continue;
+    }
+    if (periodizationsApart && isPeriodizationsSection(section)) {
+      periodizations = section;
       continue;
     }
     const { [LAYOUT_KEY]: ownLayout, ...rest } = section;
@@ -324,7 +341,7 @@ export function parseContainer(doc: unknown): ParsedContainer {
         `no matrix to draw`,
     );
   }
-  return { members, shelf, corpus, activeGraphId, wasLegacy: false,
+  return { members, shelf, corpus, periodizations, activeGraphId, wasLegacy: false,
            version: readVersion(doc.version), freshLayouts: fresh, warnings };
 }
 
@@ -339,6 +356,8 @@ export function buildContainer(input: {
   shelf?: GraphSection | null;
   /** the DOCUMENTATION member, written back under its own id */
   corpus?: GraphSection | null;
+  /** MICRO-LAB orizzonti · the horizons member, written back under its own id */
+  periodizations?: GraphSection | null;
   activeGraphId?: string | null;
 }): ContainerDoc {
   const graphs: Record<string, GraphSection> = {};
@@ -357,6 +376,10 @@ export function buildContainer(input: {
   if (input.corpus) {
     const corpusId = String(input.corpus.graph_id ?? DTC_CORPUS_MEMBER_ID);
     graphs[corpusId] = input.corpus;
+  }
+  if (input.periodizations) {
+    const pid = String(input.periodizations.graph_id ?? PERIODIZATIONS_MEMBER_ID);
+    graphs[pid] = input.periodizations;
   }
   // The header comes from the first member so the format/version/datamodel
   // stamps stay written in one place (whoever wrote that document wrote them) —

@@ -120,6 +120,27 @@ const doc = { graph: structuredClone(fx.graph) };
   eq(JSON.parse(bodies.at(-1)).graph.nodes.find((n) => n.id === "P_USM_START").data.value, "200",
      "…carrying the document as it is when it leaves");
 
+  // MICRO-LAB bande-3 · one state per document: the Inspector on a node of
+  // graph B and the Chronology on graph A do not ask in turn
+  C.resetChronology();
+  mode = "ok";
+  const other = structuredClone(doc);
+  other.graph.graph_id = "altro";
+  const A = {}, B = {};
+  const before = calls;
+  C.chronologyFor(doc, () => JSON.stringify(doc), A);
+  C.chronologyFor(other, () => JSON.stringify(other), B);
+  await tick(20);
+  eq(calls - before, 2, "two documents, two owners: one request each");
+  for (let i = 0; i < 4; i++) {
+    C.chronologyFor(doc, () => JSON.stringify(doc), A);
+    C.chronologyFor(other, () => JSON.stringify(other), B);
+  }
+  await tick(700);
+  eq(calls - before, 2, "…and asked in turn they do not throw each other's answer away");
+  eq([C.chronologyFor(doc, () => "", A).status, C.chronologyFor(other, () => "", B).status], ["ok", "ok"],
+     "…each keeps its own");
+
   C.resetChronology();
   mode = "old";
   C.chronologyFor(doc, () => JSON.stringify(doc));

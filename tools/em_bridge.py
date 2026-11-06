@@ -3726,7 +3726,7 @@ def make_handler(api):
                 fn = self._compose_plan if route == "/blend/compose-plan" else self._master_place
                 status, out = fn(body if isinstance(body, dict) else {})
                 self._json(out, status)
-            elif route in ("/gis/features", "/gis/surface", "/graph/gis-ingest",
+            elif route in ("/gis/features", "/gis/surface", "/graph/gis-ingest", "/graph/site-footprint",
                            "/graph/landscape-surface", "/graph/gis-contours"):
                 # MICRO-GIS-BASE · the GIS layers: read (s3Dgraphy, no GDAL),
                 # drawn in the scene's CRS, brought into the graph as a delta
@@ -7078,7 +7078,11 @@ def make_handler(api):
             ``/gis/surface {dem, image?, scene_crs, step?}`` → the ground as a
             grid of heights (and the image's texture coordinates);
             ``/graph/gis-ingest {doc, doc_path, path, layer?, z_field?,
-            feature_key?, crs?, attach_to?}`` → the layer as a resource, a delta;
+            feature_key?, crs?, attach_to?, site_name?, acquisition?}`` → the
+            layer as a resource, a delta (experimental · the site's door: a site
+            named when the graph has none, the capture that stamps the layer);
+            ``/graph/site-footprint {doc, doc_path, site_id, units}`` →
+            (experimental) the site's footprint from the proxies of the units, a delta;
             ``/graph/landscape-surface {doc, dem_id, image_id?, site_id?,
             step_m?}`` → the LandscapeSurfaceNode, a delta;
             ``/graph/gis-contours {doc, doc_path, dem_id, interval, base?}`` →
@@ -7119,13 +7123,41 @@ def make_handler(api):
                     url = os.path.relpath(os.path.realpath(path), em_real) if em_real else os.path.basename(path)
                     if url.startswith(".." + os.sep + ".." + os.sep + ".."):
                         url = path
-                    got, delta = self._gis_delta(graph, lambda: SG.add_gis_layer(
-                        graph, path, url=url.replace(os.sep, "/"), layer=body.get("layer") or None,
-                        z_field=body.get("z_field") or None, feature_key=body.get("feature_key") or None,
-                        crs=body.get("crs") or None, attach_to=body.get("attach_to") or None))
+                    # (experimental · the site's door) a site named here is made in the
+                    # same delta when the graph has none, and the capture that produced
+                    # the layer stamps it (`acquisition`): one undo step for the act
+                    def _ingest():
+                        attach = body.get("attach_to") or None
+                        made = None
+                        if not attach and str(body.get("site_name") or "").strip():
+                            made = SG.site_of(graph) or SG.add_site(graph, str(body["site_name"]).strip())
+                            attach = made.node_id
+                        out = SG.add_gis_layer(
+                            graph, path, url=url.replace(os.sep, "/"), layer=body.get("layer") or None,
+                            z_field=body.get("z_field") or None, feature_key=body.get("feature_key") or None,
+                            crs=body.get("crs") or None, attach_to=attach,
+                            acquisition=body.get("acquisition") if isinstance(body.get("acquisition"), dict) else None)
+                        if made is not None:
+                            out["site_id"], out["site_name"] = made.node_id, made.name
+                        return out
+                    got, delta = self._gis_delta(graph, _ingest)
                     return 200, {"ok": True, "resource_id": got["resource_id"], "warnings": got["warnings"],
                                  "inspect": {k: v for k, v in got["inspect"].items() if k != "features"},
+                                 **({"site_id": got["site_id"], "site_name": got["site_name"]} if got.get("site_id") else {}),
                                  "delta": delta}
+                if route == "/graph/site-footprint":
+                    # (experimental) the site's footprint: the convex hull in plan of the
+                    # proxies of the units named (s3Dgraphy's footprint_from_glbs), its
+                    # chain to their geometry properties (set_footprint)
+                    site_id = str(body.get("site_id") or "")
+                    if graph.find_node_by_id(site_id) is None:
+                        return 404, {"ok": False, "error": "no such site in this graph"}
+                    if not em_folder:
+                        return 422, {"ok": False, "error": "the em.json has no folder on this disk: save it first"}
+                    names = [str(u) for u in (body.get("units") or [])]
+                    got, delta = self._gis_delta(graph, lambda: GI.site_footprint(
+                        graph, site_id, names, em_folder, inside=self._geo_inside))
+                    return 200, {"ok": True, **got, "delta": delta}
                 if route == "/graph/landscape-surface":
                     step = float(body["step_m"]) if body.get("step_m") else None
                     got, delta = self._gis_delta(graph, lambda: SG.add_landscape_surface(

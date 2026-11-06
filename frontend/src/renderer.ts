@@ -2,6 +2,8 @@
 // one hit-testing model, one style system, styles driven by the EM palette
 // metadata (palette.ts ← em_visual_rules.json). Edges are routed
 // orthogonally with crossing bridges (routing.ts), yEd-style.
+import { cardRuns } from "./scene-overlaps";
+import { EXPERIMENTAL } from "./experimental";
 import { crispImage, dtcGlyphUrl, ICON_NODE_TYPES, imageFor, imageForUrl } from "./icons";
 import { dtcGlyphName, propertyLabel, reasoningText, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { documentVariant, edgeInk, edgeStyle, nodeStyle } from "./palette";
@@ -122,6 +124,12 @@ export interface RenderState {
    *  decorators): one switched off is not drawn and has no hit rect. Nothing
    *  else changes — no layout, no scene. Absent → all drawn. */
   overlays?: OverlayState | null;
+  /** MICRO-LAB orizzonti · reading by horizons (the periodization chosen in
+   *  this session): `tint` = node id → the colour of the horizon its computed
+   *  interval overlaps, drawn as a halo behind the node; `fade` = the dated
+   *  nodes outside every visible horizon, drawn faded (filter mode). A view
+   *  state: nothing in the node changes, no layout, no scene. */
+  horizon?: { tint: Map<string, string>; fade: Set<string> } | null;
   /** MICRO-CONTENTS-1 F10 · the «+» that adds a phase to an epoch, on the lane's
    *  rail. Only an epoch lane has it: the DTC's lanes (Ingressi, passo, Prodotti)
    *  are drawn by the same code and are not epochs. Absent → drawn. */
@@ -710,9 +718,29 @@ export function render(
     // cover the lane: each band paints its own single-colour wash below.
     if (lane.color && !lanesWithBands.has(lane.id)) {
       ctx.save();
-      ctx.globalAlpha = 0.05;
+      ctx.globalAlpha = lane.horizon ? 0.07 : 0.05;
       ctx.fillStyle = lane.color;
       ctx.fillRect(worldLeft, lane.y, worldRight - worldLeft, lane.height);
+      ctx.restore();
+    }
+    // MICRO-LAB orizzonti come bande · what falls outside every visible horizon,
+    // or has no date: a hatched band, so it never reads as one more horizon
+    if (lane.horizon === "outside" || lane.horizon === "undated") {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(worldLeft, lane.y, worldRight - worldLeft, lane.height);
+      ctx.clip();
+      ctx.strokeStyle = canvasTheme().laneLine;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 1 / vp.scale;
+      const step = 14 / Math.max(vp.scale, 0.05);
+      const x0 = Math.floor(worldLeft / step) * step;
+      ctx.beginPath();
+      for (let x = x0 - lane.height; x < worldRight; x += step) {
+        ctx.moveTo(x, lane.y + lane.height);
+        ctx.lineTo(x + lane.height, lane.y);
+      }
+      ctx.stroke();
       ctx.restore();
     }
     // COLLEGARE · the lane the current chapter narrates: a wash and a rail
@@ -735,10 +763,19 @@ export function render(
     }
     ctx.strokeStyle = canvasTheme().laneLine;
     ctx.lineWidth = 1 / vp.scale;
+    // MICRO-LAB orizzonti come bande · an horizon's border is DASHED and in its
+    // colour (an epoch's is the thin solid line): the sign of a shared measure
+    if (lane.horizon) {
+      ctx.save();
+      ctx.strokeStyle = lane.color || canvasTheme().laneLine;
+      ctx.lineWidth = 1.6 / vp.scale;
+      ctx.setLineDash([9 / vp.scale, 6 / vp.scale]);
+    }
     ctx.beginPath();
     ctx.moveTo(worldLeft, lane.y);
     ctx.lineTo(worldRight, lane.y);
     ctx.stroke();
+    if (lane.horizon) ctx.restore();
   });
 
   // phase sub-bands: a faint per-phase colour wash + a dashed separator at the
@@ -957,10 +994,26 @@ export function render(
     n.id === state.selectedId ||
     n.instanceOf === state.selectedId ||
     (state.selectedIds?.has(n.id) ?? false);
+  const hz = state.horizon ?? null;
   for (const n of shown) {
     if (n.collapsed) continue; // PD1 · shown as a bottom-left tablet, not a node
     // FONTE · a TRACE (removed keeping its trace, still read) is attenuated
     ctx.globalAlpha = n.trace ? 0.38 : 1;
+    // MICRO-LAB orizzonti · the horizon's colour behind the node, and the node
+    // faded when it falls in no visible horizon (an instance reads its master)
+    if (hz) {
+      const hid = (n as { instanceOf?: string }).instanceOf ?? n.id;
+      if (hz.fade.has(hid)) ctx.globalAlpha *= 0.16;
+      const col = hz.tint.get(hid);
+      if (col && !hz.fade.has(hid)) {
+        ctx.save();
+        ctx.globalAlpha = 0.42;
+        ctx.fillStyle = col;
+        const m = 6 / vp.scale;
+        ctx.fillRect(n.x - m, n.y - m, n.w + 2 * m, n.h + 2 * m);
+        ctx.restore();
+      }
+    }
     // MICRO-SPAZIO-3D-2 · «fuori dal gruppo»: a loose property shown in the
     // unit's group by the view, a light dashed frame around it
     if (n.outside) {
@@ -1826,6 +1879,8 @@ export function render(
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const ovInstance = ov("instance_badge"), ovTrace = ov("trace");
+  // EXPERIMENTAL · the «+n» runs and the cut cards (the switch off: as before)
+  const cards = EXPERIMENTAL ? cardRuns(scene) : new Map<string, { show: boolean; more: number }>();
   for (const n of shown) {
     if (!(n.instanceBadge && ovInstance) && !(n.trace && ovTrace)) continue;
     if (glyphsOff(n)) continue;
@@ -1838,9 +1893,20 @@ export function render(
     const h0 = Math.max(badgePx * 0.8, fpx0 * 1.5);
     const fpx = fpx0 * glyphFactor(h0, u);
     ctx.font = canvasFont(600, fpx);
-    if (n.instanceBadge?.ownerName && ovInstance) {
-      const text = reasoningText("instance_badge", "label", { owner: n.instanceBadge.ownerName });
-      const w = ctx.measureText(text).width + fpx * 1.1;
+    const run = cards.get(n.id);
+    if (n.instanceBadge?.ownerName && ovInstance && run?.show !== false) {
+      // MICRO-LAB bande-2 · one card for a run from the same place («+n»), and
+      // never wider than its box (from the card's left), cut with «…»
+      const more = run?.more ? ` +${run.more}` : "";
+      let text = reasoningText("instance_badge", "label", { owner: n.instanceBadge.ownerName }) + more;
+      const maxW = EXPERIMENTAL ? Math.max(r.w + badgePx * 0.25, badgePx * 4) : Infinity;
+      if (EXPERIMENTAL && ctx.measureText(text).width + fpx * 1.1 > maxW) {
+        const base = text.slice(0, text.length - more.length);
+        let k = base.length;
+        while (k > 1 && ctx.measureText(`${base.slice(0, k)}…${more}`).width + fpx * 1.1 > maxW) k--;
+        text = `${base.slice(0, k)}…${more}`;
+      }
+      const w = Math.min(maxW, ctx.measureText(text).width + fpx * 1.1);
       const h = cappedGlyphPx(h0, u);
       const bx = r.x - badgePx * 0.25;
       const by = r.y - h * 0.6;
@@ -1986,14 +2052,19 @@ export function render(
     const sh = lane.height * vp.scale;
     if (sy + sh < 0 || sy > viewH) continue;
     // strong epoch colour on the left edge of the lane
-    if (lane.color) {
+    if (lane.color && lane.horizon) {
+      // MICRO-LAB orizzonti come bande · an horizon's rail is dashed
+      const y0 = Math.max(sy, 0);
+      const y1 = Math.min(sy + sh, viewH);
+      ctx.fillStyle = lane.color;
+      for (let y = y0; y < y1; y += 14) ctx.fillRect(0, y, RAIL, Math.min(9, y1 - y));
+    } else if (lane.color) {
       const y0 = Math.max(sy, 0);
       const y1 = Math.min(sy + sh, viewH);
       ctx.fillStyle = lane.color;
       ctx.fillRect(0, y0, RAIL, y1 - y0);
     }
     if (sh < 18) continue; // lane too thin on screen — the chip would overlap
-    const ty = Math.max(sy + 4, 4);
     // start–end collapses out when the lane is too short to fit two lines
     const boundsText =
       lane.start || lane.end ? `${lane.start ?? "?"} – ${lane.end ?? "?"}` : "";
@@ -2019,15 +2090,40 @@ export function render(
     const chipX = RAIL + 4;
     const chipW = 8 + Math.max(nameW, boundsW) + warnSpace + tagSpace + 8;
     const chipH = showBounds ? 32 : 18;
+    // the chip sticks to the top of the view while its lane is on screen — and,
+    // as a sticky header, the next lane pushes it up: it never leaves its own
+    // lane (MICRO-LAB bande-3: a short top band, scrolled half out, laid its
+    // chip on the next band's — measured on CronoFilter, Ottoman over Late
+    // Byzantine, when the bar of the window took two rows)
+    const ty = EXPERIMENTAL ? Math.max(sy + 4, Math.min(4, sy + sh - chipH)) : Math.max(sy + 4, 4);
     const selectedLane = lane.id === state.selectedId;
     laneChipHits.push({ id: lane.id, x: chipX, y: ty - 2, w: chipW, h: chipH });
     // fill = the epoch's semantic colour (falls back to the neutral chip when
     // the epoch declares none); ink = labelOn(that fill) so the contrast lives
     // in the chip, not in a per-theme token laid on a semantic surface.
-    const chipFill = lane.color || canvasTheme().laneChip;
-    const chipInk = lane.color ? labelOn(lane.color) : canvasTheme().laneChipInk;
+    // MICRO-LAB orizzonti come bande · an horizon's chip is NOT filled with its
+    // colour (an epoch's is): neutral, with a dashed border in the colour — a
+    // measure laid over the graphs, not a creation of one
+    const hzChip = !!lane.horizon;
+    const chipFill = hzChip ? canvasTheme().laneChip : lane.color || canvasTheme().laneChip;
+    const chipInk = hzChip ? canvasTheme().laneChipInk : lane.color ? labelOn(lane.color) : canvasTheme().laneChipInk;
     ctx.fillStyle = chipFill;
-    if (typeof ctx.roundRect === "function") {
+    if (hzChip && typeof ctx.roundRect === "function") {
+      ctx.beginPath();
+      ctx.roundRect(chipX, ty - 2, chipW, chipH, 5);
+      ctx.fill();
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeStyle = lane.color || canvasTheme().chipBorder;
+      ctx.stroke();
+      ctx.restore();
+      if (selectedLane) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = accentColor();
+        ctx.stroke();
+      }
+    } else if (typeof ctx.roundRect === "function") {
       ctx.beginPath();
       ctx.roundRect(chipX, ty - 2, chipW, chipH, 5);
       ctx.fill();
@@ -2080,6 +2176,7 @@ export function render(
     // AUDIT N5 · only when it fits in THIS lane: in a thin lane it hung over the
     // next one (the lane menu and the Inspector's «+ Add phase» remain)
     if (addCy + addR > sy + sh - 1) continue;
+    if (lane.horizon) continue;   // MICRO-LAB orizzonti come bande · a band has no phases
     if (state.addPhase === false) continue;
     laneChipHits[laneChipHits.length - 1].h = addCy + addR - (ty - 2);
     const ecol = lane.color || canvasTheme().labelMuted;

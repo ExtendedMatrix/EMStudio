@@ -337,3 +337,68 @@ def _haversine(lon1, lat1, lon2, lat2) -> float:
     p1, p2 = math.radians(lat1), math.radians(lat2)
     a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
     return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+# ── (experimental) the site's footprint ──────────────────────────────────────
+
+def _proxy_paths(graph, unit_ids: List[str], doc_dir: str, inside) -> Tuple[List[str], List[str]]:
+    """The .glb of each unit's proxy (unit → has_property geometry →
+    has_semantic_shape → has_linked_resource) on this disk, and the geometry
+    property ids (the sources of the footprint)."""
+    paths: List[str] = []
+    props: List[str] = []
+    out_edges: Dict[str, List[Any]] = {}
+    for e in graph.edges:
+        out_edges.setdefault(e.edge_source, []).append(e)
+    for uid in unit_ids:
+        for e in out_edges.get(uid, []):
+            if e.edge_type != "has_property":
+                continue
+            p = graph.find_node_by_id(e.edge_target)
+            d = getattr(p, "data", {}) or {}
+            if (d.get("property_type") or getattr(p, "name", "")) != "geometry":
+                continue
+            for e2 in out_edges.get(p.node_id, []):
+                if e2.edge_type != "has_semantic_shape":
+                    continue
+                for e3 in out_edges.get(e2.edge_target, []):
+                    if e3.edge_type != "has_linked_resource":
+                        continue
+                    r = graph.find_node_by_id(e3.edge_target)
+                    url = (getattr(r, "data", {}) or {}).get("url") or getattr(r, "url", "")
+                    if not url:
+                        continue
+                    full = inside(url if os.path.isabs(url) else os.path.join(doc_dir, url))
+                    if full and os.path.exists(full):
+                        paths.append(full)
+                        if p.node_id not in props:
+                            props.append(p.node_id)
+    return paths, props
+
+
+def site_footprint(graph, site_id: str, units: Sequence[str], doc_dir: str, *, inside=lambda p: p,
+                   extractor_name: str = "D.footprint") -> Dict[str, Any]:
+    """The footprint of the site from the proxies of ``units`` (names or ids):
+    the convex hull in plan of their vertices, each vertex at the lowest height
+    measured there (s3Dgraphy ``footprint_from_glbs``), written by
+    ``set_footprint`` with its chain to the geometry properties."""
+    from s3dgraphy.gis import footprint_from_glbs, set_footprint
+    names = [str(u) for u in units]
+    by_name = {n.name: n.node_id for n in graph.nodes}
+    unit_ids = [by_name.get(u, u) for u in names]
+    paths, props = _proxy_paths(graph, unit_ids, doc_dir, inside)
+    if not paths:
+        raise ValueError("no proxy file found for these units beside the em.json")
+    geo = next((n for n in graph.nodes if n.node_type == "geo_position"), None)
+    gd = (getattr(geo, "data", {}) or {}) if geo is not None else {}
+    crs = f"EPSG:{gd.get('epsg')}" if gd.get("epsg") else "local"
+    shift = (float(gd.get("shift_x") or 0), float(gd.get("shift_y") or 0), float(gd.get("shift_z") or 0))
+    fp = footprint_from_glbs(paths, shift=shift if crs != "local" else (0, 0, 0),
+                             rotation=float(gd.get("rotation") or 0) if crs != "local" else 0)
+    note = ("Convex hull in plan of the proxies of " + ", ".join(names)
+            + f" ({len(fp['ring'])} vertices; each keeps the lowest height measured at it)")
+    out = set_footprint(graph, site_id, [[fp["ring"]]], crs, sources=props,
+                        extractor_name=extractor_name, note=note)
+    out.update({"bbox": fp["bbox"], "z_range": fp["z_range"], "sources": fp["sources"], "crs": crs,
+                "vertices": len(fp["ring"])})
+    return out

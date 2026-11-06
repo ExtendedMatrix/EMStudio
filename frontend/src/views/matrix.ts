@@ -729,6 +729,9 @@ export function buildMatrixScene(
     g.w = Mx - mx + GROUP_PAD * 2;
     g.h = My - g.y + GROUP_PAD;
   }
+  // MICRO-LAB bande-2 · who an outline box (activity, time branch…) is drawn
+  // around: the overlap check reads it with `memberOf`
+  scene.outlineOf = outlineMemberOf;
 
   // ---- phase sub-band reflow ----
   // For each epoch whose phases are toggled visible, split its lane into

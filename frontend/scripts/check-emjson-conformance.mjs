@@ -32,7 +32,11 @@ if (!existsSync(SUITE)) {
   process.exit(0);
 }
 
-const KNOWN_GAPS = {
+// EXPERIMENTAL · with «Funzioni sperimentali» on (EMSTUDIO_EXPERIMENTAL=1)
+// container.ts reads the Periodizations member by its marker, as the shelf and
+// the DTC corpus: the gap below is closed. Off — as for everyone — it is open.
+const EXPERIMENTAL_ON = process.env.EMSTUDIO_EXPERIMENTAL === "1";
+const KNOWN_GAPS = EXPERIMENTAL_ON ? {} : {
   // container.ts recognises the shelf and the DTC corpus by their marker, not
   // yet the Periodizations member (s3Dgraphy 1.6.47): it opens as a study graph.
   // Nothing is lost — the member is written back as it was, marker included —
@@ -45,6 +49,7 @@ const bundle = await esbuild.build({
 });
 const C = await import("data:text/javascript;base64," +
   Buffer.from(bundle.outputFiles[0].text).toString("base64"));
+C.setPeriodizationsApart(EXPERIMENTAL_ON);
 
 // ── a validator for the subset of JSON Schema the em.json schemas use ─────────
 function validator(schema) {
@@ -113,11 +118,15 @@ function reading(parsed) {
   for (const m of parsed.members) graphs[m.id] = sectionReading(m.doc.graph, "study");
   if (parsed.shelf) graphs[String(parsed.shelf.graph_id ?? "shelf")] = sectionReading(parsed.shelf, "shelf");
   if (parsed.corpus) graphs[String(parsed.corpus.graph_id ?? "dtc")] = sectionReading(parsed.corpus, "dtc");
+  if (parsed.periodizations) {
+    graphs[String(parsed.periodizations.graph_id ?? "periodizations")] = sectionReading(parsed.periodizations, "periodizations");
+  }
   return { active_graph_id: parsed.activeGraphId, graphs };
 }
 const rewrite = (parsed) => C.buildContainer({
   graphs: parsed.members.map((m) => ({ id: m.id, doc: m.doc })),
-  shelf: parsed.shelf, corpus: parsed.corpus, activeGraphId: parsed.activeGraphId,
+  shelf: parsed.shelf, corpus: parsed.corpus, periodizations: parsed.periodizations,
+  activeGraphId: parsed.activeGraphId,
 });
 const sections = (doc) => doc.graphs
   ? Object.fromEntries(Object.entries(doc.graphs).map(([k, s]) => [String(s.graph_id ?? k), s]))

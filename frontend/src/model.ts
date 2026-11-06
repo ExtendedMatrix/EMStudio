@@ -394,6 +394,10 @@ export class DocumentStore {
    * history. Outside a room nothing changes.
    */
   static liveHistory: ((st: DocumentStore) => boolean) | null = null;
+  /** MICRO-LAB orizzonti · the ORIGIN a line drawn here carries
+   *  (`attributes.origin`, connections 1.6.47): main.ts answers «user» for the
+   *  relative-chronology family. Null = no mark. */
+  static originOf: ((edgeType: string) => string | null) | null = null;
   private recording: Snapshot | null = null;
   private historyFn: ((note: LiveHistoryNote) => void) | null = null;
 
@@ -2083,9 +2087,12 @@ export class DocumentStore {
     let i = 2;
     const base = id;
     while (ids.has(id)) id = `${base}__${i++}`;
+    const origin = DocumentStore.originOf?.(edgeType) ?? null;
+    const attrs = origin && !(attributes && "origin" in attributes)
+      ? { ...(attributes ?? {}), origin } : attributes;
     const edge: EmEdge = { id, source, target, edge_type: edgeType,
-                           ...(attributes && Object.keys(attributes).length
-                             ? { attributes: { ...attributes } } : {}) };
+                           ...(attrs && Object.keys(attrs).length
+                             ? { attributes: { ...attrs } } : {}) };
     this.doc.graph.edges.push(edge);
     this.emit();
     this.emitOp({ op: "add_edge", edge });
@@ -3771,6 +3778,17 @@ export class DocumentStore {
     const anchor = { node, to, corner, dx, dy };
     if (i >= 0) list[i] = anchor;
     else list.push(anchor);
+  }
+
+  /** MICRO-LAB bande-3 · the hand placed these nodes (a drop in the Matrix):
+   *  part of the step that moved them (no checkpoint, no emit of its own). */
+  markHandPlaced(ids: readonly string[]): void {
+    if (!ids.length) return;
+    const layout = (this.doc.layout ??= {});
+    const set = new Set(layout.hand_placed ?? []);
+    const n = set.size;
+    for (const id of ids) set.add(id);
+    if (set.size !== n) layout.hand_placed = [...set].sort();
   }
 
   /** Pin/unpin one or more nodes. When pinning, the node's CURRENT position is

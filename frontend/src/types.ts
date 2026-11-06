@@ -46,6 +46,9 @@ export interface EmLayout {
   group_spaces?: Record<string, Record<string, LayoutRect>>;
   /** node ids pinned in place — the layout engine keeps them at their Rect */
   pinned?: string[];
+  /** MICRO-LAB bande-3 · the nodes the hand placed in the Matrix: «making room»
+   *  never moves them (`makeRoom`). A Layout writes a new layout without it. */
+  hand_placed?: string[];
   /** rule pins: a node placed at a corner of a container (epoch/group) + offset */
   anchors?: LayoutAnchor[];
   [k: string]: unknown;

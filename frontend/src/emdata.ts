@@ -610,7 +610,7 @@ function renderEmDataInto(host: EmDataHost): void {
   if (st.sheet === "Chron") {
     // asked of s3Dgraphy through the bridge when the view is drawn and the
     // document changed; the answer lives in memory, the document gets nothing
-    const cs = chronologyFor(store.doc, () => store.toJSON());
+    const cs = chronologyFor(store.doc, () => store.toJSON(), store);
     const rows = chronRows(ctx, ix, cs.status === "ok" ? cs.map : null)
       .filter((r) => passes(r.node.id, String(r.node.name)));
     count = rows.length;

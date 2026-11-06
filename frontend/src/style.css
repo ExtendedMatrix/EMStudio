@@ -10285,6 +10285,69 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .win-detached-tail button:hover { background: var(--bg-panel); border-color: var(--border); color: var(--text); }
 .gest .gjoin.gdetach { border-style: dashed; }
 
+/* MICRO-LAB orizzonti · the horizons panel at the head of the Chronology */
+.hz-panel { padding: 8px 12px 10px; border-bottom: 1px solid var(--border, rgba(127,127,127,.3)); font-size: 12px; }
+.hz-head { margin-bottom: 6px; cursor: help; }
+.hz-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; flex-wrap: wrap; }
+.hz-label { min-width: 92px; opacity: .8; }
+.hz-select { min-width: 160px; }
+.hz-btn { padding: 1px 7px; }
+.hz-note { margin: 4px 0; opacity: .8; font-style: italic; }
+.hz-empty { margin: 6px 0; opacity: .8; }
+.hz-table { border-collapse: collapse; margin: 6px 0; }
+.hz-table th { text-align: left; font-weight: 600; opacity: .75; padding: 2px 6px; }
+.hz-table td { padding: 2px 6px; vertical-align: middle; }
+.hz-table input[type="color"] { width: 30px; height: 20px; padding: 0; border: none; background: none; }
+.hz-name { width: 140px; }
+.hz-num { width: 72px; }
+.hz-count { display: inline-block; min-width: 2em; text-align: right; opacity: .8; }
+.hz-acts { white-space: nowrap; }
+
+/* MICRO-LAB orizzonti come bande · the switch Epochs ⇄ Horizons in a window's
+   bar. Horizons are drawn DASHED everywhere (the lanes' borders, the chip, the
+   rail) and so is the pressed «Horizons» here: the eye learns one sign. */
+.win-bands { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.win-header .win-bands[data-bands="horizons"] .win-bands-seg button[aria-pressed="true"] {
+  box-shadow: none;
+  background-image: repeating-linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 9px);
+  background-size: 100% 2px;
+  background-repeat: no-repeat;
+  background-position: bottom;
+}
+.win-bands-per { font: 500 12px var(--font-sans); max-width: 170px; border: 1px dashed var(--border-strong);
+  border-radius: var(--radius); background: var(--bg-panel); color: var(--text); padding: 2px 4px; }
+.win-bands-graphs { display: inline-flex; align-items: center; gap: 4px; position: relative; flex-wrap: wrap; row-gap: 4px; }
+/* MICRO-LAB bande-3 · a graph's button: its tint and its name, short */
+.win-bands-graphs > .win-bands-graph { max-width: 112px; }
+/* …and the periodization a little narrower when the buttons are beside it: two
+   graphs keep the bar of a 1600 px screen on one row */
+.win-bands:has(.win-bands-graphs) .win-bands-per { max-width: 150px; }
+.win-bands-graph-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.win-bands-more { display: inline-flex; position: relative; }
+/* MICRO-LAB bande-2 · the bar of a Matrix in horizons wraps, never scrolls sideways */
+.tile-bar.hz-bar.one-line { flex-wrap: wrap !important; overflow-x: hidden; overflow-y: visible; height: auto; row-gap: 4px; }
+.tile-bar.hz-bar.one-line::before, .tile-bar.hz-bar.one-line::after { display: none; }
+.win-bands-graphs-toggle { display: inline-flex; align-items: center; gap: 4px; font: 500 11.5px var(--font-sans); white-space: nowrap; }
+.win-bands-graphs-menu .win-bands-graph { display: flex; width: 100%; border: 0; border-radius: 0; text-align: left;
+  max-width: 320px; padding: 4px 10px; }
+.win-bands-check { display: inline-block; width: 12px; flex: none; color: var(--accent); }
+.win-bands-graph { display: inline-flex; align-items: center; gap: 4px; font: 500 11.5px var(--font-sans);
+  border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px 1px 4px; background: none;
+  color: var(--text); cursor: pointer; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.win-bands-graph[aria-pressed="false"] { color: var(--text-muted); text-decoration: line-through; opacity: .7; }
+.win-bands-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid var(--border-strong); flex: none; }
+
+/* MICRO-LAB orizzonti come bande · the same switch in the Scena 3D's bar, and
+   its horizon buttons dashed (the horizons' sign) */
+.scn-bar .win-bands .win-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.scn-bar .win-bands .win-seg button { border: 0; border-right: 1px solid var(--border); background: var(--bg-panel); color: var(--text); font: inherit; padding: 2px 9px; cursor: pointer; }
+.scn-bar .win-bands .win-seg button:last-child { border-right: 0; }
+.scn-bar .win-bands .win-seg button[aria-pressed="true"] { background: var(--bg-accent-soft); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.scn-bar .win-bands[data-bands="horizons"] .win-seg button[aria-pressed="true"] { box-shadow: none;
+  background-image: repeating-linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 9px);
+  background-size: 100% 2px; background-repeat: no-repeat; background-position: bottom; }
+.scn-seg.scn-seg-hz { border-style: dashed; }
+.scn-seg.scn-seg-hz button[aria-pressed="true"] { background: var(--bg-accent-soft); color: var(--text); font-weight: 600; outline: 2px dashed var(--accent); outline-offset: -3px; }
 /* MICRO-TILESET-CARTELLA · a dropped tileset: its bar in the Viewer and over the Scene */
 .tsp-bar { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; font-size: 12px;
   background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 6px; }

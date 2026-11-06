@@ -99,6 +99,10 @@ export interface Lane {
   warn?: boolean;
   /** G4 · the epoch has no name: the label says so and a click asks for one */
   unnamed?: boolean;
+  /** MICRO-LAB orizzonti come bande · the lane is not an epoch but a band of a
+   *  Matrix read by horizons: an horizon, or what falls outside every visible
+   *  one, or what has no date — drawn in a style of its own (renderer) */
+  horizon?: "horizon" | "outside" | "undated";
 }
 
 /** Vertical gap (world units) stacked between adjacent phase sub-bands. The
@@ -170,6 +174,9 @@ export interface Scene {
   groupsById?: Map<string, SceneGroup>;
   /** member id → container group id (open containers only) */
   memberOf?: Map<string, string>;
+  /** MICRO-LAB bande-2 · member id → the outline group drawn around it
+   *  (activities, time branches: a box from its members' extent) */
+  outlineOf?: Map<string, string>;
 }
 
 /** ± toggle button of a group container under a world-space point. */

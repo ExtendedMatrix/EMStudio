@@ -54,6 +54,11 @@ export interface ChronState {
   error?: string;
   /** the map answers an OLDER version of the document; a new one is on its way */
   stale: boolean;
+  /** MICRO-LAB orizzonti · the epochs' effective intervals
+   *  (`Graph.epoch_intervals()`: a sub-epoch restricted by its parent), when
+   *  the bridge's s3dgraphy gives them */
+  epochs?: Record<string, { start: number | null; end: number | null; start_rule?: string | null;
+                            end_rule?: string | null; parent?: string | null }>;
 }
 
 const DEBOUNCE_MS = 500;
@@ -61,15 +66,11 @@ const DEBOUNCE_MS = 500;
 const RETRY_MS = 5000;
 
 let resolveBridge: () => Promise<string> = async () => "http://localhost:8765";
-/** who redraws when an answer lands: the Chronology view, and since
- *  MICRO-INSPECTOR-SEZIONI the Inspector's propagative metadata */
-const listeners: Array<() => void> = [];
-
-let state: ChronState = { status: "idle", map: {}, warnings: [], stale: false };
-let lastSig: string | null = null;
-let lastAttempt = 0;
-let timer: ReturnType<typeof setTimeout> | null = null;
-let seq = 0;
+/** every view that shows something computed from the chronology (the
+ *  Chronology view, the Data panel, the horizons of the Matrix and the Graph,
+ *  and since MICRO-INSPECTOR-SEZIONI the Inspector's propagative metadata) is
+ *  told when an answer lands */
+const onUpdate: Array<() => void> = [];
 
 export function setChronologyBridgeResolver(fn: () => Promise<string>): void {
   resolveBridge = fn;
@@ -77,7 +78,7 @@ export function setChronologyBridgeResolver(fn: () => Promise<string>): void {
 
 /** called when an answer lands, so the view can redraw itself */
 export function onChronologyUpdate(fn: () => void): void {
-  listeners.push(fn);
+  onUpdate.push(fn);
 }
 
 /**
@@ -106,68 +107,110 @@ export function chronologySignature(doc: EmDocument): string {
 }
 
 /**
+ * One asker per document: its answer, the signature it answers, its timer.
+ * MICRO-LAB orizzonti come bande · a Matrix in horizons draws EVERY graph
+ * switched on, each with its own answer. MICRO-LAB bande-3 · since dev.74 the
+ * Inspector asks too (start/end of a node), and its node may be in another
+ * document than the one the Chronology view or the bands are reading: with ONE
+ * state the two would ask in turn, each answer throwing the other's away. So
+ * the asker belongs to the document's OWNER (its store), whoever asks.
+ */
+class Asker {
+  state: ChronState = { status: "idle", map: {}, warnings: [], stale: false };
+  lastSig: string | null = null;
+  lastAttempt = 0;
+  timer: ReturnType<typeof setTimeout> | null = null;
+  seq = 0;
+
+  for(doc: EmDocument, serialize: () => string): ChronState {
+    const sig = chronologySignature(doc);
+    const now = Date.now();
+    const changed = sig !== this.lastSig;
+    const retry = (this.state.status === "off" || this.state.status === "error") &&
+      now - this.lastAttempt > RETRY_MS && this.timer == null;
+    if (changed || retry) {
+      this.lastSig = sig;
+      if (changed && this.state.status === "ok") this.state = { ...this.state, stale: true };
+      if (this.timer != null) clearTimeout(this.timer);
+      // the first request (the view opening) goes at once; edits wait
+      const wait = this.state.status === "idle" ? 0 : DEBOUNCE_MS;
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        void this.ask(serialize());
+      }, wait);
+    }
+    return this.state;
+  }
+
+  async ask(body: string): Promise<void> {
+    const mine = ++this.seq;
+    this.lastAttempt = Date.now();
+    if (this.state.status === "idle" || this.state.status === "off") this.state = { ...this.state, status: "loading" };
+    let next: ChronState;
+    try {
+      const res = await fetch(`${await resolveBridge()}/chronology`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      if (!res.ok) {
+        let msg = `bridge error ${res.status}`;
+        try {
+          const j = await res.json();
+          if (j?.error) msg = String(j.error);
+        } catch { /* non-JSON error body */ }
+        next = { status: "error", map: {}, warnings: [], error: msg, stale: false };
+      } else {
+        const j = (await res.json()) as { chronology?: Record<string, ChronEntry>; warnings?: string[];
+                                          epochs?: ChronState["epochs"] };
+        next = { status: "ok", map: j.chronology ?? {}, warnings: j.warnings ?? [], stale: false,
+                 ...(j.epochs ? { epochs: j.epochs } : {}) };
+      }
+    } catch {
+      next = { status: "off", map: {}, warnings: [], stale: false };
+    }
+    // an answer to an older request than the latest one is dropped
+    if (mine !== this.seq) return;
+    this.state = next;
+    for (const fn of onUpdate) fn();
+  }
+
+  reset(): void {
+    if (this.timer != null) clearTimeout(this.timer);
+    this.timer = null;
+    this.state = { status: "idle", map: {}, warnings: [], stale: false };
+    this.lastSig = null;
+    this.lastAttempt = 0;
+    this.seq++;
+  }
+}
+
+const main = new Asker();
+const owned = new Map<object | string, Asker>();
+function askerOf(owner: object | string): Asker {
+  let a = owned.get(owner);
+  if (!a) owned.set(owner, (a = new Asker()));
+  return a;
+}
+
+/**
  * The current answer for this document — and, when the document changed since
  * the last request (or an unreachable bridge is due another try), a new request
  * scheduled after the debounce. `serialize` is called when the request LEAVES,
  * so it carries the document as it is then.
  */
-export function chronologyFor(doc: EmDocument, serialize: () => string): ChronState {
-  const sig = chronologySignature(doc);
-  const now = Date.now();
-  const changed = sig !== lastSig;
-  const retry = (state.status === "off" || state.status === "error") &&
-    now - lastAttempt > RETRY_MS && timer == null;
-  if (changed || retry) {
-    lastSig = sig;
-    if (changed && state.status === "ok") state = { ...state, stale: true };
-    if (timer != null) clearTimeout(timer);
-    // the first request (the view opening) goes at once; edits wait
-    const wait = state.status === "idle" ? 0 : DEBOUNCE_MS;
-    timer = setTimeout(() => {
-      timer = null;
-      void ask(serialize());
-    }, wait);
-  }
-  return state;
+export function chronologyFor(doc: EmDocument, serialize: () => string, owner?: object): ChronState {
+  return (owner ? askerOf(owner) : main).for(doc, serialize);
 }
 
-async function ask(body: string): Promise<void> {
-  const mine = ++seq;
-  lastAttempt = Date.now();
-  if (state.status === "idle" || state.status === "off") state = { ...state, status: "loading" };
-  let next: ChronState;
-  try {
-    const res = await fetch(`${await resolveBridge()}/chronology`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-    if (!res.ok) {
-      let msg = `bridge error ${res.status}`;
-      try {
-        const j = await res.json();
-        if (j?.error) msg = String(j.error);
-      } catch { /* non-JSON error body */ }
-      next = { status: "error", map: {}, warnings: [], error: msg, stale: false };
-    } else {
-      const j = (await res.json()) as { chronology?: Record<string, ChronEntry>; warnings?: string[] };
-      next = { status: "ok", map: j.chronology ?? {}, warnings: j.warnings ?? [], stale: false };
-    }
-  } catch {
-    next = { status: "off", map: {}, warnings: [], stale: false };
-  }
-  // an answer to an older request than the latest one is dropped
-  if (mine !== seq) return;
-  state = next;
-  for (const fn of listeners) fn();
+/** The same, for the document of `key` (an open graph): each one its own answer. */
+export function chronologyOfKey(key: string, doc: EmDocument, serialize: () => string): ChronState {
+  return askerOf(key).for(doc, serialize);
 }
 
 /** test/reset hook: forget everything (a new session, a closed document) */
 export function resetChronology(): void {
-  if (timer != null) clearTimeout(timer);
-  timer = null;
-  state = { status: "idle", map: {}, warnings: [], stale: false };
-  lastSig = null;
-  lastAttempt = 0;
-  seq++;
+  main.reset();
+  for (const a of owned.values()) a.reset();
+  owned.clear();
 }

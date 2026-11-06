@@ -4,6 +4,17 @@ import { linksOf, resolveAddress, type GraphDocs } from "./links";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
 import { geoOf, georeferenceScene, reprojectPoint, setBridgeResolver } from "./geo";
 import { chronologyFor, onChronologyUpdate, setChronologyBridgeResolver } from "./chron-bridge";
+import {
+  BANDS_KEY, BANDS_OFF_KEY, BANDS_PER_KEY, GRAPH_TINTS, horizonSpace, HZ_LANE, projectByHorizons, SEP as HZ_SEP,
+  type BandGraphInput, type Bands, type HorizonProjection,
+} from "./horizon-bands";
+import {
+  chosenPeriodization, horizonMarks, HORIZON_TYPE, initialHidden, intervalsFrom, isPeriodizationsSection,
+  MEMBERSHIP_EDGE, newPeriodizationsSection, nextSwatch, PERIODIZATION_TYPE, PERIODIZATIONS_MEMBER_ID,
+  readPeriodizations, reorderPlan,
+  type HorizonMarks, type HorizonView, type Periodization, type PeriodizationsRead,
+} from "./horizons";
+import { renderHorizonsPanel } from "./horizons-ui";
 import type { PlacedScene } from "./geo";
 import {
   buildContainer,
@@ -351,6 +362,7 @@ import {
   render,
   type ConnectDrag,
 } from "./renderer";
+import { cardItems, makeRoom, sceneItems, sceneOverlaps } from "./scene-overlaps";
 import {
   allowedEdgeTypes,
   canonicalEdgeType,
@@ -410,6 +422,11 @@ import {
   onDesktopDragDrop,
   pathIsDir,
 } from "./tauri";
+// EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): the horizons as
+// bands, making room in the epochs, the site and its door (experimental.ts)
+import { EXPERIMENTAL, experimentalStored, setExperimental } from "./experimental";
+import { doorDrop, initSiteDoor, type GisIngestAsk, onSiteMark, openDoor, siteChip, siteDoorState, siteMarks, spaceButtons } from "./site-door";
+import "./site-door.css";
 import { guessKind, mightBeTileset, planDesktopDrop, positionsArePhysical, toCssPoint, TILESET_TARGETS } from "./desktop-drop";
 import * as paths from "./paths";
 import * as SR from "./save-rebase";
@@ -2859,6 +2876,104 @@ window.__EM_SCENE__ = () => {
   // document to `loadDocument` and lose the corpus of a project on the way
   // F2 · …and a single graph too: a path is a FILE, and only that door makes one
   openAt: (d: EmDocument, path: string) => loadContainerDocument(d, baseName(path), path),
+  // MICRO-LAB orizzonti · the horizons: the store, the session's reading, the
+  // marks a Matrix/Graph window paints now, and ⌘Z's own path
+  horizonsStore: () => periodizations({ create: false }),
+  horizonView: () => ({ periodizationId: horizonView.periodizationId, hidden: [...horizonView.hidden] }),
+  /** the marks a GRAPH window reading by horizons paints (its id; else the focused) */
+  horizonMarks: (winId?: string) => {
+    const m = horizonMarksNow(winId ?? activeWin().id);
+    return m ? { tint: Object.fromEntries(m.tint), fade: [...m.fade], inside: Object.fromEntries(m.inside) } : null;
+  },
+  // MICRO-LAB orizzonti come bande · a window's switch, and what it draws
+  hzBands: (winId?: string) => {
+    const id = winId ?? activeWin().id;
+    const sc = hzWin(id) ? hzSceneOfWin(id) : null;
+    const proj = sc?.proj ?? null;
+    return {
+      bands: bandsOfWin(id), periodization: bandsPerOfWin(id)?.id ?? null, off: [...bandsOffOfWin(id)],
+      drawing: hzWin(id), note: sc?.note ?? null,
+      lanes: (sc?.scene?.lanes ?? []).map((l) => ({ id: l.id, label: l.label, horizon: l.horizon ?? null,
+                                                   y: l.y, height: l.height })),
+      counts: proj ? Object.fromEntries(proj.counts) : {},
+      tints: proj ? Object.fromEntries(proj.tintOf) : {},
+      nodes: (sc?.scene?.nodes ?? []).filter((n) => !n.instanceOf).map((n) => ({
+        id: n.id, slot: proj?.slotOf.get(n.id) ?? null, real: proj?.realOf.get(n.id) ?? n.id,
+        name: String(n.node.name ?? ""), band: proj?.placed.get(n.id)?.band ?? null,
+        also: proj?.placed.get(n.id)?.also ?? [], y: n.y, h: n.h })),
+    };
+  },
+  /** …and the Scena 3D: its epochs (or horizons), the one shown, what it holds */
+  spaceNow: () => {
+    const sp = currentSpace();
+    const ep = sp ? spaceEpochOf(sp) : null;
+    const sum = sp && ep ? sp.summary(ep) : null;
+    return { horizons: spaceBandsWin() !== null, epochs: (sp?.epochs ?? []).map((e) => ({ id: e.id, name: e.name })),
+             current: ep, units: sum?.units ?? [], rms: (sum?.rms ?? []).map((r) => r.id), withProxy: sum?.withProxy ?? [],
+             bar: [...document.querySelectorAll<HTMLElement>(".scn-bar")].map((b) => b.textContent ?? ""),
+             // MICRO-LAB bande-2 · what the scene DREW (a box in a 3D view): models and proxies
+             drawn: [...(sum?.rms ?? []).map((r) => `rm:${r.id}`), ...(sum?.withProxy ?? []).map((u) => `proxy:${u}`)]
+               .filter((k) => [...sceneHandles.values()].some((h) => !!h.boxOf(k))),
+             empty: [...document.querySelectorAll<HTMLElement>(".scn-empty:not(.hidden)")].map((b) => b.textContent ?? "") };
+  },
+  /** MICRO-LAB bande-2 · what a Matrix window draws on top of something else
+   *  (`scene-overlaps.ts`): boxes, groups, bands and the «from …» cards of the
+   *  last paint (that window painted last: call `draw()` first) */
+  sceneOverlaps: (winId?: string, limit = 20, opts: { chips?: boolean } = {}) => {
+    // the picture as it STANDS: a slide still running (or a headless page whose
+    // frames do not run) is jumped to its end, as a press does
+    finishSlide();
+    const id = winId ?? activeWin().id;
+    const s = sceneOfWin(id, "matrix");
+    if (!s) return null;
+    const vp = viewportFor(id, "matrix");
+    // the «from …» cards as drawn at scale 1, wherever the camera is
+    const cards = cardItems(s);
+    // …and the bands' headers (the chips with name and years, screen space)
+    const mount = graphWindows.get(id);
+    if (mount && opts.chips !== false) {
+      const k = mount.cv.width / Math.max(1, mount.cv.getBoundingClientRect().width) / (window.devicePixelRatio || 1);
+      for (const r of drawnLabelRects().lanes)
+        cards.push({ kind: "card" as const, id: `chip:${r.id}`, owner: r.id,
+          x: (r.x * k - vp.x) / vp.scale, y: (r.y * k - vp.y) / vp.scale, w: r.w * k / vp.scale, h: r.h * k / vp.scale });
+    }
+    const rep = sceneOverlaps(s, cards);
+    const name = (x: string): string => x.startsWith("chip:") ? x
+      : String(s.byId.get(x.replace(/^card:/, ""))?.node.name ?? x);
+    return { items: rep.items, count: rep.overlaps.length, byKind: rep.byKind, cards: cards.length,
+             sample: rep.overlaps.slice(0, limit).map((o) => {
+               const r = (x: string) => { const g = s.groupsById?.get(x); const n = g ?? s.byId.get(x);
+                 return n ? [Math.round(n.x), Math.round(n.y), Math.round(n.w), Math.round(n.h)] : null; };
+               return { kind: o.kind, a: name(o.a), b: name(o.b), ra: r(o.a), rb: r(o.b) };
+             }) };
+  },
+  setSpaceEpoch: (id: string) => { spaceEpochId = id; refreshSurfaces("scene"); },
+  setBands: (bands: Bands, winId?: string) => { const w = winById(winId ?? activeWin().id); if (w) setBandsOf(w, bands); },
+  setBandsPeriodization: (id: string, winId?: string) => { const w = winById(winId ?? activeWin().id); if (w) setBandsPerOf(w, id); },
+  setBandsGraph: (graphId: string, on: boolean, winId?: string) => { const w = winById(winId ?? activeWin().id); if (w) setBandsGraphOf(w, graphId, on); },
+  // MICRO-LAB bande-3 · a graph in front by its slot (the epochs' measure, graph by graph)
+  activateSlot: (id: string) => activateSlot(id),
+  // MICRO-LAB bande-3 · a drop by the hand, the same commit as the pointer's
+  // (one batch, settled where it was dropped, marked `hand_placed`)
+  dropAt: (id: string, x: number, y: number) => {
+    const st = store;
+    if (!st) return;
+    slideSuppressed++;
+    try {
+      st.batch(() => settleDropped(new Map([[id, { x, y }]]), id, [], false));
+      buildScenes();
+    } finally { slideSuppressed--; }
+    draw();
+  },
+  handPlaced: () => [...(store?.doc.layout?.hand_placed ?? [])],
+  activeSlot: () => ({ id: emtree.active()?.id ?? null, graphId: emtree.active() ? graphIdOfSlot(emtree.active()!) : null,
+                       slots: emtree.slots.map((sl) => ({ id: sl.id, graphId: graphIdOfSlot(sl), label: slotLabel(sl) })) }),
+  undoAny: () => undoStore()?.undo(),
+  roomGraphsFor: (doc: unknown) => { noteRoomGraphs(doc); return [...hubRoomGraphs]; },
+  storeForGraph: (gid: string) => {
+    const st = hubStoreFor(gid);
+    return st === periodizationStore ? "periodizations" : st === store ? "active" : st ? "slot" : null;
+  },
   /** MICRO-PERCORSI-WINDOWS p.3 · «Ritrova i file…» in a named folder (no dialog
    *  for the folder), and what its window shows */
   relocate: (folder: string) => relocateFiles(folder),
@@ -3191,6 +3306,10 @@ interface GraphPaint {
 const paintedAt = new Map<string, { seq: number; t: number }>();
 function paintGraphWindow(p: GraphPaint): void {
   const { cv, scene: s, vp, live } = p;
+  // MICRO-LAB orizzonti come bande · a Matrix in horizons: its own ids
+  const hzP = p.mode === "matrix" ? hzProjOf(p.winId) : null;
+  const selId = hzP ? hzSceneId(p.winId, selectedId) : selectedId;
+  const selIds = hzP ? new Set([...selectedIds].map((id) => hzSceneId(p.winId, id) ?? id)) : selectedIds;
   paintedAt.set(p.winId, { seq: docChangeSeq, t: performance.now() });
   // MICRO-FINESTRE-MULTIPLE · the density of the SCREEN this canvas is on: a
   // detached window on a second screen has its own
@@ -3205,6 +3324,15 @@ function paintGraphWindow(p: GraphPaint): void {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, w, h);
     p.overview?.update(null, vp, w, h);
+    // MICRO-LAB orizzonti come bande · why the bands are not there (yet)
+    const note = p.mode === "matrix" && store && hzWin(p.winId) ? hzSceneOfWin(p.winId).note : null;
+    if (note) {
+      c.font = canvasFont(500, 13);
+      c.fillStyle = canvasTheme().labelMuted;
+      c.textAlign = "center";
+      c.fillText(note, w / 2, h / 2);
+      c.textAlign = "left";
+    }
     return;
   }
   // Frame it the first time this window shows this document (so a new area never
@@ -3216,25 +3344,24 @@ function paintGraphWindow(p: GraphPaint): void {
   const size = `${Math.round(w)}x${Math.round(h)}`;
   // CAMPAGNA · a Matrix opens on its first epoch with nodes, not on the whole
   // graph (`firstViewBounds`); «0» and ⤢ still frame everything
+  let framedNow = false;
   if (!framedViews.has(key)) {
     framedViews.add(key);
     vp.fit(p.mode === "matrix" ? firstViewBounds(s) : sceneBounds(s), w, h);
     framedSizes.set(key, size);
+    framedNow = true;
   } else if (framedSizes.get(key) !== size && !touchedViews.has(key)) {
     vp.fit(p.mode === "matrix" ? firstViewBounds(s) : sceneBounds(s), w, h);
     framedSizes.set(key, size);
+    framedNow = true;
   }
   const selectedEdgeIdx = selectedEdge
     ? s.edges.findIndex((se) => sameEdge(se.edge, selectedEdge!))
     : -1;
-  render(
-    c,
-    s,
-    vp,
-    {
+  const renderState: Parameters<typeof render>[3] = {
       hoverId: live?.hoverId ?? null,
-      selectedId,
-      selectedIds,
+      selectedId: selId,
+      selectedIds: selIds,
       edgeVisible,
       hoverEdgeIdx: live?.hoverEdgeIdx ?? null,
       selectedEdgeIdx,
@@ -3260,23 +3387,32 @@ function paintGraphWindow(p: GraphPaint): void {
       } : undefined,
       // MICRO-SOVRAPPOSIZIONI · the overlays of this window's view
       overlays: overlaysOfWin(p.winId, overlayViewOf(p.winId, p.mode)),
+      // MICRO-LAB orizzonti · the Matrix and the Graph read by horizons
+      // MICRO-LAB orizzonti come bande · the Graph of a window that reads by
+      // horizons; the Matrix does not tint, its lanes are the horizons
+      horizon: p.mode === "graph" ? horizonMarksNow(p.winId) : null,
       // E5 · an undated epoch's lane invites to date it — drawn, never saved
-      dateInvite: p.mode === "matrix" ? { text: t("epoch.inviteDate"), add: t("epoch.inviteAdd") } : null,
+      dateInvite: p.mode === "matrix" && !hzP ? { text: t("epoch.inviteDate"), add: t("epoch.inviteAdd") } : null,
       // MICRO-CONTENTS-1 F10 · a DTC lane is not an epoch: no «+ phase» on it
       addPhase: p.mode !== "dtc",
-    },
-    w,
-    h,
-  );
+  };
+  render(c, s, vp, renderState, w, h);
+  // MICRO-LAB bande-2 · a Matrix just framed opens with its bands' headers
+  // (the chips, pinned to the left of the screen) clear of the boxes: the
+  // camera moves right by what the widest overlap asks, once
+  if (EXPERIMENTAL && framedNow && p.mode === "matrix") {
+    const dx = chipClearance(s, vp);
+    if (dx > 0) { vp.x += dx; render(c, s, vp, renderState, w, h); }
+  }
   p.overview?.update(s, vp, w, h);
   // selection overlay (screen space): a translucent wash + ring so the whole
   // multi-selection is unmistakable regardless of node colour. Active node is
   // bolder than the other selected ones (two-tier feedback). Drawn in EVERY
   // window: the selection is a fact about the graph, not about a gesture.
-  if (selectedIds.size) {
+  if (selIds.size) {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.save();
-    for (const id of selectedIds) {
+    for (const id of selIds) {
       const sn = s.byId.get(id);
       // BUGFIX-PDG · a collapsed-to-tablet PDG has no box on the canvas — the
       // selection wash must NOT paint a phantom box at its layout rect (its
@@ -3289,7 +3425,7 @@ function paintGraphWindow(p: GraphPaint): void {
       const y = vb.y * vp.scale + vp.y - 3;
       const bw = vb.w * vp.scale + 6;
       const bh = vb.h * vp.scale + 6;
-      const active = id === selectedId;
+      const active = id === selId;
       const th = canvasTheme();
       c.fillStyle = active ? th.selectWash : th.selectWashSoft;
       c.strokeStyle = active ? th.accent : th.selectSoft;
@@ -3335,6 +3471,8 @@ function paintGraphWindow(p: GraphPaint): void {
     c.setLineDash([]);
     c.restore();
   }
+  // MICRO-LAB orizzonti come bande · whose graph each box is
+  if (hzP) paintGraphTabs(c, s, vp, hzP, dpr);
   // …and the one thing that belongs to a HAND rather than to the document
   if (live?.marquee) {
     const m = live.marquee;
@@ -3756,6 +3894,12 @@ function sameEdge(a: EmEdge, b: EmEdge): boolean {
 
 function select(nodeId: string | null): void {
   scheduleSessionCopy();   // MICRO-MEMORIA-SESSIONE p.2 · the selection is part of the view kept
+  // MICRO-LAB orizzonti come bande · a node of a horizon picture is a node of
+  // ITS graph: that graph comes in front, the node is selected there
+  if (nodeId) {
+    const r = hzResolve(nodeId);
+    if (r !== undefined) nodeId = r;
+  }
   // MICRO-AUTORI-LAYOUT p.5 · a node of the Multigraph is a node of ITS graph:
   // that graph comes in front (the Inspector shows the active graph), then the
   // node is selected there — the graph's node shows the graph and its paradata
@@ -3864,6 +4008,13 @@ function selectEdge(edge: EmEdge | null): void {
 
 /** Shift/Cmd-click: toggle a node in the multi-selection (D3). */
 function toggleSelect(nodeId: string): void {
+  // MICRO-LAB orizzonti come bande · a selection lives in ONE graph: a node of
+  // another graph of the picture starts a new one there
+  const hz = hzOwner(nodeId);
+  if (hz) {
+    if (hz.slot !== emtree.active()?.id) { select(nodeId); return; }
+    nodeId = hz.raw;
+  }
   if (selectedIds.has(nodeId)) {
     selectedIds.delete(nodeId);
     if (selectedId === nodeId)
@@ -3934,6 +4085,20 @@ document.addEventListener("emdata:rendered", () => markTableSelection());
 
 /** Replace the selection with a set (marquee result). */
 function selectMany(ids: string[]): void {
+  // MICRO-LAB orizzonti come bande · a marquee over several graphs selects in
+  // ONE: the active one if it has some of them, else the one with the most
+  if (ids.some((id) => hzOwner(id))) {
+    const by = new Map<string, string[]>();
+    for (const id of ids) {
+      const o = hzOwner(id);
+      if (!o) continue;
+      (by.get(o.slot) ?? by.set(o.slot, []).get(o.slot)!).push(o.raw);
+    }
+    const act = emtree.active()?.id ?? "";
+    const slot = by.has(act) ? act : [...by.entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+    if (slot && slot !== act) hzActivate(slot);
+    ids = slot ? by.get(slot) ?? [] : [];
+  }
   selectedIds = new Set(ids);
   selectedId = ids.length ? ids[ids.length - 1] : null;
   dropSketchSel();
@@ -4108,7 +4273,7 @@ function renderInspectorInto(host: HTMLElement): void {
             run: (anchor) => toggleConnectionPanel(anchor ?? null) }),
       chronologyOf: (id) => {
         const st = storeOfNode(id) ?? store!;
-        const cs = chronologyFor(st.doc, () => st.toJSON());
+        const cs = chronologyFor(st.doc, () => st.toJSON(), st);
         return { status: cs.status, entry: cs.map[id] ?? null, stale: cs.stale };
       },
       isResourceOpen: (id) => openResourceFiles.has(id),
@@ -5541,6 +5706,9 @@ function renderImplicitInspector(host: HTMLElement, groupId: string): void {
 
 function filteredView(opts: { wholeGraph?: boolean;
                         hidden?: { nodes: Set<string>; edges: Set<string> };
+                        /** MICRO-LAB orizzonti come bande · another open graph's
+                         *  document (the Matrix in horizons draws them all) */
+                        doc?: EmDocument;
                         /** the Matrix: no LocationNodeGroup drawn (11 Oct 2026) */
                         placesUndrawn?: boolean } = {}): {
   nodes: EmDocument["graph"]["nodes"];
@@ -5550,7 +5718,7 @@ function filteredView(opts: { wholeGraph?: boolean;
   instanceKindsHidden?: Set<string>;
 } {
   // MICRO-SPAZIO-3D-2 · the view's document: the implicit groups in it
-  const doc = viewDocNow();
+  const doc = opts.doc ?? viewDocNow();
   const wholeGraph = !!opts.wholeGraph;
   const hiddenNodeTypes = opts.hidden?.nodes ?? hiddenNodesNow;
   const hiddenEdgeTypes = opts.hidden?.edges ?? hiddenEdgesNow;
@@ -5866,6 +6034,8 @@ let sharedLensKey = "";
 let lensFileCounts: ReturnType<typeof fileCounts> = new Map();
 function sceneOfWin(winId: string | null | undefined, mode: ViewKind): Scene | null {
   ensureScenes();
+  // MICRO-LAB orizzonti come bande · a Matrix window in horizons: its own picture
+  if (mode === "matrix" && store && hzWin(winId)) return hzSceneOfWin(winId!).scene;
   // no document: no lens has a scene (the cache is the LAST document's — TT1:
   // the graph of a Blender session left drawn after it ended)
   if (mode !== "matrix" || !winId || !store) return scenes[mode] ?? null;
@@ -5951,7 +6121,12 @@ function startSlide(before: SlideSnap | null): void {
   slideRun = run;
   const step = (now: number): void => {
     if (slideRun !== run) return; // superseded by a newer rebuild
-    const t = Math.min(1, (now - run.start) / SLIDE_MS);
+    // MICRO-LAB bande-3 · clamped BELOW too: a frame's timestamp can precede the
+    // run's start (the frame began before the rebuild), and a negative t eased
+    // to e < 0 threw every node backwards past its start; a rebuild during the
+    // slide then snapshotted that and compounded it (measured headless, 50
+    // groups opened in a row: x at -1e25, then 0 by cancellation)
+    const t = Math.max(0, Math.min(1, (now - run.start) / SLIDE_MS));
     const e = 1 - (1 - t) ** 3;
     for (const it of run.items) {
       it.obj.x = it.fx + (it.tx - it.fx) * e;
@@ -6009,6 +6184,7 @@ function reflowMatrix(): void {
 }
 
 function buildScenesNow(): void {
+  hzScenes.clear();   // MICRO-LAB orizzonti come bande · rebuilt on demand (sceneOfWin)
   if (!store) return;
   // MICRO-SPAZIO-3D-2 · the view's document, computed once per build
   viewDocDirty = true;
@@ -6040,6 +6216,7 @@ function buildScenesNow(): void {
     )
       warnIds.add(n.id);
   const vdoc = viewDocNow();
+  const handPlaced = new Set(doc.layout?.hand_placed ?? []);
   const matrixFrom = (fv: ReturnType<typeof filteredView>, cont: boolean): Scene | null => {
     const sc = buildMatrixScene(
       vdoc,
@@ -6058,6 +6235,11 @@ function buildScenesNow(): void {
     // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the overlay «Continuity» off: the BR
     // and its line are not drawn (and not touched); the graph keeps them
     if (sc && !cont) dropContinuity(sc, isContinuityType);
+    // MICRO-LAB bande-3 · «fare spazio» in the epochs too (E.D. on the lab.4):
+    // what the view grew after the layout (an open paradata group under its
+    // unit, its instances, their cards) moves the block it covers, as in the
+    // horizons — but what the hand placed stays where the hand left it
+    if (sc && EXPERIMENTAL) makeRoom(sc, 24, (id) => handPlaced.has(id));
     return sc;
   };
   const sharedCont = overlayShown(overlaysOf("matrix"), "continuity");
@@ -7162,6 +7344,19 @@ function loadContainerDocument(
   } else if (!emtree.files.some((f) => f.id !== file.id)) {
     corpusStore = null;        // the first file of a fresh workspace: nothing to keep
   }
+  // MICRO-LAB orizzonti · the horizons: ONE per workspace, like the corpus —
+  // its home file writes it, a second file's is retained in that file
+  if (parsed.periodizations) {
+    if (periodizationHomeFileId && emtree.file(periodizationHomeFileId) && projectPeriodizationsSection()) {
+      file.retained[String(parsed.periodizations.graph_id ?? PERIODIZATIONS_MEMBER_ID)] = parsed.periodizations;
+    } else {
+      adoptProjectPeriodizations(parsed.periodizations);
+      periodizationHomeFileId = file.id;
+    }
+  } else if (!emtree.files.some((f) => f.id !== file.id)) {
+    periodizationStore = null;
+    periodizationHomeFileId = null;
+  }
   if (activeSlotId) activateSlot(activeSlotId, { rebuildOnly: false });
   if (parsed.members.length > 1) {
     // MICRO-CONTENTS-1 B10 · which graph the file makes ACTIVE, said at the
@@ -7476,6 +7671,532 @@ function adoptProjectCorpus(section: Record<string, unknown>): void {
     graph: section as unknown as EmDocument["graph"],
   } as EmDocument);
   wireCorpusStore(corpusStore);
+}
+
+// ── MICRO-LAB orizzonti · THE HORIZONS MEMBER, as a store of its own ─────────
+//
+// Periodizations (E32) and their horizons (crmgeo:SP10) are nodes of the
+// MULTIGRAPH, at the level of the container (E.D., 24 Oct 2026): the member
+// `graphs.periodizations`, routed like the corpus — one per workspace, owned by
+// the file that brought it (its HOME), written only by that file. It is a
+// `DocumentStore`, so every rule already written applies (ids, stamps,
+// tombstones, undo): an edit is ONE undo step, it goes to the Log, and in a room
+// its operations leave like any other, with the member's `graph_id` in the
+// envelope (G1) — the relay applies them to `graphs.periodizations`.
+let periodizationStore: DocumentStore | null = null;
+let periodizationHomeFileId: string | null = null;
+
+/** The horizons store; `create: false` answers "is there one?" */
+function periodizations(opts: { create?: boolean } = {}): DocumentStore | null {
+  if (periodizationStore) return periodizationStore;
+  if (opts.create === false) return null;
+  adoptProjectPeriodizations(newPeriodizationsSection());
+  return periodizationStore;
+}
+
+function adoptProjectPeriodizations(section: Record<string, unknown>): void {
+  periodizationStore = new DocumentStore({
+    header: { format: "em.json", version: "1.0" },
+    graph: section as unknown as EmDocument["graph"],
+  } as EmDocument);
+  horizonView.hidden = initialHidden(chosenPeriodization(
+    readPeriodizations(section), horizonView));
+  wirePeriodizationStore(periodizationStore);
+}
+
+function wirePeriodizationStore(s: DocumentStore): void {
+  s.onChange(() => {
+    lastTouchedStore = s;      // ⌘Z takes back the last horizon edit
+    const home = periodizationHomeFileId ? emtree.file(periodizationHomeFileId) : null;
+    if (home) home.dirty = true;
+    refreshSurfaces("chronology");
+    updateToolbar();
+    refreshEMTree();
+    draw();
+  });
+  s.onOp((op) => {
+    if (sync.room && !sync.canWrite) {
+      takeBackReadOnlyWrite(s);
+      return;
+    }
+    queueOpLog(s, op);         // the Log says what the hand changed
+    let wireOps: HubOp[];
+    try {
+      wireOps = opsForLocalChange(op as Parameters<typeof opsForLocalChange>[0], null);
+    } catch (e) {
+      opRefused(t("ops.notSent", { why: (e as Error).message }));
+      return;
+    }
+    const gid = String((s.doc.graph as Record<string, unknown>).graph_id ?? PERIODIZATIONS_MEMBER_ID);
+    if (sync.room) hubSendLocal(wireOps, gid);
+  });
+}
+
+/** The member to write, or null: a project without periodizations does not
+ *  grow an empty member (s3dgraphy writes it only when there is one). */
+function projectPeriodizationsSection(): Record<string, unknown> | null {
+  const st = periodizations({ create: false });
+  if (!st) return null;
+  const graph = st.doc.graph as unknown as Record<string, unknown>;
+  if (!readPeriodizations(graph).list.length) return null;
+  return JSON.parse(st.toJSON()).graph as Record<string, unknown>;
+}
+
+/** The session's way of reading the views by horizons (never in the file). */
+const horizonView: HorizonView = { mode: "off", periodizationId: null, hidden: new Set() };
+
+function horizonsRead(): PeriodizationsRead {
+  const st = periodizations({ create: false });
+  return st ? readPeriodizations(st.doc.graph) : { list: [], active: null };
+}
+
+/** MICRO-LAB orizzonti come bande · the marks a GRAPH window paints when it
+ *  reads by horizons (its switch on «Orizzonti»): each node the colour of the
+ *  first visible horizon its interval overlaps. The Matrix does not tint: its
+ *  lanes ARE the horizons. The intervals are the bridge's
+ *  (`Graph.chronology()` + `epoch_intervals()`) for the graph on screen. */
+function horizonMarksNow(winId?: string | null): HorizonMarks | null {
+  if (!store || !winId || bandsOfWin(winId) !== "horizons") return null;
+  const per = bandsPerOfWin(winId);
+  if (!per) return null;
+  const st = store;
+  const cs = chronologyFor(st.doc, () => st.toJSON(), st);
+  if (cs.status !== "ok") return null;
+  return horizonMarks(per, { ...horizonView, mode: "colour" }, intervalsFrom(cs.map, cs.epochs ?? null));
+}
+
+// ── MICRO-LAB orizzonti come bande · THE MATRIX IN HORIZONS ─────────────────
+//
+// E.D., 25 Oct 2026: «gli orizzonti si vedono come si vedono le epoche: al posto
+// delle epoche». A Matrix window has a switch, Epoche ⇄ Orizzonti, in its bar,
+// with the periodization beside it; in horizons its lanes are the horizons of
+// that periodization and EVERY graph switched on (all, by default) is laid out
+// in those same bands — `horizon-bands.ts` builds the projection, em-core lays
+// it out (a fresh layout of its own: the epochs' arrangement is the epochs'),
+// `buildMatrixScene` draws it. The switch, the periodization and the graphs
+// switched off are the WINDOW's (`win.state`, like the lens of dev.71): never
+// in the em.json, never in the room.
+//
+// A selection in that picture is a node of ITS graph: that graph comes in front
+// (`hzActivate`, the cameras of the horizon windows kept) and the node is
+// selected there, so the Inspector, the keys and the undo write to the graph it
+// belongs to. The picture moves nothing: a drag, a fold, a new edge are refused
+// with a word (the places are the projection's, not the graph's).
+
+function bandsOfWin(winId: string | null | undefined): Bands {
+  if (!EXPERIMENTAL) return "epochs";   // the switch off: the epochs, always
+  const w = winById(winId);
+  return w && winCurrent(w, BANDS_KEY) === "horizons" ? "horizons" : "epochs";
+}
+/** the periodization a window reads: its own, else the panel's, else the file's */
+function bandsPerOfWin(winId: string | null | undefined): Periodization | null {
+  const w = winById(winId);
+  const own = w ? winCurrent(w, BANDS_PER_KEY) : null;
+  return chosenPeriodization(horizonsRead(),
+    { ...horizonView, periodizationId: typeof own === "string" ? own : horizonView.periodizationId });
+}
+/** the graphs a window switched off (graph ids) */
+function bandsOffOfWin(winId: string | null | undefined): Set<string> {
+  const w = winById(winId);
+  const raw = w ? winCurrent(w, BANDS_OFF_KEY) : null;
+  return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
+}
+/** does this window draw its Matrix in horizons now? */
+function hzWin(winId: string | null | undefined): boolean {
+  return !!winId && bandsOfWin(winId) === "horizons" && graphModeOf(winId) === "matrix" && !!bandsPerOfWin(winId);
+}
+function setBandsOf(win: Win, bands: Bands): void {
+  setWinCurrent(win, BANDS_KEY, bands === "horizons" ? "horizons" : null);
+  framedViews.delete(viewportKey(win.id, "matrix"));   // the other picture opens framed
+  touchedViews.delete(viewportKey(win.id, "matrix"));
+  afterBandsChange();
+}
+function setBandsPerOf(win: Win, id: string): void {
+  setWinCurrent(win, BANDS_PER_KEY, id);
+  framedViews.delete(viewportKey(win.id, "matrix"));
+  afterBandsChange();
+}
+function setBandsGraphOf(win: Win, graphId: string, on: boolean): void {
+  const off = bandsOffOfWin(win.id);
+  if (on) off.delete(graphId); else off.add(graphId);
+  setWinCurrent(win, BANDS_OFF_KEY, off.size ? [...off].sort() : null);
+  afterBandsChange();
+}
+function afterBandsChange(): void {
+  renderAreaHeaders();
+  buildScenes();
+  draw();
+  refreshSurfaces("scene");
+  // MICRO-LAB bande-2 · the «Modelli e proxy» sheet reads as the scene reads
+  refreshSurfaces("table");
+}
+const graphIdOfSlot = (sl: GraphSlot): string => String(sl.store.doc.graph.graph_id ?? sl.id);
+
+interface HzScene { key: string; scene: Scene | null; proj: HorizonProjection | null; note: string | null }
+/** per window, the horizon picture of this build (cleared by every rebuild) */
+const hzScenes = new Map<string, HzScene>();
+/** em-core's layouts of the projections, by their structure (kept across builds) */
+const hzLayouts = new Map<string, EmDocument["layout"] | "pending" | "failed">();
+
+/** The slots a window lays out in its bands: every open graph not switched off. */
+function hzSlotsOf(winId: string): GraphSlot[] {
+  const off = bandsOffOfWin(winId);
+  return emtree.slots.filter((sl) => !off.has(graphIdOfSlot(sl)));
+}
+
+function hzSceneOfWin(winId: string): HzScene {
+  const per = bandsPerOfWin(winId);
+  const slots = hzSlotsOf(winId);
+  const leaves = leavesOfWin(winId, "matrix");
+  const key = [per?.id ?? "", [...horizonView.hidden].sort().join(","), leavesKey(leaves),
+               slots.map((sl) => sl.id).join(","), JSON.stringify(per?.horizons ?? [])].join("§");
+  const memo = hzScenes.get(winId);
+  if (memo && memo.key === key) return memo;
+  const out: HzScene = { key, scene: null, proj: null, note: null };
+  hzScenes.set(winId, out);
+  if (!per || !slots.length) { out.note = t("bands.none"); return out; }
+  // s3Dgraphy's intervals, one answer per graph
+  const inputs: BandGraphInput[] = [];
+  for (const sl of slots) {
+    const st = sl.store;
+    const cs = chronologyFor(st.doc, () => st.toJSON(), st);
+    if (cs.status !== "ok") {
+      out.note = t(cs.status === "loading" || cs.status === "idle" ? "bands.loading" : "bands.bridgeOff");
+      return out;
+    }
+    // MICRO-LAB bande-2 · the graph's own closed groups stay closed (lab.3
+    // opened them all: every paradata group open, arranged after the layout,
+    // over its neighbours — E.D.'s screenshots of 25 Oct)
+    const doc = st.doc;
+    const hiddenNodes = new Set<string>();
+    for (const n of st.doc.graph.nodes) { const l = nodeLeaf(n.node_type); if (l && !leaves.has(l)) hiddenNodes.add(n.node_type); }
+    const hiddenEdges = new Set<string>();
+    for (const e of st.doc.graph.edges) { const l = edgeLeaf(e.edge_type ?? ""); if (l && !leaves.has(l)) hiddenEdges.add(e.edge_type ?? ""); }
+    const fv = filteredView({ doc, hidden: { nodes: hiddenNodes, edges: hiddenEdges }, placesUndrawn: true });
+    // the edges that place a unit in TIME, whatever the filter (refreshMatrixViewLayout)
+    const ids = new Set(fv.nodes.map((n) => n.id));
+    const seen = new Set(fv.edges.map((e) => `${e.source}|${e.target}|${e.edge_type}`));
+    const extra = st.doc.graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target)
+      && !seen.has(`${e.source}|${e.target}|${e.edge_type}`) && !isRemoved(e as unknown as Record<string, unknown>));
+    inputs.push({ key: sl.id, label: slotLabel(sl), nodes: fv.nodes, edges: [...fv.edges, ...extra],
+                  intervals: intervalsFrom(cs.map, cs.epochs ?? null), folded: doc.layout?.folded_groups ?? [] });
+  }
+  const proj = projectByHorizons(inputs, per, horizonView.hidden, {
+    outsideName: t("bands.outside"), undatedName: t("bands.undated"),
+    drop: (n) => isContinuityType(n.node_type),
+  });
+  out.proj = proj;
+  // the layout of this STRUCTURE (the nodes, the edges, the bands they are in)
+  // (what the Matrix draws as a box: `layoutGraph`, the closed groups with it)
+  const lg = proj.layoutGraph;
+  const lkey = lg.nodes.map((n) => n.id).join(",") + "#" +
+    lg.edges.map((e) => `${e.source}>${e.target}:${e.edge_type}`).join(",") + "#" + proj.folded.join(",");
+  const lay = hzLayouts.get(lkey);
+  if (lay === undefined) {
+    hzLayouts.set(lkey, "pending");
+    void (async () => {
+      try {
+        const { computeLayout } = await import("./emcore");
+        const l = await perfTimeAsync("runLayout", () => computeLayout(lg as EmDocument["graph"],
+          { positions: {}, folded_groups: proj.folded } as unknown as EmDocument["layout"]));
+        // a «PD» tablet sits on its unit (refreshMatrixViewLayout)
+        if (l?.positions)
+          for (const [pdg, ref] of proj.tablets) { const at = l.positions[ref]; if (at) l.positions[pdg] = { ...at }; }
+        hzLayouts.set(lkey, l);
+      } catch {
+        hzLayouts.set(lkey, "failed");
+      }
+      buildScenes();
+      draw();
+    })();
+  }
+  if (lay === undefined || lay === "pending") { out.note = t("bands.layingOut"); return out; }
+  if (lay === "failed") { out.note = t("bands.failed"); return out; }
+  const hdoc: EmDocument = { header: { format: "em.json", version: "1.0" },
+                             graph: proj.graph as EmDocument["graph"],
+                             layout: { ...lay, folded_groups: proj.folded } as EmDocument["layout"] };
+  const sc = buildMatrixScene(hdoc, undefined, undefined, new Set(), undefined);
+  if (sc) {
+    markHorizonLanes(sc, proj);
+    // MICRO-LAB bande-2 · what the view grew after em-core (an open paradata
+    // group under its unit) makes room: nobody arranges this picture by hand
+    makeRoom(sc);
+  }
+  out.scene = sc;
+  return out;
+}
+
+/** the horizon lanes say what they are: the renderer draws them in their own style */
+function markHorizonLanes(sc: Scene, proj: HorizonProjection): void {
+  const kind = new Map(proj.bands.map((b) => [b.id, b.kind]));
+  for (const l of sc.lanes) {
+    const k = kind.get(l.id);
+    if (k) l.horizon = k;
+  }
+}
+
+/** The projection a window draws (null when it is in epochs). */
+function hzProjOf(winId: string | null | undefined): HorizonProjection | null {
+  return winId && hzWin(winId) ? hzSceneOfWin(winId).proj : null;
+}
+/** a node of the active graph → its id in a window's horizon picture */
+function hzSceneId(winId: string, raw: string | null): string | null {
+  if (!raw) return raw;
+  const proj = hzProjOf(winId);
+  const slot = emtree.active()?.id;
+  return proj && slot ? proj.sceneOf.get(`${slot}${HZ_SEP}${raw}`) ?? raw : raw;
+}
+
+/**
+ * An id picked in a horizon picture → the id in its graph, that graph brought
+ * in front first. `undefined` = not a horizon id (nothing to do); null = a
+ * band (selects nothing: a horizon is edited in the Chronology's panel).
+ */
+function hzResolve(id: string): string | null | undefined {
+  if (id.startsWith(HZ_LANE)) return windowsOf().some((w) => hzWin(w.id)) ? null : undefined;
+  for (const w of windowsOf()) {
+    if (!hzWin(w.id)) continue;
+    const proj = hzSceneOfWin(w.id).proj;
+    const slot = proj?.slotOf.get(id);
+    if (!proj || !slot) continue;
+    if (slot !== emtree.active()?.id) hzActivate(slot);
+    return proj.realOf.get(id) ?? id;
+  }
+  return undefined;
+}
+
+/** whose node a horizon picture's id is (without bringing anything in front) */
+function hzOwner(id: string): { slot: string; raw: string } | null {
+  for (const w of windowsOf()) {
+    if (!hzWin(w.id)) continue;
+    const proj = hzSceneOfWin(w.id).proj;
+    const slot = proj?.slotOf.get(id);
+    if (proj && slot) return { slot, raw: proj.realOf.get(id) ?? id };
+  }
+  return null;
+}
+
+/** Bring a graph in front from a horizon picture: the horizon windows keep their
+ *  camera (their picture does not change) and the focused one its mode. */
+function hzActivate(slotId: string): void {
+  const keep = new Map<string, { x: number; y: number; scale: number }>();
+  for (const w of windowsOf()) if (hzWin(w.id)) {
+    const vp = viewportFor(w.id, "matrix");
+    keep.set(w.id, { x: vp.x, y: vp.y, scale: vp.scale });
+  }
+  const here = activeWin();
+  const mode = here.type === "graph" ? winMode(here) : null;
+  activateSlot(slotId);
+  if (mode && activeWin() === here && winMode(here) !== mode) setWindowMode(here, mode);
+  for (const [id, c] of keep) {
+    const vp = viewportFor(id, "matrix");
+    vp.x = c.x; vp.y = c.y; vp.scale = c.scale;
+    framedViews.add(viewportKey(id, "matrix"));
+    touchedViews.add(viewportKey(id, "matrix"));
+  }
+}
+
+/**
+ * The switch of a window's bar: «Epochs | Horizons» (a segment, as the modes),
+ * and in horizons the periodization beside it and — in the Matrix, with more
+ * than one graph open — one button per graph (up to 4; beyond, three and «more…»),
+ * its tint, a click switching it off or on. Without a periodization «Horizons» says why and opens the Chronology,
+ * where the panel makes one. The Scena 3D has the same control (`spaceBandsBar`).
+ */
+function bandsControl(win: Win): HTMLElement {
+  const box = document.createElement("span");
+  box.className = "win-bands";
+  box.dataset.bands = bandsOfWin(win.id);
+  box.title = t("bands.title");
+  const read = horizonsRead();
+  const seg = document.createElement("span");
+  seg.className = "win-seg win-bands-seg";
+  seg.setAttribute("role", "group");
+  seg.setAttribute("aria-label", t("bands.title"));
+  for (const b of ["epochs", "horizons"] as Bands[]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.bandsSet = b;
+    btn.textContent = t(`bands.${b}`);
+    btn.setAttribute("aria-pressed", String(bandsOfWin(win.id) === b));
+    const none = b === "horizons" && !read.list.length;
+    if (none) {
+      btn.classList.add("dd-disabled");
+      btn.title = t("bands.noPeriodization");
+    }
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (none) { toast(t("bands.noPeriodization")); openChronology(); return; }
+      if (bandsOfWin(win.id) !== b) setBandsOf(win, b);
+    });
+    seg.appendChild(btn);
+  }
+  box.appendChild(seg);
+  if (bandsOfWin(win.id) !== "horizons" || !read.list.length) return box;
+  const per = bandsPerOfWin(win.id);
+  const sel = document.createElement("select");
+  sel.className = "win-bands-per";
+  sel.dataset.bandsPer = "1";
+  sel.title = t("bands.periodizationTip");
+  for (const p of read.list) {
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = p.id === read.active ? `${p.name} ★` : p.name;
+    o.selected = p.id === per?.id;
+    sel.appendChild(o);
+  }
+  sel.addEventListener("click", (e) => e.stopPropagation());
+  sel.addEventListener("change", () => setBandsPerOf(win, sel.value));
+  box.appendChild(sel);
+  if (win.type !== "graph" || winMode(win) !== "matrix" || emtree.slots.length < 2) return box;
+  // MICRO-LAB bande-3 · the graphs as BUTTONS in sight (E.D. on the lab.4): up
+  // to 4 one button each; beyond, the first three and a menu «more…» with the
+  // rest. lab.4 had them all in a menu «Graphs n/N» (lab.3's row of chips had
+  // pushed the bar into its sideways scroll): a button keeps its name short
+  // (ellipsis, the whole name in its tooltip) and the bar wraps, never scrolls.
+  const off = bandsOffOfWin(win.id);
+  const onSlots = emtree.slots.filter((x) => !off.has(graphIdOfSlot(x)));
+  const MAX_BUTTONS = 4;
+  const shown = emtree.slots.length <= MAX_BUTTONS ? emtree.slots : emtree.slots.slice(0, MAX_BUTTONS - 1);
+  const rest = emtree.slots.slice(shown.length);
+  const row = document.createElement("span");
+  row.className = "win-bands-graphs";
+  row.setAttribute("role", "group");
+  row.setAttribute("aria-label", t("bands.graphsCount", { on: onSlots.length, all: emtree.slots.length }));
+  row.title = t("bands.graphsTip");
+  const graphButton = (sl: (typeof emtree.slots)[number], inMenu: boolean): HTMLButtonElement => {
+    const gid = graphIdOfSlot(sl);
+    const on = !off.has(gid);
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "win-bands-graph";
+    c.dataset.bandsGraph = gid;
+    c.setAttribute("aria-pressed", String(on));
+    // the tint the boxes carry: by the slot's place among the graphs switched on
+    const k = onSlots.indexOf(sl);
+    const sw = document.createElement("span");
+    sw.className = "win-bands-swatch";
+    sw.style.background = on && k >= 0 ? GRAPH_TINTS[k % GRAPH_TINTS.length] : "transparent";
+    const name = document.createElement("span");
+    name.className = "win-bands-graph-name";
+    name.textContent = slotLabel(sl);
+    if (inMenu) {
+      const mark = document.createElement("span");
+      mark.className = "win-bands-check";
+      mark.textContent = on ? "✓" : "";
+      c.append(mark);
+    }
+    c.append(sw, name);
+    c.title = `${slotLabel(sl)} — ${t("bands.graphsTip")}`;
+    c.addEventListener("click", (e) => { e.stopPropagation(); closeAllDropdowns(); setBandsGraphOf(win, gid, !on); });
+    return c;
+  };
+  for (const sl of shown) row.appendChild(graphButton(sl, false));
+  if (rest.length) {
+    const dd = document.createElement("span");
+    dd.className = "dropdown win-bands-more";
+    const tog = document.createElement("button");
+    tog.type = "button";
+    tog.className = "dd-toggle win-bands-graphs-toggle";
+    tog.dataset.bandsMore = "1";
+    tog.title = t("bands.moreGraphsTip");
+    for (const sl of rest) {
+      const k = onSlots.indexOf(sl);
+      if (k < 0) continue;
+      const sw = document.createElement("span");
+      sw.className = "win-bands-swatch";
+      sw.style.background = GRAPH_TINTS[k % GRAPH_TINTS.length];
+      tog.appendChild(sw);
+    }
+    tog.append(document.createTextNode(t("bands.moreGraphs", { n: rest.length })));
+    const caret = document.createElement("span");
+    caret.className = "win-type-caret";
+    caret.textContent = "▾";
+    tog.appendChild(caret);
+    const menu = document.createElement("div");
+    menu.className = "dd-menu hidden win-bands-graphs-menu";
+    for (const sl of rest) menu.appendChild(graphButton(sl, true));
+    wireBarDropdown(tog, menu);
+    dd.append(tog, menu);
+    row.appendChild(dd);
+  }
+  box.appendChild(row);
+  return box;
+}
+
+/** MICRO-LAB bande-2 · how far right the camera must go so that no band
+ *  header (screen space, as last drawn) covers a box of its band. */
+function chipClearance(s: Scene, vp: Viewport): number {
+  let dx = 0;
+  const boxes = sceneItems(s).filter((b) => b.kind !== "lane")
+    .map((b) => b.kind === "group" ? { ...b, h: s.groupsById?.get(b.id)?.headerH ?? 20 } : b);
+  for (const r of drawnLabelRects().lanes) {
+    for (const n of boxes) {
+      const x = n.x * vp.scale + vp.x, y = n.y * vp.scale + vp.y;
+      const w = n.w * vp.scale, h = n.h * vp.scale;
+      if (x >= 0 && x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) dx = Math.max(dx, r.x + r.w + 8 - x);
+    }
+  }
+  return Math.ceil(dx);
+}
+
+/** MICRO-LAB bande-2 · the words of the «Modelli e proxy» sheet that say
+ *  «epoch», said «horizon» when it reads by horizons */
+const HZ_SHEET_KEYS = new Set(["space.sumEpochs", "space.rmByEpoch", "space.col.epoch"]);
+/** an horizon of the scene, as a node for the sheet's name column */
+function hzBandNode(sp: Space, id: string): EmNode | undefined {
+  const e = id.startsWith(HZ_LANE) ? sp.epochs.find((x) => x.id === id) : undefined;
+  return e ? ({ id, node_type: "EpochNode", name: e.name } as EmNode) : undefined;
+}
+
+/** What a horizon window refuses, said once per gesture. */
+function hzRefuse(): void {
+  toast(t("bands.readOnlyGesture"));
+}
+
+/**
+ * The signs of a horizon picture, over the scene (screen space):
+ *  · with more than one graph, each box carries a tab of its graph's tint on
+ *    its left, so every graph stays recognisable in the shared bands;
+ *  · a unit that also lives in later horizons (its interval overlaps them; it
+ *    is drawn in the oldest) carries «↑n», dashed like every horizon sign.
+ */
+function paintGraphTabs(c: CanvasRenderingContext2D, s: Scene, vp: Viewport, proj: HorizonProjection, dpr: number): void {
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.save();
+  const k = Math.min(1, vp.scale * 2);
+  for (const n of s.nodes) {
+    if (n.collapsed) continue;
+    const x = n.x * vp.scale + vp.x, y = n.y * vp.scale + vp.y, h = n.h * vp.scale, w = n.w * vp.scale;
+    if (h < 4) continue;
+    const isGroup = !!s.groupsById?.has(n.id);
+    const slot = proj.slotOf.get(n.instanceOf ?? n.id);
+    const tint = proj.tintOf.size > 1 && slot ? proj.tintOf.get(slot) : undefined;
+    if (tint) {
+      c.fillStyle = tint;
+      if (isGroup) c.fillRect(x + 1, y + 1, Math.max(4, 6 * k), Math.min(h - 2, 18 * vp.scale));
+      else c.fillRect(x - 5 * k, y + 1, Math.max(2, 4 * k), h - 2);
+    }
+    const also = isGroup || n.instanceOf ? 0 : proj.placed.get(n.id)?.also.length ?? 0;
+    if (also && h >= 12) {
+      const txt = `↑${also}`;
+      c.font = canvasFont(700, 9);
+      const tw = c.measureText(txt).width + 6;
+      const bx = x + w - tw / 2, by = y - 7;
+      c.fillStyle = canvasTheme().laneChip;
+      c.fillRect(bx, by, tw, 12);
+      c.setLineDash([3, 2]);
+      c.strokeStyle = canvasTheme().labelMuted;
+      c.lineWidth = 1;
+      c.strokeRect(bx, by, tw, 12);
+      c.setLineDash([]);
+      c.fillStyle = canvasTheme().laneChipInk;
+      c.textBaseline = "middle";
+      c.fillText(txt, bx + 3, by + 6.5);
+      c.textBaseline = "alphabetic";
+    }
+  }
+  c.restore();
 }
 
 /** MICRO-ARCHIVIO-1 · a shelf that ARRIVES (from its file, emptied with it) is
@@ -7946,10 +8667,12 @@ function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): Re
   const open = new Set(graphs.map((g) => g.id));
   let retainedShelf: Record<string, unknown> | null = null;
   let retainedCorpus: Record<string, unknown> | null = null;
+  let retainedPeriodizations: Record<string, unknown> | null = null;
   for (const [gid, section] of Object.entries(file?.retained ?? {})) {
     if (open.has(gid)) continue;
     if (isShelfSection(section)) { retainedShelf = section; continue; }
     if (isCorpusSection(section)) { retainedCorpus = section; continue; }
+    if (periodizationsMember(section)) { retainedPeriodizations = section; continue; }
     const { layout, ...graph } = section as Record<string, unknown>;
     graphs.push({ id: gid, doc: { graph, ...(layout ? { layout } : {}) } as unknown as EmDocument });
   }
@@ -7966,10 +8689,13 @@ function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): Re
   const homeless = (home: string | null): boolean => !home || !emtree.file(home);
   const writesShelf = fid ? fid === shelfHomeFileId : homeless(shelfHomeFileId);
   const writesCorpus = fid ? fid === corpusHomeFileId : homeless(corpusHomeFileId);
+  if (fid && !periodizationHomeFileId && projectPeriodizationsSection()) periodizationHomeFileId = fid;
+  const writesPeriodizations = fid ? fid === periodizationHomeFileId : homeless(periodizationHomeFileId);
   const container = buildContainer({
     graphs,
     shelf: writesShelf ? projectShelfSection() : retainedShelf,
     corpus: writesCorpus ? projectCorpusSection() : retainedCorpus,
+    periodizations: writesPeriodizations ? projectPeriodizationsSection() : retainedPeriodizations,
     activeGraphId: activeSlot
       ? String((activeSlot.store.doc.graph as Record<string, unknown>).graph_id ?? activeSlot.id)
       : null,
@@ -8000,7 +8726,7 @@ function markFileSaved(file: OpenFile, doc: ReturnType<typeof buildContainer>): 
   file.dirty = false;
   file.onDisk = {};
   for (const [gid, section] of Object.entries(doc.graphs)) {
-    if (!isShelfSection(section) && !isCorpusSection(section)) file.onDisk[gid] = section;
+    if (!isShelfSection(section) && !isCorpusSection(section) && !periodizationsMember(section)) file.onDisk[gid] = section;
   }
 }
 
@@ -8127,6 +8853,8 @@ function hubStoreFor(graphId: string | undefined): DocumentStore | null {
   const own = (st: DocumentStore): string =>
     String((st.doc.graph as Record<string, unknown>).graph_id ?? "");
   if (own(store) === graphId) return store;
+  // MICRO-LAB orizzonti · the horizons member is addressed like a graph
+  if (periodizationStore && own(periodizationStore) === graphId) return periodizationStore;
   const roomFile = emtree.files.find((f) => f.room?.id === sync.room);
   const slots = roomFile ? emtree.slotsOf(roomFile.id) : emtree.slots;
   const hit = slots.find((sl) => own(sl.store) === graphId);
@@ -8140,10 +8868,17 @@ const hubKey = opKey;
  *  operations (`DocumentStore.liveHistory`). */
 function isRoomStore(st: DocumentStore): boolean {
   if (!sync.inRoom) return false;
+  if (st === periodizationStore) return true;   // MICRO-LAB orizzonti
   const roomFile = emtree.files.find((f) => f.room?.id === sync.room);
   return !!roomFile && emtree.slotsOf(roomFile.id).some((sl) => sl.store === st);
 }
 DocumentStore.liveHistory = isRoomStore;
+// MICRO-LAB orizzonti · a relative-chronology line drawn by a hand is the user's
+if (EXPERIMENTAL) DocumentStore.originOf = (et) => edgeFamilyOf(et) === "chronology" ? "user" : null;
+/** EXPERIMENTAL · the Periodizations member read apart (switch off: a study graph, as before) */
+function periodizationsMember(section: unknown): boolean {
+  return EXPERIMENTAL && isPeriodizationsSection(section);
+}
 
 function noteHub(note: AwarenessNote): void {
   hubNotes.unshift(note);
@@ -10456,6 +11191,7 @@ function forgetUnwrittenFile(slot: GraphSlot, file: OpenFile): void {
   emtree.files = emtree.files.filter((f) => f.id !== file.id);
   if (shelfHomeFileId === file.id) shelfHomeFileId = null;
   if (corpusHomeFileId === file.id) corpusHomeFileId = null;
+  if (periodizationHomeFileId === file.id) periodizationHomeFileId = null;
 }
 
 /** F2 · «Salva tutto»: every file with unsaved work. A graph with no file is
@@ -11172,6 +11908,8 @@ function settleDropped(
 ): void {
   const st = store!;
   const groupIds = [primary, ...members];
+  // MICRO-LAB bande-3 · what the hand drops, «making room» never moves again
+  if (EXPERIMENTAL) st.markHandPlaced(groupMove ? [primary] : [...dropped.keys()]);
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · in a soloing the drop IS the place, in
   // the group's space: written as it is (the passes below compared the drop with
   // a soloing scene nobody had rebuilt, found it equal, and wrote nothing — the
@@ -11821,6 +12559,8 @@ function nudgeSelection(dxPx: number, dyPx: number): boolean {
   const st = store;
   const ids = selectedIds.size ? [...selectedIds] : selectedId ? [selectedId] : [];
   if (!st || !ids.length || inContext()) return false;
+  // MICRO-LAB orizzonti come bande · the places of the bands are not the graph's
+  if (view === "matrix" && hzWin(activeWin().id)) { hzRefuse(); return true; }
   const vp = viewport();
   const dx = dxPx / vp.scale;
   const dy = dyPx / vp.scale;
@@ -14333,6 +15073,13 @@ setTreeBridgeResolver(bridgeUrl);
 // MICRO-cronologia · the Chronology view asks s3Dgraphy for the propagated
 // chronology through the same bridge, by the same rule.
 setChronologyBridgeResolver(bridgeUrl);
+// MICRO-LAB orizzonti · an answer of the bridge repaints the horizons
+onChronologyUpdate(() => {
+  if (!EXPERIMENTAL) return;   // the horizons are experimental: nothing waits for these
+  // MICRO-LAB orizzonti come bande · a window reading by horizons waits for these
+  if (windowsOf().some((w) => bandsOfWin(w.id) === "horizons")) { buildScenes(); draw(); refreshSurfaces("scene"); }
+  refreshSurfaces("chronology");
+});
 // MICRO-INSPECTOR-SEZIONI p.3 · an answer repaints the time rows of the Inspector
 onChronologyUpdate(() => repaintTimeRows());
 // DP-79 P1 · export the NARRATIVE — LaTeX, Word, HTML.
@@ -17008,6 +17755,8 @@ function openSettings(section?: string): void {
   { const ch = document.getElementById("set-node-chooser"); if (ch) { ch.hidden = true; ch.textContent = ""; } }
   paintSettingsNodes();
   setDevUuid.checked = s.developer.showNodeIds;
+  // EXPERIMENTAL · the switch, as stored on this machine (experimental.ts)
+  { const el = document.getElementById("set-experimental") as HTMLInputElement | null; if (el) el.checked = experimentalStored(); }
   setEdgeTips.checked = s.interaction.edgeTooltips;
   { const el = document.getElementById("set-dtc-hover-card") as HTMLInputElement | null; if (el) el.checked = !!s.interaction.dtcHoverCard; }
   setStrictDocNames.checked = s.interaction.strictDocumentNames;
@@ -17445,6 +18194,16 @@ settingsModal.addEventListener("click", (e) => {
   refreshInspector(); // reflect the UUID-visibility toggle immediately
   // A narrative on screen may hold 3D blocks that were waiting for exactly this.
   refreshNarrativeView();
+  // EXPERIMENTAL · «Funzioni sperimentali»: this machine's storage, read when the
+  // page starts — a change asks for a reload (the documents open are kept by
+  // the session copy)
+  const expEl = document.getElementById("set-experimental") as HTMLInputElement | null;
+  if (expEl && expEl.checked !== experimentalStored()) {
+    setExperimental(expEl.checked);
+    changed.push(t("settings.w.experimental"));
+    if (expEl.checked !== EXPERIMENTAL)
+      void askConfirm(t("settings.experimentalReload")).then((yes) => { if (yes) location.reload(); });
+  }
   const syncChanged = JSON.stringify(before.sync) !== JSON.stringify(next.sync);
   toast(changed.length
     ? t("settings.saved", { what: changed.join(", ") })
@@ -18239,10 +18998,17 @@ function renderCirclesPanel(): void {
         const tipKey = `${fam.label}.tip`;
         const tip = t(tipKey) !== tipKey ? [t(tipKey)] : [];
         if (fam.key === "chronology" && total) {
-          const o = { derived: 0, imported: 0, unmarked: 0 };
-          for (const e of store!.doc.graph.edges) if (edgeFamilyOf(e.edge_type) === fam.key) o[edgeOrigin(e)]++;
-          tip.push(t("fam.origin", { derived: String(o.derived), imported: String(o.imported), unmarked: String(o.unmarked) }));
-          row.dataset.origin = `${o.derived}/${o.imported}/${o.unmarked}`;
+          const o = { derived: 0, user: 0, imported: 0, unmarked: 0 };
+          for (const e of store!.doc.graph.edges) if (edgeFamilyOf(e.edge_type) === fam.key) o[edgeOrigin(e, EXPERIMENTAL)]++;
+          if (EXPERIMENTAL) {
+            // EXPERIMENTAL · the origin s3Dgraphy writes (attributes.origin), «the user's» among them
+            tip.push(t("fam.originUser", { derived: String(o.derived), user: String(o.user),
+                                           imported: String(o.imported), unmarked: String(o.unmarked) }));
+            row.dataset.origin = `${o.derived}/${o.user}/${o.imported}/${o.unmarked}`;
+          } else {
+            tip.push(t("fam.origin", { derived: String(o.derived), imported: String(o.imported), unmarked: String(o.unmarked) }));
+            row.dataset.origin = `${o.derived}/${o.imported}/${o.unmarked}`;
+          }
         }
         if (tip.length) name.title = tip.join("\n\n");
       }
@@ -18918,6 +19684,10 @@ function closeFile(fileId: string): void {
     corpusHomeFileId = null;
     corpusStore = null;   // its documentation goes with it, written or not
   }
+  if (periodizationHomeFileId === fileId) {
+    periodizationHomeFileId = null;
+    periodizationStore = null;   // its horizons go with it
+  }
   const next = emtree.activeId;
   if (next && wasActive) { store = null; activateSlot(next); }
   else if (!next) closeWorkspace();
@@ -19313,7 +20083,8 @@ const emtreeHandlers: EMTreeHandlers = {
   },
   keptGraphsOf: (fileId) => {
     const file = emtree.file(fileId);
-    return file ? Object.values(file.retained).filter((s) => !isShelfSection(s) && !isCorpusSection(s)).length : 0;
+    return file ? Object.values(file.retained).filter((s) => !isShelfSection(s) && !isCorpusSection(s)
+                                                       && !periodizationsMember(s)).length : 0;
   },
   onShowCorpus: (fileId) => showFileCorpus(fileId),
   // AUDIT C · a story in the EMtree opens it: the graph becomes active and the
@@ -24347,7 +25118,7 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
     const ty = winNow()?.type ?? "";
     // MICRO-TILESET-CARTELLA · a Storage path or files of the system on a
     // Viewer or a Scene: a tileset may be in it (decided at the drop)
-    if ((storageDragPayload(e) && ["viewer", "shelf", "scene"].includes(ty))
+    if ((storageDragPayload(e) && ["viewer", "shelf", "scene", ...(EXPERIMENTAL ? ["graph"] : [])].includes(ty))   // EXPERIMENTAL: "graph", the site's door
         || (carriesFiles(e) && ["viewer", "scene"].includes(ty))
         // MICRO-ARCHIVIO-1 · entries of the Shelf, onto a graph, the File window, a Viewer
         || (e.dataTransfer?.types.includes(SHELF_ENTRIES_MIME) && ["graph", "storage", "viewer"].includes(ty))) {
@@ -24368,6 +25139,8 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
       dropShelfEntries(into, fromShelf);
       return;
     }
+    // EXPERIMENTAL · a GIS file of the Storage on a Graph, a Matrix, a Space: the site's door
+    if (EXPERIMENTAL && into && doorDrop(into.type, storageDragPayload(e))) { e.preventDefault(); e.stopPropagation(); selectWindow(winId); return; }
     if (into && dropTilesetOn(into, e)) return;
     const resource = storageDragPayload(e);
     const target = winNow();
@@ -25939,6 +26712,7 @@ function renderChronologyInto(body: HTMLElement, _win: Win): void {
   if (!data || !store) {
     body.textContent = "";
     body.appendChild(emptyState("empty.chronology"));
+    if (store && EXPERIMENTAL) horizonsPanelInto(body);   // EXPERIMENTAL · the horizons: no epochs, horizons still
     return;
   }
   const st = store;
@@ -25960,6 +26734,131 @@ function renderChronologyInto(body: HTMLElement, _win: Win): void {
     },
     onDissolve: (id, to) => dissolveEpochInto(id, to),
   });
+  if (EXPERIMENTAL) horizonsPanelInto(body);
+}
+
+// ── MICRO-LAB orizzonti · the horizons panel and its gestures ───────────────
+
+/** The panel at the head of the Chronology. Every edit is ONE undo step in the
+ *  horizons store; reading choices (periodization, mode, visibility) are the
+ *  session's and never written. */
+function horizonsPanelInto(body: HTMLElement): void {
+  const host = document.createElement("div");
+  host.className = "hz-host";
+  const read = horizonsRead();
+  const chosen = chosenPeriodization(read, horizonView);
+  const counts = new Map<string, number>();
+  let note: string | null = null;
+  if (store && chosen) {
+    const st = store;
+    const cs = chronologyFor(st.doc, () => st.toJSON(), st);
+    if (cs.status === "ok") {
+      const marks = horizonMarks(chosen, { ...horizonView, mode: "colour", hidden: new Set() },
+                                 intervalsFrom(cs.map, cs.epochs ?? null));
+      for (const ids of marks.inside.values()) for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+      if (!cs.epochs) note = t("hz.noEpochIntervals");
+    } else {
+      note = t(cs.status === "loading" || cs.status === "idle" ? "hz.loading" : "hz.bridgeOff");
+    }
+  }
+  if (sync.room && !roomHasPeriodizations()) note = t("hz.roomWithout");
+  renderHorizonsPanel(host, {
+    list: read.list, chosen: chosen?.id ?? null, proposed: read.active,
+    hidden: horizonView.hidden, counts, note,
+    writable: !(sync.room && (!sync.canWrite || !roomHasPeriodizations())),
+  }, {
+    onChoose: (id) => {
+      horizonView.periodizationId = id;
+      horizonView.hidden = initialHidden(chosenPeriodization(horizonsRead(), horizonView));
+      afterBandsChange();
+      refreshSurfaces("chronology");
+    },
+    onToggle: (id, visible) => {
+      if (visible) horizonView.hidden.delete(id); else horizonView.hidden.add(id);
+      afterBandsChange();
+      refreshSurfaces("chronology");
+    },
+    onAddPeriodization: () => {
+      const st = periodizations({ create: true })!;
+      const name = t("hz.newPeriodization", { n: String(horizonsRead().list.length + 1) });
+      const node = st.addNode({ id: st.newId(), node_type: PERIODIZATION_TYPE, name, data: {} });
+      horizonView.periodizationId = node.id;
+      if (!periodizationHomeFileId) periodizationHomeFileId = emtree.activeFile()?.id ?? null;
+      toastUndo(t("hz.didAddPeriodization", { name }), st);
+    },
+    onRenamePeriodization: (id, name) => {
+      const st = periodizations({ create: false });
+      if (!st) return;
+      st.updateNode(id, { name });
+      toastUndo(t("hz.didRename", { name }), st);
+    },
+    onDeletePeriodization: (id) => {
+      const st = periodizations({ create: false });
+      const per = horizonsRead().list.find((p) => p.id === id);
+      if (!st || !per) return;
+      st.batch(() => {
+        for (const h of per.horizons) st.deleteNode(h.id);
+        st.deleteNode(id);
+      });
+      if (horizonView.periodizationId === id) horizonView.periodizationId = null;
+      toastUndo(t("hz.didDeletePeriodization", { name: per.name }), st);
+    },
+    onAddHorizon: (perId) => {
+      const st = periodizations({ create: false });
+      const per = horizonsRead().list.find((p) => p.id === perId);
+      if (!st || !per) return;
+      const last = per.horizons[per.horizons.length - 1];
+      const start = last?.end ?? 0;
+      const name = t("hz.newHorizon", { n: String(per.horizons.length + 1) });
+      st.batch(() => {
+        const h = st.addNode({ id: st.newId(), node_type: HORIZON_TYPE, name,
+                               data: { start_time: start, end_time: start + 100,
+                                       color: nextSwatch(per), order: per.horizons.length, enabled: true } });
+        st.addEdge(h.id, perId, MEMBERSHIP_EDGE);
+      });
+      toastUndo(t("hz.didAddHorizon", { name }), st);
+    },
+    onSetHorizon: (id, field, value) => {
+      const st = periodizations({ create: false });
+      if (!st) return;
+      if (field === "name") st.updateNode(id, { name: value });
+      else if (field === "color") st.setField(id, "data.color", value);
+      else {
+        const v = value.trim() === "" ? null : Number(value);
+        if (v !== null && !Number.isFinite(v)) { toast(t("hz.notANumber")); return; }
+        if (v === null) st.clearField(id, `data.${field}`); else st.setField(id, `data.${field}`, v);
+      }
+      toastUndo(t("hz.didEdit", { name: String(st.node(id)?.name ?? id) }), st);
+    },
+    onMoveHorizon: (perId, id, dir) => {
+      const st = periodizations({ create: false });
+      const per = horizonsRead().list.find((p) => p.id === perId);
+      if (!st || !per) return;
+      const plan = reorderPlan(per, id, dir);
+      if (!plan.length) return;
+      st.batch(() => { for (const [hid, order] of plan) st.setField(hid, "data.order", order); });
+      toastUndo(t("hz.didMove", { name: String(st.node(id)?.name ?? id) }), st);
+    },
+    onDeleteHorizon: (id) => {
+      const st = periodizations({ create: false });
+      if (!st) return;
+      const name = String(st.node(id)?.name ?? id);
+      st.deleteNode(id);
+      horizonView.hidden.delete(id);
+      toastUndo(t("hz.didDelete", { name }), st);
+    },
+  });
+  body.prepend(host);
+}
+
+/** In a room the relay applies an op to a member the ROOM has: the horizons can
+ *  be edited there only when the room's em.json carries the member. */
+function roomHasPeriodizations(): boolean {
+  if (!sync.room) return true;
+  const gid = periodizationStore
+    ? String((periodizationStore.doc.graph as Record<string, unknown>).graph_id ?? PERIODIZATIONS_MEMBER_ID)
+    : PERIODIZATIONS_MEMBER_ID;
+  return hubRoomGraphs.has(gid);
 }
 
 /** A change of the epochs' NESTING, as one undo step: the change is tried on a
@@ -26092,7 +26991,31 @@ function spaceFileUrl(res: { url: string; checksum: string; residency?: string }
  *  times per drawing, and building it walks the whole graph (measured: the
  *  Space's opening went from 0.85 to 1.9 s before this memo). */
 let spaceMemo: { key: unknown[]; sp: Space } | null = null;
+/** MICRO-LAB orizzonti come bande · the Space as the Scena 3D reads it: with
+ *  its epochs, or — a 3D window switched to «Orizzonti» — with the horizons of
+ *  that window's periodization in their place (`horizonSpace`). One Space for
+ *  the app (the scene's epoch is shared with the Chronology through the
+ *  selection): the first 3D window in horizons decides. */
+function spaceBandsWin(): Win | null {
+  return windowsOf().find((w) => w.type === "scene" && bandsOfWin(w.id) === "horizons" && !!bandsPerOfWin(w.id)) ?? null;
+}
+let hzSpaceMemo: { key: unknown[]; sp: Space } | null = null;
 function currentSpace(): Space | null {
+  const sp = baseSpace();
+  const w = sp && store ? spaceBandsWin() : null;
+  if (!sp || !w || !store) return sp;
+  const st = store;
+  const per = bandsPerOfWin(w.id);
+  const cs = chronologyFor(st.doc, () => st.toJSON(), st);
+  const key = [sp, per, JSON.stringify(per?.horizons ?? []), [...horizonView.hidden].sort().join(","), cs];
+  if (hzSpaceMemo && hzSpaceMemo.key.every((k, i) => k === key[i])) return hzSpaceMemo.sp;
+  const ok = cs.status === "ok";
+  const hs = horizonSpace(sp, per, horizonView.hidden, ok ? intervalsFrom(cs.map) : new Map(),
+                          ok ? intervalsFrom({}, cs.epochs ?? null) : new Map(), { outsideName: t("bands.outside") });
+  hzSpaceMemo = { key, sp: hs };
+  return hs;
+}
+function baseSpace(): Space | null {
   if (!store) return null;
   spaceAccessChanged();
   // Y6 · the proxies the connected host has in its scene count too
@@ -26145,14 +27068,32 @@ function askResident(): void {
  *  disk), or every 1.5 s (a room's store); the rule is `UnansweredFiles`. */
 const spaceUnanswered = new UnansweredFiles();
 let spaceWaitTimer: ReturnType<typeof setTimeout> | null = null;
+/** MICRO-LAB bande-3 · the answers about the files arrive one by one (a study
+ *  opened away from its folder: ~100 models «missing», each its own fetch), and
+ *  each repainted the whole Space — the Outliner, the «Models and proxies»
+ *  sheet — on its own: measured 147 repaints and the page busy for over 20 s
+ *  after switching the scene to horizons (GT16 + Saggio B). They are gathered:
+ *  one repaint for every answer of the same moment. */
+let spaceMarksTimer: ReturnType<typeof setTimeout> | null = null;
+let spaceMarksData = false;
+function refreshSpaceSoon(data: boolean): void {
+  spaceMarksData ||= data;
+  if (spaceMarksTimer) return;
+  spaceMarksTimer = setTimeout(() => {
+    spaceMarksTimer = null;
+    refreshSurfaces("scene");
+    if (spaceMarksData) renderEmData();
+    spaceMarksData = false;
+  }, 120);
+}
 function spaceAwaitAnswer(resourceId: string): void {
   const v = spaceUnanswered.heard(resourceId, Date.now());
   if (v === "missing") {
-    if (spaceMarks.mark(resourceId, "missing")) queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
+    if (spaceMarks.mark(resourceId, "missing")) refreshSpaceSoon(true);
     return;
   }
   if (v === "waiting" || spaceWaitTimer) return;
-  queueMicrotask(() => { refreshSurfaces("scene"); });   // the summary says it waits
+  refreshSpaceSoon(false);   // the summary says it waits
   const again = (): void => {
     spaceWaitTimer = setTimeout(() => { void (async () => {
       // offline the bytes come through the bridge: ask it first, cheaply
@@ -26221,7 +27162,7 @@ function noteModelLoad(key: string | null, name: string, url: string, error: unk
         logWarn(t("load.failed", { name, url: shownUrl(url),
           answer: f.status != null ? `HTTP ${f.status}` : (f.error ?? t("load.noAnswer")), cause: failureWords(f) }), ids);
       }
-      refreshSurfaces("scene");
+      refreshSpaceSoon(false);
     });
   };
   if (isNetworkError(error)) setTimeout(() => { void say(); }, 4000); else void say();
@@ -26238,6 +27179,13 @@ function spaceEpochOf(sp: Space): string | null {
   // MICRO-RIFINITURE p.8 · a sub-epoch chosen: its models only
   const top = spaceEpochId ? sp.topOf(spaceEpochId) : null;
   if (spaceEpochId && top && sp.subEpochs(top).some((e) => e.id === spaceEpochId)) return spaceEpochId;
+  // MICRO-LAB bande-2 · read by horizons, the scene opens on the newest
+  // horizon that HAS a body in space (the Matrix opens on its first band with
+  // nodes), not on an empty one
+  if (sp.epochs[0]?.id.startsWith(HZ_LANE)) {
+    const full = sp.epochs.find((e) => { const s = sp.summary(e.id); return !!s && (s.rms.length > 0 || s.withProxy.length > 0); });
+    if (full) return full.id;
+  }
   return sp.epochs[0]?.id ?? null;
 }
 
@@ -27165,7 +28113,8 @@ function spaceDecorators(st: DocumentStore, sp: Space, units: string[]): (u: str
     if (g) out.push({ group: "pd", text: `PD ${g.count}`, title: t("compact.badge", { n: String(g.count) }) });
     if (warnedNodes.has(u)) out.push({ group: "warning", text: "!", title: t("s3.decWarning") });
     const ep = spaceEpochFor(u, sp);
-    if (ep) out.push({ group: "epoch", kind: "EpochNode", title: String(st.node(ep)?.name ?? ep) });
+    // MICRO-LAB orizzonti come bande · in horizons the decorator names the horizon
+    if (ep) out.push({ group: "epoch", kind: "EpochNode", title: String(st.node(ep)?.name ?? sp.epochs.find((e) => e.id === ep)?.name ?? ep) });
     return out;
   };
 }
@@ -28167,7 +29116,10 @@ async function createUnitFromSketch(win: Win, sketchId: string, type = "US", cho
   const st = store;
   const sp = currentSpace();
   if (!st || !sp || refuseReadOnly()) return false;
-  const epochId = spaceEpochOf(sp);
+  // MICRO-LAB orizzonti come bande · a scene read by horizons has no epoch to
+  // give the unit: it is born without one (the Matrix's «epoch missing» says so)
+  const shown = spaceEpochOf(sp);
+  const epochId = shown && !shown.startsWith(HZ_LANE) ? shown : null;
   const name = chosen || (initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type));
   const node = { id: st.newId(), node_type: type, name, description: "" } as EmNode;
   // a place in the Matrix: the epoch's lane, right of what is there
@@ -30074,7 +31026,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
         setSpaceSel(clickOutliner(spaceSel(sp), r.key, mods, order));
         return;
       }
-      if (r.kind === "epoch") { spaceEpochId = r.id; select(r.id); refreshInspector(); return; }
+      if (r.kind === "epoch") { spaceEpochId = r.id; if (!r.id.startsWith(HZ_LANE)) select(r.id); refreshInspector(); return; }
       // MICRO-SPAZIO-3D-3 p.7 · a container: its models (⌘/Ctrl: added to the selection)
       if (r.kind === "rmgroup") {
         const keys = (r.children ?? []).filter((c) => c.object).map((c) => c.key);
@@ -30395,15 +31347,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     overlayValue: (k) => overlayValue(overlaysOfWin(win.id, "space"), k),
     locked: () => new Set(space3dPrefs().locked),
     sketchVisible: (id) => { const k = `sketch:${id}`; return !space3dPrefs().hidden.includes(k) && (!spaceIsolated || spaceIsolated === k); },
-    epochLabel: () => { const sp = currentSpace(); const e = sp ? spaceEpochOf(sp) : null; return e ? String(store?.node(e)?.name ?? e) : ""; },
+    epochLabel: () => { const sp = currentSpace(); const e = sp ? spaceEpochOf(sp) : null;
+      return e ? String(store?.node(e)?.name ?? sp?.epochs.find((x) => x.id === e)?.name ?? e) : ""; },
     // MICRO-SPAZIO-3D · ⌘-click selects the model; opening it is the menu's
     // «Apri il modello in soloing» now (E.D., 11 Oct 2026). A click goes to
     // `onPick` (MICRO-SPAZIO-3D-3); a right click on a sketch selects it
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
-    marks: () => instanceMarks(win.id),
-    onMark: (id) => { if (id.startsWith("inst:")) goToInstance(id.slice(5)); },
+    marks: () => [...instanceMarks(win.id), ...(EXPERIMENTAL ? siteMarks(win.id) : [])],   // EXPERIMENTAL: the site's footprint
+    onMark: (id) => { if (EXPERIMENTAL && onSiteMark(id)) return; if (id.startsWith("inst:")) goToInstance(id.slice(5)); },
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
       if (a === "outliner") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, shown: !p.shown }); return true; }
@@ -30436,7 +31389,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (unanswered && why === "missing") { spaceAwaitAnswer(rid); return; }
       if (!spaceMarks.mark(rid, why)) return;
       void noteCloudOnly(rid);
-      queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
+      refreshSpaceSoon(true);
     },
   });
   sceneHandles.set(win.id, handle);
@@ -30547,7 +31500,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     } else if (b.dataset.epoch) {
       spaceEpochId = b.dataset.epoch;
       lastPress = { win: win.id, part: "scene", t: performance.now() };   // p.4: this Space's pick, whoever clicked
-      select(b.dataset.epoch);              // the Chronology and the Inspector follow
+      // the Chronology and the Inspector follow — an epoch; an horizon is
+      // nobody's node (MICRO-LAB orizzonti come bande): the scene alone changes
+      if (!b.dataset.epoch.startsWith(HZ_LANE)) select(b.dataset.epoch);
       refreshInspector();
     } else if (b.dataset.toggle) {
       // MICRO-SPAZIO-3D · the two switches of the bar are two doors of the
@@ -30598,7 +31553,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     back.textContent = "←";
     const lab = document.createElement("span");
     lab.className = "scn-lbl";
-    lab.textContent = t("space.epoch");
+    // MICRO-LAB orizzonti come bande · the switch, and the word for what follows
+    const hzOn = spaceBandsWin() !== null;
+    lab.textContent = t(hzOn ? "bands.spaceHorizon" : "space.epoch");
+    const bands = bandsControl(win);
     const seg = document.createElement("span");
     seg.className = "scn-seg";
     seg.setAttribute("role", "group");
@@ -30705,7 +31663,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     more.dataset.act = "more";
     more.textContent = "⋯";
     more.title = t("lay.moreTitle");
-    bar.append(back, lab, seg, ...(subPick ? [subPick] : []), ...geoSpace.barButtons(), hwb, more);
+    seg.classList.toggle("scn-seg-hz", hzOn);
+    // EXPERIMENTAL · Epochs ⇄ Horizons and the site's marks («Funzioni sperimentali» on)
+    bar.append(back, ...(EXPERIMENTAL ? [bands] : []), lab, seg, ...(subPick ? [subPick] : []), ...geoSpace.barButtons(),
+      ...(EXPERIMENTAL ? spaceButtons(win.id) : []), hwb, more);
     gisSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
@@ -30783,7 +31744,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     if (folded) overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${escapeHtml(t("s3.foldedSummary", { rm: String(sum.rms.length), px: String(sum.withProxy.length), n: String(sum.units.length) }))}`
       + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "");
     else overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${rmPart}<br>`
-      + `${escapeHtml(t("space.proxies", { n: String(sum.withProxy.length), m: String(sum.units.length) }))}`
+      + `${escapeHtml(t(spaceBandsWin() ? "space.proxiesHz" : "space.proxies", { n: String(sum.withProxy.length), m: String(sum.units.length) }))}`
       + (sum.inScene.length ? ` <span class="ref" data-sum="inScene">${escapeHtml(t("space.inScene", { n: String(sum.inScene.length) }))}</span>` : "")
       + (sum.without.length ? ` · <span class="miss" data-sum="without">${escapeHtml(t("space.without"))}: ${list(sum.without)}</span>` : "")
       + (sum.missing.length ? ` · <span class="miss" data-sum="missing">${escapeHtml(t("space.missingFiles"))}: ${list(sum.missing)}</span>` : "")
@@ -30826,7 +31787,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     empty.classList.toggle("hidden", !nothing);
     if (nothing) {
       empty.innerHTML = `<b>${escapeHtml(t("space.emptyTitle", { x: sum.epoch.name }))}</b>`
-        + `<p>${escapeHtml(t("space.emptyBody", { n: String(sum.units.length) }))}</p>`;
+        // MICRO-LAB bande-2 · read by horizons, the scene says «horizon»
+        + `<p>${escapeHtml(t(spaceBandsWin() ? "space.emptyBodyHz" : "space.emptyBody", { n: String(sum.units.length) }))}</p>`;
       handle.update([]);
       return;
     }
@@ -46633,6 +47595,37 @@ async function gisIngest(path: string, layer: string | null): Promise<string | n
   refreshSurfaces("scene");
   return null;
 }
+/** EXPERIMENTAL · the site's door: the same ingest, with the fields the person
+ *  chose, the capture that stamps the layer and — the graph without a site —
+ *  the site made in the same delta (one undo step) */
+async function siteDoorIngest(ask: GisIngestAsk): Promise<{ error?: string; siteName?: string; warnings?: string[] }> {
+  const st = store;
+  if (!st || refuseReadOnly()) return { error: t("labsite.readOnly") };
+  const site = st.doc.graph.nodes.find((n) => n.node_type === "LocationNodeGroup" && (n.data as Record<string, unknown> | undefined)?.level === "sito");
+  const j = await postGraph<{ resource_id?: string; site_name?: string; warnings?: string[]; delta?: GraphDelta }>("/graph/gis-ingest",
+    { doc: st.doc, doc_path: currentFilePath ?? "", path: ask.path,
+      ...(ask.featureKey ? { feature_key: ask.featureKey } : {}), ...(ask.zField ? { z_field: ask.zField } : {}),
+      ...(site ? { attach_to: site.id } : ask.siteName ? { site_name: ask.siteName } : {}),
+      ...(ask.acquisition ? { acquisition: ask.acquisition } : {}) });
+  if (!j.ok || !j.delta) return { error: t("gis.failed", { why: String(j.error ?? j.status) }) };
+  applyBlendDelta(j.delta, "gis.deltaApplied");
+  for (const w of j.warnings ?? []) logWarn(`GIS · ${w}`, [j.resource_id ?? ""]);
+  refreshSurfaces("scene");
+  return { siteName: j.site_name ?? String(site?.name ?? ""), warnings: j.warnings };
+}
+/** EXPERIMENTAL · the site's footprint from the proxies of the units named */
+async function siteFootprint(siteId: string, units: string[]): Promise<{ error?: string; vertices?: number; crs?: string; bbox?: number[] }> {
+  const st = store;
+  if (!st || refuseReadOnly()) return { error: t("labsite.readOnly") };
+  if (!currentFilePath) return { error: t("gis.needSaved") };
+  const j = await postGraph<{ vertices?: number; crs?: string; bbox?: number[]; delta?: GraphDelta }>("/graph/site-footprint",
+    { doc: st.doc, doc_path: currentFilePath, site_id: siteId, units });
+  if (j.status === 404 && !j.error) return { error: t("labsite.bridgeOld") };
+  if (!j.ok || !j.delta) return { error: t("gis.failed", { why: String(j.error ?? j.status) }) };
+  applyBlendDelta(j.delta, "gis.deltaApplied");
+  refreshSurfaces("scene");
+  return { vertices: j.vertices, crs: j.crs, bbox: j.bbox };
+}
 /** …the ground of the landscape: a LandscapeSurfaceNode on a DEM layer (and an image layer) */
 async function gisSurface(demId: string, imageId: string | null): Promise<string | null> {
   const st = store;
@@ -47395,6 +48388,7 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
   }
   if (entry.type === "dir") {
     item(t("storage.menuOpenFolder"), "open-folder", () => setStoragePath(win, entry.path));
+    if (EXPERIMENTAL) item(t("labsite.menuDoor"), "site-door", () => { void openDoor(entry.path, true); });   // the site's door
   } else {
     const picked = storagePicked(win);
     const group = picked.length > 1 && picked.includes(entry.path) ? picked : [entry.path];
@@ -47422,6 +48416,9 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
     // MICRO-TIMBRA-MASTER p.2 · a Metashape project: its whole chain, stamped
     if (/\.psx$/i.test(entry.name))
       item(t("master.chain"), "stamp-photogrammetry-chain", () => { void stampPhotogrammetryChain(entry.path); });
+    // EXPERIMENTAL · the site's door: one way in for a model, a tileset, a GIS layer
+    if (EXPERIMENTAL && !/\.(em\.json|emj|graphml)$/i.test(entry.name) && !isStampPath(entry.path))
+      item(t("labsite.menuDoor"), "site-door", () => { void openDoor(entry.path); });
     if (/\.(em\.json|emj|graphml)$/i.test(entry.name))
       item(t("storage.openDoc", { name: entry.name }), "open-doc-here", () => { void openFromStorage(entry.path); },
         currentFilePath === entry.path ? t("storage.alreadyOpen") : undefined);
@@ -50096,6 +51093,15 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(modeDd);
   }
 
+  // ── EXPERIMENTAL · Epochs ⇄ Horizons, in plain sight ─────────────────────
+  if (EXPERIMENTAL && type === "graph" && (winMode(win) === "matrix" || winMode(win) === "graph") && store)
+    frag.appendChild(bandsControl(win));
+  // ── EXPERIMENTAL · the site as a node: its glyph, in the bar ─────────────
+  if (EXPERIMENTAL && type === "graph" && (winMode(win) === "matrix" || winMode(win) === "graph") && store) {
+    const chip = siteChip();
+    if (chip) frag.appendChild(chip);
+  }
+
   // ── STRUTTURA · Rows | Cards, for the three sheets that have cards ────────
   if (type === "table" && CARD_VIEWS.includes(currentSheetKey(win))) {
     const seg = document.createElement("span");
@@ -50263,6 +51269,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
         draw();
       });
     });
+    // MICRO-LAB bande-2 · a Matrix in horizons moves nothing (the bands are laid
+    // out by themselves): «Layout» and «Compact» are not on its bar
+    if (hzWin(win.id)) { /* (the acts above only) */ } else {
     // MICRO-AUTORI-LAYOUT p.4 · «Layout» always on the bar: the one command that
     // arranges again (nothing else moves a node); Alt drops the manual arrangement.
     // MICRO-PULIZIA p.4 · an icon of its own (no word «Layout»), its name in
@@ -50297,6 +51306,7 @@ function buildAreaHeader(win: Win): DocumentFragment {
         // not available: still reached by Tab, and it says why (aria-disabled)
         if (why) { b.setAttribute("aria-disabled", "true"); b.classList.add("win-act-off"); }
       }
+    }
     }
     // MICRO-PULIZIA p.3 · the «Graph paradata» badge is gone from the bar: the
     // view is one of the modes («Graphs paradata»), opened from there
@@ -50988,6 +51998,9 @@ function renderAreaHeaders(): void {
     const win = windowsOf().find((w) => w.id === area.dataset.win);
     if (!bar || !win) continue;
     bar.innerHTML = "";
+    // MICRO-LAB bande-2 · a Matrix in horizons: its bar WRAPS instead of
+    // scrolling sideways (lab.3 cut the modes, «rix», E.D.'s screenshot)
+    bar.classList.toggle("hz-bar", hzWin(win.id));
     // MICRO-CONTENTS-4 F6 · the Chain's header goes to a second row rather
     // than scroll its last button out of sight (its name is long and whole)
     bar.classList.toggle("win-chain-bar", isChainWin(win));
@@ -52122,6 +53135,23 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       dragMode = "none";
       try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic event */ }
     };
+    // MICRO-LAB orizzonti come bande · a Matrix in horizons is a PICTURE of
+    // several graphs in shared bands: a press on a box is a click (it selects,
+    // in the box's own graph), elsewhere a marquee. Nothing is dragged, folded,
+    // connected or inserted here: the places are the projection's
+    if (hzWin(winId)) {
+      const hs = scene();
+      if (!hs) return;
+      const hw = worldPos(e);
+      if (hitTest(hs, hw.x, hw.y, hitTol())) {
+        armChip();
+        return;
+      }
+      dragMode = "marquee";
+      marquee = { x0: hw.x, y0: hw.y, x1: hw.x, y1: hw.y };
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
     {
       const rect = canvas.getBoundingClientRect();
       const lx = e.clientX - rect.left;
@@ -52832,6 +53862,10 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const hit = hitTest(s, w.x, w.y, hitTol());
       // group container ± toggle
       const toggle = hitGroupToggle(s, w.x, w.y);
+      if (toggle && store && hzWin(winId)) {
+        hzRefuse();   // MICRO-LAB orizzonti come bande · a group stays open here
+        return;
+      }
       if (toggle && store) {
         requestFold(toggle.id);
         return;
@@ -52898,6 +53932,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
   // work (buildMembership + a full redraw) could push the gap past its window.
   canvas.addEventListener("dblclick", (e) => {
     claim();
+    if (hzWin(winId)) return;   // MICRO-LAB orizzonti come bande · no soloing from the bands
     const s = scene();
     if (!s) return;
     // PD1 · double-clicking the collapsed-PDG tablet enters the hypergraph
@@ -53006,6 +54041,14 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     const wp = worldPos(e);
     const s = scene();
     const hit = s ? hitTest(s, wp.x, wp.y, hitTol()) : null;
+    // MICRO-LAB orizzonti come bande · the right click selects the box in its
+    // graph and says where the graph's gestures are (the Inspector, the epochs)
+    if (hzWin(winId)) {
+      hideContextMenu();
+      if (hit) select(hit.instanceOf ?? hit.id);
+      hzRefuse();
+      return;
+    }
     // DTCEMS1 · a parent that did NOT resolve gets a menu of its own, and the
     // reason is not cosmetic: that node is in no document at all — it is the
     // drawing of an absence — so the document's own menu (group, rename,
@@ -54676,6 +55719,30 @@ renderWarningsPill();
 renderLogButton(); // SHIFT-A · «Log · n» in the status bar
 // MICRO-INSTALLER-PULSANTE p.3 · which bridge answers: said if it is not the one wanted
 void checkBridgeLevel(30);
+// EXPERIMENTAL · the site and its door: their seams (site-door.ts); the switch
+// off, nothing of it is wired
+if (EXPERIMENTAL) initSiteDoor({
+  t: (k, v) => t(k, v), toast, bridge: () => bridgeUrl(),
+  doc: () => (store?.doc ?? null) as EmDocument | null,
+  ingest: (ask) => siteDoorIngest(ask),
+  footprint: (siteId, units) => siteFootprint(siteId, units),
+  select: (id) => revealFromTable(id),
+  redraw: () => { renderAreaHeaders(); draw(); refreshSurfaces("scene"); },
+  readOnly: () => !!sync.room && hubReadOnly(),
+  tileset: (path) => {
+    const win = windowsOf().find((w) => w.type === "scene" || w.type === "viewer");
+    if (!win) { toast(t("labsite.doorNode")); return; }
+    void droppedFromPath(path, /\.(3tz|3dtiles)$/i.test(path) || /tileset\.json$/i.test(path) ? "file" : "dir").then((d) => { if (d) showDropped(win, d); });
+  },
+  model: (path) => {
+    void fsList(paths.dirname(path) || "/").then(async (listing) => {
+      await ensureFolderCover(listing);
+      const out = listing.entries.find((x) => x.path === path);
+      if (out) openDraft([out], listing);
+    }, () => toast(t("storage.bridgeDown")));
+  },
+});
+if (EXPERIMENTAL) Object.assign(window as unknown as Record<string, unknown>, { __siteDoor: siteDoorState, __openDoor: openDoor });
 // PELLE · the canvas face (Sora) arrives after the first frame; one redraw when
 // it is in, so the drawing does not stay in the fallback until the next click.
 whenCanvasFontsReady(() => draw());
@@ -54774,12 +55841,17 @@ initEmData({
   setCurrentRow: (id) => setCurrentRowId(id),
   // SPAZIO · «Modelli e proxy»: the space the Scena 3D draws, read once
   getSpace: () => {
-    const sp = currentSpace();
+    // MICRO-LAB bande-2 · the inventory «Modelli e proxy» reads as the scene
+    // reads: by horizons when the Scena 3D does (its rows per horizon, «Horizons
+    // with an RM n/N»), by epoch otherwise (lab.3 kept it by epoch always)
+    const hz = !!spaceBandsWin();
+    const sp = hz ? currentSpace() : baseSpace();
     if (!sp || !store) return null;
     askResident();
     const st = store;
+    const tt = hz ? (k: string, v?: Record<string, string>) => t(HZ_SHEET_KEYS.has(k) ? `${k}Hz` : k, v) : t;
     return { space: sp, units: st.liveNodes().filter((n) => isStratigraphicType(n.node_type)).map((n) => n.id),
-             ctx: { node: (id) => st.node(id), t, genre: spaceGenre, rmName: (id) => rmShown(id),
+             ctx: { node: (id) => st.node(id) ?? hzBandNode(sp, id), t: tt, genre: spaceGenre, rmName: (id) => rmShown(id),
                // MICRO-SPAZIO-COMPATTO p.8 · what the Space draws of each model, its eye
                drawn: (id) => spaceDrawnOf(id, sp), hidden: (k) => space3dPrefs().hidden.includes(k),
                toggleEye: (k) => { const p = space3dPrefs(); const h = new Set(p.hidden); if (h.has(k)) h.delete(k); else h.add(k); setSpace3dPrefs({ ...p, hidden: [...h] }); renderEmData(); },
