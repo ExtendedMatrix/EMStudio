@@ -88,6 +88,8 @@ export interface SpaceRM {
   name: string;
   /** the top epochs it depicts */
   epochs: string[];
+  /** MICRO-RIFINITURE p.8 · the epochs it is attached to as written (a sub-epoch too, not only its top) */
+  exactEpochs?: string[];
   /** the document that records it (its «scheda») */
   documentId: string | null;
   /** the placement axis of the document (`document_variant_styles`):
@@ -166,6 +168,9 @@ export interface SpaceEpoch {
   name: string;
   start: number | null;
   end: number | null;
+  /** MICRO-RIFINITURE p.8 · a sub-epoch (`has_sub_epoch`): its top epoch and its depth under it */
+  top?: string;
+  depth?: number;
 }
 
 export interface EpochSummary {
@@ -196,6 +201,11 @@ export interface Space {
   rmGroups: Map<string, SpaceRMGroup>;
   /** THE COMMON HAT · the sets of alternatives (s3Dgraphy `alternative_sets`) */
   alternatives: AltResult;
+  /** MICRO-RIFINITURE p.8 · an epoch's sub-epochs, the whole subtree in the
+   *  Matrix's order (depth first, the oldest first under each), empty for none.
+   *  `summary(sub)` gives only the sub-epoch's models and units (and its own
+   *  sub-epochs'); `summary(top)` all of them, as before */
+  subEpochs(topId: string): SpaceEpoch[];
   summary(epochId: string): EpochSummary | null;
   /** the top epoch a node (epoch or phase) belongs to */
   topOf(epochId: string): string | null;
@@ -365,6 +375,30 @@ export function buildSpace(
   const epochs: SpaceEpoch[] = nodes.filter((n) => isEpoch(n) && !parentOf.has(n.id))
     .map((n) => ({ id: n.id, name: str(n.name) || n.id, start: num(dataOf(n).start_time), end: num(dataOf(n).end_time) }))
     .sort((a, b) => (b.start ?? -Infinity) - (a.start ?? -Infinity));
+  // MICRO-RIFINITURE p.8 (E.D., 6 Nov 2026: the 2013 and 2015 surveys as two
+  // sub-epochs of XX sec) · the sub-epochs, by their top; an epoch's subtree
+  const childrenOf = new Map<string, string[]>();
+  for (const [c, par] of parentOf) (childrenOf.get(par) ?? childrenOf.set(par, []).get(par)!).push(c);
+  const subs = new Map<string, SpaceEpoch[]>();
+  const subById = new Map<string, SpaceEpoch>();
+  for (const top of epochs) {
+    const list: SpaceEpoch[] = [];
+    const walk = (id: string, depth: number, seen: Set<string>) => {
+      const kids = (childrenOf.get(id) ?? []).filter((k) => !seen.has(k)).map((k) => byId.get(k)!).filter(Boolean)
+        .map((n) => ({ id: n.id, name: str(n.name) || n.id, start: num(dataOf(n).start_time), end: num(dataOf(n).end_time), top: top.id, depth }))
+        .sort((a, b) => ((a.start ?? Infinity) - (b.start ?? Infinity)) || a.name.localeCompare(b.name));
+      for (const k of kids) { seen.add(k.id); list.push(k); subById.set(k.id, k); walk(k.id, depth + 1, seen); }
+    };
+    walk(top.id, 1, new Set([top.id]));
+    subs.set(top.id, list);
+  }
+  /** an epoch and every epoch under it */
+  const subtree = (id: string): Set<string> => {
+    const out = new Set([id]);
+    const stack = [id];
+    while (stack.length) for (const k of childrenOf.get(stack.pop()!) ?? []) if (!out.has(k)) { out.add(k); stack.push(k); }
+    return out;
+  };
 
   const asResource = (r: EmNode): SpaceResource => {
     const d = dataOf(r);
@@ -441,11 +475,17 @@ export function buildSpace(
   // scene reads the folder's archive (`dtc_derived_from`, the `preferred` one
   // first — s3Dgraphy's pick_representation); a plain zip is not a tileset
   const rg = plainGraph({ nodes, edges });
+  // MICRO-RIFINITURE p.7 (6 Nov 2026) · from the disk too, when the graph says
+  // the archive is the PREFERRED form: Templu Mare's folder had its tileset.json
+  // put back to the zip's (2 Nov, sha256 9fa897…, not the 813eda97… the graph
+  // recorded) and the Space drew the 2015 survey 495 m under the models; the
+  // .3tz, the form the graph prefers, holds the transform the graph recorded
   const servable = (node: EmNode): EmNode => {
-    if (!opts.fromStore || tilesKindOf(dataOf(node)) !== "directory") return node;
+    if (tilesKindOf(dataOf(node)) !== "directory") return node;
     const pick = pickRepresentation(rg, node.id, ["archive"]);
     const alt = pick.picked ? byId.get(pick.picked.id) : undefined;
-    return alt && tilesKindOf(dataOf(alt)) === "3tz" ? alt : node;
+    if (!alt || tilesKindOf(dataOf(alt)) !== "3tz") return node;
+    return opts.fromStore || pick.picked?.preferred ? alt : node;
   };
   const entriesOf = (rmId: string) => {
     const linked = resourcesOf(rmId);
@@ -465,10 +505,11 @@ export function buildSpace(
   const rms: SpaceRM[] = nodes.filter((n) => RM_TYPES.has(n.node_type)).map((rm) => {
     const from = inOf(rm.id, "has_representation_model");
     const eps = new Set<string>();
+    const exact = new Set<string>();
     for (const s of [...from.filter((x) => isEpoch(byId.get(x))),
                      ...outOf(rm.id, "has_first_epoch"), ...outOf(rm.id, "survive_in_epoch")]) {
       const top = topOf(s);
-      if (top) eps.add(top);
+      if (top) { eps.add(top); exact.add(s); }
     }
     const documentId = from.find((x) => byId.get(x)?.node_type === "document") ?? null;
     const dd = dataOf(documentId ? byId.get(documentId) : undefined);
@@ -480,7 +521,7 @@ export function buildSpace(
     const group = outOf(rm.id, RM_GROUP_EDGE).find((g) => byId.get(g)?.node_type === RM_GROUP_TYPE) ?? null;
     const resource = chosen ? chosen.resource : resourceOf(rm.id);
     const frame = resource?.tiles ? frameAmong([resource.id, assetOf(vg, resource.id), rm.id], (i) => dataOf(byId.get(i))) : null;
-    return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre, group,
+    return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], exactEpochs: [...exact], documentId, genre, group,
              resource, choice: chosen?.choice ?? null, ...(frame ? { frame } : {}),
              ...(resource?.tiles ? { frameHome: assetOf(vg, resource.id) } : {}),
              tileset: tilesetOf(rm.id),
@@ -591,13 +632,14 @@ export function buildSpace(
     const choice = chooseVersion(entries.filter((e) => opensGltf(e.data ?? {})), SCENE_USES);
     const node = choice?.entry ? byId.get(choice.entry.id) : byId.get(set.assets[0]);
     const eps = new Set(rms.filter((r) => set.covers.includes(r.id)).flatMap((r) => r.epochs));
+    const exact = new Set(rms.filter((r) => set.covers.includes(r.id)).flatMap((r) => r.exactEpochs ?? r.epochs));
     // MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · no member, or members
     // without epochs: the container's own (its Document's), as s3Dgraphy says
     // (`alternative_sets` → `epochs`, em_visual_rules 1.6.40)
-    if (!eps.size) for (const ep of set.epochs) eps.add(ep);
+    if (!eps.size) for (const ep of set.epochs) { const t = topOf(ep) ?? ep; eps.add(t); exact.add(ep); }
     const asset = byId.get(set.assets[0]);
     const frame = frameAmong([node?.id, set.assets[0], set.hat], (i) => dataOf(byId.get(i)));
-    rms.push({ id: set.hat, name: str(asset?.name) || set.name, epochs: [...eps], documentId: g?.documentId ?? null, genre: null,
+    rms.push({ id: set.hat, name: str(asset?.name) || set.name, epochs: [...eps], exactEpochs: [...exact], documentId: g?.documentId ?? null, genre: null,
                ...(frame ? { frame } : {}), frameHome: set.assets[0] ?? null,
                group: null, altOf: set.hat, resource: node ? asResource(servable(node)) : null, choice: choice?.entry ? choice : null,
                tileset: null,
@@ -606,11 +648,15 @@ export function buildSpace(
 
   return {
     epochs, rms, proxies, rmGroups, alternatives, topOf,
+    subEpochs: (topId) => subs.get(topId) ?? [],
     summary(epochId) {
-      const epoch = epochs.find((e) => e.id === epochId);
+      const sub = subById.get(epochId);
+      const epoch = epochs.find((e) => e.id === epochId) ?? sub;
       if (!epoch) return null;
-      const mine = rms.filter((r) => r.epochs.includes(epochId));
-      const units = unitsIn(epochId);
+      // a sub-epoch: the models and the units of its subtree only
+      const tree = sub ? subtree(epochId) : null;
+      const mine = tree ? rms.filter((r) => (r.exactEpochs ?? []).some((x) => tree.has(x))) : rms.filter((r) => r.epochs.includes(epochId));
+      const units = tree ? unitsIn(sub!.top!).filter((u) => EPOCH_LINKS.some((l) => outOf(u, l).some((x) => tree.has(x)))) : unitsIn(epochId);
       const scene = opts.sceneProxies ?? null;
       const has = (u: string): boolean => proxies.has(u) || !!scene?.has(u);
       const withProxy = units.filter(has);

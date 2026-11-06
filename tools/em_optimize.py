@@ -91,31 +91,45 @@ ADDONS["gltfpack"]["builds"]["windows-arm64"] = ADDONS["gltfpack"]["builds"]["wi
 # the credits stay OpenDroneMap's. The day the two PRs are merged and upstream
 # publishes them, ONE field goes back: ``OBJ2TILES_FROM = "upstream"`` (and
 # the upstream table gets that release's assets and digests).
-_O2T_UPSTREAM = "https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.8.0/"
+#
+# MICRO-RIFINITURE p.1 (6 Nov 2026) · THAT DAY CAME: #107 and #108 were merged
+# on 1 Nov 2026 (01:18, 01:36) and OpenDroneMap published v1.9.0 the same
+# morning (04:37 UTC, commit 69fee74): the native OsxArm64 build with its
+# libktx 4.4.2, ``--progress`` (stages decimation, splitting, ROOT, tiling,
+# packing), the root's textures in parallel, at most one tile per core in the
+# tiling (``DOTNET_PROCESSOR_COUNT`` respected). The six assets below are the
+# release's, with the sha256 GitHub publishes for each (the OsxArm64 one
+# checked on the bytes downloaded on 6 Nov 2026). The fork's table stays only
+# as history: nothing reads it any more.
+_O2T_UPSTREAM = "https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.9.0/"
 _O2T_FORK = "https://github.com/zalmoxes-laran/Obj2Tiles/releases/download/v1.8.0-em.3/"
-OBJ2TILES_FROM = "fork"
+OBJ2TILES_FROM = "upstream"
 _O2T_BUILDS = {
     "upstream": {
+        "darwin-arm64": {
+            "version": "1.9.0", "asset": "Obj2Tiles-OsxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
+            "size": 10672986, "url": _O2T_UPSTREAM + "Obj2Tiles-OsxArm64.zip",
+            "sha256": "1f99c5e8f66911ac9966bf56dfd7576645d6770e470818330a66c6f8bf640f5d"},
         "darwin-x86_64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-Osx64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
-            "size": 11113512, "url": _O2T_UPSTREAM + "Obj2Tiles-Osx64.zip",
-            "sha256": "2f843f40ba23f535953ccfc19103549a80fba953d6483a21fe8a9e48545548b3"},
+            "version": "1.9.0", "asset": "Obj2Tiles-Osx64.zip", "member": "Obj2Tiles", "extra": ["libktx.dylib"],
+            "size": 11341816, "url": _O2T_UPSTREAM + "Obj2Tiles-Osx64.zip",
+            "sha256": "c95afaab130c91aa1faaba231dd1a9d3a16f33c870a3a59a010410f7fcb1c319"},
         "windows-x86_64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-Win64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
-            "size": 22160647, "url": _O2T_UPSTREAM + "Obj2Tiles-Win64.zip",
-            "sha256": "762cc3500af613dda8c601d70d503218298b0d6dc45a91a9133d04134e3005c6"},
+            "version": "1.9.0", "asset": "Obj2Tiles-Win64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
+            "size": 22918302, "url": _O2T_UPSTREAM + "Obj2Tiles-Win64.zip",
+            "sha256": "e4bc1b7b96585bb957af75a99fc2e113ad3f2156c0aadd677e00aa129d5fa498"},
         "windows-arm64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-WinArm64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
-            "size": 21034189, "url": _O2T_UPSTREAM + "Obj2Tiles-WinArm64.zip",
-            "sha256": "089523f069cc61c76043a7b4f86e5102fcf07b11c2798ee07e456f286b695c87"},
+            "version": "1.9.0", "asset": "Obj2Tiles-WinArm64.zip", "member": "Obj2Tiles.exe", "extra": ["ktx.dll"],
+            "size": 21752165, "url": _O2T_UPSTREAM + "Obj2Tiles-WinArm64.zip",
+            "sha256": "92e0d6b42280ac121db6587a6912c55c19609b2c9684946f505c2f2899dad213"},
         "linux-x86_64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-Linux64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
-            "size": 11391412, "url": _O2T_UPSTREAM + "Obj2Tiles-Linux64.zip",
-            "sha256": "f50663075d6b4ebff46e0e52fd365d9b8f78d6b5b9f4c9f07d56866f5a6f7de9"},
+            "version": "1.9.0", "asset": "Obj2Tiles-Linux64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
+            "size": 11612319, "url": _O2T_UPSTREAM + "Obj2Tiles-Linux64.zip",
+            "sha256": "91d9078b24e1fcc96d7d026add082288fde7d96e46e2e73988cc7515eb88c338"},
         "linux-arm64": {
-            "version": "1.8.0", "asset": "Obj2Tiles-LinuxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
-            "size": 10962078, "url": _O2T_UPSTREAM + "Obj2Tiles-LinuxArm64.zip",
-            "sha256": "1903851bb5da073b7e239b09094f694ceeb8fbffe0f1ce68fdb0b1575768da77"},
+            "version": "1.9.0", "asset": "Obj2Tiles-LinuxArm64.zip", "member": "Obj2Tiles", "extra": ["libktx.so"],
+            "size": 11185422, "url": _O2T_UPSTREAM + "Obj2Tiles-LinuxArm64.zip",
+            "sha256": "ce28898b396a137dfd0bbecf8ca8f5d16ca1c97efa78275c1950b538271f0b41"},
     },
     "fork": {
         "darwin-arm64": {
@@ -145,9 +159,11 @@ _O2T_BUILDS = {
     },
 }
 _O2T_FROM = {
-    "upstream": {"source": "https://github.com/OpenDroneMap/Obj2Tiles/releases",
-                 "licence_url": "https://github.com/OpenDroneMap/Obj2Tiles/blob/master/LICENSE.md",
-                 "build": ""},
+    "upstream": {"source": "https://github.com/OpenDroneMap/Obj2Tiles/releases/tag/v1.9.0",
+                 "licence_url": "https://github.com/OpenDroneMap/Obj2Tiles/blob/v1.9.0/LICENSE.md",
+                 "build": "",
+                 "history": "until 1 Nov 2026 EMStudio ran the CNR-ISPC fork (zalmoxes-laran/Obj2Tiles, "
+                            "v1.8.0-em.3: 1.8.0 + #107 osx-arm64 + #108 --progress); both merged into v1.9.0"},
     "fork": {"source": "https://github.com/zalmoxes-laran/Obj2Tiles/tree/emstudio",
              "licence_url": "https://github.com/zalmoxes-laran/Obj2Tiles/blob/emstudio/LICENSE.md",
              "build": "CNR-ISPC build: 1.8.0 + Apple Silicon + progress",
@@ -164,6 +180,7 @@ ADDONS["obj2tiles"] = {
     "upstream": "https://github.com/OpenDroneMap/Obj2Tiles",
     "build_note": _O2T_FROM[OBJ2TILES_FROM]["build"],
     "pending": _O2T_FROM[OBJ2TILES_FROM].get("pending", ""),
+    "history": _O2T_FROM[OBJ2TILES_FROM].get("history", ""),
     "does": "textured OBJ → Cesium 3D Tiles: decimation per level of detail, spatial splitting, tiling",
     "heavy": True,
     # below this a survey's mesh rarely fits (round 2: 1.1 GB of OBJ → 3.1 GB)
@@ -424,7 +441,7 @@ def addon_state(addon_id: str) -> dict:
     if addon_id == "node":
         sysnode = node_tool(system_only=True)
         out["system_node"] = sysnode["version"] if sysnode else None
-    for k in ("serves", "build_note", "pending", "upstream", "runtime"):
+    for k in ("serves", "build_note", "pending", "history", "upstream", "runtime"):
         if spec.get(k):
             out[k] = spec[k]
     out["fit"] = addon_fit(spec, out, memory_total_mb())
@@ -707,7 +724,10 @@ _KEEP_DONE = 20
 TOOLS = {
     "blender": {"max": lambda c: max(1, min(4, c // 3)), "cores": lambda c: max(2, c // max(1, min(4, c // 3)))},
     "blender_read": {"max": lambda c: 2, "cores": lambda c: 1},
-    "obj2tiles": {"max": lambda c: max(1, min(4, c // 3)), "cores": lambda c: 2},
+    # MICRO-RIFINITURE p.1 · Obj2Tiles 1.9.0 converts up to one tile per core and
+    # reads ``DOTNET_PROCESSOR_COUNT``: each instance gets the cores the queue
+    # gives it (passed to it as that variable), Blender's split — C = 11 → 3 × 3
+    "obj2tiles": {"max": lambda c: max(1, min(4, c // 3)), "cores": lambda c: max(2, c // max(1, min(4, c // 3)))},
     "ktx2": {"max": lambda c: max(1, min(3, c // 4)), "cores": lambda c: min(4, max(1, c))},
     "gltfpack": {"max": lambda c: max(1, min(8, c)), "cores": lambda c: 1},
     "pack": {"max": lambda c: 2, "cores": lambda c: 1},
@@ -1429,7 +1449,9 @@ class O2TProgress:
     Measured on the native build (30 Oct 2026, 45 k triangles): 4 decimation,
     88 splitting, 85 tiling lines and «done», the share never going back."""
 
-    WEIGHTS = {"decimation": (0.0, 0.30), "splitting": (0.30, 0.55), "tiling": (0.85, 0.13),
+    # MICRO-RIFINITURE p.1 · v1.9.0 adds the ROOT stage (the root tile, its
+    # textures in parallel) between the splitting and the tiling
+    WEIGHTS = {"decimation": (0.0, 0.30), "splitting": (0.30, 0.52), "root": (0.82, 0.03), "tiling": (0.85, 0.13),
                "packing": (0.98, 0.02)}
     error = ""
 
@@ -1978,7 +2000,7 @@ def run_tileset_batch(job: Job, items: list, tool: dict, pack, *, ceiling_mb: in
             used = SCHED.view()["used"]
             job.say(f"{it.get('name')}: started ({it.get('estimate_mb')} MB asked, "
                     f"{used['memory_mb']} of {SCHED.budget()['memory_mb']} MB in use)")
-            res = _tileset_one(job, it, row, tool, None if combine else pack, refresh)
+            res = _tileset_one(job, it, row, tool, None if combine else pack, refresh, cores=int(t.get("cores") or 0))
         except _Cancelled:
             res = {**it, "state": "cancelled"}
             row["state"] = "cancelled"
@@ -2060,8 +2082,11 @@ def _combine_parts(job: Job, combine: dict, items: list, out: list, pack) -> dic
             "path": packed.get("path") or combine.get("path")}
 
 
-def _tileset_one(job: Job, it: dict, row: dict, tool: dict, pack, refresh) -> dict:
+def _tileset_one(job: Job, it: dict, row: dict, tool: dict, pack, refresh, cores: int = 0) -> dict:
     folder = it["folder"]
+    # MICRO-RIFINITURE p.1 · the cores the scheduler gave this instance, said to
+    # .NET (Obj2Tiles 1.9.0 converts at most that many tiles at a time)
+    env = {**os.environ, "DOTNET_PROCESSOR_COUNT": str(cores)} if cores > 0 else None
     row["state"] = "running"
     row["stage"] = "decimation"
     prog = O2TProgress(it["lods"], it["leaves"])
@@ -2077,7 +2102,7 @@ def _tileset_one(job: Job, it: dict, row: dict, tool: dict, pack, refresh) -> di
     for attempt in (1, 2):
         try:
             run = run_tool(cmd, on_line, lambda: row["cancel"] or job.cancel.is_set(),
-                           stall_s=float(os.environ.get("EM_TILES_STALL_S") or 900))
+                           stall_s=float(os.environ.get("EM_TILES_STALL_S") or 900), env=env)
         except (_Cancelled, TimeoutError):
             # the folder is this run's: nothing half-made is left behind
             shutil.rmtree(folder, ignore_errors=True)

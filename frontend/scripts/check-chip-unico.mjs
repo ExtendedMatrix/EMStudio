@@ -110,10 +110,24 @@ const trow = ch.querySelector('[data-group="typed"] .nc-row[data-url="https://al
 ok(trow, "by hand: the typed address asked");
 trow.querySelector('[data-act="use"]').dispatchEvent(new win.Event("click"));
 eq(used.at(-1), "https://altro.example/em", "«Use» hands the node to the host");
+// MICRO-RIFINITURE p.3 · a node typed by hand that does not answer: chosen, «non risponde» beside it, and it stays
+await new Promise((r) => setTimeout(r, 10));
+const downSaved = ch.querySelector('[data-group="saved"] .nc-row[data-url="https://down.example/em"]');
+ok(downSaved && downSaved.querySelector('[data-act="use"]') && !downSaved.querySelector('[data-act="use"]').disabled
+   && /non risponde|does not answer/.test(downSaved.textContent), "a saved node that does not answer: «Use», with «does not answer» beside it");
+ch.querySelector("[data-nc-typed]").value = "https://down.typed.example/em";
+ch.querySelector('[data-group="typed"] [data-act="try"]').dispatchEvent(new win.Event("click"));
+await new Promise((r) => setTimeout(r, 10));
+const drow = ch.querySelector('[data-group="typed"] .nc-row[data-url="https://down.typed.example/em"]');
+ok(drow && /non risponde|does not answer/.test(drow.textContent) && drow.querySelector('[data-act="use"]'), "typed, silent: chosen with «does not answer» beside it");
+drow.querySelector('[data-act="use"]').dispatchEvent(new win.Event("click"));
+await new Promise((r) => setTimeout(r, 10));
+eq(used.at(-1), "https://down.typed.example/em", "…handed to the host");
+ok(ch.querySelector('[data-group="typed"] .nc-row[data-url="https://down.typed.example/em"]'), "…and its row is still there after «Use» (it vanished)");
 // Settings' flavour: «Add», the saved ones marked
 await N.paintChooser(ch, hooks({ pickLabel: "Add", picked: (u) => u === NODE }));
 const savedBtns = [...ch.querySelectorAll('[data-group="saved"] .nc-row [data-act="use"]')].map((b) => `${b.textContent}:${b.disabled}`);
-eq(savedBtns, ["saved:true"], "in Settings the same rows say «saved» / «Add» (the unreachable one has no button)");
+eq(savedBtns, ["saved:true", "Add:false"], "in Settings the same rows say «saved» / «Add» (the unreachable one too, since MICRO-RIFINITURE p.3)");
 // with the bridge: its finder answers, «Turn on a node on this computer»
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url) => ({ ok: true, json: async () => String(url).endsWith("/nodes")

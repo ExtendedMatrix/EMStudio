@@ -226,3 +226,114 @@ def dem_rows(dem_path: str, max_side: int = 2048) -> Tuple[List[List[float]], Se
     affine of those pixels, nodata, CRS."""
     g = _dem_grid(dem_path, max_side=max_side)
     return g["rows"], g["affine"], g["nodata"], g["crs"]
+
+
+# ── a tileset in TRUE ECEF, in the study's frame (MICRO-RIFINITURE p.7) ──────
+
+#: the geoid the heights of a study are read on when the tileset's are
+#: ellipsoidal: EGM2008 (EPSG:3855). Romania's Black Sea heights (Constanța,
+#: EPSG:5781) have no grid in PROJ's database — a «ballpark» operation that
+#: changes nothing — and the quasi-geoid of Romania stays within decimetres of
+#: EGM2008: the difference is said in the answer, never hidden
+GEOID_CRS = "EPSG:3855"
+#: farther than this from the study's origin, an «Earth» root is not taken for
+#: a true ECEF one (a file of shifted coordinates written as ECEF lands on the
+#: equator: that is the frame's case, `relocate_transform`, not this one)
+NEAR_STUDY_M = 50_000.0
+
+
+def _best_op(src, dst):
+    """The first operation of PROJ's list that is AVAILABLE and not a
+    «ballpark» (PROJ falls back on one without a word when a grid is missing:
+    measured 6 Nov 2026, WGS 84 → Stereo70 + EGM2008 without the grid moved
+    the point 123 m and kept the ellipsoidal height). ``None`` if there is none."""
+    from pyproj.transformer import TransformerGroup
+    tg = TransformerGroup(src, dst, always_xy=True)
+    for t in tg.transformers:
+        if "ballpark" not in (t.description or "").lower():
+            return t
+    return None
+
+
+def _geoid_op():
+    """WGS 84 (lon, lat, h ellipsoidal) → the same with the EGM2008 height; the
+    grid comes through PROJ's network (its own cache) when it is not on the disk.
+    ``(op, how)``; ``(None, why)`` when there is no way."""
+    import pyproj
+    op = _best_op("EPSG:4979", f"EPSG:4326+{GEOID_CRS.split(':')[1]}")
+    if op is not None:
+        return op, "grid on disk"
+    try:
+        if not pyproj.network.is_network_enabled():
+            pyproj.network.set_network_enabled(True)
+        op = _best_op("EPSG:4979", f"EPSG:4326+{GEOID_CRS.split(':')[1]}")
+    except Exception as exc:  # noqa: BLE001
+        return None, f"PROJ network: {exc}"
+    return (op, "grid through PROJ's network (cdn.proj.org, cached)") if op is not None else (None, "no EGM2008 grid, offline")
+
+
+def relocate_true_ecef(transform: Sequence[float], bounding_volume: Dict[str, Any],
+                       target: Dict[str, Any], *, check: int = 5) -> Dict[str, Any]:
+    """The transform that puts a tileset whose ``root.transform`` is a TRUE ECEF
+    one (WGS 84, ellipsoidal heights: RealityScan, Metashape's Cesium export)
+    into the study's frame: its CRS minus its shift, ORTHOMETRIC heights.
+
+    For each point of the root's volume: ECEF → (lon, lat, h) on WGS 84 → the
+    study's CRS by PROJ's best operation with a DATUM SHIFT (for Stereo70:
+    Pulkovo 1942(58) → WGS 84, a Helmert of 7 parameters, never «the same
+    numbers») → the height minus the geoid's undulation (EGM2008) → minus the
+    shift. The affine fit and its residual as `relocate_transform`'s.
+    """
+    from pyproj import Transformer
+    from s3dgraphy.geometry.frame import _apply, _column_major, _fit_affine, _mat, volume_points
+    if not transform or len(transform) != 16:
+        return {"ok": False, "error": "no-transform"}
+    if math.dist((0, 0, 0), transform[12:15]) < 1e6:
+        return {"ok": False, "error": "local", "why": "the root is not on the Earth: drawn as written"}
+    crs = _norm((target or {}).get("crs"))
+    if not crs:
+        return {"ok": False, "error": "the study declares no CRS"}
+    tsh = [float(v) for v in (list((target or {}).get("shift") or []) + [0, 0, 0])[:3]]
+    pts = volume_points(bounding_volume, 3)
+    chk = volume_points(bounding_volume, check) if check > 1 else []
+    if not pts:
+        return {"ok": False, "error": "no points to fit on (a region volume is already geographic)"}
+    M = _mat(transform)
+    to_geo = Transformer.from_crs("EPSG:4978", "EPSG:4979", always_xy=True)
+    hz = _best_op("EPSG:4326", crs)
+    if hz is None:
+        return {"ok": False, "error": f"PROJ has no operation WGS 84 → {crs} but a ballpark one"}
+    geoid, geoid_how = _geoid_op()
+    # the study's origin, back on the Earth: the guard against a fake ECEF
+    back = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    olon, olat = back.transform(tsh[0], tsh[1])
+
+    def true_of(p):
+        x, y, z = _apply(M, p)
+        lon, lat, h = to_geo.transform(x, y, z)
+        e, n = hz.transform(lon, lat)
+        H = geoid.transform(lon, lat, h)[2] if geoid is not None else h
+        return (e - tsh[0], n - tsh[1], H - tsh[2]), (lon, lat, h, h - H)
+
+    centre = [sum(p[k] for p in pts) / len(pts) for k in range(3)]
+    q, (clon, clat, ch, und) = true_of(centre)
+    far = _haversine(olon, olat, clon, clat)
+    if far > NEAR_STUDY_M:
+        return {"ok": False, "error": "far", "why": f"the root is {far / 1000:.1f} km from the study's origin: not taken for a true ECEF frame",
+                "written": {"lat": clat, "lon": clon, "h": ch}}
+    dst = [true_of(p)[0] for p in pts]
+    fit = _fit_affine(pts, dst)
+    errs = [math.dist(true_of(p)[0], _apply([*fit, [0, 0, 0, 1]], p)) for p in (chk or pts)]
+    return {"ok": True, "transform": _column_major(fit), "target": {"crs": crs, "shift": tsh},
+            "residual_rms_m": math.sqrt(sum(e * e for e in errs) / len(errs)), "residual_max_m": max(errs),
+            "points": len(chk or pts), "written": {"lat": clat, "lon": clon, "h": ch}, "true": {"x": q[0], "y": q[1], "z": q[2]},
+            "datum": {"operation": hz.description, "accuracy_m": hz.accuracy if hz.accuracy and hz.accuracy > 0 else None},
+            "geoid": {"crs": GEOID_CRS, "undulation_m": und if geoid is not None else None, "how": geoid_how},
+            "from_study_m": far}
+
+
+def _haversine(lon1, lat1, lon2, lat2) -> float:
+    r = 6371008.8
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))

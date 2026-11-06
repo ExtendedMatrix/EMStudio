@@ -78,6 +78,8 @@ export interface GlobeApi extends GeoDriver {
   setClip(on: boolean, margin: number): void;
   /** …the box cut now (three's x0 z0 x1 z1), null: none */
   clipBox(): [number, number, number, number] | null;
+  /** MICRO-RIFINITURE p.6 · the territory's opacity (0–1), from the data panel */
+  setOpacity(v: number): void;
   state(): GlobeState;
 }
 
@@ -144,6 +146,7 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
   let clipBox: [number, number, number, number] | null = null;
   let clipMaterials = 0;
   let clipTick = 0;
+  let opacity = 1;
   let savedLocalClipping: boolean | null = null;
   const clipNow = (): [number, number, number, number] | null => {
     if (!clip.on || mode !== "site" || flight) return null;
@@ -172,6 +175,8 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
     tiles.group.traverse((q: any) => {
       if (!q.isMesh || !q.material) return;
       for (const mat of Array.isArray(q.material) ? q.material : [q.material]) {
+        // MICRO-RIFINITURE p.6 · the territory's opacity, on every material (new tiles too)
+        if (mat.opacity !== opacity) { mat.transparent = opacity < 1; mat.opacity = opacity; mat.depthWrite = opacity >= 1; mat.needsUpdate = true; }
         if (mat.clippingPlanes !== want) {
           const was = mat.clippingPlanes?.length ?? 0;
           mat.clippingPlanes = want;
@@ -754,6 +759,12 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       tiles.update();
     },
     setLayers(l) { layers = l; applyLayers(); },
+    setOpacity(v) {
+      const next = Math.min(1, Math.max(0, Number(v)));
+      if (!Number.isFinite(next) || next === opacity) return;
+      opacity = next;
+      applyClip(true);
+    },
     setMode(m) {
       const to = viewFor(m);
       if (!to || !ctx) { mode = m; return; }

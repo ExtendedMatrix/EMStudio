@@ -124,8 +124,13 @@ print(json.dumps({"resident": sorted(r["resource_id"] for r in s["resident"]), "
   eq(M.tilesKindOf({ url: "https://n/v1/rooms/r/asset/sha256:" + "c".repeat(64), media_type: "application/vnd.maxar.archive.3tz+zip" }),
      "3tz", "…a .3tz by digest, said by its media type");
   const disk = M.buildSpace(d, { isUnit }).rms.find((r) => r.id === "RM");
-  eq([disk.resource?.id, disk.resource?.tiles, disk.choice?.use], ["DIR", "directory", "web"],
-     "from the disk: the version the rule picks is the folder, drawn as tiles (not the zip master)");
+  // MICRO-RIFINITURE p.7 (6 Nov 2026) · from the disk too the archive the graph says PREFERRED
+  // (Templu Mare's folder had its tileset.json put back to the zip's: the survey 495 m down)
+  eq([disk.resource?.id, disk.resource?.tiles, disk.choice?.use], ["TZ", "3tz", "web"],
+     "from the disk: the rule picks the folder, the scene draws its PREFERRED .3tz, as tiles (not the zip master)");
+  const notPreferred = { graph: { nodes: d.graph.nodes.map((n) => n.id === "TZ" ? { ...n, data: { ...n.data, preferred: false } } : n), edges: d.graph.edges } };
+  eq(M.buildSpace(notPreferred, { isUnit }).rms.find((r) => r.id === "RM").resource?.id, "DIR",
+     "…a .3tz not said preferred: from the disk the folder, as before");
   const node = M.buildSpace(d, { isUnit, fromStore: true }).rms.find((r) => r.id === "RM");
   eq([node.resource?.id, node.resource?.tiles, node.resource?.checksum.slice(-4)], ["TZ", "3tz", "cccc"],
      "from a node: the folder's .3tz, the representation a store serves by its digest");

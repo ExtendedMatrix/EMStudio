@@ -301,7 +301,7 @@ import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE } from "./space";
 import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame } from "./file-frame";
 import { trackpadClassifier } from "./wheel-kind";
-import { formatBytes as tilesBytes, isTilesetUrl } from "./tiles3d";
+import { formatBytes as tilesBytes, isTilesetUrl, onEarth } from "./tiles3d";
 import { mount3dViewer } from "./embed3d-native";
 import {
   emptyQuery, findOnShelf, folderOf, pillCounts, queryActive, rangeOf, shelfTypeOf, whereOf,
@@ -522,7 +522,7 @@ import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
 import {
   defaultOverlays, drawnOverlayCounts, farGlyphsHidden, withHideFar, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlayShown, overlaysHideSomething,
-  overlayValue, saveOverlays, withGroup, withOverlay, withValue, type OverlayKey, type OverlayState, type OverlayView,
+  overlayValue, saveOverlays, withGroup, withOverlay, withValue, type OverlayKey, type OverlayState, type OverlayValueKey, type OverlayView,
 } from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
 import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
@@ -1813,6 +1813,8 @@ function connectionGestures(): ConnectionGestures {
       : away(() => document.getElementById("btn-open-other")?.click()),
     shareRoom: document.getElementById("btn-share-room")?.classList.contains("hidden") ? undefined
       : away(() => document.getElementById("btn-share-room")?.click()),
+    // MICRO-RIFINITURE p.2 · the room's panel in the chip's menu (the role is checked there and by the node)
+    shareWith: sync.connected && sync.room ? () => openRoomPanel(sync.room!) : undefined,
   };
 }
 /** MICRO-CHIP-UNICO p.5 · THE node selector's hooks, for its two hosts: the
@@ -3802,8 +3804,10 @@ function select(nodeId: string | null): void {
   // SPAZIO · an epoch selected anywhere is the scene's epoch (a phase: its
   // epoch), and the scene marks the unit selected; the Chronology marks the row
   if (nodeId && store?.node(nodeId)?.node_type === "EpochNode") {
-    const top = currentSpace()?.topOf(nodeId);
-    if (top) spaceEpochId = top;
+    const sp = currentSpace();
+    const top = sp?.topOf(nodeId);
+    // MICRO-RIFINITURE p.8 · a sub-epoch is the scene's epoch itself (its models only)
+    if (top) spaceEpochId = sp!.subEpochs(top).some((e) => e.id === nodeId) ? nodeId : top;
   }
   if (windowsOf().some((w) => w.type === "scene" || w.type === "chronology"))
     queueMicrotask(() => { refreshSurfaces("scene"); refreshSurfaces("chronology"); });
@@ -14219,7 +14223,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 62;   // 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 63;   // 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -23150,6 +23154,7 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
       onVerify: (c, b) => { if (current) verifyBlock(current.id, c, b); },
       onInsert: (c, at, anchor, replace) => { if (current) openBlocksMenu(current.id, c, at, anchor, !!replace); },
       onFileDrop: (c, f, x, y) => { if (current) dropFileOnChapter(current.id, c, f, x, y); },
+      onIngress: () => { void ingressFromNarrative(); },
       onScaffold: () => {
         if (!store) return;
         const nid = scaffoldNarrativeFromGraph(store);   // one batch: one undo step
@@ -26230,6 +26235,9 @@ function modelFailureOf(key: string): string | undefined {
 /** The scene's epoch: the one chosen, else the first (newest) top epoch. */
 function spaceEpochOf(sp: Space): string | null {
   if (spaceEpochId && sp.epochs.some((e) => e.id === spaceEpochId)) return spaceEpochId;
+  // MICRO-RIFINITURE p.8 · a sub-epoch chosen: its models only
+  const top = spaceEpochId ? sp.topOf(spaceEpochId) : null;
+  if (spaceEpochId && top && sp.subEpochs(top).some((e) => e.id === spaceEpochId)) return spaceEpochId;
   return sp.epochs[0]?.id ?? null;
 }
 
@@ -26846,6 +26854,8 @@ const sceneHandles = new Map<string, SpaceSceneHandle>();
 /** MICRO-SPAZIO-COMPATTO p.1 · each Space's bar (epochs, layers, ⤢, Territory),
  *  drawn IN its window's header: one row instead of two */
 const sceneBars = new Map<string, HTMLElement>();
+/** MICRO-RIFINITURE p.6 · per Space window, the «Livelli» section of its data panel */
+const spaceLayerSections = new Map<string, () => HTMLElement>();
 /** the ornament id of a unit's «ha 3D» badge: not a node, a door */
 const HAS3D_BADGE = "has3d:";
 
@@ -27532,6 +27542,10 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
       // Shift+D in the Space yet)
       { label: t("s3.associate"), act: "associate", run: () => revealAssociate() },
       { label: t("s3.createUnit"), act: "create-unit", run: () => { void createUnitFromSketch(win, sk.id); } },
+      "sep",
+      // MICRO-RIFINITURE p.4 · the cube as a detail
+      { label: t("det.blender"), act: "blender-detail", run: () => { void blenderOnDetail(win, sk.id); } },
+      { label: t("det.proxy"), act: "proxy-detail", run: () => { void proxyOnDetail(win, sk.id); } },
       "sep",
       { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`sketch:${sk.id}`]) },
       { label: t("s3.isolate"), act: "isolate", run: () => isolate(`sketch:${sk.id}`) },
@@ -28263,6 +28277,104 @@ function beginSketchDrag(win: Win, sketchId: string, e0: PointerEvent): void {
   document.addEventListener("pointerup", up, true);
 }
 
+// ── MICRO-RIFINITURE p.4 · a sketched cube as a DETAIL of the scene ─────────
+
+/** The detail under a sketch: its box (three's axes and the study's: x east,
+ *  y north, z up, and with the shift), the models of the epoch drawn whose box
+ *  meets it, the documents that record them. */
+function detailOfSketch(win: Win, skId: string): { box: [V3, V3]; study: { min: V3; max: V3; abs: { min: V3; max: V3 } };
+  rms: SpaceRM[]; docs: string[]; epoch: string | null } | null {
+  const h = sceneHandles.get(win.id);
+  const sp = currentSpace();
+  const b = h?.boxOf(`sketch:${skId}`);
+  if (!h || !sp || !b) return null;
+  const ep = spaceEpochOf(sp);
+  const sum = ep ? sp.summary(ep) : null;
+  const meets = (a: [V3, V3], c: [V3, V3]) => [0, 1, 2].every((k) => a[0][k] <= c[1][k] && a[1][k] >= c[0][k]);
+  const rms = (sum?.rms ?? []).filter((r) => { const rb = h.boxOf(`rm:${r.id}`); return !!rb && meets(rb, b); });
+  const docs = [...new Set(rms.map((r) => r.documentId ?? (r.group ? sp.rmGroups.get(r.group)?.documentId : null)
+    ?? (r.altOf ? sp.rmGroups.get(r.altOf)?.documentId : null)).filter((x): x is string => !!x))];
+  // three (y up, z south) → the study (z up, y north)
+  const toStudy = (p: V3): V3 => [p[0], -p[2], p[1]];
+  const lo = toStudy(b[0]), hi = toStudy(b[1]);
+  const min: V3 = [Math.min(lo[0], hi[0]), Math.min(lo[1], hi[1]), Math.min(lo[2], hi[2])];
+  const max: V3 = [Math.max(lo[0], hi[0]), Math.max(lo[1], hi[1]), Math.max(lo[2], hi[2])];
+  const geo = (store?.doc.graph.nodes.find((n) => n.node_type === "geo_position")?.data ?? {}) as Record<string, unknown>;
+  const sh: V3 = [Number(geo.shift_x) || 0, Number(geo.shift_y) || 0, Number(geo.shift_z) || 0];
+  const abs = { min: min.map((v, i) => v + sh[i]) as V3, max: max.map((v, i) => v + sh[i]) as V3 };
+  return { box: b, study: { min, max, abs }, rms, docs, epoch: ep };
+}
+const fmtM = (v: number) => v.toFixed(2);
+
+/** «Apri in Blender con questo dettaglio»: «Componi un .blend dal grafo» with
+ *  the models the cube meets (and its epoch), the box written in the plan
+ *  (`detail`, the study's coordinates), then Blender opens on the .blend. */
+async function blenderOnDetail(win: Win, skId: string): Promise<void> {
+  const d = detailOfSketch(win, skId);
+  if (!d) { toast(t("det.noBox")); return; }
+  if (!d.rms.length) { toast(t("det.noModels")); return; }
+  const models = d.rms.filter((r) => !r.altOf).map((r) => r.id);
+  const containers = [...new Set(d.rms.map((r) => r.altOf ?? r.group).filter((x): x is string => !!x))];
+  await composeFromGraphDialog({ models, containers: models.length ? [] : containers, epochs: d.epoch ? [d.epoch] : [],
+    detail: { name: sketchById(skId)?.name ?? skId, min: d.study.min, max: d.study.max, abs: d.study.abs }, open: true });
+}
+
+/** «Modella un proxy su questo dettaglio»: the cube becomes the proxy of a unit
+ *  (the same association as Ctrl+P) and the EXTRACTOR is written by the app —
+ *  proposed, shown, changed by the person before it enters: from each document
+ *  that records a model the cube meets (`extractBetween`: property → extractor
+ *  → document, a combiner when there are several), ONE undo step each. */
+async function proxyOnDetail(win: Win, skId: string): Promise<void> {
+  const st = store;
+  const sp = currentSpace();
+  const d = detailOfSketch(win, skId);
+  if (!st || !sp || !d) { toast(t("det.noBox")); return; }
+  const sum = d.epoch ? sp.summary(d.epoch) : null;
+  const units = [...new Set([...(sum?.without ?? []), ...(sum?.units ?? [])])];
+  if (!units.length) { toast(t("det.noUnits")); return; }
+  const body = document.createElement("div");
+  body.className = "compose-dialog det-dialog";
+  const lab = (text: string, el: HTMLElement) => { const l = document.createElement("label"); l.className = "compose-field"; l.append(text + " ", el); return l; };
+  const unit = document.createElement("select");
+  unit.dataset.det = "unit";
+  const active = selectedId && units.includes(selectedId) ? selectedId : null;
+  for (const u of units) { const o = document.createElement("option"); o.value = u; o.textContent = String(st.node(u)?.name ?? u) + (sum?.without.includes(u) ? ` · ${t("det.noProxyYet")}` : ""); o.selected = u === active; unit.appendChild(o); }
+  const docNames = d.docs.map((x) => String(st.node(x)?.name ?? x));
+  const modelNames = d.rms.map((r) => r.name);
+  const size = d.study.max.map((v, i) => fmtM(v - d.study.min[i])).join(" × ");
+  const centre = d.study.abs.min.map((v, i) => fmtM((v + d.study.abs.max[i]) / 2)).join(", ");
+  const epochName = String(st.node(d.epoch ?? "")?.name ?? "").replace(/\.+$/, "");
+  const propose = () => t("det.extractor", { unit: String(st.node(unit.value)?.name ?? unit.value), models: modelNames.slice(0, 6).join(", ") + (modelNames.length > 6 ? " …" : ""),
+    docs: docNames.join(", ") || "—", size, centre, epoch: epochName });
+  const text = document.createElement("textarea");
+  text.dataset.det = "extractor";
+  text.rows = 5;
+  text.style.width = "100%";
+  text.value = propose();
+  let touched = false;
+  text.oninput = () => { touched = true; };
+  unit.onchange = () => { if (!touched) text.value = propose(); };
+  const src = document.createElement("p");
+  src.className = "files-hint";
+  src.dataset.det = "docs";
+  src.textContent = d.docs.length ? t("det.sources", { docs: docNames.join(", ") }) : t("det.noDocs");
+  body.append(lab(t("det.unit"), unit), src, lab(t("det.extractorLabel"), text));
+  const ans = await openDialog({ title: t("det.proxy"), body, ok: t("det.go"), kind: "proxy-detail" });
+  if (!ans.ok) return;
+  const u = unit.value;
+  if (!(await associateFlow(win, [skId], u))) return;
+  // the geometry property the association wrote (the last one of the unit)
+  const props = st.doc.graph.edges.filter((e) => e.source === u && e.edge_type === "has_property").map((e) => st.node(e.target))
+    .filter((n) => n?.node_type === "property" && String((n.data as Record<string, unknown> | undefined)?.property_type ?? n.name ?? "") === "geometry");
+  const prop = props[props.length - 1];
+  if (!prop) { logWarn(t("det.noProperty", { unit: String(st.node(u)?.name ?? u) })); return; }
+  const desc = text.value.trim();
+  for (const doc of d.docs) chain.extractBetween(st, prop.id, doc, { description: desc });
+  const say = d.docs.length ? t("det.done", { unit: String(st.node(u)?.name ?? u), n: String(d.docs.length) }) : t("det.doneNoDoc", { unit: String(st.node(u)?.name ?? u) });
+  logInfo(say, [u, prop.id, ...d.docs]);
+  toast(say);
+}
+
 /** The Inspector of a sketch (the active is one): what it is, and its roads. */
 function renderSketchInspector(host: HTMLElement, sketchId: string): void {
   host.textContent = "";
@@ -28302,6 +28414,10 @@ function renderSketchInspector(host: HTMLElement, sketchId: string): void {
   btn("associate", t("s3.associate"), () => revealAssociate());
   btn("create-unit", t("s3.createUnit"), () => { void createUnitFromSketch(win, sk.id); });
   btn("frame", t("s3.frame"), () => sceneHandles.get(win.id)?.frameKeys([`sketch:${sk.id}`]));
+  // MICRO-RIFINITURE p.4 (E.D., 6 Nov 2026) · the cube as a DETAIL: Blender on
+  // the models it meets, and a proxy modelled on it with its extractor
+  btn("blender-detail", t("det.blender"), () => { void blenderOnDetail(win, sk.id); });
+  btn("proxy-detail", t("det.proxy"), () => { void proxyOnDetail(win, sk.id); });
   btn("delete", t("s3.deleteSketch"), () => removeSketch(sk.id));
   host.appendChild(bar);
   renderAssociateSection(host, win, sk.id, spaceSketchSet.size > 1 ? [...spaceSketchSet] : [sk.id]);
@@ -29873,6 +29989,12 @@ function useAlternativeFrom(rmId: string, x: number, y: number): void {
 }
 
 /** The Outliner of a Space window, drawn into `el`. */
+/** MICRO-RIFINITURE p.6 · the Outliner, and the scene's «Livelli» under its head */
+function renderOutlinerAndLayers(el: HTMLElement, win: Win, ...rest: [Parameters<typeof renderOutliner>[1], Parameters<typeof renderOutliner>[2]]): void {
+  renderOutliner(el, ...rest);
+  const sec = spaceLayerSections.get(win.id)?.();
+  if (sec) el.querySelector(".sol-head")?.after(sec);
+}
 function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void {
   const prefs = space3dPrefs();
   const st = store;
@@ -29935,7 +30057,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       saveSpacePrefs(sp3.person, shownPrefs);
     }
   }
-  renderOutliner(el, {
+  renderOutlinerAndLayers(el, win, {
     rows, prefs: shownPrefs, reveal, selected: spaceSelectedKeys(sp), active: spaceSel(sp).active, substituted: spaceSubstituted, isolated: spaceIsolated, query: spaceQuery,
     blendState: blendStateOfNode,
     glyph: (k) => typeIconElement(k),
@@ -30355,6 +30477,49 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     surface: (dem, image) => gisSurface(dem, image),
     contours: (dem, interval) => gisContours(dem, interval),
   });
+  // MICRO-RIFINITURE p.6 · the «Livelli» of the scene at the head of the data panel:
+  // Models, Proxies (each shown or hidden, and its opacity), the Territory (and
+  // the globe's «Livelli» inside it), the GIS layers as documents of the graph
+  const layersOpen = { on: true };
+  const spaceLayersSection = (): HTMLElement => {
+    const box = document.createElement("details");
+    box.className = "sol-layers";
+    box.dataset.solLayers = "1";
+    box.open = layersOpen.on;
+    box.addEventListener("toggle", () => { layersOpen.on = box.open; });
+    const sum = document.createElement("summary");
+    sum.textContent = t("lay.title");
+    box.appendChild(sum);
+    const ovs = () => overlaysOfWin(win.id, "space");
+    const row = (name: string, which: OverlayKey, value: OverlayValueKey | null, key: string) => {
+      const r = document.createElement("div");
+      r.className = "sol-lay-row";
+      r.dataset.layRow = key;
+      const lab = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = space3dShown(which, win.id);
+      cb.addEventListener("change", () => setOverlays("space", withOverlay(ovs(), which, cb.checked), win.id));
+      const nm = document.createElement("span");
+      nm.textContent = name;
+      lab.append(cb, nm);
+      r.appendChild(lab);
+      if (value) {
+        const op = document.createElement("input");
+        op.type = "range"; op.min = "0.05"; op.max = "1"; op.step = "0.01";
+        op.className = "sol-lay-op";
+        op.value = String(overlayValue(ovs(), value));
+        op.title = t("lay.opacity");
+        op.addEventListener("change", () => setOverlays("space", withValue(ovs(), value, Number(op.value)), win.id));
+        r.appendChild(op);
+      }
+      return r;
+    };
+    box.append(row(t("space.layerRm"), "s3_rm", "s3_opacity_rm", "rm"), row(t("lay.tiles"), "s3_tiles", null, "tiles"),
+      row(t("space.layerPx"), "s3_proxies", "s3_opacity_proxy", "px"), geoSpace.section(), gisSpace.section());
+    return box;
+  };
+  spaceLayerSections.set(win.id, spaceLayersSection);
   const onBar = (e: Event) => {
     if (geoSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     if (gisSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
@@ -30365,10 +30530,18 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       openHardwareMenu(r.left, r.bottom + 4);
       return;
     }
-    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close],[data-act='back']");
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close],[data-act='back'],[data-act='more']");
     if (!b) return;
     e.stopPropagation();
     if (b.dataset.act === "back") { goBack(); return; }
+    if (b.dataset.act === "more") {
+      const r = b.getBoundingClientRect();
+      spaceMenu(r.left, r.bottom + 4, t("lay.moreHead"), [
+        { label: `⤢ ${t("space.frame")}`, act: "frame", run: () => handle.frame() },
+        { label: t("geo.goSite"), act: "go-site", disabled: !geoSpace.isOn(), run: () => { geoSpace.goToSite(); } },
+      ]);
+      return;
+    }
     if (b.dataset.previewClose) {
       setWinCurrent(win, "space.preview", null);
     } else if (b.dataset.epoch) {
@@ -30391,7 +30564,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   bar.addEventListener("click", onBar);
   // p.3 · the epochs' menu: a choice is the click on that epoch's button
   bar.addEventListener("change", (e) => {
-    const pick = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-epoch-pick]");
+    const pick = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-epoch-pick],[data-sub-epoch-pick]");
     if (!pick?.value) return;
     e.stopPropagation();
     spaceEpochId = pick.value;
@@ -30435,10 +30608,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // the bar is placed), a MENU with the epoch shown and ← → for the previous /
     // next one, in the order the buttons had (newest first)
     const epochsHere = sp?.epochs ?? [];
+    // MICRO-RIFINITURE p.8 · the top epoch of the scene's (itself, or a sub-epoch's)
+    const topId = sp && epochId ? sp.topOf(epochId) ?? epochId : epochId;
     const asMenu = (): void => {
       seg.textContent = "";
       seg.classList.add("scn-seg-menu");
-      const i = epochsHere.findIndex((e) => e.id === epochId);
+      const i = epochsHere.findIndex((e) => e.id === topId);
       const arrow = (dir: -1 | 1): HTMLButtonElement => {
         const b = document.createElement("button");
         b.type = "button";
@@ -30459,7 +30634,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         const o = document.createElement("option");
         o.value = e.id;
         o.textContent = e.name;
-        o.selected = e.id === epochId;
+        o.selected = e.id === topId;
         pick.appendChild(o);
       }
       pick.title = epochsHere[i]?.name ?? "";
@@ -30471,8 +30646,31 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       b.type = "button";
       b.dataset.epoch = e.id;
       b.textContent = e.name;
-      b.setAttribute("aria-pressed", String(e.id === epochId));
+      b.setAttribute("aria-pressed", String(e.id === topId));
       seg.appendChild(b);
+    }
+    // MICRO-RIFINITURE p.8 (E.D., 6 Nov 2026) · the sub-epochs of the epoch shown,
+    // as the Matrix's sub-bands: «all» = every sub-epoch's models (the epoch),
+    // one = its models only (and its own sub-epochs')
+    const subsHere = sp && topId ? sp.subEpochs(topId) : [];
+    const subPick = subsHere.length ? document.createElement("select") : null;
+    if (subPick && topId) {
+      subPick.className = "scn-ep-pick scn-sub-pick";
+      subPick.dataset.subEpochPick = "1";
+      subPick.setAttribute("aria-label", t("space.subEpoch"));
+      subPick.title = t("space.subEpochTitle");
+      const all = document.createElement("option");
+      all.value = topId;
+      all.textContent = t("space.subEpochAll", { n: String(subsHere.length) });
+      all.selected = epochId === topId;
+      subPick.appendChild(all);
+      for (const e of subsHere) {
+        const o = document.createElement("option");
+        o.value = e.id;
+        o.textContent = `${"  ".repeat(Math.max(0, (e.depth ?? 1) - 1))}↳ ${e.name}`;
+        o.selected = e.id === epochId;
+        subPick.appendChild(o);
+      }
     }
     const tog = (which: "rm" | "px", key: string) => {
       const b = document.createElement("button");
@@ -30496,7 +30694,18 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     hwb.dataset.hw = hardwareProfile();
     hwb.textContent = t("hw.chip", { hw: hardwareWord(hardwareProfile()) });
     hwb.title = t(space3dPrefs().hardware ? "hw.titleChosen" : "hw.titleRead", { hw: hardwareWord(hardwareProfile()), why: (detectHardware(), hardwareWhy) });
-    bar.append(back, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr, hwb, ...geoSpace.barButtons(), ...gisSpace.barButtons());
+    // MICRO-RIFINITURE p.6 (E.D., 6 Nov 2026: «la barra è troppo affollata») · in the
+    // bar the epoch, the view (Globe / Plan / Site, with the territory) and the
+    // profile ⚙; Models, Proxies, Territory, Layers and GIS are sections of the
+    // data panel (`spaceLayersSection`), ⤢ and «Vai al sito» in the menu «⋯»
+    void tog; void fr;
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "scn-tg scn-more";
+    more.dataset.act = "more";
+    more.textContent = "⋯";
+    more.title = t("lay.moreTitle");
+    bar.append(back, lab, seg, ...(subPick ? [subPick] : []), ...geoSpace.barButtons(), hwb, more);
     gisSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
@@ -30695,7 +30904,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     handle.syncSketches();
   };
   refresh();
-  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); spaceLayerSections.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
 }
 
 /** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
@@ -30799,8 +31008,20 @@ function sceneHandleTilesOf(id: string): { relocated: SceneRelocated | null } | 
  *  CRS and shift (its GeoPositionNode) when it declares a CRS, else the file's
  *  own shifted grid — the frame of the models exported with the same shift. */
 function spaceTilesRelocate(r: SpaceRM): SceneItem["tilesRelocate"] {
-  if (!r.frame || !store) return null;
+  if (!store) return null;
   const geo = (store.doc.graph.nodes.find((n) => n.node_type === "geo_position")?.data ?? null) as Record<string, unknown> | null;
+  // MICRO-RIFINITURE p.7 (E.D., 6 Nov 2026: the 2013 survey on the axes' origin) ·
+  // no frame said, a root in TRUE ECEF (Metashape's, RealityScan's) and a study
+  // with a CRS: into the study's CRS by the bridge — the datum shift (Stereo70 is
+  // Pulkovo 1942(58), not WGS 84) and the geoid (EGM2008: ellipsoidal → orthometric,
+  // 44 m at Sarmizegetusa). Until now such a root was only CENTRED, on the origin
+  if (!r.frame) {
+    const target = studyTarget(geo, { crs: null, shift: [0, 0, 0] });
+    if (!target) return null;
+    const ecef: FileFrame = { crs: "EPSG:4978", shift: [0, 0, 0] };
+    return { key: frameKey(ecef, target), fn: async (root) => onEarth(root.transform)
+      ? relocation(await bridgeUrl().catch(() => null), root, ecef, target) : { ok: false, error: "local" } };
+  }
   const frame = r.frame.frame;
   const target = studyTarget(geo, frame);
   if (!target) return null;
@@ -35550,7 +35771,7 @@ interface AddonState { fit?: AddonFit; id: string; name: string; project: string
   /** p.4 · the actions of Ottimizza it serves, the profiles they serve */
   serves?: { actions: string[]; profiles: string[]; for?: string[] };
   /** p.6 · a build of its own (E.D.'s fork) and the way back to upstream */
-  build_note?: string; pending?: string; upstream?: string; runtime?: boolean }
+  build_note?: string; pending?: string; history?: string; upstream?: string; runtime?: boolean }
 let addonsState: { at: number; list: AddonState[] | null; error?: string; machine?: AddonMachine } | null = null;
 
 function readEngineChoice(): Record<string, string> {
@@ -35865,6 +36086,8 @@ function addonCard(a: AddonState, compact: boolean, advice?: Advice): HTMLElemen
       : t("files.addonNoBuild", { platform: a.platform }));
   if (a.build_note) long.push(t(`files.addonBuild.${a.id}`, undefined, a.build_note));
   if (a.pending) long.push(t(`files.addonPending.${a.id}`, undefined, a.pending));
+  // MICRO-RIFINITURE p.1 · the fork EMStudio ran before the official release, as history
+  if (a.history) long.push(t(`files.addonHistory.${a.id}`, undefined, a.history));
   if (a.upstream) long.push(t("files.addonUpstream", { url: a.upstream }));
   if (a.with_node) long.push(t("files.addonWithNodeTip", { version: a.node_version ?? "", size: formatBytes(a.node_size ?? 0) }));
   head.append(" ", tabTip(long.join("\n")));
@@ -46156,7 +46379,8 @@ async function registerUseVersionNow(blend: string, profile: string, model: stri
 /** «Componi un .blend dal grafo»: from the open study, no .blend to start
  *  from — a working profile, the containers / epochs, link or append, from
  *  the disk or the room; the plan shown first, then EM Tools composes it. */
-async function composeFromGraphDialog(): Promise<void> {
+async function composeFromGraphDialog(preset?: { models: string[]; containers: string[]; epochs: string[];
+  detail?: { name: string; min: V3; max: V3; abs: { min: V3; max: V3 } }; open?: boolean }): Promise<void> {
   if (!store) { toast(t("cons.noDoc")); return; }
   if (!currentFilePath) { toast(t("gcomp.noPath")); return; }
   const st = store;
@@ -46197,6 +46421,8 @@ async function composeFromGraphDialog(): Promise<void> {
       const c = document.createElement("input");
       c.type = "checkbox";
       c.value = n.id;
+      // MICRO-RIFINITURE p.4 · a detail's epoch and containers, ticked
+      if (preset && (key === "epochs" ? preset.epochs : preset.containers).includes(n.id)) c.checked = true;
       c.onchange = () => { void refresh(); };
       l.append(c, " " + String(n.name || n.id));
       box.appendChild(l);
@@ -46214,6 +46440,15 @@ async function composeFromGraphDialog(): Promise<void> {
   const preview = document.createElement("div");
   preview.className = "compose-preview";
   preview.dataset.gcomp = "preview";
+  if (preset?.detail) {
+    const dn = document.createElement("p");
+    dn.className = "files-hint";
+    dn.dataset.gcomp = "detail";
+    const a = preset.detail.abs;
+    dn.textContent = t("det.composeNote", { name: preset.detail.name, n: String(preset.models.length || preset.containers.length),
+      min: a.min.map(fmtM).join(", "), max: a.max.map(fmtM).join(", ") });
+    body.appendChild(dn);
+  }
   body.append(lab(t("gcomp.profile"), prof), pubHint, lab(t("bcomp.how"), how), lab(t("gcomp.source"), from),
     lab(t("gcomp.containers"), conts.box), lab(t("gcomp.epochs"), eps.box), lab(t("bcomp.out"), out), preview);
   const got: { plan: ComposeGraphPlan | null } = { plan: null };
@@ -46224,7 +46459,7 @@ async function composeFromGraphDialog(): Promise<void> {
     await archiveStates();
     const j = await postGraph<{ plan?: ComposeGraphPlan; out?: string }>("/graph/compose-plan", {
       doc: st.doc, doc_path: currentFilePath ?? "", profile: prof.value, how: how.value,
-      containers: conts.chosen(), epochs: eps.chosen(),
+      containers: conts.chosen(), epochs: eps.chosen(), ...(preset?.models.length ? { models: preset.models } : {}),
       resolved: fileStates().map((f) => ({ id: f.id, state: f.state, path: f.path })), in_room: from.value === "room" });
     if (mine !== seq) return;
     preview.innerHTML = "";
@@ -46270,6 +46505,9 @@ async function composeFromGraphDialog(): Promise<void> {
   if (!plan?.ok || !plan.items.length) { toast(t("gcomp.empty")); return; }
   const target = out.value.trim();
   if (!target) return;
+  // the detail travels in the plan (the study's coordinates): EM Tools may frame on it
+  if (preset?.detail) (plan as unknown as Record<string, unknown>).detail = { name: preset.detail.name, min: preset.detail.min, max: preset.detail.max,
+    abs: preset.detail.abs, frame: "study (x east, y north, z up), shift added in abs" };
   const job = await startJob({ kind: "blender", op: "compose_graph", plan, out: target,
                                room: from.value === "room" ? fileRoom() : null },
                              t("gcomp.job", { name: paths.basename(target) }));
@@ -46283,6 +46521,7 @@ async function composeFromGraphDialog(): Promise<void> {
   logInfo(m);
   if (res.fetched) void checkFiles();
   renderStorage();
+  if (preset?.open) void openInBlender(target);
 }
 
 /** MICRO-BLEND-OFFICINA-3 (3) · «Aggiorna»: the ticks of the before/after,
@@ -47206,6 +47445,15 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
 const INGRESS_MODEL = /\.(glb|gltf|obj)$/i;
 const INGRESS_ASSET = /\.(glb|gltf|obj|ply|fbx|stl|usdz?|e57|las|laz|abc|dae|3ds|x3d|3tz)$/i;
 
+/** MICRO-RIFINITURE p.4 · «Fai entrare un asset» from the Narrative: the
+ *  path(s) asked (one per line, a folder too) and the same ingress card as
+ *  the Archive's; dropping files on the window does the same */
+async function ingressFromNarrative(): Promise<void> {
+  if (!(await bridgeUrl().catch(() => null))) { toast(t("ingress.bridgeDown")); return; }
+  const v = await askText(t("nv.ingressAsk"), "", { title: t("ingress.title") });
+  const list = (v ?? "").split(/\r?\n/).map((x) => x.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  if (list.length) await ingressFromPaths(list);
+}
 /** the paths dropped or picked, as assets: a folder that is a tileset enters
  *  as one; any other folder enters with the models it holds */
 async function ingressFromPaths(list: string[]): Promise<void> {

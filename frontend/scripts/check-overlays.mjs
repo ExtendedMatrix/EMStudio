@@ -53,7 +53,8 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
     "s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch",
     "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles", "s3_sketches", "s3_instances", "s3_sel_outline", "s3_gizmo",
     "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its twenty-three, in their groups, and only them");
-  eq(O.OVERLAY_VALUES.map((v) => [v.key, v.def]), [["s3_opacity_proxy", 0.42], ["s3_opacity_wire", 0.9]], "Geometry: two sliders, at the opacities the scene used");
+  eq(O.OVERLAY_VALUES.map((v) => [v.key, v.def]), [["s3_opacity_proxy", 0.42], ["s3_opacity_wire", 0.9], ["s3_opacity_rm", 1]],
+     "Geometry: three sliders, at the opacities the scene used (the models' since MICRO-RIFINITURE p.6: 1, as they came)");
   // every label in en, it, de
   const i18n = readFileSync(`${SRC}i18n.ts`, "utf8");
   for (const k of [...O.OVERLAY_KEYS.map((x) => `ov.item.${x}`), ...O.OVERLAY_GROUPS.map((g) => `ov.group.${g.key}`),

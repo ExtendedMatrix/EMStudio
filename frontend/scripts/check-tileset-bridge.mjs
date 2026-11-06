@@ -146,12 +146,14 @@ try {
   // ── the add-ons ──
   const ad = (await get("/addons")).j.addons ?? [];
   const o2t = ad.find((x) => x.id === "obj2tiles");
-  ok(o2t && o2t.licence === "AGPL-3.0" && /zalmoxes-laran\/Obj2Tiles/.test(o2t.source) && o2t.project === "OpenDroneMap",
-     "Obj2Tiles is an add-on: AGPL-3.0, its source E.D.'s fork, the credits OpenDroneMap's (MICRO-PREPARA-RITOCCHI p.6)");
-  ok(o2t && o2t.version === "1.8.0-em.3" && /^[0-9a-f]{64}$/.test(o2t.sha256 ?? "") && /v1\.8\.0-em\.3\//.test(o2t.url ?? ""),
-     "pinned at the fork's release 1.8.0-em.3 with its sha256");
-  ok(o2t && /Apple Silicon/.test(o2t.build_note ?? "") && /#107/.test(o2t.pending ?? "") && /#108/.test(o2t.pending ?? ""),
-     "the build said (1.8.0 + Apple Silicon + progress) and the way back to upstream (#107, #108)");
+  // MICRO-RIFINITURE p.1 · the OFFICIAL release v1.9.0 (#107 and #108 merged), the fork as history
+  ok(o2t && o2t.licence === "AGPL-3.0" && /github\.com\/OpenDroneMap\/Obj2Tiles\/releases\/tag\/v1\.9\.0/.test(o2t.source) && o2t.project === "OpenDroneMap"
+     && /v1\.9\.0\/LICENSE/.test(o2t.licence_url ?? ""),
+     "Obj2Tiles is an add-on: AGPL-3.0, its source OpenDroneMap's release v1.9.0, its licence that tag's");
+  ok(o2t && o2t.version === "1.9.0" && /^[0-9a-f]{64}$/.test(o2t.sha256 ?? "") && /OpenDroneMap\/Obj2Tiles\/releases\/download\/v1\.9\.0\//.test(o2t.url ?? ""),
+     "pinned at the official release 1.9.0 with its sha256");
+  ok(o2t && !o2t.build_note && !o2t.pending && /#107/.test(o2t.history ?? "") && /#108/.test(o2t.history ?? "") && /em\.3/.test(o2t.history ?? ""),
+     "no build note, nothing pending: the fork (1.8.0-em.3, #107, #108) only as history");
   if (o2t?.platform === "darwin-arm64") ok(!o2t.emulated && /OsxArm64/.test(o2t.url), "on Apple Silicon: the native OsxArm64 build, no Rosetta");
   const val = ad.find((x) => x.id === "tiles-validator");
   ok(val && val.licence === "Apache-2.0" && val.needs === "node" && /^sha512-/.test(val.sha256 ?? ""), "the validator is an add-on: Apache-2.0, a Node program, its integrity pinned");

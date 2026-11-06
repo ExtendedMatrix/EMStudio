@@ -410,6 +410,11 @@ export interface ConnectionGestures {
   /** …the room's other door («Open this room in…»), «Share this room…» */
   openOther?(): void;
   shareRoom?(): void;
+  /** MICRO-RIFINITURE p.2 (E.D., 1 Nov 2026) · «Condividi con…»: the room's
+   *  invitations and permissions inside EMStudio (the same panel as the node's
+   *  API: members, roles, an ORCID, a link), only for whoever manages the room
+   *  (owner, admin); the whole management stays the node's page in the browser */
+  shareWith?(): void;
 }
 
 /** FIRMA DELLA NASCITA · «Who you are» — the person and the role this session
@@ -637,6 +642,13 @@ export function renderWhereSection(host: HTMLElement, s: ConnectionState, g: Con
       other.title = t("roundtrip.title");
       other.addEventListener("click", () => g.openOther!());
       acts.appendChild(other);
+    }
+    if (g.shareWith && (s.role === "owner" || s.role === "admin")) {
+      const sw = btn(t("share.with"));
+      sw.dataset.act = "share-with";
+      sw.title = t("share.withTitle");
+      sw.addEventListener("click", () => g.shareWith!());
+      acts.appendChild(sw);
     }
     if (g.shareRoom) {
       const share = btn(t("share.open"));

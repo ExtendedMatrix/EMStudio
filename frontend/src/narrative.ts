@@ -885,6 +885,9 @@ export interface PageHooks {
   /** AUDIT A8 · «Proponi i capitoli»: the story is made at the FIRST GESTURE
    *  (one undo step), never by opening the window */
   onScaffold?(): void;
+  /** MICRO-RIFINITURE p.4 (E.D., 6 Nov 2026) · «Fai entrare un asset»: the
+   *  ingress card of the Archive, opened from the page being written */
+  onIngress?(): void;
 }
 
 /** COLLEGARE · «Posiziona il sito…» for a map with no site: installed by the
@@ -1127,6 +1130,15 @@ export function renderNarrativeView(
   head.appendChild(metaEl);
   const lede = el("p", "nv-lede", current.description ?? "");
   if (current.description || writing) head.appendChild(lede);
+  // MICRO-RIFINITURE p.4 · a model, a tileset, a survey's files enter the graph from here
+  if (writing && page.onIngress) {
+    const ing = el("button", "insp-btn nv-ingress", t("nv.ingress")) as HTMLButtonElement;
+    ing.type = "button";
+    ing.dataset.action = "ingress";
+    ing.title = t("nv.ingressTitle");
+    ing.addEventListener("click", (e) => { e.stopPropagation(); page.onIngress!(); });
+    head.appendChild(ing);
+  }
   // NARRATIVA-BLOCCHI p.1 · the title and the subtitle are written IN THE PAGE,
   // with the gesture of a chapter's title: click, type, Enter or leave. One
   // field each (`name`, `description`), one undo step per gesture.

@@ -44,13 +44,23 @@ export interface GeoSpaceDeps {
 
 interface Saved { on: boolean; mode: GeoMode; layers: GeoLayer[]; panel: boolean; half: number; zmax: number; source: string; height: HeightMode;
   /** MICRO-GEOREF-GRAFO p.0b · the terrain cut under the site, and its margin (m) */
-  clip: boolean; clipMargin: number }
+  clip: boolean; clipMargin: number;
+  /** MICRO-RIFINITURE p.6 · the territory's opacity (the data panel) */
+  opacity: number }
 
 const fmtMB = (b: number) => `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`;
 
 export interface GeoSpace {
-  /** the bar's buttons, for the Space's bar (drawn at each refresh) */
+  /** the bar's buttons, for the Space's bar (drawn at each refresh): since
+   *  MICRO-RIFINITURE p.6 only the view (Globe / Plan / Site), with the territory on */
   barButtons(): HTMLElement[];
+  /** MICRO-RIFINITURE p.6 · the territory as a section of the data panel: on/off,
+   *  its opacity, «Livelli» of the globe (the panel, inside the section) */
+  section(): HTMLElement;
+  /** «Vai al sito» (the bar's menu); false when there is no globe */
+  goToSite(): boolean;
+  /** the territory is on */
+  isOn(): boolean;
   /** a click in the bar: true when it was the territory's */
   onBar(target: HTMLElement): boolean;
   destroy(): void;
@@ -95,9 +105,10 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
         layers: readLayers(raw?.layers), panel: !!raw?.panel, half: Number(raw?.half) || 2000,
         zmax: Number(raw?.zmax) || 16, source: typeof raw?.source === "string" ? raw.source : "s2cloudless-2016",
         height: (HEIGHT_MODES.includes(raw?.height) ? raw.height : "auto") as HeightMode,
-        clip: raw?.clip !== false, clipMargin: Number.isFinite(raw?.clipMargin) ? Math.max(0, raw.clipMargin) : 10 };
+        clip: raw?.clip !== false, clipMargin: Number.isFinite(raw?.clipMargin) ? Math.max(0, raw.clipMargin) : 10,
+        opacity: Number(raw?.opacity) >= 0 && Number(raw?.opacity) <= 1 && raw?.opacity !== null && raw?.opacity !== undefined ? Number(raw.opacity) : 1 };
     } catch {
-      return { on: false, mode: "site", layers: readLayers(null), panel: false, half: 2000, zmax: 16, source: "s2cloudless-2016", height: "auto", clip: true, clipMargin: 10 };
+      return { on: false, mode: "site", layers: readLayers(null), panel: false, half: 2000, zmax: 16, source: "s2cloudless-2016", height: "auto", clip: true, clipMargin: 10, opacity: 1 };
     }
   };
   let s = load();
@@ -106,10 +117,14 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
   const pkgDir = () => { const p = d.docPath(); return p ? `${dirname(p)}/geo` : null; };
 
   const panel = document.createElement("div");
-  panel.className = "geo-panel hidden";
+  panel.className = "geo-panel geo-in-data hidden";
   panel.dataset.geoPanel = "1";
   for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) panel.addEventListener(ev, (e) => e.stopPropagation());
-  d.host.appendChild(panel);
+  // MICRO-RIFINITURE p.6 · the territory's section of the data panel; the «Livelli» panel lives in it
+  const sect = document.createElement("div");
+  sect.className = "sol-lay-geo";
+  sect.dataset.geoSection = "1";
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) sect.addEventListener(ev, (e) => e.stopPropagation());
 
   /** the anchor, measured: lon/lat by PROJ (the bridge), the azimuth of the scene's +y */
   const measureAnchor = async (): Promise<SiteAnchor | null> => {
@@ -162,6 +177,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
         onMode: (m) => { s.mode = m; save(); d.redrawBar(); draw(); },
       });
       d.handle.setGeo(globe);
+      globe.setOpacity(s.opacity);
       if (s.mode !== "site") globe.setMode(s.mode);
       void refreshCache();
       watchFailures(!!bridge);
@@ -554,15 +570,10 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
         placedBy = null;     // once: the bar is drawn again meanwhile
         queueMicrotask(() => { stop(); void start(); });
       }
+      // MICRO-RIFINITURE p.6 (E.D., 6 Nov 2026: «la barra è troppo affollata») · the
+      // switch of the territory and «Livelli» are in the data panel (`section`),
+      // «Vai al sito» in the bar's menu: here only the view, with the territory on
       const out: HTMLElement[] = [];
-      const tg = document.createElement("button");
-      tg.type = "button";
-      tg.className = "scn-tg";
-      tg.dataset.geo = "toggle";
-      tg.textContent = t("geo.territory");
-      tg.title = t("geo.territoryHint");
-      tg.setAttribute("aria-pressed", String(s.on));
-      out.push(tg);
       if (!s.on) return out;
       const seg = document.createElement("span");
       seg.className = "scn-seg geo-modes";
@@ -579,23 +590,45 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
         b.disabled = !globe;
         seg.appendChild(b);
       }
-      const go = document.createElement("button");
-      go.type = "button";
-      go.className = "scn-tg";
-      go.dataset.geo = "site";
-      go.textContent = t("geo.goSite");
-      go.disabled = !globe;
-      const pn = document.createElement("button");
-      pn.type = "button";
-      pn.className = "scn-tg";
-      pn.dataset.geo = "panel";
-      pn.textContent = t("geo.layers");
-      pn.setAttribute("aria-pressed", String(s.panel));
-      pn.disabled = !globe;
-      out.push(seg, go, pn);
+      out.push(seg);
       return out;
     },
+    section() {
+      sect.textContent = "";
+      const row = document.createElement("div");
+      row.className = "sol-lay-row";
+      const lab = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = s.on;
+      cb.dataset.geoOn = "1";
+      const nm = document.createElement("span");
+      nm.textContent = t("geo.territory");
+      lab.title = t("geo.territoryHint");
+      lab.append(cb, nm);
+      const op = document.createElement("input");
+      op.type = "range"; op.min = "0"; op.max = "1"; op.step = "0.05";
+      op.value = String(s.opacity);
+      op.className = "sol-lay-op";
+      op.dataset.geoOpacity = "1";
+      op.title = t("lay.opacity");
+      op.disabled = !s.on;
+      const pn = document.createElement("button");
+      pn.type = "button";
+      pn.className = "sol-btn";
+      pn.dataset.geo = "panel";
+      pn.textContent = `${t("geo.layers")} ${s.panel ? "▾" : "▸"}`;
+      pn.setAttribute("aria-pressed", String(s.panel));
+      pn.disabled = !globe;
+      row.append(lab, op, pn);
+      sect.append(row, panel);
+      draw();
+      return sect;
+    },
+    goToSite() { if (!globe) return false; globe.goToSite(); return true; },
+    isOn: () => s.on,
     onBar(target) {
+      if (panel.contains(target)) return false;
       const b = target.closest<HTMLElement>("[data-geo],[data-geo-mode]");
       if (!b) return false;
       if (b.dataset.geoMode) { const m = b.dataset.geoMode as GeoMode; s.mode = m; save(); globe?.setMode(m); d.redrawBar(); return true; }
@@ -609,15 +642,30 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       }
       return false;
     },
+    // (the section's own listeners: below, once)
     destroy() {
       clearInterval(jobTimer);
       clearInterval(failTimer);
       d.handle.setGeo(null);
       globe = null;
       panel.remove();
+      sect.remove();
     },
     state: () => ({ on: s.on, mode: globe?.mode() ?? s.mode, layers: s.layers, anchor, anchorNote, placedBy, height: heightNow, heightMode: s.height, bridge, pkgDir: pkgDir(), job, cache: cacheInfo, failures, globe: globe?.state() ?? null }),
   };
+  sect.addEventListener("click", (e) => { if (api.onBar(e.target as HTMLElement)) e.stopPropagation(); });
+  sect.addEventListener("change", (e) => {
+    const el = e.target as HTMLInputElement;
+    if (!el.dataset.geoOn) return;
+    s.on = el.checked; save();
+    if (s.on) void start(); else stop();
+  });
+  sect.addEventListener("input", (e) => {
+    const el = e.target as HTMLInputElement;
+    if (!el.dataset.geoOpacity) return;
+    s.opacity = Number(el.value); save();
+    globe?.setOpacity(s.opacity);
+  });
   (d.host as unknown as { __geoSpace?: () => unknown }).__geoSpace = api.state;
   return api;
 }

@@ -2284,7 +2284,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: their heads (tileset.json or the stored members of a .3tz, never the
 #: geometry) and passes them to s3Dgraphy (``tiles=``): a tileset «ok» for a
 #: target only if its tiles fit the band, and then it covers its meshes.
-BRIDGE_LEVEL = 62   # 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 63   # 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -7382,7 +7382,16 @@ def make_handler(api):
                     # root.transform read back to the shifted coordinates by the
                     # inverse of the same projection, the shift added, the true
                     # transform fitted (to ECEF, or to a study's CRS − shift)
-                    from s3dgraphy.geometry.frame import relocate_transform
+                    from s3dgraphy.geometry.frame import normalise_crs, relocate_transform
+                    if normalise_crs((body.get("frame") or {}).get("crs")) == "EPSG:4978":
+                        # MICRO-RIFINITURE p.7 · a TRUE ECEF root (RealityScan,
+                        # Metashape): into the study's CRS with the datum shift
+                        # and the geoid, orthometric heights (em_gis)
+                        import em_gis as _gis
+                        out = _gis.relocate_true_ecef(body.get("transform"), body.get("bounding_volume") or {},
+                                                      body.get("target") or {})
+                        self._json(out, 200 if out.get("ok") else 422)
+                        return
                     out = relocate_transform(body.get("transform"), body.get("frame") or {},
                                              bounding_volume=body.get("bounding_volume"),
                                              target=body.get("target") or None)

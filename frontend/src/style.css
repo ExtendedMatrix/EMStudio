@@ -11421,3 +11421,17 @@ td.al-cloud { color: var(--accent-ink); }
 .storage-master-stamp { font-size: 11px; margin-left: 6px; padding: 0 6px; }
 .master-chain ol { margin: 6px 0 0 18px; padding: 0; }
 .master-chain li[data-pending] { opacity: .75; }
+
+/* MICRO-RIFINITURE p.6 · the scene's «Livelli» at the head of the Space's data panel:
+   Models, Tilesets, Proxies, the Territory (and the globe's Livelli inside it), the GIS layers */
+.sol-layers { border-bottom: 1px solid var(--border); padding: 4px 6px 6px; font-size: 0.74rem; display: flex; flex-direction: column; gap: 3px; }
+.sol-layers > summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+.sol-lay-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sol-lay-row > label { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.sol-lay-op { width: 72px; flex: 0 0 auto; }
+.sol-lay-h { font-weight: 600; margin-top: 4px; }
+.sol-lay-sub { color: var(--text-muted, inherit); margin-top: 4px; }
+.geo-panel.geo-in-data { position: static; width: auto; max-height: none; z-index: auto; border-radius: 4px; margin-top: 3px; }
+.gis-panel.gis-in-data { display: flex; flex-direction: column; gap: 4px; }
+.gis-in-data .gis-row label { display: flex; align-items: center; gap: 4px; }
+.gis-in-data button { font: inherit; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-panel); color: var(--text); padding: 1px 6px; cursor: pointer; }

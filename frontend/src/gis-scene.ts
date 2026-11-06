@@ -158,6 +158,8 @@ export interface GisDriverOptions {
 export interface GisDriver extends GeoDriver {
   /** what to draw: the layers shown and the surfaces shown */
   set(layers: GisLayerRef[], surfaces: SurfaceRef[], all: GisLayerRef[]): void;
+  /** MICRO-RIFINITURE p.6 · a layer's (or a surface's) opacity, 0–1, from the data panel */
+  setOpacity(id: string, v: number): void;
   /** the probes' seam */
   state(): Record<string, unknown>;
 }
@@ -170,6 +172,21 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
   const grids = new Map<string, { x0: number; y0: number; step: number; nx: number; ny: number; heights: Array<number | null> }>();
   let want: { layers: GisLayerRef[]; surfaces: SurfaceRef[]; all: GisLayerRef[] } = { layers: [], surfaces: [], all: [] };
   let frames = 0;
+  const opacities = new Map<string, number>();
+  const applyOpacity = (id: string) => {
+    const d = drawn.get(id);
+    const v = opacities.get(id);
+    if (!d?.obj || v === undefined) return;
+    d.obj.traverse((x: any) => {
+      const m = x.material;
+      if (!m) return;
+      if (m.userData.baseOpacity === undefined) m.userData.baseOpacity = m.opacity ?? 1;
+      m.transparent = true;
+      m.opacity = m.userData.baseOpacity * v;
+      m.needsUpdate = true;
+    });
+    for (const l of d.labels) l.el.style.opacity = String(v);
+  };
   const sceneCrs = `EPSG:${o.frame.epsg}`;
   const post = async (route: string, body: Record<string, unknown>) => {
     const r = await fetch(`${o.bridge}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -241,6 +258,7 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
       holder.add(ps);
     }
     group.add(holder);
+    queueMicrotask(() => applyOpacity(l.id));
     const labels = geo.labels.slice(0, 5000).map((x) => ({ ...x, el: label(x.text, color) }));
     drawn.set(l.id, { obj: holder, labels, sig, info: { features: j.count, vertices: j.vertices, how: j.how, layer_crs: j.layer_crs,
       truncated: j.truncated, points: geo.points.length / 3, segments: geo.segments.length / 6 } });
@@ -291,6 +309,7 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
     mesh.userData.gisSurface = s.id;
     mesh.userData.helper = true;
     group.add(mesh);
+    queueMicrotask(() => applyOpacity(s.id));
     grids.set(s.id, { x0, y0, step, nx, ny, heights });
     drawn.set(s.id, { obj: mesh, labels: [], sig, info: { nx, ny, step, how: j.how, z_range: j.z_range, triangles: idx.length / 3, textured: !!map } });
   };
@@ -353,6 +372,12 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
     set(layers, surfaces, all) {
       want = { layers, surfaces, all };
       void sync();
+    },
+    setOpacity(id, v) {
+      const x = Math.min(1, Math.max(0, Number(v)));
+      if (!Number.isFinite(x)) return;
+      opacities.set(id, x);
+      applyOpacity(id);
     },
     state() {
       return { epsg: o.frame.epsg, drawn: [...drawn.entries()].map(([id, d]) => ({ id, ...d.info, labels: d.labels.length,

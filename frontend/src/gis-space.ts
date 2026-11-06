@@ -33,7 +33,12 @@ export interface GisSpaceDeps {
 }
 
 export interface GisSpace {
+  /** MICRO-RIFINITURE p.6 (E.D., 6 Nov 2026: «il GIS deve stare nel pannello dei
+   *  dati 3D») · no button in the bar any more: kept for the callers, empty */
   barButtons(): HTMLElement[];
+  /** …the GIS layers as a section of the Space's data panel: each one shown or
+   *  hidden and its opacity, a DEM's surface and contours, «Porta nel grafo» */
+  section(): HTMLElement;
   onBar(target: HTMLElement): boolean;
   /** the graph changed: draw again what it says */
   refresh(): void;
@@ -41,7 +46,7 @@ export interface GisSpace {
   state(): unknown;
 }
 
-interface Saved { panel: boolean; hidden: string[]; interval: number }
+interface Saved { panel: boolean; hidden: string[]; interval: number; opacity: Record<string, number> }
 
 export function mountGisSpace(d: GisSpaceDeps): GisSpace {
   const { t } = d;
@@ -54,18 +59,20 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
   const load = (): Saved => {
     try {
       const raw = JSON.parse(localStorage.getItem(key()) ?? "null");
-      return { panel: !!raw?.panel, hidden: Array.isArray(raw?.hidden) ? raw.hidden.map(String) : [], interval: Number(raw?.interval) > 0 ? Number(raw.interval) : 1 };
-    } catch { return { panel: false, hidden: [], interval: 1 }; }
+      const op: Record<string, number> = {};
+      for (const [k, v] of Object.entries(raw?.opacity ?? {})) if (Number(v) >= 0 && Number(v) <= 1) op[k] = Number(v);
+      return { panel: !!raw?.panel, hidden: Array.isArray(raw?.hidden) ? raw.hidden.map(String) : [], interval: Number(raw?.interval) > 0 ? Number(raw.interval) : 1, opacity: op };
+    } catch { return { panel: false, hidden: [], interval: 1, opacity: {} }; }
   };
   let s = load();
   let loadedFor = key();
   const save = () => { try { localStorage.setItem(key(), JSON.stringify(s)); } catch { /* kept in memory */ } };
 
   const panel = document.createElement("div");
-  panel.className = "geo-panel gis-panel hidden";
+  // MICRO-RIFINITURE p.6 · a section of the data panel (`section()`), not a panel over the scene
+  panel.className = "gis-panel gis-in-data";
   panel.dataset.gisPanel = "1";
   for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) panel.addEventListener(ev, (e) => e.stopPropagation());
-  d.host.appendChild(panel);
 
   const shownNow = () => {
     const all = gisLayersOf(d.doc());
@@ -92,6 +99,7 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
       driver = createGisDriver({ bridge, frame: f, docPath: d.docPath(), log: d.log });
       driverSig = sig;
       d.handle.setGis(driver);
+      for (const [id, v] of Object.entries(s.opacity)) driver.setOpacity(id, v);
     }
     driver.set(layers, surfaces, all);
   };
@@ -107,15 +115,11 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
   };
 
   const draw = () => {
-    panel.classList.toggle("hidden", !s.panel);
-    if (!s.panel) return;
     const typed = panel.querySelector<HTMLInputElement>("[data-gis-path]")?.value ?? "";
     panel.textContent = "";
     const h = document.createElement("div");
-    h.className = "geo-h";
-    const b = document.createElement("b");
-    b.textContent = t("gis.title");
-    h.append(b, btn("✕", "close", t("geo.close")));
+    h.className = "sol-lay-h";
+    h.textContent = t("gis.title");
     panel.appendChild(h);
     const f = frameOf(d.doc());
     const note = document.createElement("div");
@@ -145,6 +149,14 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
       const nm = document.createElement("span");
       nm.textContent = name;
       lab.append(cb, nm);
+      // MICRO-RIFINITURE p.6 · its opacity
+      const op = document.createElement("input");
+      op.type = "range"; op.min = "0"; op.max = "1"; op.step = "0.05";
+      op.value = String(s.opacity[id] ?? 1);
+      op.dataset.gisOpacity = id;
+      op.title = t("lay.opacity");
+      op.className = "sol-lay-op";
+      lab.append(op);
       const info = document.createElement("small");
       const drawnInfo = st.find((x) => x.id === id);
       info.textContent = what + (drawnInfo ? (drawnInfo.error ? ` · ⚠ ${String(drawnInfo.error)}`
@@ -177,6 +189,10 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     }
     panel.appendChild(list);
     // bring a file into the graph
+    const addH = document.createElement("div");
+    addH.className = "sol-lay-sub";
+    addH.textContent = t("gis.bringTitle");
+    panel.appendChild(addH);
     const add = document.createElement("div");
     add.className = "geo-add";
     const inp = document.createElement("input");
@@ -214,6 +230,14 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     if (busy) { const p = document.createElement("p"); p.className = "xf-note"; p.textContent = busy; panel.appendChild(p); }
   };
 
+  panel.addEventListener("input", (e) => {
+    const el = e.target as HTMLInputElement;
+    if (!el.dataset.gisOpacity) return;
+    const v = Number(el.value);
+    s.opacity[el.dataset.gisOpacity] = v;
+    save();
+    driver?.setOpacity(el.dataset.gisOpacity, v);
+  });
   panel.addEventListener("change", (e) => {
     const el = e.target as HTMLElement;
     if (el.dataset.gisShow) {
@@ -249,7 +273,6 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     const b = (e.target as HTMLElement).closest<HTMLElement>("[data-gis-act]");
     if (!b) return;
     const act = b.dataset.gisAct;
-    if (act === "close") { s.panel = false; save(); draw(); d.redrawBar(); return; }
     if (act === "inspect") {
       const v = panel.querySelector<HTMLInputElement>("[data-gis-path]")?.value.trim() ?? "";
       if (v) void doInspect(v);
@@ -277,25 +300,9 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
 
   void sync();
   return {
-    barButtons() {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "scn-tg";
-      b.dataset.gisBar = "1";
-      b.textContent = t("gis.bar");
-      const n = gisLayersOf(d.doc()).length + surfacesOf(d.doc()).length;
-      b.title = frameOf(d.doc()) ? t("gis.barTitle", { n: String(n) }) : t("gis.noFrame");
-      b.setAttribute("aria-pressed", String(s.panel));
-      return [b];
-    },
-    onBar(target) {
-      if (!target.closest("[data-gis-bar]")) return false;
-      s.panel = !s.panel;
-      save();
-      draw();
-      d.redrawBar();
-      return true;
-    },
+    barButtons() { return []; },
+    section() { draw(); return panel; },
+    onBar() { return false; },
     refresh() { void sync().then(draw); },
     destroy() { d.handle.setGis(null); driver = null; panel.remove(); },
     state() { return { panel: s.panel, hidden: s.hidden, driver: driver?.state() ?? null, layers: gisLayersOf(d.doc()), surfaces: surfacesOf(d.doc()) }; },

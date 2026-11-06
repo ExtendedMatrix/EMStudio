@@ -83,7 +83,7 @@ export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "three
 
 /** MICRO-GIZMO-ASSI · a value of a view's overlays, not a switch: a slider of
  *  the «Geometry» group (Blender's Overlays ▸ Geometry) */
-export type OverlayValueKey = "s3_opacity_proxy" | "s3_opacity_wire";
+export type OverlayValueKey = "s3_opacity_proxy" | "s3_opacity_wire" | "s3_opacity_rm";
 export interface OverlayValueItem { key: OverlayValueKey; min: number; max: number; step: number; def: number }
 
 export interface OverlayItem {
@@ -186,6 +186,8 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
   { key: "s3_geometry", items: [], values: [
     { key: "s3_opacity_proxy", min: 0.05, max: 1, step: 0.01, def: 0.42 },
     { key: "s3_opacity_wire", min: 0.05, max: 1, step: 0.01, def: 0.9 },
+    // MICRO-RIFINITURE p.6 · the models' opacity (the data panel's «Livelli»)
+    { key: "s3_opacity_rm", min: 0.05, max: 1, step: 0.01, def: 1 },
   ] },
 ];
 

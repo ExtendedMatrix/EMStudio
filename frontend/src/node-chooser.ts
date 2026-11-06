@@ -63,7 +63,7 @@ export const findNodes = (h: ChooserHooks, typed = "") =>
 export const personal = (h: ChooserHooks, action: "start" | "stop" | "status", lan = false) =>
   post(h.bridge, "/node/personal", { action, lan, root: h.projectRoot }) as unknown as Promise<PersonalState & { ok: boolean; error?: string }>;
 
-function row(n: NodeRow, h: ChooserHooks, host: HTMLElement, typed = false): HTMLElement {
+function row(n: NodeRow, h: ChooserHooks, host: HTMLElement, typed = false, typedText?: string): HTMLElement {
   const r = el("div", "nc-row");
   r.dataset.url = n.url;
   r.appendChild(stateBadge(n.reachable ? "node.reachable" : "node.unreachable", false));
@@ -76,14 +76,18 @@ function row(n: NodeRow, h: ChooserHooks, host: HTMLElement, typed = false): HTM
     r.appendChild(el("span", "insp-hint", t("nodes.silent")));
   }
   // a node that answers can be used; one typed by hand too (an explicit
-  // address: it may be off now, it is said beside it)
+  // address: it may be off now, it is said beside it). MICRO-RIFINITURE p.3
+  // (E.D., 1 Nov 2026: «si può scegliere, con "non risponde" accanto») · a
+  // SAVED one as well — it was typed by hand once — and the row typed stays
+  // in the list after «Use» (it vanished: the list was drawn again empty)
   if (n.reachable || typed) {
     const on = h.picked ? h.picked(n.url) : n.url === h.current();
     const use = el("button", "ghost", on ? (h.picked ? t("nodes.picked") : t("nodes.inUse")) : (h.pickLabel ?? t("nodes.use"))) as HTMLButtonElement;
     use.type = "button";
     use.disabled = on;
     use.dataset.act = "use";
-    use.addEventListener("click", () => { h.use(n.url); void paintChooser(host, h); });
+    if (!n.reachable) use.title = t("nodes.useSilent");
+    use.addEventListener("click", () => { h.use(n.url); void paintChooser(host, h, typedText ?? ""); });
     r.appendChild(use);
   }
   return r;
@@ -122,7 +126,7 @@ export async function paintChooser(host: HTMLElement, h: ChooserHooks, typed = "
     const g = el("div", "nc-group");
     g.dataset.group = key;
     g.appendChild(el("div", "nc-head", t(`nodes.g.${key}`)));
-    for (const n of rows) g.appendChild(row(n, h, host));
+    for (const n of rows) g.appendChild(row(n, h, host, key === "saved", typed));
     if (!rows.length) g.appendChild(el("div", "insp-hint", note || t("nodes.none")));
     host.appendChild(g);
   };
@@ -178,7 +182,7 @@ export async function paintChooser(host: HTMLElement, h: ChooserHooks, typed = "
   go.addEventListener("click", () => { void paintChooser(host, h, input.value.trim()); });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go.click(); } });
   hand.append(input, go);
-  for (const n of found.typed) hand.appendChild(row(n, h, host, true));
+  for (const n of found.typed) hand.appendChild(row(n, h, host, true, typed));
   host.appendChild(hand);
   // a real node, and the move that does not exist yet
   if (found.real_node) host.appendChild(el("div", "insp-hint nc-real", found.real_node));

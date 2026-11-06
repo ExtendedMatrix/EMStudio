@@ -866,6 +866,35 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         return { id: l.itemId, files: l.layer.loadedFiles(), status: l.layer.status(), mode: l.layer.mode(), relocated: l.layer.relocated(),
           box: box ? [...box.min.toArray(), ...box.max.toArray()] : null, points };
       });
+      // MICRO-RIFINITURE p.7 · the vertices of a tileset's loaded tiles in the scene
+      // (sampled to `max`): two surveys of one place compared on their surfaces
+      (probe as Record<string, unknown>).__spaceTileVerts = (id: string, max = 200_000, refine?: number) => {
+        const l = liveLayers().find((x) => x.itemId === id);
+        // a model's meshes (by its id, or «rm:*» for every model drawn as meshes)
+        const tileObjs = new Set(liveLayers().map((x) => x.layer.object));
+        const ownerRm = (o: any): string | null => { for (let q = o; q && q !== content; q = q.parent) { if (tileObjs.has(q)) return null; if (q.userData?.rmId) return q.userData.rmId; } return null; };
+        const meshesOf = (o: any) => { if (!o.isMesh) return false; const r = ownerRm(o); return !!r && (id === "rm:*" || r === id); };
+        const root = l ? l.layer.object : content;
+        if (l && refine !== undefined) { l.layer.setMode("auto"); l.layer.setErrorScale(refine); return { refining: refine }; }
+        root.updateMatrixWorld(true);
+        const want = (o: any) => (l ? o.isMesh : meshesOf(o));
+        const all: number[] = [];
+        const v = new THREE.Vector3();
+        let total = 0;
+        root.traverse((o: any) => { if (want(o) && o.geometry?.attributes?.position) total += o.geometry.attributes.position.count; });
+        const step = Math.max(1, Math.ceil(total / max));
+        let k = 0;
+        root.traverse((o: any) => {
+          const pos = want(o) ? o.geometry?.attributes?.position : null;
+          if (!pos) return;
+          for (let i = 0; i < pos.count; i++, k++) {
+            if (k % step) continue;
+            v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+            all.push(v.x, v.y, v.z);
+          }
+        });
+        return { total, step, xyz: all };
+      };
       // MICRO tileset dritto e nitido · each tileset's own up in the scene, and its angle to three's Y
       probe.__spaceTilesUp = () => liveLayers().map((l) => {
         const u = l.layer.up();
@@ -953,9 +982,17 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         return e;
       };
       const tag = (obj: any, item: SceneItem) => {
+        const rmOp = val("s3_opacity_rm", 1);
         obj.traverse((o: any) => {
           if (item.kind === "proxy") o.userData.unitId = item.id; else o.userData.rmId = item.id;
           if (o.isMesh) pickables.push(o);
+          // MICRO-RIFINITURE p.6 · a model that comes while the models are faded
+          if (o.isMesh && item.kind !== "proxy" && rmOp < 1 && o.material)
+            for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+              if (m.userData.baseOpacity === undefined) m.userData.baseOpacity = m.opacity ?? 1;
+              if (m.userData.baseTransparent === undefined) m.userData.baseTransparent = !!m.transparent;
+              m.opacity = m.userData.baseOpacity * rmOp; m.transparent = true; m.needsUpdate = true;
+            }
         });
       };
       const centreOf = (obj: any) => new THREE.Box3().setFromObject(obj).getCenter(new THREE.Vector3());
@@ -2201,11 +2238,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         return b ? [...b.min.toArray(), ...b.max.toArray()].map((x: number) => Math.round(x * 1000) / 1000) : null;
       };
       const applyOverlays = () => {
+        // MICRO-RIFINITURE p.6 · the models' opacity (1: as they came)
+        const rmOp = val("s3_opacity_rm", 1);
         content.traverse((o: any) => {
           if (o.isMesh && o.userData.unitId && o.material) {
             const wire = ov("s3_proxy_wire");
             o.material.wireframe = wire;
             o.material.opacity = proxyOpacity();
+          } else if (o.isMesh && o.userData.rmId && o.material) {
+            for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+              if (m.userData.baseOpacity === undefined) m.userData.baseOpacity = m.opacity ?? 1;
+              if (m.userData.baseTransparent === undefined) m.userData.baseTransparent = !!m.transparent;
+              const want = m.userData.baseOpacity * rmOp;
+              if (m.opacity !== want) { m.opacity = want; m.transparent = m.userData.baseTransparent || rmOp < 1; m.needsUpdate = true; }
+            }
           }
         });
         for (const m of sketchMeshes.values()) {
@@ -3514,6 +3560,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const live = liveLayers().find((l) => l.layer.object === roots.get(k));
           const lb = live ? live.layer.bounds() : null;
           if (lb && !lb.isEmpty()) return [arr(lb.min), arr(lb.max)] as [V3, V3];
+          // MICRO-RIFINITURE p.4 · a sketch (the cube of a detail): its own box
+          if (k.startsWith("sketch:")) { const sb = boxOfKey(k); return sb ? [arr(sb.min), arr(sb.max)] as [V3, V3] : null; }
           const f = (probe as Record<string, unknown>).__spaceBoxOf as ((id: string) => number[] | null) | undefined;
           const b = f?.(k.split(":").slice(1).join(":"));
           return b ? [[b[0], b[1], b[2]], [b[3], b[4], b[5]]] as [V3, V3] : null;
