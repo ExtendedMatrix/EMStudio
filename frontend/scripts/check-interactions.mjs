@@ -3595,7 +3595,7 @@ test("T1.disk", "3D Tiles · un tileset su disco passa dal bridge per percorso (
       && /\/fs\/at\//.test(st.model ?? "") && !errors.length, detail: { model: st.model, requests, errors } };
 });
 
-test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si apre alla radice e si raffina; il set LOD al più leggero, col selettore; il glb oltre la soglia chiede e propone il tileset", async () => {
+test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM nasce «Automatico» (MICRO-TILE-METASHAPE: come quello di un contenitore); in «Manuale» torna alla radice e si raffina su richiesta; il set LOD al più leggero, col selettore; il glb oltre la soglia chiede e propone il tileset", async () => {
   const { p, ctx, errors } = await open({ doc: "tiles", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
   const sc = () => p.evaluate(() => {
@@ -3614,13 +3614,20 @@ test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si
   const s0 = await settle((s) => by(s, "RM1")?.as === "tiles" && by(s, "RM2")?.as === "mesh" && by(s, "RM3")?.as === "gated"
     && s.tiles.some((t) => t.files.length));
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-spazio.png` }).catch(() => {});
-  // «Più dettaglio qui» on RM1's strip, then a click on its root
+  const rm1 = (s) => s.tiles.find((t) => t.id === "RM1");
   // (MICRO-SPAZIO-COMPATTO p.3 · the tileset's strip is in the chip's popover: Alt+click opens it here)
   await p.click(".scn-tchip", { modifiers: ["Alt"] }); await p.waitForTimeout(200);
+  // «Manuale», and back to the root («Meno dettaglio» while there is something asked)
+  await p.click('.scn-strips .v3d-strip[data-id="RM1"] .tl-seg [data-mode="manual"]');
+  for (let i = 0; i < 8 && await p.evaluate(() => !document.querySelector('.scn-strips .v3d-strip[data-id="RM1"] .tl-less')?.disabled); i++)
+    await p.click('.scn-strips .v3d-strip[data-id="RM1"] .tl-less');
+  // (the children stay in the cache, not shown: the level and the tiles visible say it)
+  const sRoot = await settle((s) => same(rm1(s)?.status?.level, [0, 0]) && rm1(s)?.status?.visible === 1);
+  // «Più dettaglio qui» on RM1's strip, then a click on its root
   await p.click('.scn-strips .v3d-strip[data-id="RM1"] .tl-more');
   const at = await p.evaluate(() => document.querySelector(".scn-host").__spaceTileScreenOf("tiles/root.glb"));
   if (at) await p.mouse.click(at.x, at.y);
-  const s1 = await settle((s) => (s.tiles.find((t) => t.id === "RM1")?.files ?? []).includes("tiles/c3.glb"));
+  const s1 = await settle((s) => same(rm1(s)?.status?.level, [1, 1]) && rm1(s)?.status?.visible === 4);
   // RM2: the selector to LOD 1; RM3: «Apri il tileset»
   await p.selectOption('.scn-strips .v3d-strip[data-id="RM2"] .lod-pick', "1");
   await p.click('.scn-strips .v3d-strip[data-id="RM3"] [data-gate="tileset"]');
@@ -3628,13 +3635,130 @@ test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-spazio-dopo.png` }).catch(() => {});
   await ctx.close();
   const f = (s, id) => s.tiles.find((t) => t.id === id)?.files ?? [];
-  return { pass: same(f(s0, "RM1"), ["tiles/root.glb"]) && /muro_LOD3\.glb$/.test(by(s0, "RM2")?.url ?? "")
+  return { pass: rm1(s0)?.mode === "auto" && f(s0, "RM1").length > 0 && same(rm1(sRoot)?.status?.level, [0, 0]) && rm1(sRoot)?.mode === "manual"
+      && /muro_LOD3\.glb$/.test(by(s0, "RM2")?.url ?? "")
       && s0.labels.some((l) => /Rilievo intero: oltre la soglia \(858\.3 MB > 200\.0 MB\)/.test(l))
       // MICRO tileset dritto e nitido · the root leaves the memory once its children are shown
-      && same(f(s1, "RM1"), ["tiles/c0.glb", "tiles/c1.glb", "tiles/c2.glb", "tiles/c3.glb"])
+      && ["tiles/c0.glb", "tiles/c1.glb", "tiles/c2.glb", "tiles/c3.glb"].every((k) => f(s1, "RM1").includes(k))
+      && same(rm1(s1)?.status?.level, [1, 1]) && rm1(s1)?.status?.visible === 4
       && /muro_LOD1\.glb$/.test(by(s2, "RM2")?.url ?? "") && by(s2, "RM3")?.as === "tiles" && same(f(s2, "RM3"), ["punti.pnts"])
       && !errors.filter((e) => !/c1_0/.test(e)).length,
-    detail: { s0: [s0.items, s0.tiles, s0.labels], s1: s1.tiles, s2: [s2.items, s2.tiles], at, errors } };
+    detail: { s0: [s0.items, s0.tiles, s0.labels], root: rm1(sRoot), s1: s1.tiles, s2: [s2.items, s2.tiles], at, errors } };
+});
+
+/** MICRO-TILE-METASHAPE · a `.3tz` with the SHAPE of Metashape 2.3's exports, made here (no data of
+ *  the lab): glb tiles whose texture is KTX2 (`KHR_texture_basisu` REQUIRED — the image is the one
+ *  of `testdata/variant-meshopt-ktx2.glb`, a synthetic cube's), Z-up box volumes, REPLACE, and a
+ *  tileset NESTED in the archive (`Data/n0/tileset.json`, its URIs relative to its own folder).
+ *  Packed by dtcstamp's canonical writer (the `@3dtilesIndex1@` index). `drop` leaves a tile out. */
+function ktx2Archive(drop = null) {
+  const v = readFileSync(new URL("../testdata/variant-meshopt-ktx2.glb", import.meta.url));
+  const jl = v.readUInt32LE(12), vj = JSON.parse(v.subarray(20, 20 + jl).toString());
+  const bin = v.subarray(20 + jl + 8);
+  const bv = vj.bufferViews[vj.images[0].bufferView];
+  const ktx2 = bin.subarray(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength);
+  const pad4 = (n) => (n + 3) & ~3;
+  // a textured square on [x0,x0+s]×[y0,y0+s] at height z (glTF Y-up: x, z, −y)
+  const quad = (x0, y0, s, z) => {
+    const pos = new Float32Array([x0, z, -y0, x0 + s, z, -y0, x0 + s, z, -(y0 + s), x0, z, -(y0 + s)]);
+    const uv = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+    const idx = new Uint16Array([0, 1, 2, 0, 2, 3]);
+    const parts = [Buffer.from(pos.buffer), Buffer.from(uv.buffer), Buffer.from(idx.buffer), ktx2];
+    const views = []; let off = 0;
+    for (const b of parts) { views.push({ buffer: 0, byteOffset: off, byteLength: b.length }); off = pad4(off + b.length); }
+    const body = Buffer.alloc(off);
+    parts.forEach((b, i) => b.copy(body, views[i].byteOffset));
+    const json = { asset: { version: "2.0" }, extensionsUsed: ["KHR_texture_basisu"], extensionsRequired: ["KHR_texture_basisu"],
+      scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 1 }, indices: 2, material: 0 }] }],
+      materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+      textures: [{ extensions: { KHR_texture_basisu: { source: 0 } } }], images: [{ bufferView: 3, mimeType: "image/ktx2" }],
+      accessors: [{ bufferView: 0, componentType: 5126, count: 4, type: "VEC3", min: [x0, z, -(y0 + s)], max: [x0 + s, z, -y0] },
+        { bufferView: 1, componentType: 5126, count: 4, type: "VEC2" }, { bufferView: 2, componentType: 5123, count: 6, type: "SCALAR" }],
+      bufferViews: views, buffers: [{ byteLength: off }] };
+    const j = Buffer.from(JSON.stringify(json)); const jp = pad4(j.length);
+    const out = Buffer.alloc(12 + 8 + jp + 8 + off);
+    out.writeUInt32LE(0x46546c67, 0); out.writeUInt32LE(2, 4); out.writeUInt32LE(out.length, 8);
+    out.writeUInt32LE(jp, 12); out.writeUInt32LE(0x4e4f534a, 16); j.copy(out, 20); out.fill(0x20, 20 + j.length, 20 + jp);
+    out.writeUInt32LE(off, 20 + jp); out.writeUInt32LE(0x004e4942, 24 + jp); body.copy(out, 28 + jp);
+    return out;
+  };
+  const box = (x0, y0, s) => ({ box: [x0 + s / 2, y0 + s / 2, 0.5, s / 2, 0, 0, 0, s / 2, 0, 0, 0, 0.5] });
+  const files = {
+    "tileset.json": { asset: { version: "1.1" }, geometricError: 10000,
+      root: { boundingVolume: box(0, 0, 4), geometricError: 2, refine: "REPLACE", content: { uri: "Data/a.glb" },
+        children: [{ boundingVolume: box(0, 0, 2), geometricError: 1, content: { uri: "Data/b0.glb" },
+          children: [{ boundingVolume: box(0, 0, 2), geometricError: 0.5, content: { uri: "Data/n0/tileset.json" } }] },
+          { boundingVolume: box(2, 0, 2), geometricError: 1, content: { uri: "Data/b1.glb" } },
+          { boundingVolume: box(2, 2, 2), geometricError: 1, content: { uri: "Data/b2.glb" } }] } },
+    "Data/n0/tileset.json": { asset: { version: "1.1" }, geometricError: 10000,
+      root: { boundingVolume: box(0, 0, 2), geometricError: 0.5, refine: "REPLACE", content: { uri: "a.glb" },
+        children: [0, 1].map((k) => ({ boundingVolume: box(k, 0, 1), geometricError: 0, content: { uri: `c${k}.glb` } })) } },
+    "Data/a.glb": quad(0, 0, 4, 0), "Data/b0.glb": quad(0, 0, 2, 0.1), "Data/b1.glb": quad(2, 0, 2, 0.1), "Data/b2.glb": quad(2, 2, 2, 0.1),
+    "Data/n0/a.glb": quad(0, 0, 2, 0.2), "Data/n0/c0.glb": quad(0, 0, 1, 0.3), "Data/n0/c1.glb": quad(1, 0, 1, 0.3),
+  };
+  const dir = `/tmp/em-check-ktx2-${process.pid}-${drop ? "rotto" : "intero"}`;
+  for (const [name, body] of Object.entries(files)) {
+    if (name === drop) continue;
+    mkdirSync(`${dir}/${name}`.replace(/\/[^/]*$/, ""), { recursive: true });
+    writeFileSync(`${dir}/${name}`, Buffer.isBuffer(body) ? body : JSON.stringify(body));
+  }
+  const PY = new URL("../../../s3Dgraphy/.venv/bin/python", import.meta.url).pathname;
+  const DTC = new URL("../../../dtcstamp/", import.meta.url).pathname;
+  execFileSync(existsSync(PY) ? PY : "python3", ["-c", "import sys, dtcstamp; dtcstamp.write_canonical_3tz(sys.argv[1], sys.argv[2])", dir, `${dir}.3tz`],
+    { env: { ...process.env, PYTHONPATH: `${DTC}:${process.env.PYTHONPATH ?? ""}` } });
+  return readFileSync(`${dir}.3tz`);
+}
+/** …served as a store serves a file: HEAD, and the Range a .3tz is read by */
+const servedByRange = (bytes) => async (route) => {
+  const req = route.request();
+  const head = { "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Content-Range, Content-Length, ETag",
+    ETag: `"${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}"`, "Content-Type": "application/octet-stream" };
+  if (req.method() === "HEAD") return route.fulfill({ status: 200, headers: { ...head, "Content-Length": String(bytes.length) }, body: "" });
+  const m = /bytes=(\d*)-(\d*)/.exec(req.headers().range ?? "");
+  if (!m) return route.fulfill({ status: 200, headers: head, body: bytes });
+  const a = m[1] === "" ? Math.max(0, bytes.length - Number(m[2])) : Number(m[1]);
+  const b = m[1] === "" || m[2] === "" ? bytes.length - 1 : Math.min(bytes.length - 1, Number(m[2]));
+  return route.fulfill({ status: 206, headers: { ...head, "Content-Range": `bytes ${a}-${b}/${bytes.length}` }, body: bytes.subarray(a, b + 1) });
+};
+test("T1.ktx2", "3D Tiles · MICRO-TILE-METASHAPE · un .3tz come quelli di Metashape 2.3 (texture KTX2 obbligatoria, un tileset annidato dentro l'archivio; fatto qui, niente dati del lab): nello Spazio l'RM nasce «Automatico», le texture si trascodificano e si scende fino alle foglie del tileset annidato; un tile che manca dall'archivio è detto nel Log in parole, una volta", async () => {
+  const full = ktx2Archive(), broken = ktx2Archive("Data/n0/c1.glb");
+  const run = async (bytes) => {
+    const d = fixture("tiles");
+    for (const n of d.graph.nodes) if (n.id === "RES_TS") { n.data.url = "/em/studio/gen/ktx2-annidato.3tz"; delete n.data.packaging; delete n.data.checksum_of; }
+    const { p, ctx, errors } = await open({ doc: d, ws: "space", route: { pattern: "**/gen/ktx2-annidato.3tz", handler: servedByRange(bytes) } });
+    const warn = [];
+    p.on("console", (m) => { if (/texture|ktx|basis|transcod/i.test(m.text())) warn.push(m.text().slice(0, 200)); });
+    await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+    const rm1 = () => p.evaluate(() => (document.querySelector(".scn-host").__spaceTiles?.() ?? []).find((t) => t.id === "RM1") ?? null);
+    const box = await p.evaluate(() => document.querySelector(".scn-host").__spaceBoxOf?.("RM1"));
+    let s0 = null;
+    for (let i = 0; i < 40 && !(s0 = await rm1())?.files?.length; i++) await p.waitForTimeout(250);
+    const mode0 = s0?.mode ?? null;
+    // the camera over the nested tileset's corner, near: the leaves are asked
+    if (s0?.box) {
+      const b = s0.box, c = [b[0] + (b[3] - b[0]) / 4, b[4], b[5] - (b[5] - b[2]) / 4];
+      await p.evaluate((c) => document.querySelector(".scn-host").__spaceSetCam({ pos: [c[0] + 0.8, c[1] + 1.2, c[2] + 0.8], target: c }), c);
+    }
+    let s = null;
+    for (let i = 0; i < 60; i++) { await p.waitForTimeout(250); s = await rm1(); if (s && (s.status.depth >= 3 || s.status.missing.length) && !s.status.busy) break; }
+    await p.waitForTimeout(600);
+    s = await rm1();
+    const log = await p.evaluate(() => window.__EM_DRAG__.logTail?.(30) ?? []);
+    await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-ktx2-${bytes === full ? "intero" : "rotto"}.png` }).catch(() => {});
+    await ctx.close();
+    return { mode0, files: s?.files, level: s?.status.level, depth: s?.status.depth, missing: s?.status.missing, tileError: s?.status.tileError,
+      lines: log.filter((l) => /Tileset «/.test(l)), errors, warn: warn.slice(0, 6), box };
+  };
+  const a = await run(full), b = await run(broken);
+  // (a nested tileset's URIs as it writes them: relative to its own folder)
+  const leaves = ["c0.glb", "c1.glb"];
+  return { pass: a.mode0 === "auto" && leaves.every((k) => (a.files ?? []).includes(k)) && a.depth >= 3 && !(a.missing ?? []).length && !a.tileError
+      && !a.lines.length && !a.errors.length && !a.warn.length
+      // the broken one: the leaf that is there comes, the missing one is said ONCE, by its file, in words
+      && (b.files ?? []).includes("c0.glb") && !(b.files ?? []).includes("c1.glb") && (b.missing ?? []).some((f) => /n0\/c1\.glb$/.test(f))
+      && b.lines.length === 1 && /un tile non si è caricato \(.*n0\/c1\.glb\)/.test(b.lines[0]) && !b.errors.length,
+    detail: { a, b } };
 });
 
 // ── MICRO-3DTILES-LOD · parte 2 · il LOD più leggero, poi il dettaglio su richiesta

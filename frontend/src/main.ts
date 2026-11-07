@@ -27565,7 +27565,7 @@ async function attachDropped(d: DroppedTileset, epochId: string): Promise<void> 
   // (its true frame, `spaceTilesRelocate`), not where the preview was centred
   // for the view — E.D., 7 Nov 2026: the two surveys stayed on the origin,
   // each centred on its own volume. The scene frames the model when it lands
-  if (showing.length) tilesHandoff.set(out.rmId, start ?? { mode: "manual" });
+  if (showing.length) tilesHandoff.set(out.rmId, start ?? { mode: "auto" });
   for (const w of showing) setWinCurrent(w, "space.preview", null);
   toastUndo(t(loc.nameOnly ? "tsp.attachedNameOnly" : "tsp.attached", { name: d.label, epoch }), st);
   if (showing.length && spaceEpochId && spaceEpochId !== epochId) logInfo(t("tsp.attachedOtherEpoch", { name: d.label, epoch }), [out.rmId]);
@@ -31527,6 +31527,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     },
     onSketchChange: () => { refreshSurfaces("scene"); drawNPanel(); },
     onLoadOutcome: (key, label, url, error) => { noteModelLoad(key, label, url, error); modelsSheetLater(); },
+    onTileError: (key, label, _url, e) => noteTileError(key, label, e),
     onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
       if (unanswered && why === "missing") { spaceAwaitAnswer(rid); return; }
       if (!spaceMarks.mark(rid, why)) return;
@@ -31830,7 +31831,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const previewItem: SceneItem | null = preview ? {
       kind: "rm", id: `preview:${preview.resourceId ?? preview.url}`, label: preview.label, state: "resident",
       url: preview.url, resourceId: preview.resourceId,
-      ...(dropTs ? { tiles: "directory" as const, tilesSource: dropTs.reader, frameOnArrival: true } : {}) } : null;
+      // MICRO-TILE-METASHAPE · in the Space a tileset starts «Automatico» (the model attached from it inherits it)
+      ...(dropTs ? { tiles: "directory" as const, tilesSource: dropTs.reader, frameOnArrival: true, tilesStart: { mode: "auto" as const } } : {}) } : null;
     // MICRO-TILESET-CARTELLA · the bar of a dropped tileset, over the scene
     tsp.textContent = "";
     tsp.classList.toggle("hidden", !dropTs);
@@ -31982,7 +31984,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         // MICRO tileset, shift e epoche · a tileset with a frame, relocated into the study's
         tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined,
         // MICRO-ANTEPRIMA-AGGANCIATA · attached from a preview: its loading, framed when it lands
-        ...(isTiles && tilesHandoff.has(r.id) ? { tilesStart: tilesHandoff.get(r.id)!, frameOnArrival: true } : {}),
+        // MICRO-TILE-METASHAPE · …else «Automatico», as a container's tileset: in «Manuale» the
+        // Space showed the root alone (41 kB) however near the camera came (the Viewer keeps «Manuale»)
+        ...(isTiles ? tilesHandoff.has(r.id) ? { tilesStart: tilesHandoff.get(r.id)!, frameOnArrival: true } : { tilesStart: { mode: "auto" as const } } : {}),
         // MICRO-3DTILES · the tileset of the same model, and the weight
         tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles", win.id) ? r.tileset.url || undefined : undefined,
         bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
@@ -32114,6 +32118,18 @@ function relocationRefusedLine(name: string, error: string): string {
   if (error === "no-transform") return t("frm.noTransform", { name });
   const why = error === "old-bridge" ? t("frm.whyOldBridge") : error === "no-bridge" ? t("frm.whyNoBridge") : error;
   return t("frm.bridgeCannot", { name, why });
+}
+/** MICRO-TILE-METASHAPE · a tile of a tileset that did not load, in words: once per
+ *  tileset (the scene says it once per layer; a layer outlives the rebuilds, a second
+ *  scene of the same model does not say it again) */
+const tileErrorSaid = new Set<string>();
+function noteTileError(key: string, label: string, e: { file: string; message: string; count: number }): void {
+  if (tileErrorSaid.has(key)) return;
+  tileErrorSaid.add(key);
+  const why = e.message.trim() || t("tl.tileFailedNoWhy");
+  const id = key.startsWith("rm:") && !key.startsWith("rm:preview:") ? key.slice(3) : null;
+  logWarn(e.count > 1 ? t("tl.tileFailedMore", { name: label, n: String(e.count), file: e.file, why })
+    : t("tl.tileFailed", { name: label, file: e.file, why }), id ? [id] : undefined);
 }
 /** …said in the Log once per model, frame and reason (the Space asks again at every rebuild) */
 const relocationSaid = new Set<string>();
@@ -49861,6 +49877,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     overlayValue: (k) => overlayValue(overlaysOf("space"), k),
     sketchVisible: () => false,
     onLoadOutcome: (key, label, url, error) => noteModelLoad(key, label, url, error),
+    onTileError: (key, label, _url, e) => noteTileError(key, label, e),
     onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
       if (unanswered && why === "missing") return;
       slot.events.push({ t: Math.round(performance.now() - slot.t0), what: `notfound:${why}`, url: rid });

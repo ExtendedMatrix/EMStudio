@@ -138,6 +138,9 @@ export interface TilesStatus {
   bytes: number;
   /** the tiles that did not load: their file */
   missing: string[];
+  /** MICRO-TILE-METASHAPE · the first of them and the renderer's reason (its
+   *  `load-error`: a fetch, a parse, a decoder), for the Log */
+  tileError: { file: string; message: string } | null;
   /** the tileset itself did not load */
   failed: string | null;
   /** tiles asked for in manual mode */
@@ -405,6 +408,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   const history: any[] = [];
   const sceneToTile = new Map<any, any>();
   const missing: string[] = [];
+  let tileError: TilesStatus["tileError"] = null;
   let failed: string | null = null;
   let deepest = 0;
   let rootReady = false;
@@ -463,6 +467,8 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
     else {
       const f = rel(String(e.url ?? ""));
       if (f && !missing.includes(f)) missing.push(f);
+      const why = e.error instanceof Error ? e.error.message : String(e.error ?? "");
+      tileError ??= { file: f || String(e.tile?.content?.uri ?? "?"), message: why.slice(0, 300) };
     }
     changed();
   });
@@ -628,7 +634,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       const s = tiles.stats ?? {};
       return {
         mode, level: visible ? [lo, hi] : null, depth: deepest, loaded, visible,
-        bytes: Number(tiles.lruCache?.cachedBytes ?? 0), missing: missing.slice(), failed,
+        bytes: Number(tiles.lruCache?.cachedBytes ?? 0), missing: missing.slice(), tileError, failed,
         asked: asked.size, busy: (s.downloading ?? 0) + (s.parsing ?? 0) + (s.queued ?? 0) > 0,
         maxBytes: Number(tiles.lruCache?.maxBytesSize ?? 0), placed, ge, textures: { ...texStats },
       };

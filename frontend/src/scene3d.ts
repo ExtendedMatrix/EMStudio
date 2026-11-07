@@ -394,6 +394,8 @@ export interface SpaceSceneOptions {
    *  came, else what the loader said (a network error too: the caller decides
    *  when a silence is worth a line) */
   onLoadOutcome?: (key: string, label: string, url: string, error: unknown | null) => void;
+  /** MICRO-TILE-METASHAPE · a tile of a tileset did not load (the first, and how many so far): once per tileset */
+  onTileError?: (key: string, label: string, url: string, error: { file: string; message: string; count: number }) => void;
   /** MICRO-3DTILES · the threshold and the tiles' memory (the Preferences) */
   limit?: { bytes: number; points: number };
   /** MICRO-MEMORIA-SESSIONE p.1 · the guard of memory: the scene's ceiling (the
@@ -850,6 +852,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       let T: any = null;
       /** the tilesets whose late root is watched (once each: a kept layer outlives the rebuilds) */
       const rootWatched = new WeakSet<object>();
+      /** MICRO-TILE-METASHAPE · the layers whose failed tiles are watched (once each) */
+      const tileErrWatched = new WeakSet<object>();
       /** MICRO-DROP-3TZ-GRANDE · the layers already framed on their arrival */
       const framedOnArrival = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
@@ -1856,6 +1860,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               roots.set(key, live.layer.object);
               el.appendChild(live.bar.el);
               live.bar.refresh();
+              // MICRO-TILE-METASHAPE · a tile that does not load is said, once per tileset
+              // (the bar turns red, but its reason stayed in the renderer)
+              if (!tileErrWatched.has(live.layer)) {
+                tileErrWatched.add(live.layer);
+                const l = live.layer;
+                let said = false;
+                const off = l.onChange(() => {
+                  const s = l.status();
+                  if (said || !s.tileError) return;
+                  said = true;
+                  queueMicrotask(off);
+                  opts.onTileError?.(key, item.label, tsUrl, { ...s.tileError, count: s.missing.length });
+                });
+              }
               await live.ready;
               if (gen !== generation || disposed) return;
               // MICRO-WINDOWS-MODELLI p.1 · a tileset whose root did not come says so
