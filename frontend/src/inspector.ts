@@ -870,27 +870,39 @@ export function renderInspector(
   // phase (or back to the epoch itself). Retargets its has_first_epoch. Shown
   // for any node that carries a has_first_epoch (stratigraphic / representation
   // units) whose epoch is phased.
+  // MICRO-SOTTOFASI-E-TILESET-TEMPLU · a representation model's epoch is read
+  // in both forms (`epoch → has_representation_model → RM`, the canonical one,
+  // and the RM's own `has_first_epoch`); a move writes the canonical one
   if (node.node_type !== "EpochNode") {
-    const hfe = store.doc.graph.edges.find(
-      (e) => e.edge_type === "has_first_epoch" && e.source === nodeId,
-    );
-    if (hfe) {
-      const cur = hfe.target;
+    const cur = store.firstEpochOf(nodeId);
+    if (cur) {
       const topEpoch = store.parentEpoch(cur) ?? cur;
       const phases = store.epochPhases(topEpoch);
       if (phases.length) {
         const samePhasedEpoch = (n: EmNode): boolean => {
-          const f = store.doc.graph.edges.find((e) => e.edge_type === "has_first_epoch" && e.source === n.id)?.target;
+          const f = store.firstEpochOf(n.id);
           return !!f && (store.parentEpoch(f) ?? f) === topEpoch;
         };
-        root.appendChild(el("h3", "insp-sect", "Phase"));
+        root.appendChild(el("h3", "insp-sect", t("insp.phase")));
+        // the marked button is where the node IS: until 7 Nov it was a disabled
+        // button, drawn dashed as every button that cannot be pressed, and read
+        // as «this phase is off» (E.D. on TempluMare_2013_egm2008)
+        const topName = String(store.node(topEpoch)?.name ?? topEpoch);
+        const curName = String(store.node(cur)?.name ?? cur);
+        root.appendChild(el("p", "insp-hint insp-phase-says", cur === topEpoch
+          ? t("insp.phaseNone", { epoch: topName }) : t("insp.phaseIn", { phase: curName, epoch: topName })));
+        const oldForm = node.node_type === "representation_model"
+          && store.doc.graph.edges.some((e) => e.edge_type === "has_first_epoch" && e.source === nodeId);
+        if (oldForm) root.appendChild(el("p", "insp-hint insp-phase-old", t("insp.phaseOldForm")));
         const bar = el("div", "insp-actions");
         const mk = (id: string, label: string): void => {
           const b = el("button", "insp-btn", label) as HTMLButtonElement;
           if (id === cur) {
-            b.disabled = true;
+            b.classList.add("insp-btn-current");
+            b.setAttribute("aria-pressed", "true");
             b.textContent = `✓ ${label}`;
-          }
+            b.title = t("insp.phaseCurrentTitle");
+          } else b.title = t("insp.phaseMoveTitle", { phase: label });
           bar.appendChild(b);
           // with ⌘/Alt: every selected node created in this same epoch (its
           // phases are the choices); without, the active node as before
@@ -898,10 +910,11 @@ export function renderInspector(
           b.addEventListener("click", (e) => {
             if (multiKeyOf(e) && (scope?.selection.length ?? 0) > 1)
               commitField(scope, nodeId, t("multi.f.phase"), samePhasedEpoch, (x) => store.setFirstEpoch([x], id), true);
-            else cb.onAssignEpoch(nodeId, id);
+            // where it is already: nothing, unless the old form is to be rewritten
+            else if (id !== cur || oldForm) cb.onAssignEpoch(nodeId, id);
           });
         };
-        mk(topEpoch, `${store.node(topEpoch)?.name ?? "epoch"} (none)`);
+        mk(topEpoch, t("insp.phaseNoneBtn", { epoch: topName }));
         for (const ph of phases) mk(ph, store.node(ph)?.name ?? ph);
         root.appendChild(bar);
         const ph = multiHint(scope, samePhasedEpoch);

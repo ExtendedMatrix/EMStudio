@@ -274,9 +274,35 @@ open(w + '/liar.3tz', 'wb').write(b)`, WORK]);
   const res = g.nodes.find((n) => n.id === out.resourceId);
   ok(rm?.node_type === "representation_model" && rm.data.is_tileset === true && rm.data.url === "../RM/Basilica.3tz", "the RM, as EM Tools' Add Cesium Tileset");
   ok(res?.node_type === "resource" && res.data.url === "../RM/Basilica.3tz" && res.data.packaging === "archive", "…its resource");
-  ok(g.edges.some((e) => e.edge_type === "has_first_epoch" && e.source === out.rmId && e.target === "ep1"), "…in the epoch");
+  ok(g.edges.some((e) => e.edge_type === "has_representation_model" && e.source === "ep1" && e.target === out.rmId),
+    "…in the epoch, the canonical way: epoch → has_representation_model → RM (MICRO-SOTTOFASI-E-TILESET-TEMPLU)");
+  ok(!g.edges.some((e) => e.edge_type === "has_first_epoch"), "…and no has_first_epoch of the RM's own");
   ok(g.edges.some((e) => e.edge_type === "has_linked_resource" && e.source === out.rmId && e.target === out.resourceId), "…linked to its resource");
   ok(batches >= 1 && g.nodes.length === 3, "…in one batch (one step of undo in the store)");
+  ok(!res.data.checksum && !res.data.residency, "no digest given: none written (the Space will say «declared, file missing»)");
+}
+// MICRO-SOTTOFASI-E-TILESET-TEMPLU · with the archive's sha256 the resource is
+// resident, and the Space (s3Dgraphy is_resident) fetches it
+{
+  const g = { nodes: [{ id: "e13", node_type: "EpochNode", name: "2013", data: {} }], edges: [] };
+  const ck = "sha256:" + "ab".repeat(32) + "";
+  const out = D.attachTileset(D.plainGraph(g), { name: "TempluMare_2013_egm2008", epochId: "e13", locator: "../RB/cesium/TempluMare_2013_egm2008.3tz",
+    packaging: "archive", sizeBytes: 6576593070, checksum: ck }, () => "rm13");
+  const res = g.nodes.find((n) => n.id === out.resourceId);
+  ok(res.data.checksum === ck && res.data.residency === "resident" && res.data.size_bytes === 6576593070, "a digest: checksum and residency resident on the resource");
+  const S = await load(`export { buildSpace } from "./space"; export { isStratigraphicType } from "./rules";`);
+  const sp = S.buildSpace({ graph: g }, { isUnit: S.isStratigraphicType });
+  eq(sp.summary("e13").rms.map((r) => [r.id, r.resource?.state, r.resource?.tiles]), [["rm13", "resident", "3tz"]], "…and the Space draws it: resident, a .3tz");
+  const g2 = { nodes: [{ id: "e13", node_type: "EpochNode", name: "2013", data: {} }], edges: [] };
+  D.attachTileset(D.plainGraph(g2), { name: "T", epochId: "e13", locator: "../RB/cesium/T.3tz", packaging: "archive" }, () => "rmX");
+  eq(S.buildSpace({ graph: g2 }, { isUnit: S.isStratigraphicType }).summary("e13").rms.map((r) => r.resource?.state), ["missing"],
+    "…without a digest it is «missing» (the bug of 7 Nov: counted, never drawn)");
+  const g3 = { nodes: [{ id: "e", node_type: "EpochNode", name: "e", data: {} }], edges: [] };
+  const o3 = D.attachTileset(D.plainGraph(g3), { name: "F", epochId: "e", locator: "../RB/F/tileset.json", packaging: "directory", checksum: ck }, () => "rmF");
+  ok(g3.nodes.find((n) => n.id === o3.resourceId).data.checksum_of === "entry-point", "a folder: the digest is its tileset.json's (checksum_of entry-point)");
+  eq(D.attachDigestPath({ dropped: "/a/x.3tz", archive: "/a/x.3tz" }, "archive"), "/a/x.3tz", "the file hashed: the archive");
+  eq(D.attachDigestPath({ dropped: "/a/X", folder: "/a/X" }, "directory"), "/a/X/tileset.json", "…a folder's tileset.json");
+  eq(D.attachDigestPath(null, "archive"), null, "…nothing without a path (a drop from the system)");
 }
 
 // ── the Basilica, read only ──────────────────────────────────────────────────

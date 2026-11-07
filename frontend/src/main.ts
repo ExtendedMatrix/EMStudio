@@ -320,7 +320,7 @@ import {
 } from "./shelf-find";
 import { resolveRemote, type PreviewDeps, type RemotePreview, type WebMeta } from "./web-preview";
 import { httpSource } from "./tiles3tz";
-import { attachTileset, bridgeTree, isArchiveName, openArchive, position, recognise, servedSource, treeOfDrop, unionTree,
+import { attachDigestPath, attachTileset, bridgeTree, isArchiveName, openArchive, position, recognise, servedSource, treeOfDrop, unionTree,
   type Position, type Recognised, type TreeSource } from "./tileset-drop";
 import { nodeBlobReady, nodeBlobUrl, ownedByNode, setNodeRoad, type FetchFailure } from "./node-road";
 import { isRoomUrl, rebaseRoomUrl, storeAddress, storeUrlOf } from "./store-url";
@@ -27535,8 +27535,17 @@ async function attachDropped(d: DroppedTileset, epochId: string): Promise<void> 
   if (!loc) { toast(t("tsp.prepareFirst")); return; }
   const epoch = String(st.node(epochId)?.name ?? epochId);
   if (!(await askConfirm(t("tsp.attachAsk", { name: d.label, epoch, locator: loc.locator })))) return;
+  // MICRO-SOTTOFASI-E-TILESET-TEMPLU (7 Nov 2026) · the file's sha256 first: a
+  // resource without one is never resident, and the Space said «declared, file
+  // missing» of TempluMare_2013_egm2008.3tz on the disk and never asked for it
+  // (6.58 GB: 3.9 s through the bridge, measured)
+  const digestPath = loc.nameOnly ? null : attachDigestPath(d.disk, loc.packaging);
+  if (digestPath) toast(t("tsp.attachHashing", { name: d.label }));
+  const checksum = digestPath ? await bridgeChecksum(digestPath) : null;
+  if (store !== st) return;
+  if (digestPath && !checksum) logWarn(t("tsp.attachNoDigest", { name: d.label }));
   const out = attachTileset(storeGraph(st), { name: d.label, epochId, locator: loc.locator, packaging: loc.packaging,
-    sizeBytes: d.bytes, nameOnly: loc.nameOnly }, () => st.newId());
+    sizeBytes: d.bytes, nameOnly: loc.nameOnly, checksum }, () => st.newId());
   d.attached = { rmId: out.rmId, epoch };
   toastUndo(t(loc.nameOnly ? "tsp.attachedNameOnly" : "tsp.attached", { name: d.label, epoch }), st);
   refreshSurfaces("scene");

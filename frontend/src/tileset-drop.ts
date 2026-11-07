@@ -411,13 +411,31 @@ export interface AttachSpec {
   sizeBytes?: number | null;
   /** the locator is the file's name only (a drop from the system: no path) */
   nameOnly?: boolean;
+  /** MICRO-SOTTOFASI-E-TILESET-TEMPLU · the archive's sha256 (`sha256:<hex>`,
+   *  the bridge's /fs/checksum): with it the resource is resident and the Space
+   *  fetches it; without it the Space says «declared, file missing» and never
+   *  asks (s3Dgraphy `is_resident`: no checksum is never resident) */
+  checksum?: string | null;
+}
+
+/** The file whose sha256 a tileset's resource records: the archive, or a
+ *  folder's `tileset.json` (`checksum_of: entry-point`, as Templu Mare's lod0) */
+export function attachDigestPath(disk: { archive?: string; dropped?: string; folder?: string } | null | undefined,
+                                 packaging: "archive" | "directory"): string | null {
+  if (!disk) return null;
+  if (packaging === "directory") return disk.folder ? `${disk.folder}/tileset.json` : null;
+  return disk.archive ?? disk.dropped ?? null;
 }
 
 /**
  * What EM Tools' «Add Cesium Tileset» writes, in EMStudio's graph and in ONE
- * step of undo: a representation model in the epoch (`has_first_epoch`), with
- * `url` and EM Tools' `is_tileset` / `tileset_path`, and the resource of its
- * file (`has_linked_resource`). → the two ids.
+ * step of undo: a representation model in the epoch, with `url` and EM Tools'
+ * `is_tileset` / `tileset_path`, and the resource of its file
+ * (`has_linked_resource`). → the two ids.
+ * MICRO-SOTTOFASI-E-TILESET-TEMPLU (7 Nov 2026) · the epoch's edge is the
+ * canonical one, `EpochNode --has_representation_model--> RM` (s3Dgraphy's
+ * datamodel, EM Tools' `sync_epoch_edges`, 97 of Templu Mare's 98 models); until
+ * now it was `RM --has_first_epoch--> EpochNode`, still read everywhere.
  */
 export function attachTileset(g: ResourceGraph, spec: AttachSpec, newId: () => string): { rmId: string; resourceId: string } {
   return g.batch(() => {
@@ -425,13 +443,16 @@ export function attachTileset(g: ResourceGraph, spec: AttachSpec, newId: () => s
       : /\.zip$/i.test(spec.locator) ? "application/zip" : "application/json";
     const res = addResource(g, {
       name: spec.name, kind: "3d_model", packaging: spec.packaging,
-      files: [{ path: spec.locator, media_type: media, ...(spec.sizeBytes ? { size_bytes: spec.sizeBytes } : {}) }],
-      ...(spec.nameOnly ? { data: { locator_note: "name only: the file was dropped, its path is not known" } } : {}),
+      files: [{ path: spec.locator, media_type: media, ...(spec.sizeBytes ? { size_bytes: spec.sizeBytes } : {}),
+        ...(spec.checksum ? { checksum: spec.checksum } : {}) }],
+      ...(spec.checksum ? { residency: "resident" } : {}),
+      ...(spec.nameOnly ? { data: { locator_note: "name only: the file was dropped, its path is not known" } }
+        : spec.checksum && spec.packaging === "directory" ? { data: { checksum_of: "entry-point" } } : {}),
     });
     const rmId = newId();
     g.addNode({ id: rmId, node_type: "representation_model", name: spec.name, description: "",
       data: { url: spec.locator, is_tileset: true, tileset_path: spec.locator, is_publishable: true } } as EmNode);
-    g.addEdge({ id: `${rmId}_has_first_epoch_${spec.epochId}`, edge_type: "has_first_epoch", source: rmId, target: spec.epochId });
+    g.addEdge({ id: `${spec.epochId}_has_representation_model_${rmId}`, edge_type: "has_representation_model", source: spec.epochId, target: rmId });
     g.addEdge({ id: `${rmId}_has_linked_resource_${res.id}`, edge_type: "has_linked_resource", source: rmId, target: res.id });
     return { rmId, resourceId: res.id };
   });

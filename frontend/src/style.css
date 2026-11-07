@@ -3459,6 +3459,14 @@ body.sync-active #footer-brand #em-version {
 .insp-btn:disabled:hover {
   background: transparent;
 }
+/* MICRO-SOTTOFASI-E-TILESET-TEMPLU · the phase a node IS in: pressed, solid —
+   not the dashed of a button that cannot be pressed */
+.insp-btn.insp-btn-current {
+  border-color: var(--accent);
+  background: var(--bg-subtle);
+  font-weight: 600;
+}
+.insp-phase-says, .insp-phase-old { margin: 2px 0 4px; }
 .insp-blocked {
   display: flex;
   flex-wrap: wrap;

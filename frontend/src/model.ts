@@ -79,6 +79,11 @@ export interface LiveHistoryNote {
 }
 
 const MAX_UNDO = 80;
+/** MICRO-SOTTOFASI-E-TILESET-TEMPLU · a representation model is in an epoch by
+ *  `EpochNode --has_representation_model--> RM` (s3Dgraphy's datamodel, EM
+ *  Tools); `RM --has_first_epoch--> EpochNode` is read too, never written */
+const RM_TYPE = "representation_model";
+const RM_EPOCH_EDGE = "has_representation_model";
 
 /**
  * TAVOLO 2 · the hand of this session's edits while it sits in a room: the
@@ -2388,6 +2393,17 @@ export class DocumentStore {
     return group;
   }
 
+  /** The FIRST epoch of a node: its `has_first_epoch`; for a representation
+   *  model with none, the epoch that points at it (`EpochNode
+   *  --has_representation_model--> RM`, the canonical form). Null for none. */
+  firstEpochOf(nodeId: string): string | null {
+    const edges = this.doc.graph.edges;
+    const own = edges.find((e) => e.edge_type === "has_first_epoch" && e.source === nodeId)?.target;
+    if (own || this.node(nodeId)?.node_type !== RM_TYPE) return own ?? null;
+    return edges.find((e) => e.edge_type === RM_EPOCH_EDGE && e.target === nodeId
+      && this.node(e.source)?.node_type === "EpochNode")?.source ?? null;
+  }
+
   /** Re-assign the FIRST epoch (swimlane) of one or more nodes: drop each
    * node's existing has_first_epoch edge and point it at `epochId`. Used when
    * a node/group is dragged into a different lane. */
@@ -2398,12 +2414,24 @@ export class DocumentStore {
     const added: EmEdge[] = [];
     for (const nid of nodeIds) {
       if (nid === epochId) continue;
+      // MICRO-SOTTOFASI-E-TILESET-TEMPLU · a representation model is moved in
+      // the canonical form: its epoch's `has_representation_model` (and an old
+      // `has_first_epoch` of its own) give way to `epoch → RM`
+      const rm = this.node(nid)?.node_type === RM_TYPE;
+      const was = rm ? this.firstEpochOf(nid) : null;
       g.edges = g.edges.filter((e) => {
-        const drop = e.source === nid && e.edge_type === "has_first_epoch";
+        const drop = (e.source === nid && e.edge_type === "has_first_epoch")
+          || (rm && e.target === nid && e.source === was && e.edge_type === RM_EPOCH_EDGE);
         if (drop) removed.push(e);
         return !drop;
       });
-      const edge: EmEdge = {
+      if (rm && g.edges.some((e) => e.source === epochId && e.target === nid && e.edge_type === RM_EPOCH_EDGE)) continue;
+      const edge: EmEdge = rm ? {
+        id: `${epochId}__${RM_EPOCH_EDGE}__${nid}`,
+        source: epochId,
+        target: nid,
+        edge_type: RM_EPOCH_EDGE,
+      } : {
         id: `${nid}__has_first_epoch__${epochId}`,
         source: nid,
         target: epochId,
@@ -2428,6 +2456,9 @@ export class DocumentStore {
         (e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch")
       )
         units.push(e.source);
+      // the representation models it points at (the canonical form)
+      if (e.source === phaseId && e.edge_type === RM_EPOCH_EDGE && this.node(e.target)?.node_type === RM_TYPE)
+        units.push(e.target);
       if (e.source === phaseId && e.edge_type === "has_sub_epoch")
         subPhases.push(e.target);
     }
@@ -2473,6 +2504,19 @@ export class DocumentStore {
           source: e.source,
           target: reassignTo,
           edge_type: e.edge_type,
+        };
+        added.push(ne);
+        kept.push(ne);
+      } else if (e.source === phaseId && e.edge_type === RM_EPOCH_EDGE && this.node(e.target)?.node_type === RM_TYPE) {
+        // MICRO-SOTTOFASI-E-TILESET-TEMPLU · a representation model the phase
+        // points at goes with the units (it was left on a deleted node)
+        removed.push(e);
+        if (g.edges.some((x) => x.source === reassignTo && x.target === e.target && x.edge_type === RM_EPOCH_EDGE)) continue;
+        const ne: EmEdge = {
+          id: `${reassignTo}__${RM_EPOCH_EDGE}__${e.target}`,
+          source: reassignTo,
+          target: e.target,
+          edge_type: RM_EPOCH_EDGE,
         };
         added.push(ne);
         kept.push(ne);
