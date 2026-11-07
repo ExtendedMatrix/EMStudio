@@ -188,6 +188,11 @@ fi
 # only visible as a suddenly-doubled binary. Same reason pandas/numpy are excluded
 # below. Developers who want PDF covers install PyMuPDF next to the DEV bridge
 # (./dev.sh reads the venv directly, no freezing involved).
+#
+# numpy stays OUT (MICRO-ANTEPRIMA-AGGANCIATA, 7 Nov 2026): the one thing of the
+# bridge that needed it — the affine fit of /geo/tileset-frame — is computed
+# without it (`em_gis.fit_affine`, lent to s3Dgraphy's `relocate_transform`).
+# Whatever needs numpy next is caught by check-bridge.sh below, not by a person.
 
 "$PY" -m PyInstaller --onefile --name em-bridge \
   --paths "$S3/src" --collect-submodules s3dgraphy \
@@ -216,4 +221,8 @@ codesign -s - --force "$OUT/em-bridge-$TRIPLE$EXE" 2>/dev/null || true
 rm -rf "$WORK"
 # the frozen binary itself says where its certificates are (macOS, Windows, Linux)
 "$OUT/em-bridge-$TRIPLE$EXE" --tls-check || { echo "✗ the frozen bridge has no certifi bundle: its HTTPS would verify nothing"; exit 1; }
+# MICRO-ANTEPRIMA-AGGANCIATA · …and it is ASKED the geo routes, over HTTP: a
+# library a route imports lazily and the freeze left out (numpy, dev.111: every
+# /geo/tileset-frame 501, no tileset in true ECEF placed) is found only by a call
+PYTHON="$PY" "$HERE/check-bridge.sh" "$OUT/em-bridge-$TRIPLE$EXE" || exit 1
 echo "✓ $OUT/em-bridge-$TRIPLE$EXE"

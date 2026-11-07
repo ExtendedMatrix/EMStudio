@@ -100,6 +100,10 @@ export interface SceneItem {
    *  origin, stayed out of the camera — the renderer never asks a tile it does
    *  not see, and the bar said «1 file read · first tile at …» for ever */
   frameOnArrival?: boolean;
+  /** MICRO-ANTEPRIMA-AGGANCIATA · how its layer starts (a new layer only): the
+   *  mode and the errors' multiplier of the preview it was attached from — the
+   *  loading the person chose on the preview passes to the model */
+  tilesStart?: { mode: "auto" | "manual"; errorScale?: number | "auto" };
   /** MICRO tileset, shift e epoche · the tileset's frame (a CRS minus a shift):
    *  the layer is relocated into the study's frame (`TilesLayer.relocate`) */
   tilesRelocate?: { key: string; fn: RelocateFn } | null;
@@ -269,6 +273,9 @@ export interface SpaceSceneHandle {
   /** MICRO-SPAZIO-COMPATTO p.3 · a tileset's controls for another place (the
    *  Inspector): a second bar of the same layer; null when it is not drawn */
   tilesControls(key: string): { el: HTMLElement; dispose(): void } | null;
+  /** MICRO-ANTEPRIMA-AGGANCIATA · a tileset's loading now (`rm:<id>`): its mode
+   *  and the errors' multiplier; null when the scene has no layer for it */
+  tilesState(key: string): { mode: "auto" | "manual"; errorScale: number | "auto" } | null;
   /** …and the popover of the chip, opened or closed */
   tilesPopover(open?: boolean): boolean;
   /** MICRO-SPAZIO-3D-2 · the view (aligned, orthographic) and the lens */
@@ -847,14 +854,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const framedOnArrival = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
       const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual",
-                                 source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"], memoryMB?: number): Promise<Live | null> => {
+                                 source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"], memoryMB?: number,
+                                 errorScale?: number | "auto"): Promise<Live | null> => {
         let live = layers.get(url);
         if (live) { live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
         // MICRO-TILESET-CONTENITORE · a container's tileset refines by itself
         // (its tiles by the distance): «Manuale» stays one click away on its bar
         const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: memoryMB ?? opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}),
-          ...(source ? { source } : {}), ...(relocate ? { relocate } : {}) });
+          ...(source ? { source } : {}), ...(relocate ? { relocate } : {}), ...(errorScale !== undefined ? { errorScale } : {}) });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
         const ready = new Promise<void>((res) => {
@@ -1829,8 +1837,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 tsMb = Math.max(64, tsMb);
                 if (!memForced.has(tsUrl)) memUsed += tsMb;
               }
-              return ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : undefined,
-                tsUrl === item.url ? item.tilesSource : undefined, tsUrl === item.url ? item.tilesRelocate : undefined, tsMb);
+              return ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : item.tilesStart?.mode,
+                tsUrl === item.url ? item.tilesSource : undefined, tsUrl === item.url ? item.tilesRelocate : undefined, tsMb,
+                item.tilesStart?.errorScale);
             }).then(async (live) => {
               if (live === "held") return;
               if (gen !== generation || disposed) return;
@@ -3566,6 +3575,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           return { el: b.el, dispose: () => { b.dispose(); l.extra.delete(b); b.el.remove(); } };
         },
         tilesPopover: (open?: boolean) => popover(open),
+        tilesState: (k: string) => {
+          const l = [...layers.values()].find((x) => `rm:${x.itemId}` === k);
+          if (!l) return null;
+          const ge = l.layer.status().ge;
+          return { mode: l.layer.mode(), errorScale: !ge || ge.auto ? "auto" as const : ge.scale };
+        },
         leavesOf: (k: string) => {
           // every layer of the item, shown or not: the leaves are the tileset's JSON
           const l = [...layers.values()].find((x) => `rm:${x.itemId}` === k);
@@ -3662,6 +3677,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     altLine: (g) => api.altLine?.(g) ?? null,
     tilesControls: (k) => api.tilesControls?.(k) ?? null,
     tilesPopover: (o) => api.tilesPopover?.(o) ?? false,
+    tilesState: (k) => api.tilesState?.(k) ?? null,
     view: () => api.view?.() ?? { view: null, ortho: false, fov: 40, lensMm: 33 },
     setView: (v) => api.setView?.(v),
     toggleOrtho: () => api.toggleOrtho?.(),

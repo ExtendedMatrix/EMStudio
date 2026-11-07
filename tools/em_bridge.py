@@ -7418,11 +7418,14 @@ def make_handler(api):
                     # inverse of the same projection, the shift added, the true
                     # transform fitted (to ECEF, or to a study's CRS − shift)
                     from s3dgraphy.geometry.frame import normalise_crs, relocate_transform
+                    import em_gis as _gis
+                    # MICRO-ANTEPRIMA-AGGANCIATA · the fit without numpy (the
+                    # frozen sidecar has none: this route answered 501 in the app)
+                    _gis.lend_fit()
                     if normalise_crs((body.get("frame") or {}).get("crs")) == "EPSG:4978":
                         # MICRO-RIFINITURE p.7 · a TRUE ECEF root (RealityScan,
                         # Metashape): into the study's CRS with the datum shift
                         # and the geoid, orthometric heights (em_gis)
-                        import em_gis as _gis
                         out = _gis.relocate_true_ecef(body.get("transform"), body.get("bounding_volume") or {},
                                                       body.get("target") or {})
                         self._json(out, 200 if out.get("ok") else 422)

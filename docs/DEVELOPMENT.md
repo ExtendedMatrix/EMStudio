@@ -212,6 +212,16 @@ environment is the escape hatch.
 
 ### Verify the build (the step that catches a missing PROJ)
 
+`build-bridge.sh` now does the first part itself: after the freeze it runs
+`apps/desktop/check-bridge.sh` on the binary, which starts it on a free port and
+asks the geo routes over HTTP (`/geo/tileset-frame` for a true ECEF root and for
+shifted coordinates, `/reproject`, `/geo/crs-info`, `/geo/frame`,
+`/tiles/globe-min`); any answer that is not `ok` fails the build, so the release
+too. The reason is dev.111: numpy was excluded from the freeze, the fit of
+`/geo/tileset-frame` imported it lazily, and the app placed no tileset in true
+ECEF — a lazy import is found missing only by calling it. The same check on an
+installed app: `./em.sh bridge-check /Applications/EMStudio.app/Contents/MacOS/em-bridge`.
+
 Reprojection working in dev proves nothing about the bundle: the data files are a
 packaging concern. Run the frozen sidecar directly and reproject a point whose
 answer is a definition, not a lookup — easting 500 000 in UTM zone 33 **is** the

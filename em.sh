@@ -48,6 +48,10 @@
 #                                version or menu, a document that does not open.
 #   ./em.sh pack                 Build the desktop app LOCALLY (sidecar + Tauri)
 #                                for this machine only.
+#   ./em.sh bridge-check [bin]   Ask a FROZEN bridge the geo routes over HTTP
+#                                (default: the sidecar just built; or e.g.
+#                                /Applications/EMStudio.app/Contents/MacOS/em-bridge).
+#                                pack and the release run it after every freeze.
 #   ./em.sh devrel [--dry-run] [--yes] [--if-changed]
 #                                A dev release: gates (s3dgraphy pin · the app
 #                                opens) → inc → commit → tag → push.
@@ -872,6 +876,7 @@ case "$cmd" in
     ;;
   doc) do_doc "$@" ;;
   pack) do_pack ;;
+  bridge-check) PYTHON="${PYTHON:-$ROOT/../s3Dgraphy/.venv/bin/python}" "$ROOT/apps/desktop/check-bridge.sh" "$@" ;;
   apertura) do_apertura ;;
   devrel) do_devrel "$@" ;;
   ghrelease) do_ghrelease "$@" ;;

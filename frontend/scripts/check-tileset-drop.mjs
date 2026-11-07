@@ -305,6 +305,70 @@ open(w + '/liar.3tz', 'wb').write(b)`, WORK]);
   eq(D.attachDigestPath(null, "archive"), null, "…nothing without a path (a drop from the system)");
 }
 
+// ── «Attacca all'epoca» from a preview: the TRUE frame (MICRO-ANTEPRIMA-AGGANCIATA) ──
+// E.D., 7 Nov 2026: two surveys in true ECEF attached from their previews stayed
+// on the origin, each centred on its own volume. The model is placed by the
+// bridge (`/geo/tileset-frame`, frame EPSG:4978 → `em_gis.relocate_true_ecef`),
+// never where the preview was centred «for the view only». The app's sidecar is
+// frozen WITHOUT numpy (build-bridge.sh): the fit is computed here with numpy
+// blocked, as the frozen bridge computes it — and against numpy's when it is here.
+// (The page's half — the preview closed, the model framed, its loading handed
+// over, the Log when the bridge refuses — is TD8.attach / TD8.refused in
+// check-interactions: `node scripts/suite-bench.mjs TD8.attach TD8.refused`.)
+{
+  const TOOLS = new URL("../../tools/", import.meta.url).pathname;
+  const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
+  const PY = [`${S3D}.venv/bin/python`, "python3"].find((p) => p === "python3" || existsSync(p));
+  const py = `
+import json, math, sys
+sys.path[:0] = [${JSON.stringify(TOOLS)}, ${JSON.stringify(S3D + "src")}]
+try:
+    import numpy as np
+    from s3dgraphy.geometry.frame import _fit_affine as numpy_fit
+except ImportError:
+    numpy_fit = None
+sys.modules["numpy"] = None          # the frozen sidecar: no numpy
+import em_gis
+from s3dgraphy.geometry import frame as F
+lon, lat, h = math.radians(22.787762), math.radians(45.515966), 521.557
+a, f = 6378137.0, 1 / 298.257223563; e2 = f * (2 - f); n = a / math.sqrt(1 - e2 * math.sin(lat) ** 2)
+x, y, z = (n + h) * math.cos(lat) * math.cos(lon), (n + h) * math.cos(lat) * math.sin(lon), (n * (1 - e2) + h) * math.sin(lat)
+E = [-math.sin(lon), math.cos(lon), 0.0]; N = [-math.sin(lat) * math.cos(lon), -math.sin(lat) * math.sin(lon), math.cos(lat)]
+U = [math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat)]
+T = [*E, 0, *N, 0, *U, 0, x, y, z, 1]
+bv = {"box": [2, 2, 0.3, 2, 0, 0, 0, 2, 0, 0, 0, 0.3]}
+target = {"crs": "EPSG:3844", "shift": [327372.56, 448682.65, 0]}
+out = {"ecef": em_gis.relocate_true_ecef(T, bv, target)}
+em_gis.lend_fit()
+out["shifted"] = F.relocate_transform([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 6378137, 0, 0, 1], {"crs": "EPSG:32633", "shift": [400000, 4600000, 0]},
+                                      bounding_volume={"box": [0, 0, 0, 20, 0, 0, 0, 20, 0, 0, 0, 5]})
+pts = F.volume_points({"box": [3, -4, 1, 40, 0, 0, 0, 25, 0, 0, 0, 0]}, 3)          # a flat volume: numpy's minimum norm
+dst = [[0.3 * p[0] - 0.9 * p[1] + 4127760.9, 0.9 * p[0] + 0.3 * p[1] + 1734113.5, p[2] + 4528084.8] for p in pts]
+mine = em_gis.fit_affine(pts, dst)
+if numpy_fit is not None:
+    sys.modules["numpy"] = np        # numpy back, for its own answer only
+out["vs_numpy"] = None if numpy_fit is None else max(abs(u - v) for r1, r2 in zip(mine, numpy_fit(pts, dst)) for u, v in zip(r1, r2))
+print(json.dumps(out))
+`;
+  let out = null;
+  try { out = JSON.parse(execFileSync(PY, ["-c", py], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim().split("\n").pop()); }
+  catch (e) { console.log(`· the bridge's relocation: not run here (${String(e.message ?? e).split("\n")[0]})`); }
+  if (out) {
+    const r = out.ecef;
+    ok(r.ok && r.transform?.length === 16, `numpy blocked: a true ECEF root still placed (${r.error ?? "ok"})`);
+    ok(r.residual_max_m < 0.01, `…the fit within a centimetre (${r.residual_max_m})`);
+    // the root's origin in three's frame: the preview's centring puts it at Rx(−90°)·W⁻¹·W·0 = 0;
+    // the true frame at Rx(−90°)·A·0 = (tx, tz, −ty)
+    const truePos = [r.transform[12], r.transform[14], -r.transform[13]];
+    ok(Math.abs(truePos[0] + 56) < 1 && Math.abs(truePos[2] - 46.5) < 1, `…56 m west, 46.5 m south of the study's origin (${truePos.map((v) => v.toFixed(2))})`);
+    ok(Math.hypot(truePos[0], truePos[2]) > 40, "…no trace of the preview's centre (the origin)");
+    ok(out.shifted.ok, `numpy blocked: shifted coordinates in a CRS relocated too (relocate_transform with the lent fit: ${out.shifted.error ?? "ok"})`);
+    if (out.vs_numpy !== null) ok(out.vs_numpy < 1e-6, `…the fit without numpy = numpy's lstsq, a flat volume included (${out.vs_numpy.toExponential(1)})`);
+  }
+  const build = readFileSync(new URL("../../apps/desktop/build-bridge.sh", import.meta.url), "utf8");
+  ok(/check-bridge\.sh/.test(build), "build-bridge.sh asks the FROZEN bridge the geo routes (check-bridge.sh): no release without them");
+}
+
 // ── the Basilica, read only ──────────────────────────────────────────────────
 const BAS = process.env.BASILICA_DIR ?? `${homedir()}/Desktop/BasilicaTSL_cesium`;
 const FIXED = process.env.BASILICA_FIXED ?? `${homedir()}/Desktop/BasilicaTLS_tileset.zip`;

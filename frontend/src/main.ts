@@ -310,7 +310,7 @@ import { oneLine } from "./one-line";
 import { findSet, isTilesetData, measureCoverage, planDeclareAlternative, planSubcontainer, SAME_COVERAGE_IOU, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
 import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE } from "./space";
-import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame } from "./file-frame";
+import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame, type Relocation } from "./file-frame";
 import { trackpadClassifier } from "./wheel-kind";
 import { formatBytes as tilesBytes, isTilesetUrl, onEarth } from "./tiles3d";
 import { mount3dViewer } from "./embed3d-native";
@@ -27186,6 +27186,8 @@ function noteModelLoad(key: string | null, name: string, url: string, error: unk
   if (docKey !== modelFailuresOf) { modelFailuresOf = docKey; modelFailures.reset(); modelFailed.clear(); }
   const k = key ?? `url:${url}`;
   if (error == null) {
+    // MICRO-ANTEPRIMA-AGGANCIATA · the model attached from a preview has come: its start is spent
+    if (key?.startsWith("rm:")) tilesHandoff.delete(key.slice(3));
     modelFailed.delete(k);
     if (modelFailures.cleared(k)) refreshSurfaces("scene");
     return;
@@ -27313,6 +27315,10 @@ interface DroppedTileset {
   attached?: { rmId: string; epoch: string };
 }
 const droppedTilesets = new Map<string, DroppedTileset>();
+/** MICRO-ANTEPRIMA-AGGANCIATA · a model attached from a preview: how its layer
+ *  starts (the preview's loading) and that the scene frames it on arrival —
+ *  until its layer has come once (`noteModelLoad` takes it away) */
+const tilesHandoff = new Map<string, NonNullable<SceneItem["tilesStart"]>>();
 /** the Viewer windows showing a dropped tileset (win → dropped id), and their 3D */
 const viewerDropped = new Map<string, string>();
 const viewerDroppedMounts = new Map<string, { id: string; host: HTMLElement; handle: { dispose(): void } }>();
@@ -27544,10 +27550,25 @@ async function attachDropped(d: DroppedTileset, epochId: string): Promise<void> 
   const checksum = digestPath ? await bridgeChecksum(digestPath) : null;
   if (store !== st) return;
   if (digestPath && !checksum) logWarn(t("tsp.attachNoDigest", { name: d.label }));
+  // MICRO-ANTEPRIMA-AGGANCIATA · the loading the person chose on the preview (auto
+  // or manual, the errors' multiplier) passes to the model, read before it closes
+  let start: NonNullable<SceneItem["tilesStart"]> | null = null;
+  const showing = everyWindow().filter((w) => w.type === "scene" && scenePreviewOf(w)?.dropId === d.id);
+  for (const w of showing) {
+    const pv = scenePreviewOf(w)!;
+    start ??= sceneHandles.get(w.id)?.tilesState(`rm:preview:${pv.resourceId ?? pv.url}`) ?? null;
+  }
   const out = attachTileset(storeGraph(st), { name: d.label, epochId, locator: loc.locator, packaging: loc.packaging,
     sizeBytes: d.bytes, nameOnly: loc.nameOnly, checksum }, () => st.newId());
   d.attached = { rmId: out.rmId, epoch };
+  // …and the preview goes: the model is drawn as every tileset of the graph is
+  // (its true frame, `spaceTilesRelocate`), not where the preview was centred
+  // for the view — E.D., 7 Nov 2026: the two surveys stayed on the origin,
+  // each centred on its own volume. The scene frames the model when it lands
+  if (showing.length) tilesHandoff.set(out.rmId, start ?? { mode: "manual" });
+  for (const w of showing) setWinCurrent(w, "space.preview", null);
   toastUndo(t(loc.nameOnly ? "tsp.attachedNameOnly" : "tsp.attached", { name: d.label, epoch }), st);
+  if (showing.length && spaceEpochId && spaceEpochId !== epochId) logInfo(t("tsp.attachedOtherEpoch", { name: d.label, epoch }), [out.rmId]);
   refreshSurfaces("scene");
   refreshInspector();
   renderViewer();
@@ -31960,6 +31981,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),
         // MICRO tileset, shift e epoche · a tileset with a frame, relocated into the study's
         tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined,
+        // MICRO-ANTEPRIMA-AGGANCIATA · attached from a preview: its loading, framed when it lands
+        ...(isTiles && tilesHandoff.has(r.id) ? { tilesStart: tilesHandoff.get(r.id)!, frameOnArrival: true } : {}),
         // MICRO-3DTILES · the tileset of the same model, and the weight
         tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles", win.id) ? r.tileset.url || undefined : undefined,
         bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
@@ -32070,8 +32093,37 @@ function renderFrameInto(host: HTMLElement, nodeId: string): boolean {
             mm: rl.residual_max_m == null ? "?" : (rl.residual_max_m * 1000).toFixed(2) }), rl.error ? "insp-hint warn" : "insp-hint");
       q.dataset.frameState = rl.error ? "error" : "relocated";
     }
+  } else {
+    // MICRO-ANTEPRIMA-AGGANCIATA · no frame said: a root in TRUE ECEF is placed by
+    // the bridge (`/geo/tileset-frame`, EPSG:4978) — said here, done or refused
+    const rl = sceneHandleTilesOf(r.id)?.relocated ?? null;
+    if (rl && rl.error !== "local") {
+      const q = hint(rl.error ? relocationRefusedLine(String(r.name ?? r.id), rl.error)
+        : t("frm.placedEcef", { mm: rl.residual_max_m == null ? "?" : (rl.residual_max_m * 1000).toFixed(2) }),
+        rl.error ? "insp-hint warn" : "insp-hint");
+      q.dataset.frameState = rl.error ? "error" : "relocated";
+    }
   }
   return true;
+}
+/** MICRO-ANTEPRIMA-AGGANCIATA · why a tileset was not placed, in words: the
+ *  bridge that cannot (a dependency missing, an old one, none), or a root that
+ *  is not taken for a true ECEF one */
+function relocationRefusedLine(name: string, error: string): string {
+  if (error === "far") return t("frm.notEcef", { name });
+  if (error === "no-transform") return t("frm.noTransform", { name });
+  const why = error === "old-bridge" ? t("frm.whyOldBridge") : error === "no-bridge" ? t("frm.whyNoBridge") : error;
+  return t("frm.bridgeCannot", { name, why });
+}
+/** …said in the Log once per model, frame and reason (the Space asks again at every rebuild) */
+const relocationSaid = new Set<string>();
+function noteRelocationRefused(r: SpaceRM, key: string, error: string): void {
+  if (error === "local" || error === "pending" || error === "waiting-root") return;
+  const k = `${r.id}|${key}|${error}`;
+  if (relocationSaid.has(k)) return;
+  relocationSaid.add(k);
+  logWarn(relocationRefusedLine(String(r.name ?? r.id), error), [r.id]);
+  refreshInspector();
 }
 const normaliseGeoCrs = (v: unknown): string | null => { const n = epsgOf({ epsg: v }); return n ? `EPSG:${n}` : null; };
 /** what a Space scene did with a tileset's layer (its relocation), when one draws it */
@@ -32102,13 +32154,21 @@ function spaceTilesRelocate(r: SpaceRM): SceneItem["tilesRelocate"] {
     const target = studyTarget(geo, { crs: null, shift: [0, 0, 0] });
     if (!target) return null;
     const ecef: FileFrame = { crs: "EPSG:4978", shift: [0, 0, 0] };
-    return { key: frameKey(ecef, target), fn: async (root) => onEarth(root.transform)
-      ? relocation(await bridgeUrl().catch(() => null), root, ecef, target) : { ok: false, error: "local" } };
+    const key = frameKey(ecef, target);
+    return { key, fn: async (root) => said(key, onEarth(root.transform)
+      ? await relocation(await bridgeUrl().catch(() => null), root, ecef, target) : { ok: false, error: "local" }) };
   }
   const frame = r.frame.frame;
   const target = studyTarget(geo, frame);
   if (!target) return null;
-  return { key: frameKey(frame, target), fn: async (root) => relocation(await bridgeUrl().catch(() => null), root, frame, target) };
+  const key = frameKey(frame, target);
+  return { key, fn: async (root) => said(key, await relocation(await bridgeUrl().catch(() => null), root, frame, target)) };
+  // MICRO-ANTEPRIMA-AGGANCIATA · a refusal is not drawn in silence at the centre:
+  // the dev.111 sidecar answered 501 to every one, and the Log said nothing
+  function said(key: string, res: Relocation): Relocation {
+    if (!res.ok) noteRelocationRefused(r, key, res.error ?? "refused");
+    return res;
+  }
 }
 
 /** The epoch's Inspector: its chronology problems, and the tool. */

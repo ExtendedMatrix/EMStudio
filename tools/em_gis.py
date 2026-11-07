@@ -242,6 +242,76 @@ GEOID_CRS = "EPSG:3855"
 NEAR_STUDY_M = 50_000.0
 
 
+def _sym_eigen(m: List[List[float]]) -> Tuple[List[float], List[List[float]]]:
+    """Eigenvalues and eigenvectors (as COLUMNS of ``V``) of a symmetric 3×3,
+    by Jacobi's rotations: a handful of sweeps to the last digit."""
+    a = [row[:] for row in m]
+    v = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    for _ in range(64):
+        off = a[0][1] ** 2 + a[0][2] ** 2 + a[1][2] ** 2
+        if off <= 1e-300 or off <= (1e-32 * sum(a[i][i] ** 2 for i in range(3))):
+            break
+        for p, q in ((0, 1), (0, 2), (1, 2)):
+            if a[p][q] == 0.0:
+                continue
+            th = (a[q][q] - a[p][p]) / (2.0 * a[p][q])
+            t = (1.0 if th >= 0 else -1.0) / (abs(th) + math.sqrt(th * th + 1.0))
+            c = 1.0 / math.sqrt(t * t + 1.0)
+            s = t * c
+            for k in range(3):                      # A ← A·J
+                akp, akq = a[k][p], a[k][q]
+                a[k][p], a[k][q] = c * akp - s * akq, s * akp + c * akq
+            for k in range(3):                      # A ← Jᵀ·A
+                apk, aqk = a[p][k], a[q][k]
+                a[p][k], a[q][k] = c * apk - s * aqk, s * apk + c * aqk
+            for k in range(3):                      # V ← V·J
+                vkp, vkq = v[k][p], v[k][q]
+                v[k][p], v[k][q] = c * vkp - s * vkq, s * vkp + c * vkq
+    return [a[0][0], a[1][1], a[2][2]], v
+
+
+def fit_affine(src: Sequence[Sequence[float]], dst: Sequence[Sequence[float]]) -> List[List[float]]:
+    """The affine 3×4 (rows) that maps ``src`` onto ``dst`` in least squares —
+    s3Dgraphy's ``geometry.frame._fit_affine`` WITHOUT numpy.
+
+    MICRO-ANTEPRIMA-AGGANCIATA (7 Nov 2026) · the frozen sidecar is built with
+    ``--exclude-module numpy`` (build-bridge.sh), and that fit was the ONLY numpy
+    of the bridge: every ``/geo/tileset-frame`` of the app answered 501, and every
+    tileset in true ECEF stayed centred on its own volume. The same solution as
+    ``numpy.linalg.lstsq``: centred on the means (the ECEF millions do not eat the
+    digits), the normal equations ``SᵀS·A = SᵀD`` solved through the
+    pseudo-inverse of ``SᵀS`` — so a flat volume (an axis of zero length) gets the
+    minimum-norm answer numpy gives, not a division by zero."""
+    n = len(src)
+    if n == 0 or n != len(dst):
+        raise ValueError("fit_affine: as many points on both sides, at least one")
+    cs = [sum(float(p[k]) for p in src) / n for k in range(3)]
+    cd = [sum(float(p[k]) for p in dst) / n for k in range(3)]
+    S = [[float(p[k]) - cs[k] for k in range(3)] for p in src]
+    D = [[float(p[k]) - cd[k] for k in range(3)] for p in dst]
+    M = [[sum(r[i] * r[j] for r in S) for j in range(3)] for i in range(3)]
+    B = [[sum(S[r][i] * D[r][j] for r in range(n)) for j in range(3)] for i in range(3)]
+    w, V = _sym_eigen(M)
+    # numpy's rcond: singular values of S under eps·max(n, 3)·σmax are zero
+    cut = (2.220446049250313e-16 * max(n, 3)) ** 2 * max(max(w), 0.0)
+    inv = [1.0 / x if x > cut and x > 0 else 0.0 for x in w]
+    P = [[sum(V[i][k] * inv[k] * V[j][k] for k in range(3)) for j in range(3)] for i in range(3)]
+    A = [[sum(P[i][k] * B[k][j] for k in range(3)) for j in range(3)] for i in range(3)]   # (S)·A ≈ D
+    L = [[A[c][r] for c in range(3)] for r in range(3)]                                     # Aᵀ
+    t = [cd[r] - sum(L[r][k] * cs[k] for k in range(3)) for r in range(3)]
+    return [[L[r][0], L[r][1], L[r][2], t[r]] for r in range(3)]
+
+
+def lend_fit() -> None:
+    """s3Dgraphy's ``relocate_transform`` (a file of shifted coordinates) calls
+    ``frame._fit_affine``, which imports numpy: the frozen bridge has none. Until
+    s3Dgraphy carries a fit of its own without numpy, the bridge lends it this one
+    — in the dev bridge too, so the two compute the same numbers."""
+    from s3dgraphy.geometry import frame as F
+    if getattr(F, "_fit_affine", None) is not fit_affine:
+        F._fit_affine = fit_affine
+
+
 def _best_op(src, dst):
     """The first operation of PROJ's list that is AVAILABLE and not a
     «ballpark» (PROJ falls back on one without a word when a grid is missing:
@@ -285,7 +355,7 @@ def relocate_true_ecef(transform: Sequence[float], bounding_volume: Dict[str, An
     shift. The affine fit and its residual as `relocate_transform`'s.
     """
     from pyproj import Transformer
-    from s3dgraphy.geometry.frame import _apply, _column_major, _fit_affine, _mat, volume_points
+    from s3dgraphy.geometry.frame import _apply, _column_major, _mat, volume_points
     if not transform or len(transform) != 16:
         return {"ok": False, "error": "no-transform"}
     if math.dist((0, 0, 0), transform[12:15]) < 1e6:
@@ -322,7 +392,7 @@ def relocate_true_ecef(transform: Sequence[float], bounding_volume: Dict[str, An
         return {"ok": False, "error": "far", "why": f"the root is {far / 1000:.1f} km from the study's origin: not taken for a true ECEF frame",
                 "written": {"lat": clat, "lon": clon, "h": ch}}
     dst = [true_of(p)[0] for p in pts]
-    fit = _fit_affine(pts, dst)
+    fit = fit_affine(pts, dst)
     errs = [math.dist(true_of(p)[0], _apply([*fit, [0, 0, 0, 1]], p)) for p in (chk or pts)]
     return {"ok": True, "transform": _column_major(fit), "target": {"crs": crs, "shift": tsh},
             "residual_rms_m": math.sqrt(sum(e * e for e in errs) / len(errs)), "residual_max_m": max(errs),

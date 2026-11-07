@@ -10697,7 +10697,8 @@ test("TD1.viewer", "tileset trascinato · uno zip dal sistema sul Viewer: si ved
     const D = window.__EM_DRAG__;
     const rms = D.idsOfType("representation_model").map((id) => D.node(id));
     const rm = rms.find((n) => n?.data?.is_tileset);
-    const ep = rm ? D.edgesOf("has_first_epoch").find((e) => e.source === rm.id)?.target : null;
+    // the canonical bond since MICRO-SOTTOFASI-E-TILESET-TEMPLU: epoch → has_representation_model → RM
+    const ep = rm ? D.edgesOf("has_representation_model").find((e) => e.target === rm.id)?.source : null;
     const link = rm ? D.edgesOf("has_linked_resource").find((e) => e.source === rm.id)?.target : null;
     return { rm: rms.length, res: D.idsOfType("resource").length, url: rm?.data?.url ?? null, ep, res0: link ? D.node(link)?.data ?? null : null };
   });
@@ -10810,6 +10811,108 @@ test("TD7.frame", "tileset trascinato · sulla Scena che guarda altrove (il Temp
   // the target moved from the temple's height to the preview's (near the origin)
   return { pass: !!bar && !!layer && Math.abs(camAfter[4]) < 100 && Math.abs(camBefore[4] - 538) < 1 && !!status && !errors.length,
     detail: { camBefore, camAfter, status, layer, errors } };
+});
+
+// MICRO-ANTEPRIMA-AGGANCIATA (7 Nov 2026) · E.D. dropped two surveys in TRUE ECEF
+// on the Space of Templu Mare and attached them to XX sec: they stayed on the
+// origin, each centred on its own volume — the preview's place «for the view
+// only». The bench: `disco` with a root in true ECEF at Sarmizegetusa (an ENU
+// frame, as Metashape writes it), a study in Stereo70 minus its shift.
+const TD8_GEO = { id: "GEO_TD8", node_type: "geo_position", name: "Sarmizegetusa", description: "",
+  data: { epsg: 3844, shift_x: 327372.56, shift_y: 448682.65, shift_z: 0 } };
+async function td8Bench(tag) {
+  const { dir } = await tsdBench(tag);
+  mkdirSync(`${dir}/ecef`, { recursive: true });
+  execFileSync("python3", ["-I", "-c", `import json,math,os,sys
+src,out=sys.argv[1],sys.argv[2]
+lon,lat=math.radians(22.787762),math.radians(45.515966)
+a,f=6378137.0,1/298.257223563; e2=f*(2-f); n=a/math.sqrt(1-e2*math.sin(lat)**2); h=521.557
+x,y,z=(n+h)*math.cos(lat)*math.cos(lon),(n+h)*math.cos(lat)*math.sin(lon),(n*(1-e2)+h)*math.sin(lat)
+E=[-math.sin(lon),math.cos(lon),0.0]; N=[-math.sin(lat)*math.cos(lon),-math.sin(lat)*math.sin(lon),math.cos(lat)]; U=[math.cos(lat)*math.cos(lon),math.cos(lat)*math.sin(lon),math.sin(lat)]
+t=json.load(open(os.path.join(src,'tileset.json'))); t['root']['transform']=[*E,0,*N,0,*U,0,x,y,z,1]
+json.dump(t,open(os.path.join(out,'tileset.json'),'w'))`, `${dir}/disco`, `${dir}/ecef`]);
+  // …the package as the Space reads a model's: a canonical .3tz, written by the bridge
+  execFileSync("cp", ["-cR", `${dir}/disco/tiles`, `${dir}/ecef/tiles`]);
+  const doc = fixture("catena");
+  doc.graph.nodes.push(TD8_GEO);
+  const r = await fetch(`${BRIDGE}/fs/pack-3tz`, { method: "POST", headers: { "Content-Type": "application/json", Origin: `http://localhost:${PORT}` },
+    body: JSON.stringify({ folder: `${dir}/ecef` }) });
+  const packed = await r.json().catch(() => ({}));
+  if (!packed.ok) throw new Error(`td8: the bridge did not pack ecef.3tz: ${JSON.stringify(packed).slice(0, 200)}`);
+  // opened FROM a path beside the tileset: the resource's locator is relative, as in a study
+  writeFileSync(`${dir}/td8.em.json`, JSON.stringify(doc));
+  return { dir, doc };
+}
+async function td8Open(dir, route) {
+  const o = await open({ doc: null, ...(route ? { route } : {}) });
+  await o.p.evaluate(([txt, path]) => window.__EM_DRAG__.openAt(JSON.parse(txt), path), [readFileSync(`${dir}/td8.em.json`, "utf8"), `${dir}/td8.em.json`]);
+  await o.p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 30000 });
+  await o.p.waitForTimeout(500);
+  await workspace(o.p, "space");
+  return o;
+}
+const td8Layers = (p) => p.evaluate(() => (document.querySelector(".scn-host")?.__spaceTiles?.() ?? []).map((l) => ({ id: String(l.id),
+  files: l.files.length, mode: l.mode, scale: l.status.ge?.scale ?? null, relocated: l.relocated,
+  centre: l.box ? [0, 1, 2].map((k) => (l.box[k] + l.box[k + 3]) / 2) : null })));
+async function td8DropAndAttach(p, win, dir) {
+  await tsdDropPath(p, win, { path: `${dir}/ecef.3tz`, type: "file", name: "ecef.3tz", ext: "3tz" });
+  const preview = await tsdWait(p, async () => (await td8Layers(p)).find((l) => l.id.startsWith("preview:") && l.files && l.centre) ?? null, 40000);
+  // the person's loading on the preview: «auto», the errors ×1.5 (the bar's controls)
+  if (preview) await p.evaluate((id) => document.querySelector(".scn-host").__spaceTileVerts(id, 1, 1.5), preview.id);
+  await p.waitForTimeout(400);
+  const bar = await tsdBar(p, win);
+  await p.click(`.tile-area[data-win="${win}"] [data-tsp-attach]`);
+  return { preview, bar };
+}
+
+test("TD8.attach", "tileset trascinato · «Attacca all'epoca…» da un'anteprima in ECEF vero: l'anteprima sparisce, l'RM si colloca col frame vero del bridge (non al centro dell'anteprima), con il caricamento dell'anteprima (auto ×1.5); un passo di annulla", async () => {
+  const { dir } = await td8Bench("td8");
+  const { p, ctx, errors } = await td8Open(dir);
+  await answerAppDialogs(p, true);
+  const win = await winOf(p, "scene");
+  await p.waitForTimeout(800);
+  const { preview, bar } = await td8DropAndAttach(p, win, dir);
+  const rm = await tsdWait(p, async () => (await td8Layers(p)).find((l) => !l.id.startsWith("preview:") && l.relocated?.placed === "relocated" && l.centre) ?? null, 60000);
+  const layers = await td8Layers(p);
+  const barAfter = await tsdBar(p, win);
+  const log = await p.evaluate(() => window.__EM_DRAG__.logTail?.(12) ?? []);
+  await p.screenshot({ path: SHOT("td8-aggancio-frame-vero") }).catch(() => {});
+  const rms = () => p.evaluate(() => window.__EM_DRAG__.idsOfType("representation_model").length);
+  const before = await rms();
+  await p.evaluate(() => window.__EM_DRAG__.undo?.());
+  await p.waitForTimeout(400);
+  const undone = await rms();
+  await ctx.close();
+  // the root's origin 56 m west and 46.5 m south of the study's (check-tileset-ecef): three's z = −north
+  const far = (c, d) => Math.hypot(c[0] - d[0], c[2] - d[2]);
+  return { pass: !!preview && !!bar?.recentred && !!rm && far(preview.centre, [0, 0, 0]) < 30
+      && Math.abs(rm.centre[0] + 56) < 15 && Math.abs(rm.centre[2] - 46.5) < 15 && far(rm.centre, preview.centre) > 40
+      && rm.relocated.residual_max_m < 0.01 && !layers.some((l) => l.id.startsWith("preview:")) && barAfter === null
+      && rm.mode === "auto" && rm.scale === 1.5 && undone === before - 1
+      && !log.some((x) => /non può collocare|cannot place/.test(x)) && !errors.length,
+    detail: { preview, bar, rm, layers, barAfter, log, before, undone, errors } };
+});
+
+test("TD8.refused", "tileset trascinato · il bridge che non può collocare (501, numpy assente come nel sidecar dev.111): il Log e l'Inspector lo dicono in parole, non un disegno al centro in silenzio", async () => {
+  const { dir } = await td8Bench("td8r");
+  const route = { pattern: "**/geo/tileset-frame", handler: (r) => r.fulfill({ status: 501, contentType: "application/json",
+    body: JSON.stringify({ ok: false, error: "geo: a dependency is missing in this bridge (numpy: pyproj or Pillow)" }) }) };
+  const { p, ctx, errors } = await td8Open(dir, route);
+  await answerAppDialogs(p, true);
+  const win = await winOf(p, "scene");
+  await p.waitForTimeout(800);
+  await td8DropAndAttach(p, win, dir);
+  const rm = await tsdWait(p, async () => (await td8Layers(p)).find((l) => !l.id.startsWith("preview:") && l.relocated?.error && l.relocated.error !== "pending") ?? null, 60000);
+  const log = await tsdWait(p, async () => { const l = await p.evaluate(() => window.__EM_DRAG__.logTail?.(12) ?? []);
+    return l.some((x) => /non può collocare/.test(x)) ? l : null; }, 10000);
+  // the Inspector of the model: its «Frame» says why
+  if (rm) await p.evaluate((id) => window.__EM_DRAG__.select(id), rm.id);
+  const insp = await tsdWait(p, () => p.evaluate(() => document.querySelector('[data-frame-state="error"]')?.textContent ?? null), 8000);
+  await p.screenshot({ path: SHOT("td8-bridge-rifiuta") }).catch(() => {});
+  await ctx.close();
+  return { pass: !!rm && rm.relocated.placed === "centred" && !!log && log.filter((x) => /non può collocare/.test(x)).length === 1
+      && /numpy/.test(log.find((x) => /non può collocare/.test(x))) && !!insp && /non può collocare/.test(insp) && !errors.length,
+    detail: { rm, log, insp, errors } };
 });
 
 test("TD5.refuse", "tileset trascinato · uno zip senza tileset dice che cosa c'è dentro; un .em.json trascinato sul Viewer non è preso dal tileset (va ad aprire il documento come prima)", async () => {
