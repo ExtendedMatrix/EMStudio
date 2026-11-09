@@ -14,6 +14,7 @@
  * the person turns «Territorio» on.
  */
 import { geoOf } from "./geo";
+import { datumOperationOf } from "./file-frame";
 import { basename, dirname } from "./paths";
 import {
   BUDGET, EXTRACT_MAX_TILES, HEIGHT_MODES, SOURCES, boxAround, extractTileCount, layersKey, moveLayer, readLayers, setLayer,
@@ -95,7 +96,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
   const geoSig = (): string => {
     const gp = (d.doc()?.graph?.nodes ?? []).find((n) => n.node_type === "geo_position");
     const x = (gp?.data ?? {}) as Record<string, unknown>;
-    return gp ? JSON.stringify([x.epsg, x.shift_x, x.shift_y, x.shift_z, x.rotation, x.shift_z_in_coordinates]) : "";
+    return gp ? JSON.stringify([x.epsg, x.shift_x, x.shift_y, x.shift_z, x.rotation, x.shift_z_in_coordinates, x.datum_operation]) : "";
   };
   let placedBy: string | null = null;
   const load = (): Saved => {
@@ -145,7 +146,9 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     if (!epsg || (!Number(data.shift_x) && !Number(data.shift_y))) { anchorNote = t("geo.noAnchor"); return null; }
     try {
       const r = await fetch(`${bridge}/geo/frame`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ epsg, x: Number(data.shift_x), y: Number(data.shift_y), z: h, rotation: rot }) });
+        // MICRO-DATUM-DICHIARATO · the globe anchored with the operation the tilesets are placed with
+        body: JSON.stringify({ epsg, x: Number(data.shift_x), y: Number(data.shift_y), z: h, rotation: rot,
+          datum_operation: datumOperationOf(data) }) });
       const j = await r.json();
       if (!j?.ok) { anchorNote = t("geo.frameFailed", { x: String(j?.error ?? r.status) }); return null; }
       shift = { x: Number(data.shift_x), y: Number(data.shift_y), rotation: rot, epsg };

@@ -325,25 +325,204 @@ def _best_op(src, dst):
     return None
 
 
-def _geoid_op():
+def _geoid_op(at: Optional[Tuple[float, float]] = None):
     """WGS 84 (lon, lat, h ellipsoidal) → the same with the EGM2008 height; the
     grid comes through PROJ's network (its own cache) when it is not on the disk.
-    ``(op, how)``; ``(None, why)`` when there is no way."""
+    ``(op, how)``; ``(None, why)`` when there is no way.
+
+    MICRO-DATUM-DICHIARATO p.3 · an operation PROJ calls available can still
+    answer ±Infinity: the grid absent, only PROJ's network cache (or the network
+    unreachable) — measured 8 Nov 2026, z NaN and the tileset drawn at the
+    scene's centre. The operation is TRIED at ``at`` (lon, lat): a result that is
+    not finite is a grid that is not there — then PROJ's network, else none."""
     import pyproj
-    op = _best_op("EPSG:4979", f"EPSG:4326+{GEOID_CRS.split(':')[1]}")
-    if op is not None:
+    target = f"EPSG:4326+{GEOID_CRS.split(':')[1]}"
+
+    def usable(op):
+        if op is None:
+            return False
+        if at is None:
+            return True
+        try:
+            r = op.transform(float(at[0]), float(at[1]), 0.0)
+        except Exception:  # noqa: BLE001 — a grid PROJ cannot open
+            return False
+        return all(math.isfinite(v) for v in r)
+
+    op = _best_op("EPSG:4979", target)
+    if usable(op):
         return op, "grid on disk"
     try:
         if not pyproj.network.is_network_enabled():
             pyproj.network.set_network_enabled(True)
-        op = _best_op("EPSG:4979", f"EPSG:4326+{GEOID_CRS.split(':')[1]}")
+        op = _best_op("EPSG:4979", target)
     except Exception as exc:  # noqa: BLE001
-        return None, f"PROJ network: {exc}"
-    return (op, "grid through PROJ's network (cdn.proj.org, cached)") if op is not None else (None, "no EGM2008 grid, offline")
+        return None, f"no EGM2008 grid on the disk, and PROJ's network: {exc}"
+    if usable(op):
+        return op, "grid through PROJ's network (cdn.proj.org, cached)"
+    return None, "no EGM2008 grid on the disk, and PROJ's network does not give it (offline?)"
+
+
+# ── MICRO-DATUM-DICHIARATO (9 Nov 2026) · the datum operation, declared ──────
+
+class DatumOp:
+    """One operation WGS 84 (lon, lat) ↔ the study's CRS (E, N), and what the
+    answer says of it: ``operation`` (PROJ's words), ``accuracy_m``,
+    ``declared`` (the GeoPositionNode's ``datum_operation`` was used), ``code``,
+    ``why``."""
+
+    def __init__(self, fwd, inv, operation: str, accuracy, *, declared: bool, code: Optional[str], why: str):
+        self._fwd, self._inv = fwd, inv
+        self.description = operation
+        self.accuracy = accuracy
+        self.declared, self.code, self.why = declared, code, why
+
+    def transform(self, lon, lat):
+        return self._fwd(lon, lat)
+
+    def inverse(self, e, n):
+        return self._inv(e, n)
+
+    def words(self) -> Dict[str, Any]:
+        acc = self.accuracy if self.accuracy is not None and self.accuracy > 0 else None
+        return {"operation": self.description, "accuracy_m": acc, "declared": self.declared,
+                "code": self.code, "why": self.why}
+
+
+def normalise_datum_operation(value) -> Optional[str]:
+    """``"EPSG:<code>"`` | None (not declared); ``ValueError`` for another form
+    (the same rule as s3Dgraphy's ``api.normalise_datum_operation``, here so
+    the frozen bridge does not need that s3Dgraphy)."""
+    import re
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"datum_operation {value!r} is not «EPSG:<code>»")
+    if isinstance(value, int):
+        code = value
+    else:
+        m = re.fullmatch(r"\s*(?:EPSG\s*:{1,2}\s*)?(\d+)\s*", str(value), re.IGNORECASE)
+        if not m:
+            raise ValueError(f"datum_operation {value!r} is not «EPSG:<code>»")
+        code = int(m.group(1))
+    if code <= 0:
+        raise ValueError(f"datum_operation {value!r} is not «EPSG:<code>»")
+    return f"EPSG:{code}"
+
+
+def normalise_datum_operation_or_none(value) -> Optional[str]:
+    """``normalise_datum_operation``, a malformed value read as declared
+    (``"?"``): something was written, and it is not to be ignored"""
+    try:
+        return normalise_datum_operation(value)
+    except ValueError:
+        return "?"
+
+
+def _wrap(t, **kw) -> DatumOp:
+    from pyproj.enums import TransformDirection
+    return DatumOp(lambda x, y: t.transform(x, y),
+                   lambda x, y: t.transform(x, y, direction=TransformDirection.INVERSE),
+                   t.description, t.accuracy, **kw)
+
+
+def _step_codes(t) -> List[str]:
+    """the EPSG codes of the steps of a PROJ operation (an «Inverse of» step
+    counts as its operation)"""
+    out = []
+    try:
+        j = t.to_json_dict()
+    except Exception:  # noqa: BLE001
+        return out
+    for st in (j.get("steps") or [j]):
+        i = st.get("id") or {}
+        if str(i.get("authority", "")).upper() in ("EPSG", "INVERSE(EPSG)") and i.get("code") is not None:
+            out.append(f"EPSG:{int(i['code'])}")
+    return out
+
+
+def datum_op(crs, declared=None) -> Tuple[Optional[DatumOp], Optional[str]]:
+    """The operation WGS 84 ↔ ``crs``: the DECLARED one (the GeoPositionNode's
+    ``datum_operation``) when it is given and PROJ knows it; otherwise PROJ's
+    first non-«ballpark» one, as before. ``(op, None)`` or ``(None, why)``.
+
+    A declared operation is never replaced in silence: unknown to PROJ, or not
+    joining the study's datum to WGS 84, it is a refusal said in words. It is
+    taken from PROJ's own list of candidates when it is there (PROJ's whole
+    pipeline); else built from the EPSG operation (``CoordinateOperation``):
+    the inverse of the operation (the study's datum → WGS 84) and the
+    projection of the study's CRS, a conversion with no datum in it.
+    """
+    from pyproj import CRS, Transformer
+    from pyproj.enums import TransformDirection
+    from pyproj.transformer import TransformerGroup
+    crs = _norm(crs)
+    try:
+        code = normalise_datum_operation(declared)
+    except ValueError as exc:
+        return None, str(exc)
+    if code is None:
+        t = _best_op("EPSG:4326", crs)
+        if t is None:
+            return None, f"PROJ has no operation WGS 84 → {crs} but a ballpark one"
+        return _wrap(t, declared=False, code=None, why="none declared: PROJ's first operation that is not a ballpark"), None
+    from pyproj.crs import CoordinateOperation
+    try:
+        op = CoordinateOperation.from_authority("EPSG", code.split(":", 1)[1])
+    except Exception:  # noqa: BLE001
+        return None, f"the declared datum operation {code} is unknown to PROJ: refused, never replaced by another"
+    if op.type_name not in ("Transformation", "Concatenated Operation"):
+        return None, f"the declared datum operation {code} ({op.name}) is a {op.type_name.lower()}, not a datum transformation: refused"
+    for t in TransformerGroup("EPSG:4326", crs, always_xy=True).transformers:
+        if code in _step_codes(t):
+            return _wrap(t, declared=True, code=code, why=f"declared on the GeoPositionNode ({code}), in PROJ's own list"), None
+    # not among PROJ's candidates for this CRS: built from the EPSG operation
+    study = CRS.from_user_input(crs)
+    geod = study.geodetic_crs
+    wgs = CRS.from_epsg(4326)
+    j = op.to_json_dict()
+    try:
+        src, dst = CRS.from_json_dict(j["source_crs"]), CRS.from_json_dict(j["target_crs"])
+    except Exception:  # noqa: BLE001 — a conversion, a concatenation without its ends
+        return None, f"the declared datum operation {code} ({op.name}) is not a transformation between two datums: refused"
+    if geod is None or geod.equals(wgs, ignore_axis_order=True):
+        return None, f"the study's CRS {crs} is on WGS 84 itself: a datum operation ({code}) has nothing to do — refused"
+    if src.equals(geod, ignore_axis_order=True) and dst.equals(wgs, ignore_axis_order=True):
+        to_wgs = TransformDirection.FORWARD
+    elif src.equals(wgs, ignore_axis_order=True) and dst.equals(geod, ignore_axis_order=True):
+        to_wgs = TransformDirection.INVERSE
+    else:
+        return None, (f"the declared datum operation {code} ({op.name}) joins {src.name} to {dst.name}, "
+                      f"not {geod.name} (the datum of {crs}) to WGS 84: refused")
+    from_wgs = TransformDirection.INVERSE if to_wgs == TransformDirection.FORWARD else TransformDirection.FORWARD
+    try:
+        p = Transformer.from_pipeline(op.to_proj4())
+    except Exception as exc:  # noqa: BLE001
+        return None, f"PROJ cannot run the declared datum operation {code}: {exc}"
+    # the pipeline takes its source CRS's axes as EPSG orders them
+    lat_first = {"src": not src.is_projected and src.axis_info and src.axis_info[0].direction == "north",
+                 "dst": not dst.is_projected and dst.axis_info and dst.axis_info[0].direction == "north"}
+    geod_first = lat_first["src"] if to_wgs == TransformDirection.FORWARD else lat_first["dst"]
+    wgs_first = lat_first["dst"] if to_wgs == TransformDirection.FORWARD else lat_first["src"]
+    conv = Transformer.from_crs(geod, study, always_xy=True)
+
+    def fwd(lon, lat):
+        a, b = p.transform(*((lat, lon) if wgs_first else (lon, lat)), direction=from_wgs)
+        glon, glat = (b, a) if geod_first else (a, b)
+        return conv.transform(glon, glat)
+
+    def inv(e, n):
+        glon, glat = conv.transform(e, n, direction=TransformDirection.INVERSE)
+        a, b = p.transform(*((glat, glon) if geod_first else (glon, glat)), direction=to_wgs)
+        return (b, a) if wgs_first else (a, b)
+
+    name = f"Inverse of {op.name} + {conv.description}" if to_wgs == TransformDirection.FORWARD else f"{op.name} + {conv.description}"
+    return DatumOp(fwd, inv, name, op.accuracy, declared=True, code=code,
+                   why=f"declared on the GeoPositionNode ({code}), built from the EPSG operation (not among PROJ's candidates for {crs})"), None
 
 
 def relocate_true_ecef(transform: Sequence[float], bounding_volume: Dict[str, Any],
-                       target: Dict[str, Any], *, check: int = 5) -> Dict[str, Any]:
+                       target: Dict[str, Any], *, check: int = 5, datum_operation=None) -> Dict[str, Any]:
     """The transform that puts a tileset whose ``root.transform`` is a TRUE ECEF
     one (WGS 84, ellipsoidal heights: RealityScan, Metashape's Cesium export)
     into the study's frame: its CRS minus its shift, ORTHOMETRIC heights.
@@ -353,6 +532,13 @@ def relocate_true_ecef(transform: Sequence[float], bounding_volume: Dict[str, An
     Pulkovo 1942(58) → WGS 84, a Helmert of 7 parameters, never «the same
     numbers») → the height minus the geoid's undulation (EGM2008) → minus the
     shift. The affine fit and its residual as `relocate_transform`'s.
+
+    MICRO-DATUM-DICHIARATO · the datum operation is the GeoPositionNode's
+    ``datum_operation`` when declared (``datum_op``: Metashape writes Stereo70
+    in ECEF with EPSG:1645, PROJ would take EPSG:15995 — 0.8 m at Templu Mare),
+    else PROJ's best; the answer's ``datum`` says which and why. No EGM2008
+    grid (or a grid that answers ±Infinity) is a refusal, never ellipsoidal
+    heights drawn as orthometric ones nor a NaN.
     """
     from pyproj import Transformer
     from s3dgraphy.geometry.frame import _apply, _column_major, _mat, volume_points
@@ -370,35 +556,46 @@ def relocate_true_ecef(transform: Sequence[float], bounding_volume: Dict[str, An
         return {"ok": False, "error": "no points to fit on (a region volume is already geographic)"}
     M = _mat(transform)
     to_geo = Transformer.from_crs("EPSG:4978", "EPSG:4979", always_xy=True)
-    hz = _best_op("EPSG:4326", crs)
+    hz, why = datum_op(crs, datum_operation)
     if hz is None:
-        return {"ok": False, "error": f"PROJ has no operation WGS 84 → {crs} but a ballpark one"}
-    geoid, geoid_how = _geoid_op()
+        return {"ok": False, "error": why, "datum": {"declared": datum_operation not in (None, ""),
+                                                     "code": datum_operation or None}}
     # the study's origin, back on the Earth: the guard against a fake ECEF
-    back = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-    olon, olat = back.transform(tsh[0], tsh[1])
+    olon, olat = hz.inverse(tsh[0], tsh[1])
+    geoid, geoid_how = _geoid_op(at=(olon, olat))
+    if geoid is None:
+        return {"ok": False, "error": f"no EGM2008 geoid: {geoid_how} — the heights cannot be made orthometric",
+                "datum": hz.words(), "geoid": {"crs": GEOID_CRS, "how": geoid_how}}
 
     def true_of(p):
         x, y, z = _apply(M, p)
         lon, lat, h = to_geo.transform(x, y, z)
         e, n = hz.transform(lon, lat)
-        H = geoid.transform(lon, lat, h)[2] if geoid is not None else h
+        H = geoid.transform(lon, lat, h)[2]
+        if not all(math.isfinite(v) for v in (e, n, H)):
+            raise ArithmeticError(f"PROJ answered a number that is not finite at lon {lon:.6f}, lat {lat:.6f} (E {e}, N {n}, H {H})")
         return (e - tsh[0], n - tsh[1], H - tsh[2]), (lon, lat, h, h - H)
 
     centre = [sum(p[k] for p in pts) / len(pts) for k in range(3)]
-    q, (clon, clat, ch, und) = true_of(centre)
+    try:
+        q, (clon, clat, ch, und) = true_of(centre)
+    except ArithmeticError as exc:
+        return {"ok": False, "error": str(exc), "datum": hz.words(), "geoid": {"crs": GEOID_CRS, "how": geoid_how}}
     far = _haversine(olon, olat, clon, clat)
     if far > NEAR_STUDY_M:
         return {"ok": False, "error": "far", "why": f"the root is {far / 1000:.1f} km from the study's origin: not taken for a true ECEF frame",
                 "written": {"lat": clat, "lon": clon, "h": ch}}
-    dst = [true_of(p)[0] for p in pts]
-    fit = fit_affine(pts, dst)
-    errs = [math.dist(true_of(p)[0], _apply([*fit, [0, 0, 0, 1]], p)) for p in (chk or pts)]
+    try:
+        dst = [true_of(p)[0] for p in pts]
+        fit = fit_affine(pts, dst)
+        errs = [math.dist(true_of(p)[0], _apply([*fit, [0, 0, 0, 1]], p)) for p in (chk or pts)]
+    except ArithmeticError as exc:
+        return {"ok": False, "error": str(exc), "datum": hz.words(), "geoid": {"crs": GEOID_CRS, "how": geoid_how}}
     return {"ok": True, "transform": _column_major(fit), "target": {"crs": crs, "shift": tsh},
             "residual_rms_m": math.sqrt(sum(e * e for e in errs) / len(errs)), "residual_max_m": max(errs),
             "points": len(chk or pts), "written": {"lat": clat, "lon": clon, "h": ch}, "true": {"x": q[0], "y": q[1], "z": q[2]},
-            "datum": {"operation": hz.description, "accuracy_m": hz.accuracy if hz.accuracy and hz.accuracy > 0 else None},
-            "geoid": {"crs": GEOID_CRS, "undulation_m": und if geoid is not None else None, "how": geoid_how},
+            "datum": hz.words(),
+            "geoid": {"crs": GEOID_CRS, "undulation_m": und, "how": geoid_how},
             "from_study_m": far}
 
 

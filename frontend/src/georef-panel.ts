@@ -236,6 +236,26 @@ export function renderGeorefSection(host: HTMLElement, store: DocumentStore, dep
   field(t("georef.y"), "shift_y", fmtCoord(sy), t("georef.shiftHint"), numOrUndef);
   const zi = field(t("georef.z"), "shift_z", fmtCoord(sz), t("georef.zHint"), numOrUndef);
   field(t("georef.azimuth"), "rotation", fmtCoord(Number(d.rotation) || 0), t("georef.azimuthHint"), numOrUndef);
+  // MICRO-DATUM-DICHIARATO · the operation the dataset's coordinates were taken
+  // to WGS 84 with (Metashape: EPSG:1645 for Stereo70): the bridge places the
+  // tilesets in true ECEF and anchors the globe with it; empty = PROJ's best
+  const declared = typeof d.datum_operation === "string" ? d.datum_operation : d.datum_operation == null ? "" : String(d.datum_operation);
+  const di = field(t("georef.datumOp"), "datum_operation", declared, t("georef.datumOpHint"), (s) => {
+    if (s === "") return null;
+    const m = /^(?:EPSG\s*:{1,2}\s*)?(\d+)$/i.exec(s);
+    return m && Number(m[1]) > 0 ? `EPSG:${Number(m[1])}` : undefined;
+  });
+  di.inputMode = "text";
+  di.placeholder = t("georef.datumOpPlaceholder");
+  const q = document.createElement("button");
+  q.type = "button";
+  q.className = "win-help";
+  q.textContent = "?";
+  q.title = t("georef.datumOpHint");
+  q.setAttribute("aria-label", t("georef.datumOpHint"));
+  q.dataset.georef = "datum-help";
+  q.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); deps.say(t("georef.datumOpHint")); });
+  di.parentElement?.querySelector(".insp-field-label")?.appendChild(q);
   // the vertical reference
   const vl = el("label", "georef-f");
   vl.appendChild(el("span", "insp-field-label", t("georef.vertical")));
@@ -272,6 +292,12 @@ export function renderGeorefSection(host: HTMLElement, store: DocumentStore, dep
         a.dataset.georef = "accuracy";
         a.dataset.accuracy = ci.to_wgs84.accuracy == null ? "unknown" : String(ci.to_wgs84.accuracy);
         sec.appendChild(a);
+        // MICRO-DATUM-DICHIARATO · the line above is PROJ's choice; a declared operation replaces it
+        if (declared) {
+          const dl = el("div", "insp-hint georef-acc", t("georef.datumDeclared", { op: declared }));
+          dl.dataset.georef = "datum-declared";
+          sec.appendChild(dl);
+        }
       }
       const w = crsWarning(ci);
       if (w) {

@@ -893,22 +893,43 @@ def job_cancel(job_id: str) -> "tuple[int, dict]":
 
 # ── the site frame ───────────────────────────────────────────────────────────
 
-def site_frame(epsg: int, x: float, y: float, z: float = 0.0, rotation: float = 0.0) -> dict:
+def site_frame(epsg: int, x: float, y: float, z: float = 0.0, rotation: float = 0.0,
+               datum_operation=None) -> dict:
     """The scene's origin (the GeoPositionNode's shift) on the ellipsoid, and
     the true azimuth of the scene's +y: the CRS's grid north at the origin
     (measured: the origin and a point 100 m up the grid, through PROJ, then
     the geodesic between them) turned by the node's `rotation` (clockwise,
-    s3Dgraphy `georeference_scene`'s convention)."""
+    s3Dgraphy `georeference_scene`'s convention).
+
+    MICRO-DATUM-DICHIARATO · the operation to WGS 84 is the one a tileset in
+    true ECEF is brought in with (`em_gis.datum_op`): the node's declared
+    `datum_operation`, else PROJ's best non-ballpark — the globe, the base map
+    and the tilesets anchored alike. A declared operation PROJ does not know is
+    refused (`ok: false`). With nothing declared and only a ballpark operation
+    (EPSG:31700), PROJ's own choice as before, said in `datum`."""
     from pyproj import Geod, Transformer
-    t = Transformer.from_crs(int(epsg), 4326, always_xy=True)
-    lon, lat = t.transform(x, y)
-    lon1, lat1 = t.transform(x, y + 100.0)
-    lon2, lat2 = t.transform(x + 100.0, y)
+    import em_gis
+    op, why = em_gis.datum_op(int(epsg), datum_operation)
+    if op is None and em_gis.normalise_datum_operation_or_none(datum_operation) is not None:
+        return {"ok": False, "error": why, "epsg": int(epsg),
+                "datum": {"declared": True, "code": datum_operation}}
+    if op is None:
+        t = Transformer.from_crs(int(epsg), 4326, always_xy=True)
+        inv = t.transform
+        datum = {"operation": t.description, "accuracy_m": t.accuracy if t.accuracy and t.accuracy > 0 else None,
+                 "declared": False, "code": None, "why": f"{why}: PROJ's own choice"}
+    else:
+        inv = op.inverse
+        datum = op.words()
+    lon, lat = inv(x, y)
+    lon1, lat1 = inv(x, y + 100.0)
+    lon2, lat2 = inv(x + 100.0, y)
     g = Geod(ellps="WGS84")
     az, _b, dist = g.inv(lon, lat, lon1, lat1)
     _az2, _b2, dist_e = g.inv(lon, lat, lon2, lat2)
     return {"ok": True, "lon": lon, "lat": lat, "h": float(z), "grid_north": az, "azimuth": az + float(rotation),
-            "rotation": float(rotation), "scale": dist / 100.0, "scale_east": dist_e / 100.0, "epsg": int(epsg)}
+            "rotation": float(rotation), "scale": dist / 100.0, "scale_east": dist_e / 100.0, "epsg": int(epsg),
+            "datum": datum}
 
 
 # ── MICRO-GEOREF-GRAFO · a CRS as PROJ's database knows it ───────────────────

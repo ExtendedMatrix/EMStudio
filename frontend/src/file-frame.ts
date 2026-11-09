@@ -78,21 +78,33 @@ export function frameAmong(ids: Array<string | null | undefined>,
   return null;
 }
 
+/** MICRO-DATUM-DICHIARATO (9 Nov 2026) · the GeoPositionNode's declared
+ *  operation to WGS 84 (`datum_operation`, «EPSG:<code>»), as written: the
+ *  bridge checks its form and whether PROJ knows it. null = not declared. */
+export function datumOperationOf(geo: Record<string, unknown> | null | undefined): string | null {
+  const v = geo?.datum_operation;
+  if (typeof v === "number" && Number.isFinite(v)) return `EPSG:${v}`;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
 /** The frame the Space lands in: the study's (its GeoPositionNode: a CRS and a
  *  shift) when it declares a CRS; otherwise the file's own shifted grid — the
- *  frame the models exported with the same shift are in (`own: true`). */
+ *  frame the models exported with the same shift are in (`own: true`). The
+ *  study's declared datum operation travels with it (MICRO-DATUM-DICHIARATO). */
 export function studyTarget(geo: Record<string, unknown> | null | undefined, frame: FileFrame):
-    { crs: string; shift: [number, number, number]; own: boolean } | null {
+    { crs: string; shift: [number, number, number]; own: boolean; datum_operation?: string } | null {
   const crs = normaliseCrs(geo?.epsg);
-  if (crs) return { crs, shift: [num(geo?.shift_x) ?? 0, num(geo?.shift_y) ?? 0, num(geo?.shift_z) ?? 0], own: false };
+  const op = datumOperationOf(geo);
+  if (crs) return { crs, shift: [num(geo?.shift_x) ?? 0, num(geo?.shift_y) ?? 0, num(geo?.shift_z) ?? 0], own: false,
+    ...(op ? { datum_operation: op } : {}) };
   if (!frame.crs) return null;
   return { crs: frame.crs, shift: frame.shift, own: true };
 }
 
 /** What a frame and its landing say, as one key (a layer relocated again only
  *  when it changes) */
-export const frameKey = (f: FileFrame | null, target: { crs: string; shift: number[] } | null): string =>
-  f && target ? `${f.crs}|${f.shift.join(",")}>${target.crs}|${target.shift.join(",")}` : "";
+export const frameKey = (f: FileFrame | null, target: { crs: string; shift: number[]; datum_operation?: string } | null): string =>
+  f && target ? `${f.crs}|${f.shift.join(",")}>${target.crs}|${target.shift.join(",")}${target.datum_operation ? `|${target.datum_operation}` : ""}` : "";
 
 export interface Relocation {
   ok: boolean;
@@ -105,13 +117,19 @@ export interface Relocation {
   via?: "bridge" | "browser";
   /** the bridge's refusal, when the browser answered in its place */
   bridgeError?: string;
+  /** MICRO-DATUM-DICHIARATO · the datum operation the bridge used, and whether it was the declared one */
+  datum?: { operation: string | null; declared: boolean; code?: string | null; why?: string; accuracy_m?: number | null };
 }
 
 const asked = new Map<string, Promise<Relocation>>();
 
 /** the browser's relocation in place of the bridge's refusal, or the refusal */
 function browserOr(refused: Relocation, root: { transform: number[] | null; boundingVolume: unknown },
-                   frame: FileFrame, target: { crs: string; shift: number[] }): Relocation {
+                   frame: FileFrame, target: { crs: string; shift: number[]; datum_operation?: string }): Relocation {
+  // MICRO-DATUM-DICHIARATO · the browser knows no datum operation: for a root
+  // in TRUE ECEF a declared one is never replaced by its reading — the refusal
+  // is said (a file of shifted coordinates involves none)
+  if (target.datum_operation && frame.crs === "EPSG:4978") return refused;
   const b = relocateInBrowser(root, frame, target);
   return b.ok ? { ...b, bridgeError: refused.error } : refused;
 }
@@ -121,14 +139,15 @@ function browserOr(refused: Relocation, root: { transform: number[] | null; boun
  *  the browser's (`relocateInBrowser`) when the projection is one it knows,
  *  else the refusal — and the layer is centred, upright. */
 export function relocation(base: string | null, root: { transform: number[] | null; boundingVolume: unknown },
-                           frame: FileFrame, target: { crs: string; shift: number[] }): Promise<Relocation> {
+                           frame: FileFrame, target: { crs: string; shift: number[]; datum_operation?: string }): Promise<Relocation> {
   if (!base) return Promise.resolve(browserOr({ ok: false, error: "no-bridge" }, root, frame, target));
   if (!root.transform || root.transform.length !== 16) return Promise.resolve({ ok: false, error: "no-transform" });
   const k = `${base}|${root.transform.join(",")}|${frameKey(frame, target)}`;
   let p = asked.get(k);
   if (!p) {
     p = fetch(`${base}/geo/tileset-frame`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transform: root.transform, bounding_volume: root.boundingVolume, frame, target }) })
+      body: JSON.stringify({ transform: root.transform, bounding_volume: root.boundingVolume, frame, target,
+        datum_operation: target.datum_operation ?? null }) })
       .then(async (r): Promise<Relocation> => {
         if (r.status === 404) return { ok: false, error: "old-bridge" };
         const j = await r.json().catch(() => null) as Relocation | null;
