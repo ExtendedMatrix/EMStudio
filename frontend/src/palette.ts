@@ -142,6 +142,49 @@ export function nodeMaterialRgb(nodeType?: string): [number, number, number] | n
   return c ? [c.r, c.g, c.b] : null;
 }
 
+/** NIGHT-TAGLI-E-NEUTRE (em_visual_rules 1.6.44) · how a proxy of a type is
+ *  drawn in 3D, read with the rule of `threed_style._comment` — the same
+ *  reading as s3Dgraphy's `get_threed_style`: `faces.rgba_color` absent = the
+ *  material's colour, `edges.rgba_color` absent = the faces', a key absent =
+ *  `threed_style.defaults`. Colours LINEAR. The opacity is the TYPE's: the
+ *  scene multiplies it by its global proxy opacity. Null when the type never
+ *  becomes a mesh (no `material`). */
+export interface ThreedStyle {
+  faces: { show: boolean; rgb: [number, number, number]; opacity: number };
+  edges: { show: boolean; rgb: [number, number, number]; width: number; style: "solid" | "dashed" | "corners" };
+  geometry: string | null;
+  featureAngleDeg: number;
+  dashRatio: number;
+  gapRatio: number;
+  tickRatio: number;
+}
+type RawRgba = { r: number; g: number; b: number };
+type RawThreed = { faces?: { show?: boolean; rgba_color?: RawRgba; opacity?: number };
+  edges?: { show?: boolean; rgba_color?: RawRgba; width?: number; style?: string }; geometry?: string };
+export function nodeThreedStyle(nodeType?: string): ThreedStyle | null {
+  const key = nodeType ?? "unknown";
+  const raw = nodeStyles[NODE_ALIAS[key] ?? key] as { style?: { material?: { rgba_color?: RawRgba }; threed?: RawThreed } } | undefined;
+  const m = raw?.style?.material?.rgba_color;
+  if (!m) return null;
+  const block = (rules as unknown as { threed_style?: { defaults?: RawThreed; feature_angle_deg?: number;
+    dashed?: { dash_ratio?: number; gap_ratio?: number }; corners?: { tick_ratio?: number } } }).threed_style ?? {};
+  const own = raw?.style?.threed ?? {};
+  const f = { show: true, opacity: 1, ...(block.defaults?.faces ?? {}), ...(own.faces ?? {}) };
+  const e = { show: false, width: 1, style: "solid", ...(block.defaults?.edges ?? {}), ...(own.edges ?? {}) };
+  const rgb = (c: RawRgba | undefined): [number, number, number] | null => (c ? [c.r, c.g, c.b] : null);
+  const faceRgb = rgb(f.rgba_color) ?? [m.r, m.g, m.b];
+  const style = (["solid", "dashed", "corners"] as const).find((s) => s === e.style) ?? "solid";
+  return {
+    faces: { show: f.show !== false, rgb: faceRgb, opacity: typeof f.opacity === "number" ? f.opacity : 1 },
+    edges: { show: !!e.show, rgb: rgb(e.rgba_color) ?? faceRgb, width: typeof e.width === "number" ? e.width : 1, style },
+    geometry: own.geometry ?? null,
+    featureAngleDeg: block.feature_angle_deg ?? 20,
+    dashRatio: block.dashed?.dash_ratio ?? 0.04,
+    gapRatio: block.dashed?.gap_ratio ?? 0.025,
+    tickRatio: block.corners?.tick_ratio ?? 0.34,
+  };
+}
+
 /** SPAZIO · the colour of a rung of the placement axis
  *  (`document_variant_styles.<key>.border_color`): the RM's contour. */
 export function placementColour(key: string | null | undefined): string | null {

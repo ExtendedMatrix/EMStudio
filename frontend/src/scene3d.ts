@@ -62,6 +62,8 @@ import { altReleaseDue, altSide, bigTurn, pickByDistance, screenShare, SSE_PX, v
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
 import { estimateMb, lighterThatFits, mbSay, roomFor, type Weight } from "./memory-guard";
+import { cutEdges } from "./threed-edges";
+import type { ThreedStyle } from "./palette";
 
 export interface SceneItem {
   kind: "rm" | "proxy";
@@ -74,6 +76,10 @@ export interface SceneItem {
   resourceId?: string;
   /** linear rgb of the unit's type, for a proxy */
   rgb?: [number, number, number];
+  /** NIGHT-TAGLI-E-NEUTRE · the 3D style of the unit's type (em_visual_rules
+   *  `threed`, `nodeThreedStyle`): faces shown or not and their opacity (× the
+   *  global proxy opacity), the type's own edges. Absent = as before 1.6.44 */
+  threed?: ThreedStyle | null;
   /** MICRO-SPAZIO-3D-2 · the object's transform, in three's axes, applied over
    *  the file as it is (the glb is never changed): absent = identity */
   pose?: Pose;
@@ -544,6 +550,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __spaceClip?: () => number[];
     /** MICRO-SPAZIO-3D-3 · what the scene draws as selected, and the active */
     __spaceSelected?: () => { selected: string[]; active: string | null };
+    /** NIGHT-TAGLI-E-NEUTRE · per unit, how its proxy is drawn: the faces'
+     *  material (shown, opacity, linear rgb) and its lines (the type's style, or «contour») */
+    __spaceProxyLook?: () => Record<string, { visible: boolean; opacity: number; rgb: number[]; edges: string[]; segments: number[] }>;
   };
   probe.__spaceSelected = () => ({ selected: items.filter((i) => i.selected).map((i) => `${i.kind}:${i.id}`),
     active: items.find((i) => i.active) ? `${items.find((i) => i.active)!.kind}:${items.find((i) => i.active)!.id}` : null });
@@ -985,18 +994,46 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const translucent = (item: SceneItem) => {
         const c = new THREE.Color();
-        const [r, g, b] = item.rgb ?? [0.328, 0.033, 0.033];
+        const [r, g, b] = item.threed?.faces.rgb ?? item.rgb ?? [0.328, 0.033, 0.033];
         c.setRGB(r, g, b, THREE.LinearSRGBColorSpace);
         // MICRO-SPAZIO-3D · «in fil di ferro»: the overlay draws the proxies as wire
         const wire = ov("s3_proxy_wire");
-        return new THREE.MeshLambertMaterial({ color: c, transparent: true, opacity: proxyOpacity(),
+        // NIGHT-TAGLI-E-NEUTRE · the type's opacity MULTIPLIES the global one
+        // (em_visual_rules threed_style, point 3); a type without faces (USNt)
+        // keeps its mesh for the pick, drawn by no pixel
+        const typeOp = item.threed?.faces.opacity ?? 1;
+        const m = new THREE.MeshLambertMaterial({ color: c, transparent: true, opacity: proxyOpacity() * typeOp,
           depthWrite: false, wireframe: wire });
+        m.userData.typeOpacity = typeOp;
+        if (item.threed && !item.threed.faces.show) m.visible = false;
+        return m;
       };
       const selOutline = (item: SceneItem) => item.selected && ov("s3_sel_outline");
       // MICRO-SPAZIO-3D-3 · Blender's theme: the active object's outline light
       // (#FFAA40), the other selected ones a darker orange (#F15800)
       const selColour = (item: SceneItem): number => (item.active ? SEL_ACTIVE : SEL_OTHER);
       const outline = (geom: any, item: SceneItem, at?: any) => {
+        const th = item.threed;
+        // NIGHT-TAGLI-E-NEUTRE · a type with edges of its own (USN solid, USNt
+        // dashed): the feature edges cut by the rule, in the edges' colour; the
+        // others keep the thin contour in the 2D frame colour, as before
+        if (th?.edges.show) {
+          const feat = new THREE.EdgesGeometry(geom, th.featureAngleDeg);
+          if (!geom.boundingBox) geom.computeBoundingBox();
+          const size = geom.boundingBox.getSize(new THREE.Vector3());
+          const pts = cutEdges(feat.getAttribute("position").array, { style: th.edges.style, size: [size.x, size.y, size.z],
+            dashRatio: th.dashRatio, gapRatio: th.gapRatio, tickRatio: th.tickRatio });
+          feat.dispose();
+          const g = new THREE.BufferGeometry();
+          g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+          const col = selOutline(item) ? selColour(item)
+            : new THREE.Color().setRGB(th.edges.rgb[0], th.edges.rgb[1], th.edges.rgb[2], THREE.LinearSRGBColorSpace);
+          // WebGL draws 1 px whatever linewidth says: `width` 1 is what the rule asks today
+          const e = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: col, linewidth: th.edges.width }));
+          e.userData.typeEdges = th.edges.style;
+          if (at) e.position.copy(at);
+          return e;
+        }
         const col = selOutline(item) ? selColour(item) : new THREE.Color(item.edge ?? "#555555");
         const e = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: col }));
         if (at) e.position.copy(at);
@@ -2289,7 +2326,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (o.isMesh && o.userData.unitId && o.material) {
             const wire = ov("s3_proxy_wire");
             o.material.wireframe = wire;
-            o.material.opacity = proxyOpacity();
+            o.material.opacity = proxyOpacity() * (o.material.userData.typeOpacity ?? 1);
           } else if (o.isMesh && o.userData.rmId && o.material) {
             for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
               if (m.userData.baseOpacity === undefined) m.userData.baseOpacity = m.opacity ?? 1;
@@ -2309,6 +2346,18 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!statsOn) { statAt = 0; statFrames = 0; }
         buildDecor();
         attachGizmo();
+      };
+      probe.__spaceProxyLook = () => {
+        const out: Record<string, { visible: boolean; opacity: number; rgb: number[]; edges: string[]; segments: number[] }> = {};
+        content.traverse((o: any) => {
+          if (!o.isMesh || !o.userData.unitId || out[o.userData.unitId]) return;
+          const lines = o.children.filter((c: any) => c.isLineSegments);
+          out[o.userData.unitId] = { visible: o.material.visible, opacity: Math.round(o.material.opacity * 1000) / 1000,
+            rgb: o.material.color.toArray().map((x: number) => Math.round(x * 1000) / 1000),
+            edges: lines.map((l: any) => l.userData.typeEdges ?? "contour"),
+            segments: lines.map((l: any) => l.geometry.getAttribute("position").count / 2) };
+        });
+        return out;
       };
       probe.__spaceOverlays = () => Object.fromEntries((["s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch", "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles",
         "s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_navgizmo", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches"] as OverlayKey[]).map((k) => [k, ov(k)]));

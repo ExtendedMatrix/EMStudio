@@ -210,7 +210,7 @@ import { issues as computeIssues, unitOfIssue, type Issue, type IssueFixers, typ
 import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
 import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
-import { edgeStyle, nodeMaterialRgb, nodeStyle, placementColour } from "./palette";
+import { edgeStyle, nodeMaterialRgb, nodeStyle, nodeThreedStyle, placementColour } from "./palette";
 import { glyphMarkupFor, typeIconElement } from "./type-icons";
 import { buildDiscLegend, buildLegendPanel, discLegendContent, legendContent, showLegendModal } from "./legend";
 import { datamodelPhraseBook, linkedPhrase, phraseDirFor } from "./phrases";
@@ -32000,6 +32000,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (!px || !shown(`proxy:${u}`)) continue;
         const type = st.node(u)?.node_type;
         const common = { kind: "proxy" as const, id: u, label: nm(u), decor: decorOf(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
+          // NIGHT-TAGLI-E-NEUTRE · the type's 3D style (em_visual_rules threed): USN, USNt and the rest
+          threed: nodeThreedStyle(type),
           edge: nodeStyle(type).border, selected: isSel(`proxy:${u}`), active: ssel.active === `proxy:${u}`,
           // MICRO-SERVSF-FINE-ISTANZE p.3 · an instance at its own model's transform
           pose: poseOfNode(px.instanceOf ? px.xfNode ?? px.shapeId : px.shapeId) };
