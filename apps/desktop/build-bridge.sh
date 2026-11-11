@@ -191,7 +191,8 @@ fi
 #
 # numpy stays OUT (MICRO-ANTEPRIMA-AGGANCIATA, 7 Nov 2026): the one thing of the
 # bridge that needed it — the affine fit of /geo/tileset-frame — is computed
-# without it (`em_gis.fit_affine`, lent to s3Dgraphy's `relocate_transform`).
+# without it (s3Dgraphy's `geometry.frame._fit_affine`, pure Python since
+# MICRO-FIT-AFFINE-SENZA-NUMPY, 11 Nov 2026; s3Dgraphy's tests guard it).
 # Whatever needs numpy next is caught by check-bridge.sh below, not by a person.
 
 "$PY" -m PyInstaller --onefile --name em-bridge \

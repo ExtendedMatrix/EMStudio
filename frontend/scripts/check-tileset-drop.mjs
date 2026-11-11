@@ -324,7 +324,12 @@ import json, math, sys
 sys.path[:0] = [${JSON.stringify(TOOLS)}, ${JSON.stringify(S3D + "src")}]
 try:
     import numpy as np
-    from s3dgraphy.geometry.frame import _fit_affine as numpy_fit
+    def numpy_fit(src, dst):          # the old numpy fit of s3Dgraphy, the reference
+        S, D = np.asarray(src, dtype=float), np.asarray(dst, dtype=float)
+        cs, cd = S.mean(axis=0), D.mean(axis=0)
+        A, *_ = np.linalg.lstsq(S - cs, D - cd, rcond=None)
+        L = A.T; t = cd - L @ cs
+        return [[float(L[r][0]), float(L[r][1]), float(L[r][2]), float(t[r])] for r in range(3)]
 except ImportError:
     numpy_fit = None
 sys.modules["numpy"] = None          # the frozen sidecar: no numpy
@@ -339,7 +344,6 @@ T = [*E, 0, *N, 0, *U, 0, x, y, z, 1]
 bv = {"box": [2, 2, 0.3, 2, 0, 0, 0, 2, 0, 0, 0, 0.3]}
 target = {"crs": "EPSG:3844", "shift": [327372.56, 448682.65, 0]}
 out = {"ecef": em_gis.relocate_true_ecef(T, bv, target)}
-em_gis.lend_fit()
 out["shifted"] = F.relocate_transform([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 6378137, 0, 0, 1], {"crs": "EPSG:32633", "shift": [400000, 4600000, 0]},
                                       bounding_volume={"box": [0, 0, 0, 20, 0, 0, 0, 20, 0, 0, 0, 5]})
 pts = F.volume_points({"box": [3, -4, 1, 40, 0, 0, 0, 25, 0, 0, 0, 0]}, 3)          # a flat volume: numpy's minimum norm
@@ -362,7 +366,7 @@ print(json.dumps(out))
     const truePos = [r.transform[12], r.transform[14], -r.transform[13]];
     ok(Math.abs(truePos[0] + 56) < 1 && Math.abs(truePos[2] - 46.5) < 1, `…56 m west, 46.5 m south of the study's origin (${truePos.map((v) => v.toFixed(2))})`);
     ok(Math.hypot(truePos[0], truePos[2]) > 40, "…no trace of the preview's centre (the origin)");
-    ok(out.shifted.ok, `numpy blocked: shifted coordinates in a CRS relocated too (relocate_transform with the lent fit: ${out.shifted.error ?? "ok"})`);
+    ok(out.shifted.ok, `numpy blocked: shifted coordinates in a CRS relocated too (relocate_transform, s3Dgraphy's own fit: ${out.shifted.error ?? "ok"})`);
     if (out.vs_numpy !== null) ok(out.vs_numpy < 1e-6, `…the fit without numpy = numpy's lstsq, a flat volume included (${out.vs_numpy.toExponential(1)})`);
   }
   const build = readFileSync(new URL("../../apps/desktop/build-bridge.sh", import.meta.url), "utf8");
