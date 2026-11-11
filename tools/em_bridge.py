@@ -721,13 +721,17 @@ _MEASURE_MEMO = {}
 #: MICRO-ARCHIVE-ASSET-2 · where each ``POST /assets/list`` is, by the page's
 #: token: ``{phase, n, total, at}`` (``GET /assets/progress``)
 _ASSET_PROGRESS = {}
+#: MICRO-ASSETS-3TZ · when the page last asked GET /assets/progress, by token:
+#: a measure of tiles no page asks after any more stops
+_ASSET_SEEN = {}
 
 
-def _asset_progress(token, phase, n=0, total=0):
+def _asset_progress(token, phase, n=0, total=0, **more):
+    """``more``: the phase's words (``tiles``: ``name`` of the tileset)."""
     if not token:
         return
     import time as _t
-    _ASSET_PROGRESS[str(token)] = {"phase": phase, "n": int(n), "total": int(total), "at": _t.time()}
+    _ASSET_PROGRESS[str(token)] = {"phase": phase, "n": int(n), "total": int(total), "at": _t.time(), **more}
     # the old ones go (a page that never asked again)
     for k in [k for k, v in _ASSET_PROGRESS.items() if _t.time() - v["at"] > 600]:
         _ASSET_PROGRESS.pop(k, None)
@@ -826,58 +830,270 @@ def _measure_by_sha(resolved, progress=None):
 #: MICRO-ARCHIVE-ASSET-3 · a tileset's tiles measured by their heads, by
 #: (path, size, mtime) of its root (tileset.json or .3tz)
 _TILES_MEMO = {}
+#: MICRO-ASSETS-3TZ · over this many tiles a tileset is measured on a sample
+#: stratified by level and the rest estimated («stimato»): Metashape's 3tz of
+#: Templu Mare has 236.608 tiles; «Misura tutto» (``tiles_full``) reads them all
+TILES_SAMPLE_OVER = int(os.environ.get("EM_TILES_SAMPLE_OVER") or 50000)
+#: the tiles of the sample (each level has at least TILES_SAMPLE_MIN, or all its own)
+TILES_SAMPLE_N = int(os.environ.get("EM_TILES_SAMPLE_N") or 4000)
+TILES_SAMPLE_MIN = 64
+#: a measure no page asks after for this long stops (the page closed, or asked again)
+TILES_ABANDON_S = float(os.environ.get("EM_TILES_ABANDON_S") or 20)
+#: one measure per tileset at a time: a lock per memo key, the tokens waiting
+_TILES_GUARD = threading.Lock()
+_TILES_LOCKS = {}
+_TILES_WAIT = {}
+
+
+class _TilesAbandoned(Exception):
+    """No page waits for this measure any more."""
+
+
+def _tiles_disk_dir() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("EM_BRIDGE_STATE_DIR")
+                        or (pathlib.Path.home() / ".config" / "emstudio")) / "cache" / "tiles"
+
+
+def _tiles_disk_file(key) -> pathlib.Path:
+    return _tiles_disk_dir() / (hashlib.sha1(json.dumps(list(key)).encode("utf-8")).hexdigest() + ".json")
+
+
+def _tiles_disk_get(key):
+    """MICRO-ASSETS-3TZ · the measure kept on disk for (path, size, mtime): a
+    restart of EMStudio does not measure a 3tz of 6,5 GB again."""
+    try:
+        with open(_tiles_disk_file(key), encoding="utf-8") as fh:
+            got = json.load(fh)
+        return got["stats"] if got.get("key") == list(key) else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _tiles_disk_put(key, stats):
+    try:
+        f = _tiles_disk_file(key)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"key": list(key), "stats": stats}, fh)
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
+class _TileReader:
+    """``read_at(p, offset, length)`` for the files of a tileset: in its
+    folder (beside ``tileset.json``) or the members of a ``.3tz`` through ONE
+    ``ZipFile`` (its central directory read once). A STORED member is read at
+    its bytes; a DEFLATED one (Metashape's 3tz) is inflated as a stream up to
+    the bytes asked — never whole, never twice: the bytes inflated of the
+    member being read are kept until another member is asked. ``opens``
+    counts the members opened, ``inflated`` the bytes inflated (MICRO-ASSETS-3TZ)."""
+
+    def __init__(self, path):
+        self.path = path
+        self.opens = 0
+        self.inflated = 0
+        self.zf = None
+        self._raw = None
+        self._cur = None          # (member name, its stream, its bytes so far)
+        if path.lower().endswith(".3tz"):
+            self.zf = zipfile.ZipFile(_long_path(path))
+            self.infos = {i.filename: i for i in self.zf.infolist()}
+            self._starts = {}
+        else:
+            self.folder = os.path.dirname(path) if path.lower().endswith(".json") else path
+
+    def load_json(self, p):
+        if self.zf is None:
+            try:
+                with open(_long_path(os.path.join(self.folder, *p.split("/"))), "rb") as fh:
+                    return json.loads(fh.read().decode("utf-8"))
+            except OSError:
+                return None
+        i = self.infos.get(p)
+        return json.loads(self.zf.read(i).decode("utf-8")) if i is not None else None
+
+    def size_of(self, p):
+        if self.zf is None:
+            try:
+                return os.path.getsize(_long_path(os.path.join(self.folder, *p.split("/"))))
+            except OSError:
+                return None
+        i = self.infos.get(p)
+        return int(i.file_size) if i is not None else None
+
+    def read_at(self, p, off, n):
+        if self.zf is None:
+            with open(_long_path(os.path.join(self.folder, *p.split("/"))), "rb") as fh:
+                fh.seek(off)
+                return fh.read(n)
+        import struct
+        i = self.infos.get(p)
+        if i is None:
+            raise OSError(f"{p}: not in the archive")
+        if i.compress_type == zipfile.ZIP_STORED:
+            if self._raw is None:
+                self._raw = open(_long_path(self.path), "rb")
+            if p not in self._starts:
+                self.opens += 1
+                self._raw.seek(i.header_offset)
+                nlen, xlen = struct.unpack("<HH", self._raw.read(30)[26:30])
+                self._starts[p] = i.header_offset + 30 + nlen + xlen
+            n = max(0, min(n, i.file_size - off))
+            self._raw.seek(self._starts[p] + off)
+            return self._raw.read(n)
+        if self._cur is None or self._cur[0] != p:
+            self._close_member()
+            self.opens += 1
+            self._cur = (p, self.zf.open(i), bytearray())
+        _p, stream, buf = self._cur
+        want = min(off + n, i.file_size)
+        while len(buf) < want:
+            chunk = stream.read(max(want - len(buf), 4096))
+            if not chunk:
+                break
+            self.inflated += len(chunk)
+            buf += chunk
+        return bytes(buf[off:off + n])
+
+    def _close_member(self):
+        if self._cur is not None:
+            try:
+                self._cur[1].close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._cur = None
+
+    def close(self):
+        self._close_member()
+        for h in (self._raw, self.zf):
+            if h is not None:
+                try:
+                    h.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        self._raw = self.zf = None
 
 
 def _tile_range_reader(path):
-    """``read_at(p, offset, length)`` for the files of a tileset: in its
-    folder (beside ``tileset.json``) or the STORED members of a ``.3tz``
-    (their data found from the central directory: never the whole archive).
-    A deflated member is read whole (a 3tz stores its tiles)."""
-    import struct
-    import zipfile
-    if path.lower().endswith(".3tz"):
-        zf = zipfile.ZipFile(_long_path(path))
-        infos = {i.filename: i for i in zf.infolist()}
-        starts = {}
-
-        def read_at(p, off, n):
-            i = infos.get(p)
-            if i is None:
-                raise OSError(f"{p}: not in the archive")
-            if i.compress_type != zipfile.ZIP_STORED:
-                return zf.read(i)[off:off + n]
-            if p not in starts:
-                with open(_long_path(path), "rb") as fh:
-                    fh.seek(i.header_offset)
-                    h = fh.read(30)
-                    nlen, xlen = struct.unpack("<HH", h[26:30])
-                    starts[p] = i.header_offset + 30 + nlen + xlen
-            n = max(0, min(n, i.file_size - off))
-            with open(_long_path(path), "rb") as fh:
-                fh.seek(starts[p] + off)
-                return fh.read(n)
-        return read_at, zf
-    folder = os.path.dirname(path) if path.lower().endswith(".json") else path
-
-    def read_at(p, off, n):
-        with open(_long_path(os.path.join(folder, *p.split("/"))), "rb") as fh:
-            fh.seek(off)
-            return fh.read(n)
-    return read_at, None
+    """``(read_at, closer)`` for the files of a tileset (:class:`_TileReader`)."""
+    r = _TileReader(path)
+    return r.read_at, r
 
 
-def _tiles_by_path(resolved):
+def _tiles_sample(tree, names, size_of=None):
+    """MICRO-ASSETS-3TZ · the tiles to read of ``names``: all of them up to
+    TILES_SAMPLE_OVER, else a sample stratified by level (each level its share
+    of TILES_SAMPLE_N, at least TILES_SAMPLE_MIN or all its own, evenly spaced
+    in the tree's order) and, with ``size_of`` (the central directory's sizes:
+    nothing read), the level's largest files too — the heaviest tiles, that
+    an even sample misses (Templu Mare 2013: 8.474 triangles at most in the
+    even sample, 15.134 in all; MEASURED 11 Nov 2026) → ``(picked, {depth:
+    [tiles of the level, the even ones]}, the even ones)``; the second None
+    when all are read."""
+    if len(names) <= TILES_SAMPLE_OVER:
+        return names, None, set(names)
+    depth = {n["uri"]: int(n.get("depth") or 0) for n in tree["nodes"].values() if n.get("uri")}
+    by = {}
+    for u in names:
+        by.setdefault(depth.get(u, 0), []).append(u)
+    picked, strata, even = [], {}, set()
+    for d in sorted(by):
+        lv = by[d]
+        k = min(len(lv), max(TILES_SAMPLE_MIN, round(TILES_SAMPLE_N * len(lv) / len(names))))
+        ev = [lv[int((j + 0.5) * len(lv) / k)] for j in range(k)]
+        even.update(ev)
+        big = []
+        if size_of is not None and k < len(lv):
+            big = sorted(lv, key=lambda u: -(size_of(u) or 0))[:max(TILES_SAMPLE_MIN // 4, k // 4)]
+        seen = set(ev)
+        picked += ev + [u for u in big if u not in seen]
+        strata[d] = [len(lv), k]
+    return picked, strata, even
+
+
+def _tiles_measure(tree, reader, *, full=False, progress=None, alive=None):
+    """The tiles of ``tree`` read by their heads (s3Dgraphy's ``tile_head``)
+    → the stats of ``tileset_fit.measure_tiles`` (``tiles, read, per_tile,
+    max_triangles, max_texture_side``); over TILES_SAMPLE_OVER (and not
+    ``full``) a sample stratified by level, the rest estimated level by level
+    (each tile read standing for its share of its level): ``estimated``,
+    ``sampled``. ``progress(n, total)`` every 200 tiles; ``alive()`` False
+    stops it (:class:`_TilesAbandoned`)."""
+    from s3dgraphy.resources import tileset_fit as F
+    names = F.tiles_of(tree)
+    picked, strata, even = (names, None, None) if full else _tiles_sample(tree, names, getattr(reader, "size_of", None))
+    depth = {n["uri"]: int(n.get("depth") or 0) for n in tree["nodes"].values() if n.get("uri")} if strata else {}
+    per, by = [], {}
+    for j, p in enumerate(picked):
+        if j % 200 == 0:
+            if alive is not None and not alive():
+                raise _TilesAbandoned()
+            if progress is not None:
+                progress(j, len(picked))
+        h = F.tile_head(reader.read_at, p)
+        if h is not None:
+            rec = [int(h["triangles"]), int(h["texture_side"])]
+            per.append(rec)
+            if strata and p in even:
+                by.setdefault(depth.get(p, 0), []).append(rec)
+    if progress is not None:
+        progress(len(picked), len(picked))
+    out = {"tiles": len(names), "read": len(per), "per_tile": per,
+           "max_triangles": max((x[0] for x in per), default=0),
+           "max_texture_side": max((x[1] for x in per), default=0)}
+    if strata:
+        # the rest estimated from the even ones (the largest are not its
+        # share of the level: they say the most, not how many)
+        est = []
+        for d, (n_lv, k) in strata.items():
+            recs = by.get(d) or []
+            want = round(n_lv * len(recs) / k) if k else 0
+            est += [recs[int(j * len(recs) / want)] for j in range(want)] if recs else []
+        # the most of one tile said by every tile read, the largest too
+        top = sorted(per, key=lambda x: (-x[0], -x[1]))[:1] + sorted(per, key=lambda x: (-x[1], -x[0]))[:1]
+        extra = [x for i, x in enumerate(top) if x not in est and x not in top[:i]]
+        est = est[:max(0, len(est) - len(extra))] + extra
+        out.update({"read": len(est), "per_tile": est, "estimated": True,
+                    "sampled": len(picked), "sample_read": len(per)})
+    return out
+
+
+def _tiles_alive(key, started):
+    """Does a page still wait for the measure of ``key``? A caller with no
+    token always does; a page's token while it asks GET /assets/progress."""
+    toks = _TILES_WAIT.get(key) or {}
+    if not toks or "" in toks:
+        return True
+    now = time.time()
+    return any(now - _ASSET_SEEN.get(t, started) < TILES_ABANDON_S for t in toks)
+
+
+def _tiles_by_path(resolved, token="", full=False):
     """A ``tiles`` for s3Dgraphy's ``asset_list`` (MICRO-ARCHIVE-ASSET-3): a
     tileset version's tiles, each measured by its head (``tileset_fit``:
     the wrapper, the glb's JSON, the first bytes of its images — never the
     geometry), from its tileset.json or .3tz on this computer; None when the
-    file is not here, is in the cloud, or the s3dgraphy has no tileset_fit."""
+    file is not here, is in the cloud, or the s3dgraphy has no tileset_fit.
+
+    MICRO-ASSETS-3TZ: the tree and the heads through one ZipFile (a deflated
+    member inflated only up to its head); over TILES_SAMPLE_OVER tiles a
+    sample, the rest estimated (``full``: all); the phase ``tiles`` said to
+    every page waiting (``{n, total, name}``); one measure per (path, size,
+    mtime) at a time — a second asking waits for the first and takes its memo
+    —, kept on disk; a measure no page waits for any more stops.
+    ``tiles.estimated``: the ids whose stats are a sample's."""
     try:
         from s3dgraphy.resources import detail as D
-        from s3dgraphy.resources import tileset_fit as F
+        from s3dgraphy.resources import tileset_fit as F  # noqa: F401
     except ImportError:
         return None
     paths = {str(r.get("id")): r.get("path") for r in resolved or [] if r.get("path")}
+    estimated = {}
+
+    def usable(stats):
+        return stats is not None and (not full or not stats.get("estimated"))
 
     def tiles(entry):
         path = paths.get(str(entry.get("id")))
@@ -888,25 +1104,71 @@ def _tiles_by_path(resolved):
             key = (os.path.realpath(path), st.st_size, st.st_mtime)
         except OSError:
             return None
-        if key not in _TILES_MEMO:
-            got = None
-            try:
-                if path.lower().endswith(".3tz"):
-                    lj, sz, _rb = D.tz_loader(path)
-                else:
-                    lj, sz, _rb = D.folder_loader(os.path.dirname(path) if path.lower().endswith(".json") else path)
-                tree = D.read_tileset(lj, "tileset.json")
-                read_at, zf = _tile_range_reader(path)
-                try:
-                    got = F.measure_tiles(tree, read_at)
-                finally:
-                    if zf is not None:
-                        zf.close()
-            except Exception:  # noqa: BLE001 — unreadable: not known
-                got = None
-            _TILES_MEMO[key] = got
-        return _TILES_MEMO[key]
+        with _TILES_GUARD:
+            lock = _TILES_LOCKS.setdefault(key, threading.Lock())
+            w = _TILES_WAIT.setdefault(key, {})
+            w[token] = w.get(token, 0) + 1
+        try:
+            with lock:
+                got = _TILES_MEMO.get(key)
+                if not usable(got):
+                    disk = _tiles_disk_get(key)
+                    if usable(disk):
+                        got = _TILES_MEMO[key] = disk
+                if not usable(got):
+                    name = os.path.basename(path.rstrip("/\\")) if not path.lower().endswith(".json") \
+                        else os.path.basename(os.path.dirname(path))
+                    started = time.time()
+
+                    def say(n, total):
+                        for t in list(_TILES_WAIT.get(key) or {}):
+                            _asset_progress(t, "tiles", n, total, name=name)
+                    reader = None
+                    try:
+                        say(0, 0)
+                        reader = _TileReader(path)
+                        tree = D.read_tileset(reader.load_json, "tileset.json", size_of=reader.size_of)
+                        got = _tiles_measure(tree, reader, full=full, progress=say,
+                                             alive=lambda: _tiles_alive(key, started))
+                        _TILES_MEMO[key] = got
+                        _tiles_disk_put(key, got)
+                    except _TilesAbandoned:
+                        got = None
+                    except Exception:  # noqa: BLE001 — unreadable: not known
+                        got = _TILES_MEMO[key] = None
+                    finally:
+                        if reader is not None:
+                            reader.close()
+        finally:
+            with _TILES_GUARD:
+                w = _TILES_WAIT.get(key) or {}
+                w[token] = w.get(token, 1) - 1
+                if w.get(token, 0) <= 0:
+                    w.pop(token, None)
+        if got and got.get("estimated"):
+            estimated[str(entry.get("id"))] = got
+        return got
+    tiles.estimated = estimated
+    tiles.paths = paths
     return tiles
+
+
+def _tiles_estimated_on(out, estimated):
+    """MICRO-ASSETS-3TZ · s3Dgraphy's ``asset_list`` keeps the tiles' counts
+    only: a tileset measured on a sample says it («stimato») in its version
+    and in each target's cell that loads it."""
+    if not estimated:
+        return
+    for a in out.get("assets") or []:
+        for v in a.get("versions") or []:
+            st = estimated.get(str(v.get("id")))
+            if st and isinstance(v.get("tiles"), dict):
+                v["tiles"].update({"estimated": True, "sampled": st.get("sampled"), "sample_read": st.get("sample_read")})
+        for c in (a.get("targets") or {}).values():
+            st = estimated.get(str((c or {}).get("loads") or ""))
+            if st and isinstance(c.get("tiles"), dict):
+                c["tiles"].update({"estimated": True, "sampled": st.get("sampled")})
+                c["why"] = f"{c.get('why') or ''} (stimato su un campione di {st.get('sampled')} tile)".strip()
 
 
 def _cloud_paths_on_versions(graph, out, cloud):
@@ -2287,7 +2549,14 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: their heads (tileset.json or the stored members of a .3tz, never the
 #: geometry) and passes them to s3Dgraphy (``tiles=``): a tileset «ok» for a
 #: target only if its tiles fit the band, and then it covers its meshes.
-BRIDGE_LEVEL = 64   # 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+#: 65 = MICRO-ASSETS-3TZ: ``/assets/list`` reads a tileset's tree and heads
+#: through ONE ZipFile (Metashape's 3tz is DEFLATED: a member inflated as a
+#: stream up to its head, never whole); the phase ``tiles`` (n/N, the
+#: tileset's name) before the files measured; over TILES_SAMPLE_OVER tiles a
+#: sample by level (and the largest of each level), the rest estimated
+#: (``estimated``), ``{tiles_full: true}`` reads all; one measure per (path,
+#: size, mtime) at a time, kept on disk, stopped when no page waits for it.
+BRIDGE_LEVEL = 65   # 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3160,6 +3429,10 @@ def make_handler(api):
                 # MICRO-ARCHIVE-ASSET-2 · where a POST /assets/list is
                 q = urllib.parse.parse_qs(parsed.query)
                 tok = (q.get("token") or [""])[0]
+                if tok:
+                    _ASSET_SEEN[tok] = time.time()
+                    for k in [k for k, v in _ASSET_SEEN.items() if time.time() - v > 600]:
+                        _ASSET_SEEN.pop(k, None)
                 self._json({"ok": True, **(_ASSET_PROGRESS.get(tok) or {"phase": "", "n": 0, "total": 0})})
             elif route == "/jobs/scheduler":
                 # MICRO-CODA-MULTICORE · the scheduler: per tool, the cores and
@@ -4870,7 +5143,9 @@ def make_handler(api):
                 # MICRO-CONSOLIDA-2 · the files on this computer measured, and
                 # verified against their stamps (hashed once per path/size/time)
                 disk = self._disk_resolved(graph, body, em_folder)
-                extra = {"measure": C.measure_from_disk(disk), "changed": C.changed_from(disk)}
+                # MICRO-ASSETS-3TZ · the measures of /assets/list (by sha256,
+                # kept between calls, never a file in the cloud), not again
+                extra = {"measure": _measure_by_sha(disk), "changed": C.changed_from(disk)}
             out = C.consolidate(graph, str(body.get("platform") or "heriverse"), models=models,
                                 states=states, in_room=bool(body.get("in_room")), **extra)
             out["platforms"] = [{"id": k, "label": v.get("label"), "label_it": v.get("label_it")}
@@ -4901,15 +5176,23 @@ def make_handler(api):
             models = body.get("models") if isinstance(body.get("models"), list) else None
             extra = {}
             disk = []
+            tiles = None
             if body.get("measure", True) is not False:
                 disk = self._disk_resolved(graph, body, em_folder)
-                _asset_progress(token, "measure", 0, len({r.get("path") for r in disk if str(r.get("path") or "").lower().endswith((".glb", ".gltf"))}))
-                extra = {"measure": _measure_by_sha(disk, progress=lambda n, t: _asset_progress(token, "measure", n, t)),
-                         "changed": C.changed_from(disk)}
-                # MICRO-ARCHIVE-ASSET-3 · a tileset's tiles against each band
-                tiles = _tiles_by_path(disk)
+                # MICRO-ARCHIVE-ASSET-3 · a tileset's tiles against each band;
+                # MICRO-ASSETS-3TZ · measured first, in their own phase
+                # («3. tileset… n di N tile»), a sample over TILES_SAMPLE_OVER
+                # unless «Misura tutto» (``tiles_full``)
+                tiles = _tiles_by_path(disk, token=token, full=bool(body.get("tiles_full")))
                 if tiles is not None and "tiles" in getattr(AL.asset_list, "__code__").co_varnames:
                     extra["tiles"] = tiles
+                    for r in disk:
+                        p = str(r.get("path") or "")
+                        if p.lower().endswith(".3tz") or os.path.basename(p).lower() == "tileset.json":
+                            tiles({"id": r.get("id")})
+                _asset_progress(token, "measure", 0, len({r.get("path") for r in disk if str(r.get("path") or "").lower().endswith((".glb", ".gltf"))}))
+                extra.update({"measure": _measure_by_sha(disk, progress=lambda n, t: _asset_progress(token, "measure", n, t)),
+                              "changed": C.changed_from(disk)})
                 for r in disk:
                     states.setdefault(str(r.get("id")), str(r.get("state") or ""))
             # MICRO-TESTATA-CLOUD · what this computer says now of a file in
@@ -4920,6 +5203,8 @@ def make_handler(api):
             out = AL.asset_list(graph, models=models, states=states, in_room=bool(body.get("in_room")), **extra)
             if cloud:
                 _cloud_paths_on_versions(graph, out, cloud)
+            if "tiles" in extra:
+                _tiles_estimated_on(out, tiles.estimated)
             _asset_progress(token, "done", out.get("counts", {}).get("assets", 0), out.get("counts", {}).get("assets", 0))
             out["resolved_here"] = here
             return 200, {"ok": True, **out}

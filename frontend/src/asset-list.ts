@@ -44,15 +44,17 @@ export interface VersionRow {
   in_cloud?: boolean; cloud_paths?: string[]; cloud_bytes?: number;
   /** MICRO-ARCHIVE-ASSET-3 · a tileset's tiles read by their heads (bridge
    *  ≥ 57): how many, how many read, the most triangles and the largest
-   *  texture side of one tile */
-  tiles?: { tiles: number; read: number; max_triangles: number | null; max_texture_side: number | null } | null;
+   *  texture side of one tile; MICRO-ASSETS-3TZ (bridge ≥ 65): over the
+   *  bridge's ceiling a sample stratified by level, the rest estimated */
+  tiles?: { tiles: number; read: number; max_triangles: number | null; max_texture_side: number | null;
+            estimated?: boolean; sampled?: number; sample_read?: number } | null;
   /** MICRO-VERSIONI-PER-USO · the profile it was made for («» for a rung of
    *  a LOD chain), said by its use; its numbers (s3Dgraphy ≥ this MICRO) */
   profile?: string; by_use?: boolean; use_params?: Record<string, unknown>;
 }
 export interface Proposal { tool: Tool; triangles: number | null; texture: number | null; ktx2: boolean; why: string }
 export interface TileFit { ok: boolean; known: boolean; tiles: number; read: number; over_triangles: number; over_texture: number;
-                           max_triangles: number | null; max_texture_side: number | null }
+                           max_triangles: number | null; max_texture_side: number | null; estimated?: boolean; sampled?: number }
 export interface TargetCell {
   state: TargetState; loads: string; why: string; proposal: Proposal; loaded_why?: string;
   /** MICRO-ARCHIVE-ASSET-3 · a mesh covered by its container's tileset for

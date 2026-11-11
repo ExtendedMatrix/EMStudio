@@ -15009,7 +15009,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 64;   // 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 65;   // 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -44181,7 +44181,7 @@ const assetUi = {
    *  asking is (the phases, with their counters); the scroll of the list and
    *  of the side, kept across every repaint */
   openShapes: new Set<string>(),
-  progress: null as { phase: string; n: number; total: number } | null,
+  progress: null as { phase: string; n: number; total: number; name?: string } | null,
   scroll: { top: 0, left: 0 }, sideScroll: 0,
 };
 /** MICRO-ARCHIVE-ASSET-2 · the forms repeated of the answer, once per answer */
@@ -44235,8 +44235,10 @@ function assetDocKey(): string {
   return `${currentFilePath ?? ""}|${assetStudies.get(store)}`;
 }
 
-/** Ask the list (the Archive's resolver answers first, as «Consolida per…» did). */
-async function askAssetList(): Promise<void> {
+/** Ask the list (the Archive's resolver answers first, as «Consolida per…» did).
+ *  ``tilesFull``: «Misura tutto» — every tile of the tilesets, no sample
+ *  (MICRO-ASSETS-3TZ). */
+async function askAssetList(tilesFull = false): Promise<void> {
   if (!store) return;
   assetUi.asking = true;
   assetUi.error = "";
@@ -44259,13 +44261,14 @@ async function askAssetList(): Promise<void> {
       if (!polling) break;
       try {
         const r = await fetch(`${await bridgeUrl()}/assets/progress?token=${token}`, { cache: "no-store" });
-        const j = await r.json().catch(() => ({})) as { phase?: string; n?: number; total?: number };
+        const j = await r.json().catch(() => ({})) as { phase?: string; n?: number; total?: number; name?: string };
         // the bridge's phases after the page's: never backwards (its «graph»
-        // and «resolve» are the page's own, already said)
-        const order = ["graph", "resolve", "measure", "textures"];
+        // and «resolve» are the page's own, already said); MICRO-ASSETS-3TZ ·
+        // «tiles» (the tilesets, tile by tile) before the files measured
+        const order = ["graph", "resolve", "tiles", "measure", "textures"];
         if (polling && j.phase && order.indexOf(j.phase) >= order.indexOf(assetUi.progress?.phase ?? "graph")
-            && (j.phase === "measure" || j.phase !== assetUi.progress?.phase)) {
-          assetUi.progress = { phase: j.phase, n: j.n ?? 0, total: j.total ?? 0 }; paintAssetProgress();
+            && (j.phase === "measure" || j.phase === "tiles" || j.phase !== assetUi.progress?.phase)) {
+          assetUi.progress = { phase: j.phase, n: j.n ?? 0, total: j.total ?? 0, name: j.name }; paintAssetProgress();
         }
       } catch { /* an old bridge: the phase stays */ }
     }
@@ -44279,7 +44282,7 @@ async function askAssetList(): Promise<void> {
     if (assetUi.progress.phase === "graph") { assetUi.progress = { phase: "resolve", n: 0, total: citedFilesOf(store) }; paintAssetProgress(); }
     void poll();
     const j = await postGraph<AL.AssetListAnswer>("/assets/list", { doc: store.doc, doc_path: currentFilePath ?? "",
-      states: statesOf(fileStates()), in_room: !!fileRoom(), progress: token });
+      states: statesOf(fileStates()), in_room: !!fileRoom(), progress: token, ...(tilesFull ? { tiles_full: true } : {}) });
     if (!j.ok) { assetUi.error = j.status === 404 ? t("al.oldBridge") : String(j.error ?? j.status); assetUi.ans = null; }
     else {
       // MICRO-BLENDER-SIDECAR p.4a · a tileset out of the band with no master
@@ -44303,7 +44306,7 @@ function assetProgressBox(): HTMLElement {
 function paintAssetProgressInto(box: HTMLElement): void {
   const pr = assetUi.progress;
   box.textContent = "";
-  const steps = ["graph", "resolve", "measure", "textures"] as const;
+  const steps = ["graph", "resolve", "tiles", "measure", "textures"] as const;
   const phase = pr?.phase === "measure" && pr.total > 0 && pr.n >= pr.total ? "textures" : pr?.phase ?? "graph";
   box.dataset.phase = phase;
   const ol = document.createElement("ol");
@@ -44318,6 +44321,8 @@ function paintAssetProgressInto(box: HTMLElement): void {
       if (k === "graph") words = t("al.phase.graphN", { n: fmtN(pr.n) });
       else if (k === "resolve" && pr.total) words = t("al.phase.resolveN", { n: fmtN(pr.total) });
       else if (k === "measure" && pr.total) words = t("al.phase.measureN", { n: fmtN(pr.n), of: fmtN(pr.total) });
+      else if (k === "tiles") words = pr.total ? t("al.phase.tilesN", { n: fmtN(pr.n), of: fmtN(pr.total), name: pr.name ?? "" })
+        : t("al.phase.tilesTree", { name: pr.name ?? "" });
     }
     li.textContent = words;
     ol.appendChild(li);
@@ -44325,7 +44330,7 @@ function paintAssetProgressInto(box: HTMLElement): void {
   const bar = document.createElement("div");
   bar.className = "al-pbar";
   const fill = document.createElement("i");
-  if (phase === "measure" && pr && pr.total) fill.style.width = `${Math.round((pr.n / pr.total) * 100)}%`;
+  if ((phase === "measure" || phase === "tiles") && pr && pr.total) fill.style.width = `${Math.round((pr.n / pr.total) * 100)}%`;
   else bar.classList.add("busy");
   bar.appendChild(fill);
   box.append(ol, bar);
@@ -44424,7 +44429,28 @@ function assetListView(win: Win): HTMLElement {
   again.title = t("al.refreshTitle");
   again.disabled = assetUi.asking;
   again.onclick = () => { void askAssetList(); };
-  bar.append(grow, again);
+  bar.append(grow);
+  // MICRO-ASSETS-3TZ · a tileset measured on a sample: «Misura tutto» reads
+  // every tile (a 3tz of 236.608 tiles: a minute), with its «?»
+  if (assetUi.ans?.assets?.some((a) => a.versions.some((v) => v.tiles?.estimated))) {
+    const all = document.createElement("button");
+    all.type = "button";
+    all.className = "ghost";
+    all.dataset.action = "al-tiles-full";
+    all.textContent = t("al.tilesFull");
+    all.title = t("al.tilesFullTitle");
+    all.disabled = assetUi.asking;
+    all.onclick = () => { void askAssetList(true); };
+    const q = document.createElement("button");
+    q.type = "button";
+    q.className = "win-help";
+    q.textContent = "?";
+    q.title = t("al.tilesFullTitle");
+    q.setAttribute("aria-label", q.title);
+    q.addEventListener("click", (e) => { e.stopPropagation(); toast(q.title); });
+    bar.append(all, q);
+  }
+  bar.append(again);
   host.appendChild(bar);
   // MICRO-CODA-VISTA p.1 · versions registered on the wrong asset: said, with
   // «Correggi» — MICRO-CODA-VISTA-2 p.6: at the TOP of the view, under its
@@ -45282,11 +45308,15 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
 /** MICRO-ARCHIVE-ASSET-3 · a tileset's numbers are per tile: the most
  *  triangles of one tile, and the words of its tiles read */
 function tilesTri(v: AL.VersionRow): string {
-  return v.tiles?.max_triangles != null ? `≤ ${fmtN(v.tiles.max_triangles)} ${t("al.perTile")}` : "—";
+  return v.tiles?.max_triangles != null
+    ? `≤ ${fmtN(v.tiles.max_triangles)} ${t("al.perTile")}${v.tiles.estimated ? ` · ${t("al.tilesEstimated")}` : ""}` : "—";
 }
 function tilesTitle(v: AL.VersionRow): string {
   const x = v.tiles;
   if (!x) return "";
+  // MICRO-ASSETS-3TZ · measured on a sample: said, with how many read
+  if (x.estimated) return t("al.tilesTitleEstimated", { n: fmtN(x.tiles), read: fmtN(x.sampled ?? 0),
+    tri: fmtN(x.max_triangles), px: String(x.max_texture_side ?? "—") });
   return t("al.tilesTitle", { n: fmtN(x.tiles), read: fmtN(x.read), tri: fmtN(x.max_triangles), px: String(x.max_texture_side ?? "—") });
 }
 
