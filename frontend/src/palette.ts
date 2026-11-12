@@ -160,7 +160,8 @@ export interface ThreedStyle {
 }
 type RawRgba = { r: number; g: number; b: number };
 type RawThreed = { faces?: { show?: boolean; rgba_color?: RawRgba; opacity?: number };
-  edges?: { show?: boolean; rgba_color?: RawRgba; width?: number; style?: string }; geometry?: string };
+  edges?: { show?: boolean; rgba_color?: RawRgba; width?: number; style?: string; feature_angle_deg?: number };
+  geometry?: string };
 export function nodeThreedStyle(nodeType?: string): ThreedStyle | null {
   const key = nodeType ?? "unknown";
   const raw = nodeStyles[NODE_ALIAS[key] ?? key] as { style?: { material?: { rgba_color?: RawRgba }; threed?: RawThreed } } | undefined;
@@ -170,7 +171,8 @@ export function nodeThreedStyle(nodeType?: string): ThreedStyle | null {
     dashed?: { dash_ratio?: number; gap_ratio?: number }; corners?: { tick_ratio?: number } } }).threed_style ?? {};
   const own = raw?.style?.threed ?? {};
   const f = { show: true, opacity: 1, ...(block.defaults?.faces ?? {}), ...(own.faces ?? {}) };
-  const e = { show: false, width: 1, style: "solid", ...(block.defaults?.edges ?? {}), ...(own.edges ?? {}) };
+  const e: NonNullable<RawThreed["edges"]> = { show: false, width: 1, style: "solid",
+    ...(block.defaults?.edges ?? {}), ...(own.edges ?? {}) };
   const rgb = (c: RawRgba | undefined): [number, number, number] | null => (c ? [c.r, c.g, c.b] : null);
   const faceRgb = rgb(f.rgba_color) ?? [m.r, m.g, m.b];
   const style = (["solid", "dashed", "corners"] as const).find((s) => s === e.style) ?? "solid";
@@ -178,7 +180,10 @@ export function nodeThreedStyle(nodeType?: string): ThreedStyle | null {
     faces: { show: f.show !== false, rgb: faceRgb, opacity: typeof f.opacity === "number" ? f.opacity : 1 },
     edges: { show: !!e.show, rgb: rgb(e.rgba_color) ?? faceRgb, width: typeof e.width === "number" ? e.width : 1, style },
     geometry: own.geometry ?? null,
-    featureAngleDeg: block.feature_angle_deg ?? 20,
+    // 1.6.45 (MICRO-TAGLI-3D-DECISIONI): the angle is the edges' own — 1 for the
+    // thin contour every type now has, 20 for the marks of USN/USNt; a 1.6.44
+    // file had one at the top of threed_style
+    featureAngleDeg: typeof e.feature_angle_deg === "number" ? e.feature_angle_deg : block.feature_angle_deg ?? 20,
     dashRatio: block.dashed?.dash_ratio ?? 0.04,
     gapRatio: block.dashed?.gap_ratio ?? 0.025,
     tickRatio: block.corners?.tick_ratio ?? 0.34,

@@ -553,6 +553,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     /** NIGHT-TAGLI-E-NEUTRE · per unit, how its proxy is drawn: the faces'
      *  material (shown, opacity, linear rgb) and its lines (the type's style, or «contour») */
     __spaceProxyLook?: () => Record<string, { visible: boolean; opacity: number; rgb: number[]; edges: string[]; segments: number[] }>;
+    /** MICRO-TAGLI-3D-DECISIONI · decision 4, for the checks: every proxy mesh's
+     *  origin moved to the centre of its volume («centre») — in memory, the
+     *  geometry translated by −c and the mesh by +c, the drawing unchanged; the
+     *  study and its files are not touched — and a unit's centre on the screen */
+    __spaceProxyOrigins?: (to: "centre") => number;
+    __spaceUnitScreen?: (unitId: string, down?: number) => { x: number; y: number; origin: number[] } | null;
   };
   probe.__spaceSelected = () => ({ selected: items.filter((i) => i.selected).map((i) => `${i.kind}:${i.id}`),
     active: items.find((i) => i.active) ? `${items.find((i) => i.active)!.kind}:${items.find((i) => i.active)!.id}` : null });
@@ -1014,9 +1020,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const selColour = (item: SceneItem): number => (item.active ? SEL_ACTIVE : SEL_OTHER);
       const outline = (geom: any, item: SceneItem, at?: any) => {
         const th = item.threed;
-        // NIGHT-TAGLI-E-NEUTRE · a type with edges of its own (USN solid, USNt
-        // dashed): the feature edges cut by the rule, in the edges' colour; the
-        // others keep the thin contour in the 2D frame colour, as before
+        // NIGHT-TAGLI-E-NEUTRE · the type's edges: the feature edges cut by the
+        // rule, in the edges' colour. Since 1.6.45 (MICRO-TAGLI-3D-DECISIONI)
+        // every type has them — the others thin and continuous at 1° in their 2D
+        // frame colour, the very contour drawn below until then; the branch
+        // below stays for what has no type style (the RM, a file before 1.6.44).
+        // Transparency order (decision 4): three (r185) sorts the transparent
+        // meshes by the centre of their geometry's bounding sphere, not by the
+        // origin, and the faces write no depth — a proxy with its origin at
+        // 0,0,0 keeps its fill readable (check-threed-browser measures both)
         if (th?.edges.show) {
           const feat = new THREE.EdgesGeometry(geom, th.featureAngleDeg);
           if (!geom.boundingBox) geom.computeBoundingBox();
@@ -2358,6 +2370,34 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             segments: lines.map((l: any) => l.geometry.getAttribute("position").count / 2) };
         });
         return out;
+      };
+      probe.__spaceProxyOrigins = () => {
+        let n = 0;
+        content.traverse((o: any) => {
+          if (!o.isMesh || !o.userData.unitId) return;
+          o.geometry.computeBoundingBox();
+          const c = o.geometry.boundingBox.getCenter(new THREE.Vector3());
+          if (c.lengthSq() < 1e-12) return;
+          o.geometry.translate(-c.x, -c.y, -c.z);
+          for (const ch of o.children) if (ch.isLineSegments) ch.geometry.translate(-c.x, -c.y, -c.z);
+          o.position.add(c);
+          o.updateMatrixWorld(true);
+          n++;
+        });
+        return n;
+      };
+      probe.__spaceUnitScreen = (unitId: string, down = 0) => {
+        let hit: any = null;
+        content.traverse((o: any) => { if (!hit && o.isMesh && o.userData.unitId === unitId) hit = o; });
+        if (!hit) return null;
+        hit.geometry.computeBoundingBox();
+        // `down`: a fraction of the half height below the centre (away from the label)
+        const bb = hit.geometry.boundingBox;
+        const p = bb.getCenter(new THREE.Vector3()).setY((bb.min.y + bb.max.y) / 2 - down * (bb.max.y - bb.min.y) / 2)
+          .applyMatrix4(hit.matrixWorld).project(camera);
+        const r = renderer.domElement.getBoundingClientRect();
+        const o = new THREE.Vector3().setFromMatrixPosition(hit.matrixWorld);
+        return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height, origin: [o.x, o.y, o.z] };
       };
       probe.__spaceOverlays = () => Object.fromEntries((["s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch", "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles",
         "s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_navgizmo", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches"] as OverlayKey[]).map((k) => [k, ov(k)]));

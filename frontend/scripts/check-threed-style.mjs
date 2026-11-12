@@ -1,12 +1,16 @@
-// NIGHT-TAGLI-E-NEUTRE (em_visual_rules 1.6.44) · the 3D style of a type, read
+// NIGHT-TAGLI-E-NEUTRE (em_visual_rules 1.6.44) and MICRO-TAGLI-3D-DECISIONI
+// (1.6.45, the four decisions of E.D., 11 Nov 2026) · the 3D style of a type, read
 // by EMStudio (`palette.ts` nodeThreedStyle, `threed-edges.ts` cutEdges):
 //
 //   1. the same answer as s3Dgraphy's `get_threed_style`, type by type (the
 //      oracle: the sibling checkout's venv; skipped without it);
-//   2. EVERY OTHER TYPE IS SEEN AS BEFORE: against the visual rules of 1.6.43
-//      (s3Dgraphy c9b970c, read with git), for each type the colour and the
-//      effective opacity (type × global, at the global defaults 0.42 / 0.9)
-//      are the ones the scene drew, and no edge of its own replaces the contour;
+//   2. AGAINST 1.6.44 (s3Dgraphy 850c7d1, read with git) ONLY THE EDGES CHANGE:
+//      for every type the faces (colour, effective opacity type × global at
+//      0.42 / 0.9) are the same; the other types' edges become the type's own,
+//      solid at 1°, in the colour of the thin contour the scene drew for them
+//      (THREE.Color(border_color) = the linear of the 2D frame, EdgesGeometry's
+//      default 1°) — so EMStudio is seen as before; the USN's edges turn dark
+//      grey (#8C8C8C); the USNt is unchanged;
 //   3. USN and USNt are told apart: faces / no faces, solid / dashed, two greys;
 //   4. the cut of the edges: solid whole, dashes starting at each corner,
 //      corners as two ticks of 0.34 × the shortest side.
@@ -53,6 +57,7 @@ print(json.dumps({k: get_threed_style(k, ${JSON.stringify(SRC + "assets/em_visua
     near(ts.faces.opacity, p.faces.opacity, `${k} faces.opacity`);
     eq(ts.faces.rgb, p.faces.rgba_color.slice(0, 3), `${k} faces colour`);
     eq([ts.edges.show, ts.edges.style, ts.edges.width], [p.edges.show, p.edges.style, p.edges.width], `${k} edges`);
+    eq(ts.featureAngleDeg, p.edges.feature_angle_deg, `${k} edges angle`);
     eq(ts.edges.rgb, p.edges.rgba_color.slice(0, 3), `${k} edges colour`);
     eq(ts.geometry, p.geometry, `${k} geometry`);
     eq([ts.featureAngleDeg, ts.dashRatio, ts.gapRatio, ts.tickRatio],
@@ -60,26 +65,63 @@ print(json.dumps({k: get_threed_style(k, ${JSON.stringify(SRC + "assets/em_visua
   }
 } else console.log("  (s3Dgraphy venv not found: the oracle is skipped)");
 
-// 2 · every other type as before (1.6.43 = s3Dgraphy c9b970c)
+// 2 · 1.6.44 → 1.6.45: only the edges change (s3Dgraphy 850c7d1)
+const lin = (hex) => [1, 3, 5].map((i) => { const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+const close = (a, b) => a.every((x, i) => Math.abs(x - b[i]) < 0.002);
 let before = null;
 try {
-  before = JSON.parse(execFileSync("git", ["-C", S3D, "show", "c9b970c:src/s3dgraphy/JSON_config/em_visual_rules.json"],
-    { maxBuffer: 1 << 26 }).toString()).node_styles;
-} catch { console.log("  (s3Dgraphy c9b970c not reachable: the before/after table is skipped)"); }
+  before = JSON.parse(execFileSync("git", ["-C", S3D, "show", "850c7d1:src/s3dgraphy/JSON_config/em_visual_rules.json"],
+    { maxBuffer: 1 << 26 }).toString());
+} catch { console.log("  (s3Dgraphy 850c7d1 not reachable: the before/after table is skipped)"); }
 const table = [];
 if (before) {
+  ok(before.version === "1.6.44" && rules.version === "1.6.45", `1.6.44 → ${rules.version}`);
+  // the 1.6.44 reading, as palette.ts read it then (edges show false = the contour)
+  const was = (k) => {
+    const st = before.node_styles[k]?.style; const m = st?.material?.rgba_color; if (!m) return null;
+    const blk = before.threed_style; const own = st.threed ?? {};
+    const f = { ...blk.defaults.faces, ...(own.faces ?? {}) }; const e = { ...blk.defaults.edges, ...(own.edges ?? {}) };
+    const rgb = f.rgba_color ? [f.rgba_color.r, f.rgba_color.g, f.rgba_color.b] : [m.r, m.g, m.b];
+    return { faces: { show: f.show !== false, rgb, opacity: f.opacity },
+      edges: e.show ? { style: e.style, rgb: e.rgba_color ? [e.rgba_color.r, e.rgba_color.g, e.rgba_color.b] : rgb, angle: blk.feature_angle_deg }
+        : { style: "contour", rgb: lin(styles[k].style.border_color ?? "#555555"), angle: 1 } };
+  };
   for (const global of [0.42, 0.9]) {
     for (const k of meshTypes) {
-      const m0 = before[k]?.style?.material?.rgba_color;
-      const t = P.nodeThreedStyle(k);
-      const was = m0 ? { rgb: [m0.r, m0.g, m0.b], opacity: global, edges: "contour" } : null;
-      const now = { rgb: t.faces.show ? t.faces.rgb : null, opacity: t.faces.show ? global * t.faces.opacity : 0,
-        edges: t.edges.show ? t.edges.style : "contour" };
-      if (global === 0.42) table.push({ type: k, before: was, after: now });
-      if (k === "USN" || k === "USNt") continue;
-      eq(now, was, `${k}: seen as before at the global opacity ${global}`);
+      const w = was(k); const t = P.nodeThreedStyle(k);
+      ok(w, `${k}: a mesh type in 1.6.44 too`);
+      const facesNow = { show: t.faces.show, rgb: t.faces.rgb, opacity: t.faces.show ? global * t.faces.opacity : 0 };
+      const facesWas = { show: w.faces.show, rgb: w.faces.rgb, opacity: w.faces.show ? global * w.faces.opacity : 0 };
+      eq(facesNow, facesWas, `${k}: the faces as in 1.6.44 at the global opacity ${global}`);
+      if (global !== 0.42) continue;
+      const edgesNow = { style: t.edges.style, rgb: t.edges.rgb, angle: t.featureAngleDeg };
+      table.push({ type: k, faces: `${facesNow.show ? facesNow.rgb.join("/") : "—"} · ${facesNow.opacity}`,
+        before: `${w.edges.style} ${w.edges.rgb.map((x) => x.toFixed(3)).join("/")} ${w.edges.angle}°`,
+        after: `${edgesNow.style} ${edgesNow.rgb.map((x) => x.toFixed(3)).join("/")} ${edgesNow.angle}°` });
+      ok(t.edges.show, `${k}: has edges (decision 1)`);
+      if (k === "USN") {
+        eq([edgesNow.style, edgesNow.angle], [w.edges.style, w.edges.angle], "USN: solid at 20° as in 1.6.44");
+        eq(edgesNow.rgb, [0.262, 0.262, 0.262], "USN: edges dark grey 0.262 = #8C8C8C (decision 2)");
+        ok(!close(edgesNow.rgb, w.edges.rgb), "USN: the edge colour is what changed");
+      } else if (k === "USNt") {
+        eq(edgesNow, w.edges, "USNt: its edges unchanged");
+      } else {
+        // the contour the scene drew becomes the type's edges, the same lines
+        eq([w.edges.style, w.edges.angle, edgesNow.style, edgesNow.angle], ["contour", 1, "solid", 1], `${k}: contour → solid at 1°`);
+        ok(close(edgesNow.rgb, w.edges.rgb), `${k}: the edges in the contour's colour ${edgesNow.rgb} ≈ ${w.edges.rgb}`);
+      }
     }
   }
+}
+// decision 4: three sorts the transparent meshes by their geometry's centre, not their origin
+const THREE_SRC = new URL("../node_modules/three/build/three.module.js", import.meta.url).pathname;
+if (existsSync(THREE_SRC)) {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(THREE_SRC, "utf8") + (existsSync(THREE_SRC.replace("three.module.js", "three.core.js"))
+    ? readFileSync(THREE_SRC.replace("three.module.js", "three.core.js"), "utf8") : "");
+  ok(/geometry\.boundingSphere\.center\s*\)[\s\S]{0,120}applyMatrix4\(\s*object\.matrixWorld\s*\)/.test(src),
+    "three sorts the transparent meshes by the centre of their bounding sphere (not the origin)");
 }
 
 // 3 · the two voids
@@ -88,7 +130,8 @@ ok(usn.faces.show && usn.faces.opacity > 0 && usn.faces.opacity < 1, "USN: trans
 eq([usn.edges.show, usn.edges.style], [true, "solid"], "USN: continuous edges");
 ok(!usnt.faces.show, "USNt: no faces");
 eq([usnt.edges.show, usnt.edges.style], [true, "dashed"], "USNt: dashed edges");
-ok(usn.faces.rgb.join() !== usnt.faces.rgb.join(), "USN and USNt: two greys");
+ok(usn.faces.rgb.join() !== usnt.faces.rgb.join(), "USN and USNt: two greys of faces");
+eq(usn.edges.rgb, usnt.edges.rgb, "USN and USNt: one grey of edges (#8C8C8C), told apart by faces and solid/dashed");
 
 // 4 · the cut
 const seg = [0, 0, 0, 10, 0, 0];
