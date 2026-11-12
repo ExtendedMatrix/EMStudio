@@ -13,13 +13,16 @@
  * `archiveOnly` is OFF: EMStudio does not use the package's plugin, and a
  * tileset of ours may point to files outside its archive.
  *
+ * MICRO-3TZ-0-3-0 (12 Nov 2026) · the package at 0.3.0 does what this module
+ * kept a copy of: a zip without index (`requireIndex: false`), its directory
+ * read in slices (`yieldEvery`), `names()`, `normalizePath`, `INDEX_NAME`, the
+ * ETag and the ranges in progress (`stats()`), errors carrying `range` and
+ * `status`, its own `.d.ts`.
+ *
  * What stays here is EMStudio's:
- *   · the sources as the app sees them: `describe()` (the ETag the tile cache
- *     keys on, the ranges still asked — `load-failure.ts`), errors carrying
- *     `range` and `status`;
- *   · `ZipArchive`, any zip (no index): its directory read here, in slices
- *     that let the page go; its entries read by the package;
- *   · the listing of a canonical archive's names (`names()`);
+ *   · the sources as the app sees them: `size()` and `describe()` (the ETag
+ *     the tile cache keys on, the ranges still asked — `load-failure.ts`);
+ *   · `ZipArchive`, any zip: the package's archive opened without index;
  *   · RealityScan's gzipped tiles (`gunzipIfGzip`), the plugin with the
  *     persistent tile cache, `archiveBase`, `sourceFor`.
  *
@@ -27,12 +30,11 @@
  * TempluMare archive in node with the same code.
  */
 
-import { Archive3tz as Package3tz, blobSource as packageBlob, httpSource as packageHttp,
-         type ByteSource as PackageSource, type EntryLocation } from "3d-tiles-renderer-3tz";
+import { Archive3tz as Package3tz, blobSource as packageBlob, httpSource as packageHttp, normalizePath,
+         DEFAULT_TAIL_BYTES, type ByteSource as PackageSource } from "3d-tiles-renderer-3tz";
 import { archiveIdentity, type TileCache } from "./tile-cache";
 
-export const INDEX_NAME = "@3dtilesIndex1@";
-const SIG_EOCD = 0x06054b50, SIG_EOCD64 = 0x06064b50, SIG_LOC64 = 0x07064b50, SIG_CDH = 0x02014b50;
+export { INDEX_NAME, normalizePath } from "3d-tiles-renderer-3tz";
 
 /** Somewhere the bytes of an archive can be read from, by range. */
 export interface ByteSource {
@@ -60,39 +62,14 @@ export function blobSource(blob: Blob): ByteSource {
 }
 
 /** HTTP with `Range`, read by the package's source (206 → ranges from then
- *  on; 200 → the whole archive kept and sliced, up to 1 GiB). Around it, what
- *  the app wants to know: the ETag, the ranges still asked.
- *  MICRO-DROP-3TZ-GRANDE · an error carries the range asked (and the status):
- *  the Log says which bytes did not come (`load-failure.ts rangeOf`). */
-export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globalThis)): ByteSource {
-  let etag: string | null = null;
+ *  on; 200 → the whole archive kept and sliced, up to 1 GiB). Its errors carry
+ *  the range asked and the status (`load-failure.ts rangeOf`); its stats the
+ *  ETag and the ranges still asked. */
+export function httpSource(url: string, fetchFn?: typeof fetch): ByteSource {
+  const p = packageHttp(url, { fetch: fetchFn });
   let total: number | null = null;
-  const asking = new Set<string>();
-  /** the status of a range refused: the package's error says it in words only */
-  const refused = new Map<string, number>();
-  const p = packageHttp(url, {
-    fetch: async (input, init) => {
-      const r = await fetchFn(input, init);
-      etag ??= r.headers.get("etag");
-      const range = new Headers(init?.headers).get("range");
-      if (!r.ok && range) refused.set(range, r.status);
-      return r;
-    },
-  });
-  const ask = async <T>(range: string, run: () => Promise<T>): Promise<T> => {
-    asking.add(range);
-    try { return await run(); }
-    catch (e) {
-      if (e && typeof e === "object") {
-        if (!("range" in e)) Object.assign(e, { range });
-        const status = refused.get(range);
-        if (status && !("status" in e)) Object.assign(e, { status });
-      }
-      throw e;
-    } finally { asking.delete(range); refused.delete(range); }
-  };
   const tail = async (length: number) => {
-    const t = await ask(`bytes=-${length}`, () => p.tail(length));
+    const t = await p.tail(length);
     total = t.size;
     return t;
   };
@@ -100,10 +77,10 @@ export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globa
     // a suffix range answers the size in Content-Range
     size: async () => total ?? (await tail(1)).size,
     tail,
-    read: (offset, length) => ask(`bytes=${offset}-${offset + length - 1}`, () => p.read(offset, length)),
+    read: (offset, length) => p.read(offset, length),
     describe: () => {
       const s = p.stats();
-      return { kind: "http", ranges: s.ranges, downloaded: s.bytes, url, etag, asking: [...asking] };
+      return { kind: "http", ranges: s.ranges, downloaded: s.bytes, url, etag: s.etag ?? null, asking: s.pending ?? [] };
     },
   };
 }
@@ -124,10 +101,6 @@ function toPackage(src: ByteSource): PackageSource {
   };
 }
 
-/** The archive path of an entry (3DSC `normalize`): NFC, `/`, no leading `/`
- *  — the package's own rule (not exported by it: proposal in the report). */
-export const normalizePath = (p: string): string => p.normalize("NFC").replace(/\\/g, "/").replace(/^\/+/, "");
-
 export interface ArchiveStats {
   entries: number;
   /** the reads made to open it (the tail; the rest of a long directory; the index) */
@@ -142,7 +115,7 @@ export interface ArchiveStats {
 /** MICRO-OTTIMIZZA-3 · what ONE request from the end of a plain zip brings
  *  (the package asks the same for a .3tz): the EOCD with any comment, zip64's
  *  records, and in most tilesets the whole central directory. */
-export const TAIL_BYTES = 256 * 1024;
+export const TAIL_BYTES = DEFAULT_TAIL_BYTES;
 
 export interface OpenOptions { tailBytes?: number; cdMaxBytes?: number }
 
@@ -161,9 +134,8 @@ export class Archive3tz {
 
   /** MICRO-DROP-3TZ-GRANDE · every file's path when the archive was opened by
    *  its central directory (it is in hand); null when opened by the index,
-   *  which finds by path and does not list. The package keeps the directory
-   *  without exposing it: read here from its field (proposal: `names()`). */
-  names(): string[] | null { return this.a._entries ? [...this.a._entries.keys()] : null; }
+   *  which finds by path and does not list. */
+  names(): string[] | null { return this.a.names(); }
 
   /** whether `path` is in the archive — by the directory or the index, no request */
   has(path: string): boolean { return this.a.has(path); }
@@ -174,108 +146,26 @@ export class Archive3tz {
   describe(): ReturnType<ByteSource["describe"]> { return this.src.describe(); }
 }
 
-const concat = (a: Uint8Array, b: Uint8Array): Uint8Array => {
-  const out = new Uint8Array(a.length + b.length);
-  out.set(a); out.set(b, a.length);
-  return out;
-};
-const u64 = (dv: DataView, at: number): number => dv.getUint32(at, true) + dv.getUint32(at + 4, true) * 2 ** 32;
-const viewOf = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength);
-
-/** A plain zip's central directory, whatever its length (no index to fall
- *  back on): the tail, and the rest of the directory when it is longer. Its
- *  bounds are checked as the package checks a .3tz's: a directory that does
- *  not end before the records describing it is refused before it is asked. */
-async function readDirectory(src: PackageSource, tailBytes: number) {
-  let reads = 1;
-  const { bytes: tail, size } = await src.tail(tailBytes);
-  const tailAt = size - tail.length, tv = viewOf(tail);
-  let e = -1;
-  for (let i = tail.length - 22, stop = Math.max(0, tail.length - 22 - 0xffff); i >= stop; i--) {
-    if (tv.getUint32(i, true) === SIG_EOCD) { e = i; break; }
-  }
-  if (e < 0) throw new Error("not a zip: no end of central directory");
-  const read = async (at: number, len: number) => { reads++; return src.read(at, len); };
-  let cdSize = tv.getUint32(e + 12, true), cdOffset = tv.getUint32(e + 16, true);
-  let recordsAt = tailAt + e, zip64 = false;
-  if (cdOffset === 0xffffffff || cdSize === 0xffffffff || tv.getUint16(e + 10, true) === 0xffff) {
-    const loc = e - 20;
-    if (loc < 0 || tv.getUint32(loc, true) !== SIG_LOC64) throw new Error("zip64 without its locator");
-    recordsAt = u64(tv, loc + 8);
-    if (recordsAt + 56 > tailAt + loc) throw new Error("damaged zip64: its end record is not before its locator");
-    const rec = recordsAt >= tailAt ? tail.subarray(recordsAt - tailAt, recordsAt - tailAt + 56) : await read(recordsAt, 56);
-    const rv = viewOf(rec);
-    if (rv.getUint32(0, true) !== SIG_EOCD64) throw new Error("zip64 end of directory not found");
-    cdSize = u64(rv, 40); cdOffset = u64(rv, 48); zip64 = true;
-  }
-  const cdEnd = cdOffset + cdSize;
-  if (!Number.isSafeInteger(cdEnd) || cdEnd > recordsAt)
-    throw new Error("damaged zip: the central directory does not end before the end records");
-  const cd = cdOffset >= tailAt ? tail.subarray(cdOffset - tailAt, cdEnd - tailAt)
-    : concat(await read(cdOffset, Math.min(cdSize, tailAt - cdOffset)), tail.subarray(0, Math.max(0, cdEnd - tailAt)));
-  return { cd, zip64, reads };
-}
-
-/** MICRO-DROP-3TZ-GRANDE · records parsed between two yields to the page: a
- *  directory of 236 607 records (TempluMare_2013, 16.8 MB) held the page's
- *  thread ~0.3 s in one piece */
-export const RECORDS_PER_SLICE = 16384;
-const yieldToPage = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
-
-/** Every record of a central directory: path → where its bytes are, as the
- *  package's reader wants it. A long directory is read in slices, the page
- *  let go between them. */
-async function parseDirectory(cd: Uint8Array): Promise<Map<string, EntryLocation>> {
-  const cv = viewOf(cd);
-  const dir = new Map<string, EntryLocation>();
-  const dec = new TextDecoder();
-  let n = 0;
-  for (let p = 0; p + 46 <= cd.length && cv.getUint32(p, true) === SIG_CDH;) {
-    if (++n % RECORDS_PER_SLICE === 0) await yieldToPage();
-    const nlen = cv.getUint16(p + 28, true), xlen = cv.getUint16(p + 30, true), clen = cv.getUint16(p + 32, true);
-    let csize = cv.getUint32(p + 20, true), usize = cv.getUint32(p + 24, true), lho = cv.getUint32(p + 42, true);
-    const name = normalizePath(dec.decode(cd.subarray(p + 46, p + 46 + nlen)));
-    if (usize === 0xffffffff || csize === 0xffffffff || lho === 0xffffffff) {
-      let q = p + 46 + nlen; const end = q + xlen;
-      while (q + 4 <= end) {
-        const tag = cv.getUint16(q, true), ln = cv.getUint16(q + 2, true);
-        if (tag === 1) {
-          let r = q + 4;
-          if (usize === 0xffffffff) { usize = u64(cv, r); r += 8; }
-          if (csize === 0xffffffff) { csize = u64(cv, r); r += 8; }
-          if (lho === 0xffffffff) lho = u64(cv, r);
-          break;
-        }
-        q += 4 + ln;
-      }
-    }
-    if (!name.endsWith("/")) dir.set(name, { offset: lho, compressedSize: csize, nameLength: nlen, method: cv.getUint16(p + 10, true) });
-    p += 46 + nlen + xlen + clen;
-  }
-  return dir;
-}
-
 /**
  * MICRO-TILESET-CARTELLA · ANY zip, read by ranges: the whole central directory
  * once (the Basilica Iulia's 1 GB zip: 1638 records, ~140 KB), then each entry
  * at its offset. A tileset zipped by hand, or by RealityScan's export folder
- * zipped in the Finder, has no `@3dtilesIndex1@` — the package refuses it,
- * this reads it: the directory here, each entry by the package (its limits:
- * 256 MB an entry, inflated or not). Stored and deflated entries; zip64.
+ * zipped in the Finder, has no `@3dtilesIndex1@`: the package opens it with
+ * `requireIndex: false` — the directory read whatever its length, in slices
+ * that let the page go (a directory of 236 607 records, TempluMare_2013,
+ * 16.8 MB, held the page ~0.3 s in one piece), the bounds and limits of a
+ * .3tz (256 MB an entry, inflated or not). Stored and deflated entries; zip64.
  */
 export class ZipArchive {
-  private constructor(private src: ByteSource, private dir: Map<string, EntryLocation>, private a: Package3tz) {}
+  private constructor(private src: ByteSource, private a: Package3tz) {}
 
   static async open(src: ByteSource, opts: OpenOptions = {}): Promise<ZipArchive> {
-    const p = toPackage(src);
-    const { cd, zip64, reads } = await readDirectory(p, opts.tailBytes ?? TAIL_BYTES);
-    const dir = await parseDirectory(cd);
-    dir.delete(INDEX_NAME);
-    return new ZipArchive(src, dir, new Package3tz(p, { entries: dir, index: null, openRequests: reads, zip64 }));
+    const a = await Package3tz.open(toPackage(src), { requireIndex: false, maxDirectoryBytes: Infinity, tailBytes: opts.tailBytes ?? TAIL_BYTES });
+    return new ZipArchive(src, a);
   }
 
   /** every file's path (folders implied, the 3tz index left out) */
-  names(): string[] { return [...this.dir.keys()]; }
+  names(): string[] { return this.a.names() ?? []; }
 
   readEntry(path: string): Promise<Uint8Array | null> { return this.a.read(path); }
 
