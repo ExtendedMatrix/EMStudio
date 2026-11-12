@@ -11349,6 +11349,63 @@ test("TN2.memory", "tileset nitido · un tileset con texture 4096² per tile ed 
   return { pass: Object.values(conds).every(Boolean), detail: { conds, s0: pick(s0), s1: pick(s1), s1b: pick(s1b), sBack: pick(sBack), s2: pick(s2), line0, errors } };
 });
 
+test("TE1.error", "errore geometrico · il tileset sulla Scena in Automatico: l'errore è del visualizzatore («errore auto» spuntato, il cursore fermo, il valore del profilo della macchina, il governatore lo dice); tolta la spunta è «Manuale» e il cursore decide (64 px: meno tile); rimessa, torna al governatore; nelle Impostazioni la stessa scelta, con il profilo e il «?»", async () => {
+  const files = ttTileset();
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "space" });
+  const win = await winOf(p, "scene");
+  await p.waitForTimeout(800);
+  await ttDrop(p, win, files);
+  await ttSpace(p, "preview:");
+  const bar = ".scn-host .tl-bar";
+  await p.evaluate((b) => document.querySelector(`${b} button[data-mode="auto"]`)?.click(), bar);
+  await p.evaluate(() => document.querySelector(".scn-host").__spaceSetCam({ pos: [10, 15, -10], target: [10, 0, -10] }));
+  await p.waitForTimeout(1500);
+  const read = () => p.evaluate((b) => {
+    const el = document.querySelector(b);
+    const h = document.querySelector(".scn-host");
+    return { auto: el?.querySelector('[data-tiles="error-auto"]')?.checked, autoDisabled: el?.querySelector('[data-tiles="error-auto"]')?.disabled,
+      rangeDisabled: el?.querySelector('[data-tiles="error-px"]')?.disabled, rangeHidden: el?.querySelector('[data-tiles="error-px"]')?.hidden,
+      value: el?.querySelector(".tl-err-v")?.textContent, why: el?.querySelector(".tl-err-v")?.title ?? "",
+      px: Number(el?.dataset.errorPx), choice: el?.dataset.errorChoice, help: el?.querySelector(".tl-err .win-help")?.title ?? "",
+      probe: h?.__spaceTilesError?.() ?? null, loaded: (h?.__spaceTiles?.() ?? [])[0]?.status.loaded ?? null };
+  }, bar);
+  const a = await read();
+  // «Manuale»: the box unticked, the cursor to 64 px
+  await p.evaluate((b) => { const x = document.querySelector(`${b} [data-tiles="error-auto"]`); x.checked = false; x.dispatchEvent(new Event("change", { bubbles: true })); }, bar);
+  await p.waitForTimeout(300);
+  const m0 = await read();
+  await p.evaluate((b) => { const r = document.querySelector(`${b} [data-tiles="error-px"]`); r.value = "6"; r.dispatchEvent(new Event("input", { bubbles: true })); }, bar);
+  await p.waitForTimeout(1500);
+  const m1 = await read();
+  await p.evaluate((b) => { const x = document.querySelector(`${b} [data-tiles="error-auto"]`); x.checked = true; x.dispatchEvent(new Event("change", { bubbles: true })); }, bar);
+  await p.waitForTimeout(800);
+  const back = await read();
+  await p.screenshot({ path: SHOT("te1-errore-barra") }).catch(() => {});
+  // the Preferences: the same choice, the profile said, the «?»
+  await p.evaluate(() => document.getElementById("btn-settings").click());
+  await p.waitForSelector("#settings-modal:not(.hidden)");
+  await p.click('#settings-tabs [data-tab-target="viewers"]');
+  await p.waitForTimeout(500);
+  const set = await p.evaluate(() => ({ box: document.querySelector("#set-tiles-error-auto")?.checked, range: document.querySelector("#set-tiles-error-px")?.disabled,
+    hint: document.querySelector("#set-tiles-error-hint")?.textContent ?? "", q: document.querySelector("#set-tiles-error-q")?.title ?? "",
+    v: document.querySelector("#set-tiles-error-v")?.textContent ?? "" }));
+  await p.evaluate(() => document.querySelector("#set-tiles-error")?.scrollIntoView({ block: "center" }));
+  await p.screenshot({ path: SHOT("te1-errore-impostazioni") }).catch(() => {});
+  await ctx.close();
+  const prof = a.probe?.governor?.profile;
+  const conds = {
+    auto: a.auto === true && a.rangeDisabled === true && a.rangeHidden === true && a.autoDisabled === false && a.choice === "auto",
+    profile: !!prof && a.px === prof.start && a.value === `${prof.start} px` && /·/.test(a.why) && a.probe.layers?.[0]?.choice === "auto",
+    governor: typeof a.probe?.calls === "number" && a.probe.governor.target >= prof.start,
+    help: /pixel/i.test(a.help),
+    manual: m0.auto === false && m0.rangeDisabled === false && m0.rangeHidden === false && m0.choice !== "auto" && m1.px === 64 && m1.choice === "64" && m1.value === "64 px",
+    back: back.auto === true && back.choice === "auto" && back.px === back.probe?.governor?.target,
+    settings: set.box === true && set.range === true && new RegExp(String(prof?.calls ?? "x")).test(set.hint) && /pixel/i.test(set.q) && /px/.test(set.v),
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, a, m0, m1, back, set, errors } };
+});
+
 test("TN3.preview-closes", "anteprima · un tileset trascinato sulla Scena resta nella barra come «Anteprima»; aprendo un em.json l'anteprima si chiude da sola", async () => {
   const { p, ctx, errors } = await open({ doc: "catena", ws: "space" });
   const win = await winOf(p, "scene");

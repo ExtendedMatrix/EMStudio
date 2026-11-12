@@ -64,6 +64,8 @@ import { tileCache, TileCachePlugin } from "./tile-cache";
 import { readLeaves, type Box, type LeafResult } from "./tileset-leaves";
 import { estimateErrorScale, onEarth, textureSideFor, volumeDiagonal, type GeErrors } from "./tiles-budget";
 export { estimateErrorScale, onEarth, textureSideFor, volumeDiagonal, type GeErrors } from "./tiles-budget";
+import { mergeTilePages, type MergeStats } from "./tile-merge";
+import { ERROR_MANUAL_MAX, ERROR_MANUAL_MIN, normaliseErrorChoice, type ErrorChoice, type ErrorGovernor } from "./tiles-error";
 
 export type RefineMode = "manual" | "auto";
 
@@ -156,6 +158,12 @@ export interface TilesStatus {
   ge: GeErrors | null;
   /** the textures reduced as the tiles arrived: how many, the largest seen, the side allowed */
   textures: { reduced: number; largest: number; max: number };
+  /** MICRO-ERRORE-GEOMETRICO · the screen-space error the renderer refines to:
+   *  its pixels, whose choice (the viewer's governor, or the person's), and why
+   *  the governor put it there */
+  error: { px: number; choice: ErrorChoice; reason: string };
+  /** …the pages of a tile drawn as one (`tile-merge.ts`) */
+  merge: MergeStats;
 }
 
 
@@ -214,6 +222,14 @@ export interface TilesLayer {
   up(): [number, number, number] | null;
   /** the multiplier of the errors in automatic mode: a number, or "auto" (estimated from the root) */
   setErrorScale(v: number | "auto"): void;
+  /** MICRO-ERRORE-GEOMETRICO · the person's choice of the error: "auto" (the
+   *  viewer's governor) or pixels («Manuale») */
+  setErrorChoice(v: ErrorChoice): void;
+  errorChoice(): ErrorChoice;
+  /** …the governor's error, applied only while the choice is "auto" */
+  setAutoError(px: number, reason?: string): void;
+  /** …the draw calls the tileset's visible tiles cost (a mesh, a call) */
+  drawCalls(): number;
 }
 
 export type RelocateFn = (root: { transform: number[] | null; boundingVolume: unknown }) =>
@@ -237,6 +253,13 @@ export interface TilesOptions {
   errorScale?: number | "auto";
   /** …the longest side a tile's texture keeps (default: `textureSideFor`) */
   textureMax?: number;
+  /** MICRO-ERRORE-GEOMETRICO · the error: "auto" (default, the viewer's
+   *  governor) or the person's pixels; and the governor's error to start from */
+  errorChoice?: ErrorChoice;
+  errorTarget?: number;
+  /** …the pages of one tile drawn as one (default on; the probes' way to
+   *  measure without: `globalThis.__EM_TILES_MERGE__ = false`) */
+  mergePages?: boolean;
 }
 
 /** 3d-tiles-renderer's LOADED (`core/renderer/constants.js`): a tile whose content is in */
@@ -400,7 +423,19 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   const texMax = opts.textureMax ?? textureSideFor(Math.max(renderer?.domElement?.width ?? 0, renderer?.domElement?.height ?? 0, 1024),
     mb * 1024 * 1024, Number(renderer?.capabilities?.maxTextureSize ?? 16384));
   const texStats = { reduced: 0, largest: 0, max: texMax };
-  tiles.registerPlugin({ name: "EM_TEXTURE_SIDE", processTileModel: (scene: any) => reduceTextures(scene, texMax, texStats) });
+  // MICRO-ERRORE-GEOMETRICO p.3 · …then the pages of the tile stacked into one primitive
+  const mergeOn = opts.mergePages ?? (globalThis as { __EM_TILES_MERGE__?: boolean }).__EM_TILES_MERGE__ !== false;
+  const mergeStats: MergeStats = { tiles: 0, before: 0, after: 0, ms: 0 };
+  tiles.registerPlugin({ name: "EM_TEXTURE_SIDE", processTileModel: async (scene: any) => {
+    await reduceTextures(scene, texMax, texStats);
+    if (mergeOn) { try { mergeTilePages(THREE, scene, mergeStats); } catch { /* the tile as it came */ } }
+  } });
+  // MICRO-ERRORE-GEOMETRICO · the error: the governor's unless the person chose
+  let errChoice: ErrorChoice = normaliseErrorChoice(opts.errorChoice);
+  let autoPx = Number(opts.errorTarget) > 0 ? Number(opts.errorTarget) : 16;
+  let autoWhy = "start";
+  const applyError = () => { tiles.errorTarget = errChoice === "auto" ? autoPx : errChoice; };
+  applyError();
 
   let mode: RefineMode = opts.mode ?? "manual";
   let leafRead: ReturnType<TilesLayer["leaves"]> | null = null;
@@ -637,6 +672,8 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
         bytes: Number(tiles.lruCache?.cachedBytes ?? 0), missing: missing.slice(), tileError, failed,
         asked: asked.size, busy: (s.downloading ?? 0) + (s.parsing ?? 0) + (s.queued ?? 0) > 0,
         maxBytes: Number(tiles.lruCache?.maxBytesSize ?? 0), placed, ge, textures: { ...texStats },
+        error: { px: Number(tiles.errorTarget), choice: errChoice, reason: errChoice === "auto" ? autoWhy : "manual" },
+        merge: { ...mergeStats },
       };
     },
     bounds() {
@@ -725,6 +762,34 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       ge = geOf(tiles.root);
       changed();
     },
+    setErrorChoice(v) {
+      const c = normaliseErrorChoice(v);
+      if (c === errChoice) return;
+      errChoice = c;
+      applyError();
+      changed();
+    },
+    errorChoice: () => errChoice,
+    setAutoError(px, reason) {
+      if (!(px > 0)) return;
+      const moved = Math.abs(px - autoPx) > 1e-6;
+      autoPx = px;
+      if (reason) autoWhy = reason;
+      applyError();
+      if (moved && errChoice === "auto") changed();
+    },
+    drawCalls() {
+      let n = 0;
+      for (const t of tiles.visibleTiles as Set<any>) {
+        const sc = t.engineData?.scene;
+        if (!sc?.parent) continue;
+        sc.traverseVisible((o: any) => {
+          if (!(o.isMesh || o.isPoints || o.isLine)) return;
+          n += Array.isArray(o.material) ? Math.max(1, o.geometry?.groups?.length ?? 1) : 1;
+        });
+      }
+      return n;
+    },
     leaves() {
       leafRead ??= (async () => {
         // the renderer's road: its plugins turn the URL (an archive's base) and fetch it (signed, from the archive)
@@ -753,6 +818,25 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   return layer;
 }
 
+/** MICRO-ERRORE-GEOMETRICO · one step of the governor over a scene's tilesets,
+ *  after the frame was drawn (`calls`: the renderer's, the whole frame). It
+ *  steers the layers refining by themselves whose error is the viewer's; the
+ *  others' calls (a layer in «Manuale», the proxies, the globe) are the rest
+ *  of the frame, paid first. */
+export function governTiles(gov: ErrorGovernor, layers: TilesLayer[], calls: number, now: number): void {
+  const governed = layers.filter((l) => l.mode() === "auto" && l.errorChoice() === "auto");
+  if (!governed.length) return;
+  let tileCalls = 0, bytes = 0, maxBytes = 0, busy = false;
+  for (const l of governed) {
+    tileCalls += l.drawCalls();
+    const s = l.status();
+    bytes += s.bytes; maxBytes += s.maxBytes; busy ||= s.busy;
+  }
+  const px = gov.sample({ calls, tileCalls, bytes, maxBytes, busy, now });
+  const why = gov.state().reason;
+  for (const l of governed) l.setAutoError(px, why);
+}
+
 /** Bytes as a person reads them. */
 export function formatBytes(n: number): string {
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`;
@@ -776,6 +860,14 @@ export interface TilesBarTexts {
   /** MICRO tileset dritto e nitido · the errors' multiplier: its title, «auto (×16)», «×4» */
   geTitle: string;
   geAuto: (scale: number) => string;
+  /** MICRO-ERRORE-GEOMETRICO · the error's control: «auto» (the governor's), the
+   *  cursor of «Manuale», the value as read («16 px», with the governor's why),
+   *  and the «?»'s words */
+  errAuto: string;
+  errAutoTitle: string;
+  errCursorTitle: string;
+  errValue: (px: number, auto: boolean, reason: string) => string;
+  errHelp: string;
 }
 
 /**
@@ -831,11 +923,53 @@ export function tilesBar(layer: TilesLayer, texts: TilesBarTexts): TilesBarHandl
   }
   ge.addEventListener("click", (e) => e.stopPropagation());
   ge.addEventListener("change", (e) => { e.stopPropagation(); layer.setErrorScale(ge.value === "auto" ? "auto" : Number(ge.value)); refresh(); });
+  // MICRO-ERRORE-GEOMETRICO · the error: the viewer's (the box ticked, the
+  // cursor shows its value and cannot be moved) or the person's («Manuale»:
+  // the box unticked, the cursor theirs). The cursor runs on log₂ of the pixels.
+  const err = document.createElement("span");
+  err.className = "tl-err";
+  err.dataset.tiles = "error";
+  const errLab = document.createElement("label");
+  errLab.className = "tl-err-auto";
+  errLab.title = texts.errAutoTitle;
+  const errBox = document.createElement("input");
+  errBox.type = "checkbox";
+  errBox.dataset.tiles = "error-auto";
+  errLab.append(errBox, document.createTextNode(` ${texts.errAuto}`));
+  const errRange = document.createElement("input");
+  errRange.type = "range";
+  errRange.dataset.tiles = "error-px";
+  errRange.min = String(Math.log2(ERROR_MANUAL_MIN));
+  errRange.max = String(Math.log2(ERROR_MANUAL_MAX));
+  errRange.step = "0.05";
+  errRange.title = texts.errCursorTitle;
+  const errVal = document.createElement("span");
+  errVal.className = "tl-err-v";
+  const errQ = document.createElement("button");
+  errQ.type = "button";
+  errQ.className = "win-help";
+  errQ.textContent = "?";
+  errQ.title = texts.errHelp;
+  errQ.setAttribute("aria-label", texts.errHelp);
+  err.append(errLab, errRange, errVal, errQ);
+  for (const x of [errLab, errBox, errRange, errQ]) x.addEventListener("click", (e) => e.stopPropagation());
+  for (const x of [errRange, errBox]) x.addEventListener("pointerdown", (e) => e.stopPropagation());
+  errQ.addEventListener("click", () => { note = texts.errHelp; refresh(); });
+  errBox.addEventListener("change", () => {
+    // unticked: «Manuale» from the error shown now
+    layer.setErrorChoice(errBox.checked ? "auto" : Math.round(layer.status().error.px));
+    refresh();
+  });
+  errRange.addEventListener("input", () => {
+    const px = Math.round(2 ** Number(errRange.value));
+    layer.setErrorChoice(px);
+    errVal.textContent = texts.errValue(px, false, "manual");
+  });
   const line = document.createElement("span");
   line.className = "tl-status";
   line.setAttribute("role", "status");
   let note = "";
-  el.append(seg, more, less, ge, line);
+  el.append(seg, more, less, ge, err, line);
   const refresh = () => {
     const s = layer.status();
     const manual = s.mode === "manual";
@@ -851,6 +985,17 @@ export function tilesBar(layer: TilesLayer, texts: TilesBarTexts): TilesBarHandl
     const autoOpt = ge.options[0];
     if (autoOpt) autoOpt.textContent = texts.geAuto(s.ge?.auto ? s.ge.scale : 1);
     el.dataset.errorScale = String(s.ge?.scale ?? 1);
+    const autoErr = s.error.choice === "auto";
+    errBox.checked = autoErr;
+    errBox.disabled = manual;
+    errRange.disabled = manual || autoErr;
+    // the cursor only in «Manuale»: the strip stays one line shorter over the scene
+    errRange.hidden = autoErr;
+    if (document.activeElement !== errRange) errRange.value = String(Math.log2(Math.max(ERROR_MANUAL_MIN, s.error.px)));
+    errVal.textContent = texts.errValue(s.error.px, false, s.error.reason);
+    errVal.title = texts.errValue(s.error.px, autoErr, s.error.reason);
+    el.dataset.errorPx = String(Math.round(s.error.px * 10) / 10);
+    el.dataset.errorChoice = String(s.error.choice);
     el.dataset.placed = s.placed;
     line.classList.toggle("bad", !!(s.missing.length || s.failed));
     el.dataset.level = s.level ? `${s.level[0]}-${s.level[1]}` : "";

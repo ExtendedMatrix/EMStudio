@@ -133,6 +133,11 @@ export interface ViewerSettings {
   lodLimitPoints: number;
   /** the memory ceiling of a tileset's automatic refinement, MB */
   tilesMemoryMB: number;
+  /** MICRO-ERRORE-GEOMETRICO · the tilesets' screen-space error: the viewer's
+   *  (true, the default: from the machine's profile and the frame's draw calls)
+   *  or «Manuale», `tilesErrorPx` pixels — the person's choice only */
+  tilesErrorAuto: boolean;
+  tilesErrorPx: number;
   /** MICRO-MEMORIA-SESSIONE p.1 · the ceiling of what the scene holds (the
    *  models drawn, estimated before each is loaded), MB; 0 or absent = the
    *  machine's (a quarter of its memory, `sceneMemoryDefaultMB`) */
@@ -235,6 +240,7 @@ const DEFAULTS: Settings = {
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.
   viewer: { atonBase: "", heriverseApp: "a/heriverse",
             lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB, tileCacheMB: TILE_CACHE_MB,
+            tilesErrorAuto: true, tilesErrorPx: 16,
             emulate3Button: false, emulateNumpad: false, autoPerspective: true, leftDrag: "auto",
             invertTrackpadOrbit: false },
   // No default base, for the same reason the ATON one has none: a wrong host

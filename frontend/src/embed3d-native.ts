@@ -34,8 +34,9 @@
 import { t } from "./i18n";
 import { onFirstVisible } from "./lazy";
 import { nodeBlobReady, nodeBlobUrl, nodeBytes, ownedByNode, roadFetch, RoadError } from "./node-road";
-import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine, withDecoders,
+import { createTilesLayer, formatBytes, governTiles, isTilesetUrl, tilesBar, tilesEngine, withDecoders,
          type RefineMode, type TilesBarTexts, type TilesLayer } from "./tiles3d";
+import { createErrorGovernor, ERROR_PROFILES, type ErrorChoice, type Hardware } from "./tiles-error";
 
 /** Loaded once per session, on the first 3D embed a reader actually looks at. */
 let enginePromise: Promise<any> | null = null;
@@ -141,6 +142,8 @@ export interface ModelOptions {
   tileset?: string | null;
   /** the tileset's refinement and memory (the preferences) */
   tiles?: { mode?: RefineMode; memoryMB?: number;
+    /** MICRO-ERRORE-GEOMETRICO · the machine's profile and the person's choice of the error (the Preferences) */
+    hardware?: Hardware; errorChoice?: ErrorChoice;
     /** MICRO-TILESET-CARTELLA · a dropped tileset: its files from this reader */
     source?: { readEntry(path: string): Promise<Uint8Array | null> } };
   /** look for the `<base>_LOD0…N` siblings of a glb (default: yes) */
@@ -375,6 +378,8 @@ export function mount3dViewer(host: HTMLElement, url: string,
       let bar: ReturnType<typeof tilesBar> | null = null;
       let frames = 0;
       let frame = 0;
+      // MICRO-ERRORE-GEOMETRICO · the error of the tileset, governed by the frame's calls
+      const gov = createErrorGovernor(ERROR_PROFILES[mo.tiles?.hardware ?? "desktop"]);
       const tick = () => {
         if (disposed) return;
         frame = requestAnimationFrame(tick);
@@ -385,6 +390,7 @@ export function mount3dViewer(host: HTMLElement, url: string,
           if (++frames % 20 === 0) bar?.refresh();
         }
         renderer.render(scene, camera);
+        if (layer && frames % 6 === 0) governTiles(gov, [layer], renderer.info.render.calls, performance.now());
         placeLabels();
       };
       // a CLICK is a press and a release without a drag — a drag orbits
@@ -590,7 +596,7 @@ export function mount3dViewer(host: HTMLElement, url: string,
         strip.textContent = "";
         strip.classList.remove("hidden");
         if (!strip.isConnected) host.prepend(strip);
-        const l = createTilesLayer(E, T, u, camera, renderer, mo.tiles ?? {});
+        const l = createTilesLayer(E, T, u, camera, renderer, { ...(mo.tiles ?? {}), errorTarget: gov.state().target });
         layer = l;
         content.add(l.object);
         host.dataset.model = u;
@@ -605,6 +611,8 @@ export function mount3dViewer(host: HTMLElement, url: string,
                    box: box ? [...box.min.toArray(), ...box.max.toArray()] : null,
                    points: (() => { let n = 0; l.object.traverse((o: any) => { if (o.isPoints) n++; }); return n; })() };
         };
+        (host as unknown as Record<string, unknown>).__tilesError = () => ({ governor: gov.state(), ...l.status().error,
+          calls: l.drawCalls(), frameCalls: renderer.info.render.calls, merge: l.status().merge });
         (host as unknown as Record<string, unknown>).__tilesScreenOf = (uri: string) => {
           const c = l.centreOf(uri);
           if (!c) return null;
@@ -761,6 +769,11 @@ export function tilesBarTexts(): TilesBarTexts {
     more: t("tl.more"), moreTitle: t("tl.moreTitle"), less: t("tl.less"), lessTitle: t("tl.lessTitle"),
     leaf: t("tl.leaf"), noTile: t("tl.noTile"),
     geTitle: t("tl.geTitle"), geAuto: (x) => t("tl.geAuto", { x: String(x) }),
+    errAuto: t("tl.errAuto"), errAutoTitle: t("tl.errAutoTitle"), errCursorTitle: t("tl.errCursorTitle"), errHelp: t("tl.errHelp"),
+    errValue: (px, auto, why) => {
+      const v = String(Math.round(px));
+      return auto ? t("tl.errPxAuto", { px: v, why: t(`tl.errWhy.${why}`) }) : t("tl.errPx", { px: v });
+    },
     status: (s) => {
       const lv = !s.level ? t("tl.noLevel") : s.level[0] === s.level[1]
         ? t("tl.level", { n: String(s.level[0]) }) : t("tl.levels", { a: String(s.level[0]), b: String(s.level[1]) });

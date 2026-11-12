@@ -277,6 +277,7 @@ import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chron
 import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
 import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type Probes } from "./load-failure";
 import { chooseForHardware, chooseVersion, HARDWARE, SCENE_USES, USES, type Hardware, type HardwareEntry } from "./asset-versions";
+import { ERROR_MANUAL_MIN, ERROR_PROFILES, normaliseErrorChoice, type ErrorChoice } from "./tiles-error";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { mountGisSpace, type GisSpaceDeps } from "./gis-space";
 import { epsgOf, georefSummary, parseShiftTxt } from "./georef";
@@ -17821,6 +17822,29 @@ function openSettings(section?: string): void {
   if (lm) lm.value = grouped(s.viewer.lodLimitMB);
   if (lp) lp.value = grouped(s.viewer.lodLimitPoints);
   if (tm) tm.value = grouped(s.viewer.tilesMemoryMB);
+  // MICRO-ERRORE-GEOMETRICO · the tilesets' error: automatic, or the person's cursor
+  {
+    const box = numIn("set-tiles-error-auto"), rg = numIn("set-tiles-error-px");
+    const v = document.getElementById("set-tiles-error-v"), q = document.getElementById("set-tiles-error-q");
+    const hint = document.getElementById("set-tiles-error-hint");
+    const hw = hardwareProfile(), prof = ERROR_PROFILES[hw];
+    const show = () => {
+      if (rg && box) rg.disabled = box.checked;
+      if (v && rg) v.textContent = box?.checked ? `${t("tl.errPx", { px: String(prof.start) })} · ${t("tl.errAuto")}`
+        : t("tl.errPx", { px: String(Math.round(2 ** Number(rg.value))) });
+    };
+    if (box) box.checked = s.viewer.tilesErrorAuto !== false;
+    if (rg) { rg.value = String(Math.log2(Math.max(ERROR_MANUAL_MIN, s.viewer.tilesErrorPx || prof.start))); rg.title = t("tl.errCursorTitle"); }
+    if (q) { q.title = t("tl.errHelp"); q.setAttribute("aria-label", q.title); }
+    if (hint) hint.textContent = t("settings.tilesErrorHint", { hw: hardwareWord(hw), px: String(prof.start), calls: String(prof.calls) });
+    if (box && !box.dataset.wired) {
+      box.dataset.wired = "1";
+      box.addEventListener("change", show);
+      rg?.addEventListener("input", show);
+      q?.addEventListener("click", () => toast(t("tl.errHelp")));
+    }
+    show();
+  }
   // MICRO tileset dritto e nitido · the machine's ceiling, said beside the field
   const tmh = document.getElementById("set-tiles-memory-hint");
   if (tmh) tmh.textContent = t("settings.tilesMemoryHint", { mb: grouped(TILES_MEMORY_MB),
@@ -18201,6 +18225,8 @@ settingsModal.addEventListener("click", (e) => {
       lodLimitMB: posNum("set-lod-limit-mb", LOD_LIMIT_MB),
       lodLimitPoints: posNum("set-lod-limit-points", LOD_LIMIT_POINTS),
       tilesMemoryMB: Math.max(64, posNum("set-tiles-memory-mb", TILES_MEMORY_MB)),
+      tilesErrorAuto: (document.getElementById("set-tiles-error-auto") as HTMLInputElement | null)?.checked ?? true,
+      tilesErrorPx: ((r) => r ? Math.round(2 ** Number(r.value)) : 16)(document.getElementById("set-tiles-error-px") as HTMLInputElement | null),
       sceneMemoryMB: ((v) => (!v.trim() ? 0 : Math.max(256, posNum("set-scene-memory-mb", 0))))(
         (document.getElementById("set-scene-memory-mb") as HTMLInputElement | null)?.value ?? ""),
       tileCacheMB: ((v) => (v.trim() === "0" ? 0 : posNum("set-tile-cache-mb", TILE_CACHE_MB)))(
@@ -27501,7 +27527,7 @@ function renderViewerDropped(win: Win, d: DroppedTileset, stage: HTMLElement): v
     host.className = "tsp-host";
     host.dataset.tilesetPreview = d.id;
     const handle = mount3dViewer(host, droppedUrl(d), { label: d.label,
-      model: { tiles: { source: d.reader, memoryMB: getSettings().viewer.tilesMemoryMB } } });
+      model: { tiles: { source: d.reader, memoryMB: getSettings().viewer.tilesMemoryMB, ...tilesErrorPrefs() } } });
     m = { id: d.id, host, handle };
     viewerDroppedMounts.set(win.id, m);
   }
@@ -29726,6 +29752,12 @@ function detectHardware(): Hardware {
   return hardwareSeen;
 }
 function hardwareProfile(): Hardware { return space3dPrefs().hardware ?? detectHardware(); }
+/** MICRO-ERRORE-GEOMETRICO · the tilesets' error as the Preferences say: the
+ *  machine's profile (the governor's numbers) and «auto» or the person's pixels */
+function tilesErrorPrefs(): { hardware: Hardware; errorChoice: ErrorChoice } {
+  const v = getSettings().viewer;
+  return { hardware: hardwareProfile(), errorChoice: v.tilesErrorAuto === false ? normaliseErrorChoice(v.tilesErrorPx) : "auto" };
+}
 /** a version of the Space as `chooseForHardware` reads it: its profile from its
  *  step (`parameters.profile`, the level's name) or its file's name */
 function hardwareEntry(v: RmVersion): HardwareEntry {
@@ -31484,6 +31516,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     memory: sceneMemory, onMemoryGate,
     onLighter: (rmId, vid) => { setVersionMode([rmId], "manual", vid); logInfo(t("mem.chose", { x: currentSpace()?.rms.find((r) => r.id === rmId)?.name ?? rmId })); },
     tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
+    tilesError: () => { const p = tilesErrorPrefs(); return { hardware: p.hardware, choice: p.errorChoice }; },
     isFocused: () => activeWin().id === win.id,
     overlay: (k) => space3dShown(k, win.id),
     overlayValue: (k) => overlayValue(overlaysOfWin(win.id, "space"), k),
@@ -49903,6 +49936,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     // MICRO-MEMORIA-SESSIONE p.1 · the guard of memory
     memory: sceneMemory, onMemoryGate,
     tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
+    tilesError: () => { const p = tilesErrorPrefs(); return { hardware: p.hardware, choice: p.errorChoice }; },
     isFocused: () => activeWin().id === win.id,
     // the document's scene: the models and their tileset; no proxies, no sketches, no labels
     overlay: (k) => (k === "s3_proxies" || k === "s3_labels_proxy" || k === "s3_labels_sketch" || k === "s3_labels_rm" ? false : space3dShown(k)),

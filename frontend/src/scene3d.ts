@@ -47,7 +47,8 @@
 import { engine, headBytes, lodLevelOf, probeLods, tilesBarTexts } from "./embed3d-native";
 import { onFirstVisible } from "./lazy";
 import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-road";
-import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine, withDecoders, type RelocateFn, type TilesLayer } from "./tiles3d";
+import { createTilesLayer, formatBytes, governTiles, isTilesetUrl, tilesBar, tilesEngine, withDecoders, type RelocateFn, type TilesLayer } from "./tiles3d";
+import { createErrorGovernor, ERROR_PROFILES, type ErrorChoice, type ErrorGovernor, type Hardware } from "./tiles-error";
 import type { OverlayKey, OverlayValueKey } from "./overlays";
 import {
   alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, freeAxes, modalHeader, threeToBlender, type ModalWords, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
@@ -109,7 +110,7 @@ export interface SceneItem {
   /** MICRO-ANTEPRIMA-AGGANCIATA · how its layer starts (a new layer only): the
    *  mode and the errors' multiplier of the preview it was attached from — the
    *  loading the person chose on the preview passes to the model */
-  tilesStart?: { mode: "auto" | "manual"; errorScale?: number | "auto" };
+  tilesStart?: { mode: "auto" | "manual"; errorScale?: number | "auto"; errorChoice?: ErrorChoice };
   /** MICRO tileset, shift e epoche · the tileset's frame (a CRS minus a shift):
    *  the layer is relocated into the study's frame (`TilesLayer.relocate`) */
   tilesRelocate?: { key: string; fn: RelocateFn } | null;
@@ -281,7 +282,7 @@ export interface SpaceSceneHandle {
   tilesControls(key: string): { el: HTMLElement; dispose(): void } | null;
   /** MICRO-ANTEPRIMA-AGGANCIATA · a tileset's loading now (`rm:<id>`): its mode
    *  and the errors' multiplier; null when the scene has no layer for it */
-  tilesState(key: string): { mode: "auto" | "manual"; errorScale: number | "auto" } | null;
+  tilesState(key: string): { mode: "auto" | "manual"; errorScale: number | "auto"; errorChoice: ErrorChoice } | null;
   /** …and the popover of the chip, opened or closed */
   tilesPopover(open?: boolean): boolean;
   /** MICRO-SPAZIO-3D-2 · the view (aligned, orthographic) and the lens */
@@ -411,6 +412,10 @@ export interface SpaceSceneOptions {
   onMemoryGate?: (g: { key: string; label: string; need: number; room: number; by: "ceiling" | "machine"; lighter: string | null }) => void;
   onLighter?: (rmId: string, versionId: string) => void;
   tilesMemoryMB?: number;
+  /** MICRO-ERRORE-GEOMETRICO · the tilesets' error: the machine's profile and the
+   *  person's choice in the Preferences ("auto" = the viewer's governor), read
+   *  at each step of the governor */
+  tilesError?: () => { hardware: Hardware; choice: ErrorChoice };
   /** MICRO-SPAZIO-3D-2 · the navigation's Preferences, read at every press */
   nav?: () => SceneNavPrefs;
   /** the first press of a middle button on this device */
@@ -872,16 +877,44 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       /** MICRO-DROP-3TZ-GRANDE · the layers already framed on their arrival */
       const framedOnArrival = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
+      // MICRO-ERRORE-GEOMETRICO · ONE governor for the scene's tilesets: the
+      // frame's draw calls are the scene's, whoever draws them
+      const tilesErr = () => opts.tilesError?.() ?? { hardware: "desktop" as Hardware, choice: "auto" as ErrorChoice };
+      let gov: ErrorGovernor | null = null;
+      let govHw: Hardware | null = null;
+      let govChoice: ErrorChoice | null = null;
+      const governor = (hw: Hardware): ErrorGovernor => {
+        if (!gov) gov = createErrorGovernor(ERROR_PROFILES[hw]);
+        else if (govHw !== hw) gov.setProfile(ERROR_PROFILES[hw]);
+        govHw = hw;
+        return gov;
+      };
+      let govFrames = 0;
+      const governTick = (live: Live[]) => {
+        if (++govFrames % 6 !== 0) return;
+        const te = tilesErr();
+        const g = governor(te.hardware);
+        // the Preferences' choice changed: every tileset takes it (a bar's own choice lasts until then)
+        if (govChoice !== null && govChoice !== te.choice) for (const l of layers.values()) l.layer.setErrorChoice(te.choice);
+        govChoice = te.choice;
+        governTiles(g, live.filter((l) => l.layer.object.visible).map((l) => l.layer), renderer.info.render.calls, performance.now());
+      };
+      (probe as Record<string, unknown>).__spaceTilesError = () => ({ governor: gov?.state() ?? null,
+        layers: liveLayers().map((l) => ({ id: l.itemId, ...l.layer.status().error, calls: l.layer.drawCalls(), merge: l.layer.status().merge })),
+        calls: renderer.info.render.calls });
       const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual",
                                  source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"], memoryMB?: number,
-                                 errorScale?: number | "auto"): Promise<Live | null> => {
+                                 errorScale?: number | "auto", errorChoice?: ErrorChoice): Promise<Live | null> => {
         let live = layers.get(url);
         if (live) { live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
         // MICRO-TILESET-CONTENITORE · a container's tileset refines by itself
         // (its tiles by the distance): «Manuale» stays one click away on its bar
+        // MICRO-ERRORE-GEOMETRICO · the error: the one handed over, else the Preferences'; the governor's now
+        const te = tilesErr();
         const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: memoryMB ?? opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}),
-          ...(source ? { source } : {}), ...(relocate ? { relocate } : {}), ...(errorScale !== undefined ? { errorScale } : {}) });
+          ...(source ? { source } : {}), ...(relocate ? { relocate } : {}), ...(errorScale !== undefined ? { errorScale } : {}),
+          errorChoice: errorChoice ?? te.choice, errorTarget: governor(te.hardware).state().target });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
         const ready = new Promise<void>((res) => {
@@ -1892,7 +1925,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               }
               return ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : item.tilesStart?.mode,
                 tsUrl === item.url ? item.tilesSource : undefined, tsUrl === item.url ? item.tilesRelocate : undefined, tsMb,
-                item.tilesStart?.errorScale);
+                item.tilesStart?.errorScale, item.tilesStart?.errorChoice);
             }).then(async (live) => {
               if (live === "held") return;
               if (gen !== generation || disposed) return;
@@ -2711,6 +2744,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         for (const l of live) if (l.layer.object.visible || altWarming.has(l)) l.layer.update();
         if (live.length && ++frames % 20 === 0) { for (const l of live) { l.bar.refresh(); for (const b of l.extra) b.refresh(); } chipTick(); }
         renderer.render(scene, camera);
+        if (live.length) governTick(live);
         if (statsOn) { statFrames++; const n = performance.now(); if (n - statAt >= 500) readStats(n); }
         place();
         placeMarks();
@@ -3686,7 +3720,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const l = [...layers.values()].find((x) => `rm:${x.itemId}` === k);
           if (!l) return null;
           const ge = l.layer.status().ge;
-          return { mode: l.layer.mode(), errorScale: !ge || ge.auto ? "auto" as const : ge.scale };
+          return { mode: l.layer.mode(), errorScale: !ge || ge.auto ? "auto" as const : ge.scale, errorChoice: l.layer.errorChoice() };
         },
         leavesOf: (k: string) => {
           // every layer of the item, shown or not: the leaves are the tileset's JSON

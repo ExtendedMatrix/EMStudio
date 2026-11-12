@@ -9173,6 +9173,18 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
   border-radius: var(--radius-sm); padding: 2px 8px; font: inherit; cursor: pointer; }
 .tl-more[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--bg-accent-soft); }
 .tl-more:disabled, .tl-less:disabled { opacity: 0.45; cursor: default; }
+/* MICRO-ERRORE-GEOMETRICO · the error: «error auto», the cursor of «Manuale», its value, the «?» */
+.tl-err { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; max-width: 100%; }
+.tl-err-auto { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+.tl-err input[type="range"] { width: 84px; }
+.tl-err input[type="range"][hidden] { display: none; }
+.tl-err input:disabled { opacity: 0.5; }
+.tl-err-v { color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 0; }
+.tl-err .win-help, .set-tiles-error .win-help { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 1px solid var(--border-strong);
+  background: var(--bg-panel); color: var(--text-muted); font: inherit; font-size: 0.72rem; line-height: 1; cursor: help; }
+.set-tiles-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.set-tiles-error input[type="range"] { width: 140px; }
+.set-tiles-error-v { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tl-status { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tl-status.bad { color: var(--danger); }
 .rd-3d-host:has(.tl-bar.armed) canvas, .scn-host:has(.tl-bar.armed) canvas { cursor: crosshair; }
