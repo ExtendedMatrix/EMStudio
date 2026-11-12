@@ -162,9 +162,17 @@ const BRUNO = "0000-0001-5109-3700";
      !Sorg.chiama(share, "renderMembersPanel"),
      "…and reads nothing itself: a copy of the panel would start here, with one "
      + "fetch that seemed harmless");
-  ok(Sorg.stringheLetterali(share).some((v) => v.includes("/work/?room=")),
-     "…at the stable per-room address the node serves (`/work/?room=<id>`), "
-     + "which is the one the note asks every app to bring a link to");
+  // MICRO-BUSSARE-ALLA-CASA (12 Nov 2026): the room's page is in the node's
+  // house, at `#room=<id>`, and where the house is the NODE declares
+  // (`/v1/node` → `faces`). `who.roomPageUrl` composes it; the address it makes
+  // is asserted in `check-cloud-files.mjs`.
+  ok(Sorg.chiama(share, "who.roomPageUrl") && Sorg.chiama(share, "nodeFacesNow"),
+     "…at the room's address in the node's house (`<house>#room=<id>`), the house "
+     + "being the one the node declares — the stable per-room address the note asks "
+     + "every app to bring a link to");
+  ok(!Sorg.stringheLetterali(share).some((v) => v.includes("/work/")),
+     "…and not through `/work/`: that was the node's old face, kept alive only by a "
+     + "redirect that is to be removed");
 
   // NO FIELD FOR A SERVER ADDRESS — the note says drawing one means you got lost
   ok(Sorg.chiama(share, "getSettings") && /sync\.hubUrl/.test(share),
@@ -218,7 +226,7 @@ const BRUNO = "0000-0001-5109-3700";
     ["fetchRoster", "reading the roster"],
   ]) {
     ok(!new RegExp(`export (function|const) ${symbol}\\b`).test(code),
-       `${symbol} · ${why} belongs to the node's panel (/em/work/?room=<id>), `
+       `${symbol} · ${why} belongs to the node's panel (/em/home/#room=<id>), `
        + "which shows people AND teams. This file showed people only, so it was "
        + "retired — see the header. If you are bringing it back, the question to "
        + "answer first is what happens to the team grants.");

@@ -74,11 +74,55 @@ export function missingFor(need: SignNeed, f: Pick<WhoFacts, "author" | "signedI
   return null;
 }
 
-/** «Il mio spazio sul nodo»: the node's console (rooms, space used,
+// ── MICRO-BUSSARE-ALLA-CASA (12 Nov 2026) · the house is where the node SAYS ──
+// The node's console moved from `/admin/` to `/home/` on 11 November, and the
+// node DECLARES it: `GET /v1/node` → `faces`, the entry with `key: "home"`
+// (measured on a running node: `{"path": "/home/", "key": "home", …}`). Asked,
+// not written down, so the next rename goes unnoticed here. Nodes from before
+// the rename declare the same house as `key: "admin"` (`/admin/`), and that
+// house reads `#room=` too — so the older name is the second answer.
+//
+// The PATH, not the face's `url`: `url` is built from the node's public name,
+// which is not always the address this session talks to (measured: public
+// `https://em.localhost:8443/em/…`, session `http://localhost:8000`). The path,
+// joined to the base this session already uses, reaches the same house.
+//
+// NOT the API: `/v1/admin/whoami` and `/v1/admin/assets/…` (connection.ts)
+// kept their names — the node renamed its face, not its API.
+
+/** One face of the node as `/v1/node` declares it (only what is read here). */
+export interface NodeFace { key?: string; path?: string }
+
+/** The house's path when the node has not said (an unreachable `/v1/node`). */
+export const HOUSE_PATH = "/home/";
+
+/** Where the node's house is: the face it declares as `home` (or, on a node
+ *  from before 11 Nov 2026, as `admin`); `/home/` when it declares neither. */
+export function housePath(faces?: readonly NodeFace[] | null): string {
+  for (const key of ["home", "admin"]) {
+    const p = (faces ?? []).find((x) => x && x.key === key)?.path;
+    if (typeof p === "string" && p.startsWith("/")) return p.endsWith("/") ? p : `${p}/`;
+  }
+  return HOUSE_PATH;
+}
+
+/** The house on this node: `<node><house path>`. */
+export function houseUrl(node: string, faces?: readonly NodeFace[] | null): string {
+  return `${node.replace(/\/+$/, "")}${housePath(faces)}`;
+}
+
+/** A room in the house: `<house>#room=<id>` — the fragment is the form the
+ *  house draws its own room links with (`modules/home.js`, `href="#room=…"`). */
+export function roomPageUrl(node: string, room: string, faces?: readonly NodeFace[] | null): string {
+  return `${houseUrl(node, faces)}#room=${encodeURIComponent(room)}`;
+}
+
+/** «Il mio spazio sul nodo»: the node's house (rooms, space used,
  *  permissions), only when signed in on a node. */
-export function mySpaceUrl(f: Pick<WhoFacts, "node" | "signedIn">): string | null {
+export function mySpaceUrl(f: Pick<WhoFacts, "node" | "signedIn">,
+                           faces?: readonly NodeFace[] | null): string | null {
   if (!f.node || !f.signedIn) return null;
-  return `${f.node.replace(/\/+$/, "")}/admin/`;
+  return houseUrl(f.node, faces);
 }
 
 /** The theme button: what it shows (☀ light, ☾ dark — the theme in force)

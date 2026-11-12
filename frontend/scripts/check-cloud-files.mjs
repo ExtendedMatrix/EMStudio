@@ -80,9 +80,60 @@ ok(W.SIGN_NEEDS.stamp === "author" && W.SIGN_NEEDS.derive === "author" && W.SIGN
 ok(W.missingFor("author", { author: null, signedIn: true }) === "author" && W.missingFor("node", { author: me, signedIn: false }) === "node"
    && W.missingFor("node", { author: null, signedIn: false }) === "author" && W.missingFor("node", { author: me, signedIn: true }) === null,
    "what is missing, in order: the author first, then the node's login");
-ok(W.mySpaceUrl({ node: "https://em.localhost:8443/em/", signedIn: true }) === "https://em.localhost:8443/em/admin/"
-   && W.mySpaceUrl({ node: "https://n", signedIn: false }) === null && W.mySpaceUrl({ node: "", signedIn: true }) === null,
-   "«Il mio spazio sul nodo» = the node's console, only when signed in");
+// MICRO-BUSSARE-ALLA-CASA (12 Nov 2026): the house is where the node DECLARES it
+// (`/v1/node` → `faces`). The faces below are the ones a running node answered.
+const FACES_NOW = [{ path: "/", key: "showcase" }, { path: "/home/", key: "home" }, { path: "/tools/", key: "tools" },
+  { path: "/docs", key: "docs" }, { path: "/v1/node", key: "offers" }];
+const FACES_BEFORE = [{ path: "/rooms/", key: "door" }, { path: "/work/", key: "work" }, { path: "/tools/", key: "tools" },
+  { path: "/admin/", key: "admin" }];
+ok(W.mySpaceUrl({ node: "https://em.localhost:8443/em/", signedIn: true }, FACES_NOW) === "https://em.localhost:8443/em/home/"
+   && W.mySpaceUrl({ node: "https://n", signedIn: false }, FACES_NOW) === null && W.mySpaceUrl({ node: "", signedIn: true }) === null,
+   "«Il mio spazio sul nodo» = the node's house as the node declares it (`home`), only when signed in");
+ok(W.mySpaceUrl({ node: "https://n/em", signedIn: true }) === "https://n/em/home/"
+   && W.mySpaceUrl({ node: "https://n/em", signedIn: true }, []) === "https://n/em/home/",
+   "…and `/home/` when the node has not said (no answer, no faces)");
+ok(W.mySpaceUrl({ node: "https://n/em", signedIn: true }, FACES_BEFORE) === "https://n/em/admin/",
+   "…a node from before the rename declares its house as `admin`: that is where it is");
+ok(W.mySpaceUrl({ node: "https://n/em", signedIn: true }, [{ key: "home", path: "/casa/" }]) === "https://n/em/casa/",
+   "…and the next rename is the node's: the chip follows the declared path, nothing written here");
+ok(!/\/admin\/$/.test(W.mySpaceUrl({ node: "https://n", signedIn: true }, FACES_NOW)),
+   "the chip no longer knocks at `/admin/` on a node that has a house");
+// THE ROOM'S ADDRESS: the house, then `#room=<id>` — never `/work/`
+{
+  const r1 = W.roomPageUrl("https://em.localhost:8443/em/", "Templu Mare/2", FACES_NOW);
+  const r2 = W.roomPageUrl("http://localhost:8000", "abc", null);
+  const r3 = W.roomPageUrl("https://n/em", "abc", FACES_BEFORE);
+  ok(r1 === "https://em.localhost:8443/em/home/#room=Templu%20Mare%2F2" && r2 === "http://localhost:8000/home/#room=abc"
+     && r3 === "https://n/em/admin/#room=abc",
+     "a room's page = the declared house + `#room=<id>` (encoded)");
+  ok([r1, r2, r3].every((u) => /#room=[^#]+$/.test(u) && !u.includes("/work/")),
+     "…every room address ends with `#room=`, and none goes through `/work/`");
+}
+// …AND THE API IS NOT THE FACE: the node renamed its page, not its API. The
+// operator's calls in `connection.ts` still go to `/v1/admin/…`, byte for byte —
+// asked of `nodeApi` itself through a transport that only writes down.
+{
+  const C = await load("connection.ts");
+  const sent = [];
+  const send = async (url, init) => {
+    sent.push(`${init.method} ${url}`);
+    return new Response(url.endsWith("/whoami") ? '{"operator":true}' : "[]", { status: 200 });
+  };
+  const api = C.nodeApi("https://em.localhost:8443/em/", () => "tok", send);
+  await api.operator();
+  await api.orphans({ type: "glb", since: "2026-11-01" });
+  await api.deleteAsset("sha256:ab/cd e");
+  await api.assetBytes("sha256:ab/cd e");
+  const want = [
+    "GET https://em.localhost:8443/em/v1/admin/whoami",
+    "GET https://em.localhost:8443/em/v1/admin/assets/orphans?type=glb&since=2026-11-01",
+    "DELETE https://em.localhost:8443/em/v1/admin/assets/sha256%3Aab%2Fcd%20e",
+    "GET https://em.localhost:8443/em/v1/admin/assets/sha256%3Aab%2Fcd%20e",
+  ];
+  ok(sent.length === want.length && sent.every((x, i) => x === want[i]),
+     `the API keeps its name: whoami and the three asset calls unchanged (${sent.join(" | ")})`);
+  ok(!sent.some((x) => /\/home\//.test(x)), "…and none of them knocks at the house");
+}
 const th = W.themeToggle("auto", "dark");
 ok(th.glyph === "☾" && th.next === "light" && th.following && !W.themeToggle("light", "light").following && W.themeToggle("light", "light").next === "dark",
    "the theme button: ☾ / ☀ the theme in force, a click the other one (explicit), «auto» follows the system");

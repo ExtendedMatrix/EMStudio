@@ -9546,11 +9546,12 @@ function shareThisRoom(): void {
     return;
   }
   // The node's API lives at `<base>/v1`; its faces are its siblings, and the
-  // work page is where the panel is (sharing is part of *lavorare*, not a fifth
-  // verb). Derived from the base this session is already talking to, so nothing
-  // is written down twice.
+  // room's panel is in the node's house, at `#room=<id>` — where the house is,
+  // the node declares (`/v1/node` → `faces`, MICRO-BUSSARE-ALLA-CASA). Joined
+  // to the base this session is already talking to, so nothing is written
+  // down twice.
   const node = base.replace(/\/+$/, "");
-  const url = `${node}/work/?room=${encodeURIComponent(room)}`;
+  const url = who.roomPageUrl(node, room, nodeFacesNow(node));
   logInfo(`share: opening ${url}`);
   window.open(url, "_blank", "noopener");
 }
@@ -10290,7 +10291,7 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
     const rep = reportOf(v.report);
     for (const f of v.report.failed ?? []) logWarn(`inventory: ${f}`);
     const door = v.report.link ? null : await nodeHttp(base).door(room).catch(() => ({ web: null, scheme: null }));
-    const link = v.report.link || door?.web || `${base}/work/?room=${encodeURIComponent(room)}`;
+    const link = v.report.link || door?.web || who.roomPageUrl(base, room, await askNodeFaces(base));
     const sentence = t("inv.report", { n: String(rep.uploaded), size: humanBytes(rep.bytes),
       a: String(rep.already), m: String(rep.references), k: String(rep.missing) })
       + (rep.moved ? ` · ${t("inv.moved", { n: String(rep.moved) })}` : "")
@@ -15904,6 +15905,37 @@ function nodeHttp(base: string): NodeApi {
   return nodeApi(base, () => hubToken, nodeAuthFetch);
 }
 
+/** MICRO-BUSSARE-ALLA-CASA · the faces a node DECLARES (`GET /v1/node` →
+ *  `faces`, public), asked once per node and kept for the session: where its
+ *  house is comes from here (`who.housePath`), never from a path written in
+ *  this file. A refused or faceless answer is kept as «not said» (the rules
+ *  fall back to `/home/`); a network failure is forgotten, so it is asked again. */
+const nodeFacesAsked = new Map<string, Promise<who.NodeFace[] | null>>();
+const nodeFacesSaid = new Map<string, who.NodeFace[] | null>();
+function askNodeFaces(base: string): Promise<who.NodeFace[] | null> {
+  const node = base.replace(/\/+$/, "");
+  if (!node) return Promise.resolve(null);
+  let asked = nodeFacesAsked.get(node);
+  if (!asked) {
+    asked = fetch(`${node}/v1/node`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { faces?: unknown } | null) => {
+        const faces = Array.isArray(j?.faces) ? (j!.faces as who.NodeFace[]) : null;
+        nodeFacesSaid.set(node, faces);
+        return faces;
+      })
+      .catch(() => { nodeFacesAsked.delete(node); return null; });
+    nodeFacesAsked.set(node, asked);
+  }
+  return asked;
+}
+/** …what the node has said so far, without waiting (a click must open its
+ *  window in the same turn, or a browser blocks it); asks if nobody has. */
+function nodeFacesNow(base: string): who.NodeFace[] | null {
+  void askNodeFaces(base);
+  return nodeFacesSaid.get(base.replace(/\/+$/, "")) ?? null;
+}
+
 /** MICRO-SPAZIO-FIRMATO · is a URL the node's store? The room's (`assetStoreBase`,
  *  `?store=` included), or `…/v1/rooms/<room>/asset/…` of the same node — the
  *  form EMtools writes in a resource's `url`. MICRO-STORE-PERCORSO · a URL of
@@ -16768,6 +16800,9 @@ function renderWhoChip(): void {
   const chip = document.getElementById("ns-who-chip");
   if (!chip) return;
   const f = whoFacts();
+  // where its house is, before «Il mio spazio» needs it — only when signed in on
+  // the node, the one case that gesture exists in (`who.mySpaceUrl`)
+  if (f.node && f.signedIn) void askNodeFaces(f.node);
   const m = who.chipModel(f);
   chip.dataset.dot = m.dot;
   chip.querySelector(".who-av")!.textContent = m.initials;
@@ -17075,8 +17110,10 @@ function paintWhoMenu(menu: HTMLElement): void {
   sacts.appendChild(gated("my-rooms", t("who.myRooms"), "rooms", () => {
     sp.querySelector<HTMLElement>('[data-sect="rooms"]')?.scrollIntoView({ block: "nearest" });
   }));
-  const space = who.mySpaceUrl(f);
+  // the house where the node says it is, read at the click (the chip has
+  // already asked the node: `renderWhoChip`)
   sacts.appendChild(gated("my-space", t("who.mySpace"), "space", () => {
+    const space = who.mySpaceUrl(f, f.node ? nodeFacesNow(f.node) : null);
     if (!space) return;
     closeWhoMenu();
     logInfo(`identity: opening the node's console ${space}`);
