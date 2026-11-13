@@ -498,7 +498,7 @@ export function computeNameStatus(
     if (!opts.strictDocumentNames || DOC_RE.test(name)) return { status: "ok" };
     return {
       status: "warn",
-      suggestion: nextDocumentName(doc),
+      suggestion: documentSeriesRenames(doc, [nodeId])[0]?.to ?? nextDocumentName(doc),
       reason: `a document should be named D.<n> (strict naming is on)`,
     };
   }
@@ -620,4 +620,99 @@ export function paradataGroupRenameOnAttach(
   if (!referent) return null;
   const derived = paradataGroupName(nameOf(referent) || referent.id);
   return nameOf(pdg) === derived ? null : derived;
+}
+
+
+// ── MICRO-FOTO-DOCUMENTI-BBOX C · documents named outside the D.nn series ────
+
+/** The names a node had before: `data.former_names` (a list) and
+ *  `data.former_name`, oldest first (s3Dgraphy `diagnostics._former_names`). */
+export function formerNames(n: { data?: unknown }): string[] {
+  const d = (n.data && typeof n.data === "object" ? n.data : {}) as Record<string, unknown>;
+  const out: string[] = [];
+  if (Array.isArray(d.former_names)) for (const x of d.former_names) if (String(x ?? "").trim()) out.push(String(x).trim());
+  if (typeof d.former_name === "string" && d.former_name.trim()) out.push(d.former_name.trim());
+  return out.filter((x, i) => out.indexOf(x) === i);
+}
+
+export interface DocumentSeriesRename {
+  id: string;
+  from: string;
+  to: string;
+  /** the name proposed is the document's `former_name` (in the series and free) */
+  fromFormer: boolean;
+  /** its extractors that read `<document>.<nn>`: they follow (TM015.01 → D.115.01) */
+  extractors: { id: string; from: string; to: string }[];
+  /** its extractors named otherwise: listed, not renamed */
+  kept: { id: string; name: string }[];
+}
+
+/**
+ * The renames that bring the documents named outside the series D.<n> into it —
+ * the given ones, or all — computed one after the other so two never take the
+ * same name. The same rule as s3Dgraphy's `diagnostics.document_series_hints`:
+ * the `former_name` when it is in the series and free, else the first free
+ * D.<n> with the graph's padding; the extractors follow only when they already
+ * read `<document>.<nn>`. Pure: the caller applies them in one batch.
+ */
+export function documentSeriesRenames(doc: NamingDoc, ids?: string[]): DocumentSeriesRename[] {
+  const nodes = doc.graph.nodes;
+  const docs = nodes.filter((n) => n.node_type === "document");
+  const taken = new Set(nodes.map(nameOf));
+  const used = new Set<number>();
+  let pad = 0;
+  for (const n of docs) {
+    const m = DOC_RE.exec(nameOf(n));
+    if (!m) continue;
+    used.add(Number(m[1]));
+    if (m[1].length > 1 && m[1].startsWith("0")) pad = Math.max(pad, m[1].length);
+  }
+  const want = ids ? new Set(ids) : null;
+  const out: DocumentSeriesRename[] = [];
+  for (const n of docs) {
+    const name = nameOf(n);
+    if (DOC_RE.test(name)) continue;
+    let to: string | null = null;
+    let fromFormer = false;
+    for (const f of [...formerNames(n)].reverse()) {
+      if (DOC_RE.test(f) && !taken.has(f)) { to = f; fromFormer = true; break; }
+    }
+    if (!to) {
+      let k = 1;
+      while (used.has(k) || taken.has(`D.${String(k).padStart(pad, "0")}`)) k++;
+      to = `D.${String(k).padStart(pad, "0")}`;
+    }
+    const m = DOC_RE.exec(to);
+    if (m) used.add(Number(m[1]));
+    taken.add(to);
+    if (want && !want.has(n.id)) continue;
+    const extractors: DocumentSeriesRename["extractors"] = [];
+    const kept: DocumentSeriesRename["kept"] = [];
+    const prefix = name ? `${name}.` : null;
+    for (const e of doc.graph.edges ?? []) {
+      if (e.edge_type !== EXTRACTED_FROM || e.target !== n.id) continue;
+      const x = nodes.find((y) => y.id === e.source);
+      if (!x || x.node_type !== "extractor") continue;
+      const xn = nameOf(x);
+      const tail = prefix && xn.startsWith(prefix) ? xn.slice(prefix.length) : "";
+      if (/^\d+$/.test(tail)) extractors.push({ id: x.id, from: xn, to: `${to}.${tail}` });
+      else kept.push({ id: x.id, name: xn });
+    }
+    out.push({ id: n.id, from: name, to, fromFormer, extractors, kept });
+  }
+  return out;
+}
+
+/** The `data` a renamed node keeps its old name in: `former_name` when it has
+ *  none (or held the new name), else appended to `former_names`. */
+export function dataWithFormerName(data: unknown, from: string, to: string): Record<string, unknown> {
+  const d = { ...((data && typeof data === "object" ? data : {}) as Record<string, unknown>) };
+  const former = typeof d.former_name === "string" ? d.former_name : "";
+  if (!former || former === to) d.former_name = from;
+  else {
+    const many = Array.isArray(d.former_names) ? [...d.former_names as unknown[]] : [];
+    if (!many.includes(from) && from !== former) many.push(from);
+    d.former_names = many;
+  }
+  return d;
 }

@@ -181,8 +181,11 @@ export interface TilesLayer {
   /** «Meno dettaglio»: the last refinement taken back */
   coarsen(): boolean;
   status(): TilesStatus;
-  /** the world box of the root's volume, for framing (null until it loads) */
+  /** the world box of what to FRAME: the root's CONTENT volume (MICRO-FOTO-
+   *  DOCUMENTI-BBOX D; null until the tileset.json loads) */
   bounds(): any | null;
+  /** …and the root's own volume as written (a Metashape cube): the probes' */
+  rootBox(): any | null;
   /** the resolution changed (the canvas was resized) */
   resize(): void;
   /** MICRO-SPAZIO-3D-2 · the scene's camera changed (perspective ⇄ orthographic) */
@@ -607,6 +610,38 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
     }
   };
 
+  /** a tile's CONTENT volume (`content.boundingVolume`) as a box in the
+   *  tileset's group, or null when it declares none (its tile's transform:
+   *  `engineData.transform`; a region is read by the renderer's own volume) */
+  const contentAabb = (t: any, world: any): any | null => {
+    const bv = t?.content?.boundingVolume;
+    const tm = t?.engineData?.transform;
+    if (!bv || !tm) return null;
+    // the corners carried into the WORLD before the box is taken: a box aligned
+    // in its tile's frame (east-north-up) is not aligned in ECEF, and an AABB
+    // taken there swells by the rotation (123×132×134 m for 72×86×10, measured)
+    const m = world.clone().multiply(tm);
+    const out = new THREE.Box3();
+    if (Array.isArray(bv.box) && bv.box.length === 12) {
+      const [cx, cy, cz, ...h] = bv.box as number[];
+      for (let i = 0; i < 8; i++) {
+        const s = [i & 1 ? 1 : -1, i & 2 ? 1 : -1, i & 4 ? 1 : -1];
+        out.expandByPoint(new THREE.Vector3(
+          cx + s[0] * h[0] + s[1] * h[3] + s[2] * h[6],
+          cy + s[0] * h[1] + s[1] * h[4] + s[2] * h[7],
+          cz + s[0] * h[2] + s[1] * h[5] + s[2] * h[8]).applyMatrix4(m));
+      }
+      return out;
+    }
+    if (Array.isArray(bv.sphere) && bv.sphere.length === 4) {
+      const [x, y, z, r] = bv.sphere as number[];
+      const c = new THREE.Vector3(x, y, z).applyMatrix4(m);
+      const k = r * m.getMaxScaleOnAxis();
+      return out.set(c.clone().subScalar(k), c.clone().addScalar(k));
+    }
+    return null;
+  };
+
   const layer: TilesLayer = {
     object: tiles.group,
     update() {
@@ -677,6 +712,25 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       };
     },
     bounds() {
+      // MICRO-FOTO-DOCUMENTI-BBOX D · Metashape's Cesium export is a cubic
+      // octree: the ROOT's volume is a cube that holds the region (124.6 m for
+      // TempluMare_2013 against ~70×58×19 m of geometry, its centre ~51 m above).
+      // What a frame wants is the CONTENT's volume: the root's, else the union of
+      // the first level of children that has one; the cube only as a last resort
+      const b = new THREE.Box3();
+      tiles.group.updateMatrixWorld(true);
+      const world = tiles.group.matrixWorld;
+      const root = tiles.root;
+      let level: any[] = root ? [root] : [];
+      for (let depth = 0; level.length && depth < 4; depth++) {
+        for (const t of level) { const cb = contentAabb(t, world); if (cb) b.union(cb); }
+        if (!b.isEmpty()) return b;
+        level = level.flatMap((t) => t.children ?? []);
+      }
+      if (!tiles.getBoundingBox(b)) return null;
+      return b.applyMatrix4(world);
+    },
+    rootBox() {
       const b = new THREE.Box3();
       if (!tiles.getBoundingBox(b)) return null;
       tiles.group.updateMatrixWorld(true);

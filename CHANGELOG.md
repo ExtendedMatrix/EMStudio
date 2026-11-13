@@ -7,6 +7,35 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **The images of a unit, the campaign as a document, the documents in the
+  series, the tight frame of a tileset** (MICRO-FOTO-DOCUMENTI-BBOX, E.D., 13
+  November 2026). The Inspector's «Immagini dell'unità» follows the four roads
+  the datamodel has (`unit-images.ts`): linked to the unit, from a document of
+  it, from the sources its readings read (a campaign gives only the photo a
+  reading looked at), illustrating a property — grouped with a line that says
+  where they come from, each picture once (its checksum); lazy thumbnails, four
+  at a time, from the cache SHARED with EM Tools (bridge `GET /fs/thumb`, level
+  68: `~/.em_cache/thumbs` or `EM_THUMBS_DIR`, sha256 key, PNG fitted 256 px —
+  the same bytes EM Tools writes). A click opens the Viewer on the unit (its
+  images with ‹ ›). «Aggiungi immagini…» (a picture or a folder, stamped, the
+  same bytes reused) and «Collega per nome…» (`T15_*.jpg` → T15, EM Tools'
+  rule; the ambiguous listed, never chosen; one undo step). A file of a
+  campaign linked to a unit enters the unit's own resource «T15 · foto» — the
+  SAME file node. The Viewer opens a document of many pictures on its grid,
+  grouped by folder › sensor › date; with a unit selected (the Viewer pinned)
+  «solo le foto di <unità>», the others in grey, ⌘-click to select, «Assegna a»
+  / «Togli da», and a pointer drag of a photo onto a unit (Outliner, Inspector).
+  A document named outside the series D.nn is said («documento con nome fuori
+  dalla serie D.nn — proposto: D.115»: its `former_name` when free, else the
+  first free D.nn); «Rinomina…» / «Rinomina tutti» with a preview, its
+  extractors following when they read `<documento>.nn`, the old name kept in
+  `former_name`, one undo step. A tileset is framed on its CONTENT's volume
+  (`root.content.boundingVolume`, else the first level of children that has
+  one; Metashape's cubic root only as a last resort), its corners carried into
+  the world before the box. Checks: `check-unit-images.mjs` (new),
+  `check-naming.mjs` (documents into the series).
+
+### Changed
 - **The Outliner by epoch, an object in more epochs, the «?» readable**
   (MICRO-OUTLINER-EPOCHE-TOOLTIP, E.D., 13 November 2026). By epoch, a
   container is a branch (epoch → container → its alternative, marked, and its

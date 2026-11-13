@@ -287,4 +287,26 @@ const LOOSE = { strictDocumentNames: false };
   eq(N.paradataGroupRenameOnAttach(d, "u1"), null, "the referent itself is never renamed by this path");
 }
 
+
+// MICRO-FOTO-DOCUMENTI-BBOX C · documents named outside the series D.nn — the
+// same rule as s3Dgraphy's diagnostics.document_series_hints
+{
+  const d = doc([["d1", "document", "D.01"], ["d2", "document", "D.02"], ["tm15", "document", "TM015"],
+                 ["tm3", "document", "TM003"], ["p", "document", "Pianta"],
+                 ["x1", "extractor", "TM015.01"], ["x2", "extractor", "TM015.02"], ["odd", "extractor", "lettura libera"]],
+                [["extracted_from", "x1", "tm15"], ["extracted_from", "x2", "tm15"], ["extracted_from", "odd", "tm15"]]);
+  d.graph.nodes.find((n) => n.id === "tm15").data = { former_name: "D.115" };
+  d.graph.nodes.find((n) => n.id === "tm3").data = { former_name: "D.02" };
+  const all = N.documentSeriesRenames(d);
+  eq(all.map((r) => [r.from, r.to, r.fromFormer]), [["TM015", "D.115", true], ["TM003", "D.03", false], ["Pianta", "D.04", false]],
+     "former_name when free, else the first free D.nn with the graph's padding; D.01/D.02 untouched");
+  eq(all[0].extractors.map((x) => x.to), ["D.115.01", "D.115.02"], "the extractors that read <document>.nn follow");
+  eq(all[0].kept.map((x) => x.name), ["lettura libera"], "the others are listed, not renamed");
+  eq(N.documentSeriesRenames(d, ["p"]).map((r) => r.to), ["D.04"], "one document: the same name it has in the whole plan");
+  eq(N.computeNameStatus(d, "tm15").suggestion, "D.115", "the name status proposes the former name");
+  eq(N.dataWithFormerName({ former_name: "D.115" }, "TM015", "D.115"), { former_name: "TM015" }, "the old name kept");
+  eq(N.dataWithFormerName({ former_name: "D.02" }, "TM003", "D.03"), { former_name: "D.02", former_names: ["TM003"] },
+     "a former name already there: the list");
+}
+
 console.log(`naming: ${checks} checks passed`);

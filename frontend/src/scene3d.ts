@@ -938,8 +938,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const box = l.layer.contentBox();
         let points = 0;
         l.layer.object.traverse((o: any) => { if (o.isPoints) points++; });
+        const fr = l.layer.bounds(), cube = l.layer.rootBox();
         return { id: l.itemId, files: l.layer.loadedFiles(), status: l.layer.status(), mode: l.layer.mode(), relocated: l.layer.relocated(),
-          box: box ? [...box.min.toArray(), ...box.max.toArray()] : null, points };
+          box: box ? [...box.min.toArray(), ...box.max.toArray()] : null, points,
+          // MICRO-FOTO-DOCUMENTI-BBOX D · what a frame takes, and the root's cube
+          bounds: fr ? [...fr.min.toArray(), ...fr.max.toArray()] : null,
+          cube: cube ? [...cube.min.toArray(), ...cube.max.toArray()] : null };
       });
       // MICRO-RIFINITURE p.7 · the vertices of a tileset's loaded tiles in the scene
       // (sampled to `max`): two surveys of one place compared on their surfaces
@@ -1646,6 +1650,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       probe.__spaceCamMatrix = () => { camera.updateMatrixWorld(true); return { ortho: isOrtho, view: aligned, world: [...camera.matrixWorld.elements], proj: [...camera.projectionMatrix.elements] }; };
       probe.__spaceSetCam = (c: CamState) => { finishAnim(); if (isOrtho) { orthoAuto = false; setOrtho(false); } applyCam(c); if (aligned) { aligned = null; showView(); } };
       probe.__spaceCamState = () => camState();
+      /** MICRO-FOTO-DOCUMENTI-BBOX D · the frame of a box [min, max], as SHIFT+D frames */
+      (probe as Record<string, unknown>).__spaceFrameBox = (b: number[]) =>
+        frameBox(new THREE.Box3(new THREE.Vector3(b[0], b[1], b[2]), new THREE.Vector3(b[3], b[4], b[5])));
 
       /** a box of objects (a model's meshes, a tileset's tiles, a proxy, a sketch) */
       const boxOfKey = (k: string): any | null => {

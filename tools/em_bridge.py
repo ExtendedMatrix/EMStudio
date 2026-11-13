@@ -2162,6 +2162,20 @@ def _fs_inside_roots(full: str) -> bool:
 _FS_ROOTS_STARTUP: list[str] = []
 
 
+#: MICRO-FOTO-DOCUMENTI-BBOX B2.6 · the thumbnails' cache SHARED with EM Tools
+#: (`EM-blender-tools/unit_images`: `cache_root`, `core.thumb_path`, THUMB_SIZE)
+_THUMB_SIZE = 256
+
+
+def _thumbs_root() -> str:
+    return os.path.expanduser(os.environ.get("EM_THUMBS_DIR") or os.path.join("~", ".em_cache", "thumbs"))
+
+
+def _thumb_path(hexd: str, size: int = _THUMB_SIZE) -> str:
+    """``<cache>/ab/abcdef…_256.png`` — EM Tools' `core.thumb_path`."""
+    return os.path.join(_thumbs_root(), hexd[:2], f"{hexd}_{size}.png")
+
+
 def _fs_roots_from_env() -> list[str]:
     raw = os.environ.get("EM_BRIDGE_FS_ROOTS", "")
     parts = [p for chunk in raw.split(os.pathsep) for p in chunk.split(",")]
@@ -2556,7 +2570,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: sample by level (and the largest of each level), the rest estimated
 #: (``estimated``), ``{tiles_full: true}`` reads all; one measure per (path,
 #: size, mtime) at a time, kept on disk, stopped when no page waits for it.
-BRIDGE_LEVEL = 67   # 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 68   # 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3323,7 +3337,7 @@ def make_handler(api):
             # MICRO-OTTIMIZZA-3 · `ETag`: the tile cache's key of an archive
             self.send_header("Access-Control-Expose-Headers",
                              "Content-Range, Accept-Ranges, Content-Length, X-EM-File, X-EM-Tile, "
-                             "ETag, Last-Modified")
+                             "ETag, Last-Modified, X-EM-Thumb")
 
         def do_OPTIONS(self):
             if not self._gate():
@@ -3487,6 +3501,15 @@ def make_handler(api):
                     return
                 q = urllib.parse.parse_qs(parsed.query)
                 self._fs_checksum((q.get("path") or [""])[0])
+            elif route == "/fs/thumb":
+                # MICRO-FOTO-DOCUMENTI-BBOX B2.6 · the thumbnail of a picture
+                # from the cache SHARED with EM Tools (~/.em_cache/thumbs or
+                # EM_THUMBS_DIR, keyed by sha256, PNG fitted in 256 px), made
+                # there when missing — never in the project
+                if not self._fs_gate():
+                    return
+                q = urllib.parse.parse_qs(parsed.query)
+                self._fs_thumb((q.get("path") or [""])[0], (q.get("sha256") or [""])[0])
             elif route == "/fs/places":
                 # WHERE A PICKER STARTS — Home and its folders, the volumes, and
                 # the served roots as bookmarks. The same sidebar Blender's File
@@ -7255,6 +7278,67 @@ def make_handler(api):
             set_session_key(key)
             del key, body, raw
             self._json({"ok": True, "set": True, "source": api_key_source()})
+
+        def _fs_thumb(self, raw, sha):
+            """The thumbnail of a picture (or of a PDF's first page) in the
+            cache EM Tools writes (`unit_images.blender.make_thumb`): the same
+            folder, the same key (`<cache>/ab/abcdef…_256.png`, the file's
+            sha256), the same format (Pillow `ImageOps.fit` 256×256, PNG), so
+            a thumbnail made by one is read by the other. Made when missing,
+            written atomically. ``X-EM-Thumb: cached | made``. Without Pillow a
+            501: the page then shows the file itself."""
+            import hashlib
+            import re as _re
+            full, err = self._fs_resolve(raw, want="file")
+            if err:
+                self._fail(*err)
+                return
+            hexd = str(sha or "").split(":", 1)[-1].lower()
+            if not _re.fullmatch(r"[0-9a-f]{64}", hexd):
+                digest = hashlib.sha256()
+                try:
+                    with open(_long_path(full), "rb") as fh:
+                        for block in iter(lambda: fh.read(1024 * 1024), b""):
+                            digest.update(block)
+                except OSError as exc:
+                    self._fail(403, f"cannot read that file: {exc.strerror}")
+                    return
+                hexd = digest.hexdigest()
+            dst = _thumb_path(hexd)
+            if os.path.isfile(dst):
+                with open(dst, "rb") as fh:
+                    self._send_bytes(fh.read(), "image/png", extra={"X-EM-Thumb": "cached"})
+                return
+            try:
+                from PIL import Image, ImageOps
+            except ImportError:
+                self._fail(501, "no Pillow in the bridge: no thumbnail")
+                return
+            try:
+                import io
+                if full.lower().endswith(".pdf"):
+                    page = self._pdf_first_page(full, 512)
+                    if page is None:
+                        self._fail(415, "no PDF engine in the bridge: no first page")
+                        return
+                    src = io.BytesIO(page[0])
+                else:
+                    src = _long_path(full)
+                with Image.open(src) as img:
+                    img = img.convert("RGB")
+                    thumb = ImageOps.fit(img, (_THUMB_SIZE, _THUMB_SIZE))
+                buf = io.BytesIO()
+                thumb.save(buf, "PNG")
+                data = buf.getvalue()
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                tmp = f"{dst}.{os.getpid()}.tmp"
+                with open(tmp, "wb") as fh:
+                    fh.write(data)
+                os.replace(tmp, dst)
+            except Exception as exc:  # noqa: BLE001 — an undecodable picture
+                self._fail(415, f"no thumbnail: {exc}")
+                return
+            self._send_bytes(data, "image/png", extra={"X-EM-Thumb": "made"})
 
         def _fs_checksum(self, raw):
             """sha256 of a file, as ``sha256:<hex>`` — the計算 a browser cannot do.

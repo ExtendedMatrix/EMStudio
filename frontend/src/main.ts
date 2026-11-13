@@ -187,6 +187,8 @@ import {
   nextFreeName,
   nameStatusMap,
   ruleRenames,
+  documentSeriesRenames,
+  dataWithFormerName,
   isOutOfRule,
   paradataGroupRenameOnAttach,
   renameOnAttach,
@@ -528,7 +530,6 @@ import {
   regionToWebAnnotation,
   thumbnailUrl as iiifThumbnailUrl,
   fittedUrl as fittedIiifUrl,
-  isImageResource,
 } from "./iiif";
 import { altLabelsOf } from "./altlabels";
 import { commitField, confirmOnMultiEnter, installMultiKey, multiHeld, multiHint, multiKeyOf, type MultiScope } from "./multi-edit";
@@ -781,6 +782,7 @@ import {
 } from "./menu-ui";
 import { currentPlatform } from "./menu-table";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
+import { onFirstVisible } from "./lazy";
 import { blendLabel, filterChoices, flatten, STATE_SIGN, type BlendFilters, type BlendFolder, type BlendState, type CheckRow } from "./blend-folder";
 import { applyGraphDelta, COMPOSE_PROFILES, fileKey, idsOfObject, LEASE_RENEW_S, leaseFor, leaseLabel,
          manualLevel, mayRelease, mayWrite, objectsOfIds, recipeLine, recipesOf, SelectionGate,
@@ -795,6 +797,8 @@ import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, re
   paramsFor, profileWords } from "./use-diagnosis";
 import { adviseAddons, enoughFor, type Advice } from "./addon-advice";
 import { pickPathInApp } from "./path-picker";
+import { documentFiles as campaignFiles, filesReadForUnit, locatorOfNode, matchByName, mediumOfLocator, unitImages, unitPhotoFiles,
+         unitPhotoResourceId, unitPhotoResourceOf, type UnitImage } from "./unit-images";
 import { GraphRemovalError, graphRemovalReport, settleLinksTowards } from "./graph-removal";
 import type { ContainerLike, LinksAction, RemovalReport, ShelfAction } from "./graph-removal";
 
@@ -2579,6 +2583,8 @@ window.__EM_SCENE__ = () => {
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
   selected: () => [...selectedIds],
+  /** MICRO-FOTO-DOCUMENTI-BBOX · the unit thumbnails asked, and where they came from */
+  thumbStats: () => ({ ...unitThumbStats, queued: unitThumbQueue.length, busy: unitThumbBusy }),
   /** MICRO-OUTLINER-UNICO · every Outliner rebuilt now (its cost, measured), its rows */
   uoRefresh: () => { for (const a of unifiedApis.values()) a.refresh(); },
   uoPaint: () => { for (const a of unifiedApis.values()) a.paintNow(); },
@@ -4680,70 +4686,312 @@ function renderAltLabels(host: HTMLElement, st: DocumentStore, nodeId: string): 
   if (head?.nextSibling) host.insertBefore(sect, head.nextSibling); else host.appendChild(sect);
 }
 
-/** E5 · «Images of the unit» in the Inspector, with their thumbnails — the
- *  section EM Tools' Stratigraphy Manager has (U5): the image resources a unit
- *  links (`has_linked_resource`, and their files). The thumbnail is a SIZE
- *  REQUEST to the node's image service when the image has a digest and the node
- *  has one (IIIF, `!128,128`), else the file where the one resolver found it on
- *  this computer; nothing is generated or stored here. A click opens the image
- *  in the Inspector. Not drawn for a node that links no image. */
+/** E5 · «Images of the unit» in the Inspector — MICRO-FOTO-DOCUMENTI-BBOX B:
+ *  by the four roads the datamodel has (`unit-images.ts`): linked to the unit,
+ *  from a document of it, from the sources its readings read, illustrating one
+ *  of its properties — grouped by road with a line that says where they come
+ *  from, each image once (its checksum). The thumbnails are LAZY (first seen)
+ *  and queued: IIIF when the node has an image service, else the cache shared
+ *  with EM Tools (`/fs/thumb`, keyed by sha256), else the file. A click opens
+ *  the image in the Viewer (the same view, with ‹ › among the unit's images).
+ *  For a unit: «Aggiungi immagini…», «Collega per nome…», and a drop target. */
 function renderUnitImages(host: HTMLElement, st: DocumentStore, nodeId: string): void {
   const n = st.node(nodeId);
-  if (!n || ["resource", "document", "file", "extractor", "combiner"].includes(String(n.node_type))) return;
-  const seen = new Set<string>();
-  const images = filesOfDocument(st.doc.graph, nodeId)
-    .map((id) => st.node(id)).filter((x): x is EmNode => !!x && isImageResource(x))
-    .filter((x) => {
-      const key = String(((x.data ?? {}) as Record<string, unknown>).checksum ?? x.id);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  if (!images.length) return;
+  if (!n || ["resource", "resource_file", "document", "file", "extractor", "combiner"].includes(String(n.node_type))) return;
+  const groups = unitImages(st.doc.graph, nodeId);
+  const total = groups.reduce((k, g) => k + g.items.length, 0);
+  const isUnit = isStratigraphicType(n.node_type);
+  if (!total && !isUnit) return;
   const sect = document.createElement("div");
   sect.className = "insp-unit-images";
+  sect.dataset.unitImages = String(total);
+  if (isUnit) { sect.dataset.unitDrop = nodeId; sect.dataset.unitDropName = String(n.name || nodeId); }
   const h = document.createElement("h3");
   h.className = "insp-sect";
-  h.textContent = t("insp.unitImages", { n: String(images.length) });
+  h.textContent = t("insp.unitImages", { n: String(total) });
   sect.appendChild(h);
-  const row = document.createElement("div");
-  row.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px";
-  for (const img of images) {
-    const fig = document.createElement("button");
-    fig.type = "button";
-    fig.className = "insp-unit-image";
-    fig.title = String(img.name || img.id);
-    fig.style.cssText = "width:72px;padding:2px;border:1px solid var(--border, #ccc);"
-      + "background:none;cursor:pointer;text-align:center;font-size:10px";
-    const pic = document.createElement("img");
-    pic.alt = String(img.name || "");
-    pic.style.cssText = "width:64px;height:64px;object-fit:cover;display:block;margin:0 auto";
-    const cap = document.createElement("div");
-    cap.textContent = String(img.name || img.id);
-    cap.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-    fig.append(pic, cap);
-    fig.addEventListener("click", () => { select(img.id); });
-    row.appendChild(fig);
-    const local = (): void => {
-      const f = fileStateOf(img.id);
-      const src = f && f.path && (f.state === "on_disk" || f.state === "both") ? f.path : viewerSourceOf(img);
-      if (!src) return;
-      if (viewerIsFetchable(src)) { pic.src = src; return; }
-      void fsUrlFor(studyLocalPath(src) ?? src).then(bridgeBlobUrl)
-        .then((u) => { pic.src = u; }).catch(() => { /* no file here: the name stays */ });
-    };
-    const iiif = iiifBase() ? iiifThumbnailUrl(img, iiifBase(), 128) : null;
-    if (iiif) {
-      pic.onerror = () => { pic.onerror = null; local(); };
-      pic.src = iiif;
-    } else {
-      local();
-    }
+  if (isUnit) {
+    const bar = document.createElement("div");
+    bar.className = "insp-ui-bar";
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "tv-act";
+    add.dataset.uiAdd = "1";
+    add.textContent = t("insp.ui.add");
+    add.addEventListener("click", () => void addUnitImages(nodeId));
+    const byName = document.createElement("button");
+    byName.type = "button";
+    byName.className = "tv-act";
+    byName.dataset.uiByName = "1";
+    byName.textContent = t("insp.ui.byName");
+    byName.title = t("insp.ui.byNameHint");
+    byName.addEventListener("click", () => void linkImagesByName(null));
+    bar.append(add, byName);
+    sect.appendChild(bar);
   }
-  sect.appendChild(row);
+  let index = 0;
+  for (const grp of groups) {
+    const line = document.createElement("div");
+    line.className = "insp-ui-route muted";
+    line.dataset.uiRoute = grp.route;
+    line.textContent = t(`ui.route.${grp.route}`, { x: grp.via?.name ?? "" });
+    sect.appendChild(line);
+    const row = document.createElement("div");
+    row.className = "insp-ui-grid";
+    for (const img of grp.items) {
+      const at = index++;
+      const fig = document.createElement("button");
+      fig.type = "button";
+      fig.className = "insp-unit-image";
+      fig.dataset.uiImage = img.id;
+      fig.title = img.name;
+      const pic = document.createElement("img");
+      pic.alt = img.name;
+      const cap = document.createElement("div");
+      cap.className = "insp-ui-cap";
+      cap.textContent = img.name;
+      fig.append(pic, cap);
+      fig.addEventListener("click", () => openUnitImage(nodeId, at));
+      row.appendChild(fig);
+      onFirstVisible(fig, () => loadUnitThumb(pic, fig, st, img));
+    }
+    sect.appendChild(row);
+  }
   // before the chain: what the unit looks like, then where it comes from
   const head = host.querySelector(".insp-head");
   if (head?.nextSibling) host.insertBefore(sect, head.nextSibling); else host.appendChild(sect);
+}
+
+/** The thumbnails are asked a few at a time (Basilica Iulia: thousands of
+ *  photographs; a unit with 200 must not ask 200 files at once). */
+const unitThumbQueue: Array<() => Promise<void>> = [];
+let unitThumbBusy = 0;
+const UNIT_THUMB_PARALLEL = 4;
+function queueUnitThumb(job: () => Promise<void>): void {
+  unitThumbQueue.push(job);
+  const pump = (): void => {
+    while (unitThumbBusy < UNIT_THUMB_PARALLEL && unitThumbQueue.length) {
+      const next = unitThumbQueue.shift()!;
+      unitThumbBusy++;
+      void next().finally(() => { unitThumbBusy--; pump(); });
+    }
+  };
+  pump();
+}
+/** what the page measured (the report's): thumbnails asked, from the shared
+ *  cache, generated by the bridge, from the file, from IIIF */
+const unitThumbStats = { asked: 0, cached: 0, made: 0, file: 0, iiif: 0, glyph: 0 };
+
+/** One thumbnail: IIIF, else the shared cache (`/fs/thumb`), else the file;
+ *  a PDF without a page raster is its type. Never throws. */
+function loadUnitThumb(pic: HTMLImageElement, fig: HTMLElement, st: DocumentStore, img: UnitImage): void {
+  const node = st.node(img.id) ?? null;
+  const glyph = (): void => {
+    unitThumbStats.glyph++;
+    fig.classList.add("glyph");
+    pic.remove();
+    const g = document.createElement("div");
+    g.className = "insp-ui-glyph";
+    g.textContent = img.medium === "pdf" ? "PDF" : "▧";
+    fig.prepend(g);
+  };
+  const iiif = node && iiifBase() ? iiifThumbnailUrl(node, iiifBase(), 128) : null;
+  const local = async (): Promise<void> => {
+    const f = fileStateOf(img.id);
+    const src = f && f.path && (f.state === "on_disk" || f.state === "both") ? f.path : viewerSourceOf(node);
+    if (!src) { glyph(); return; }
+    if (viewerIsFetchable(src)) { if (img.medium === "pdf") glyph(); else { unitThumbStats.file++; pic.src = src; } return; }
+    const path = studyLocalPath(src) ?? src;
+    try {
+      const sha = img.checksum ? img.checksum.replace(/^sha256:/i, "") : "";
+      const res = await fetch(`${await bridgeUrl()}/fs/thumb?path=${encodeURIComponent(path)}${sha ? `&sha256=${sha}` : ""}`);
+      if (res.ok) {
+        unitThumbStats[res.headers.get("X-EM-Thumb") === "cached" ? "cached" : "made"]++;
+        pic.src = URL.createObjectURL(await res.blob());
+        return;
+      }
+    } catch { /* no bridge, or an old one: the file itself */ }
+    if (img.medium === "pdf") { glyph(); return; }
+    try { pic.src = await bridgeBlobUrl(await fsUrlFor(path)); unitThumbStats.file++; } catch { glyph(); }
+  };
+  unitThumbStats.asked++;
+  queueUnitThumb(async () => {
+    if (iiif) {
+      await new Promise<void>((done) => {
+        pic.onload = () => { unitThumbStats.iiif++; done(); };
+        pic.onerror = () => { pic.onerror = null; void local().finally(done); };
+        pic.src = iiif;
+      });
+      return;
+    }
+    await local();
+  });
+}
+
+/** The image `at` of a unit, in the Viewer (‹ › among the unit's images). */
+function openUnitImage(unitId: string, at: number): void {
+  const w = requestDoc(unitId);
+  if (!w) return;
+  setWinCurrent(w, "viewer.on", unitId);
+  setWinCurrent(w, "item", at === 0 ? null : at);
+  setWinModeOf(w, "single");
+  renderViewer();
+  renderAreaHeaders();
+}
+
+/** The unit's own photo resource («T15 · foto»), made when missing: its
+ *  `has_file` are the campaign's file nodes (the same file in N resources).
+ *  Returns its id. Inside a batch of the caller. */
+function ensureUnitPhotoResource(st: DocumentStore, unitId: string): string {
+  const have = unitPhotoResourceOf(st.doc.graph, unitId);
+  if (have) return have;
+  const unit = st.node(unitId);
+  const rid = unitPhotoResourceId(unitId);
+  addResource(storeGraph(st), { resourceId: rid, name: `${String(unit?.name || unitId)} · foto`, kind: "image",
+                                data: { unit_photos: unitId } });
+  st.addEdge(unitId, rid, "has_linked_resource", undefined, `${unitId}__has_linked_resource__${rid}`);
+  return rid;
+}
+
+/** Link pictures to a unit — a file of a set enters the unit's photo resource
+ *  (the same node), a resource of one file is linked to the unit. One batch. */
+function linkPicturesToUnit(st: DocumentStore, unitId: string, ids: string[]): number {
+  let n = 0;
+  const g = st.doc.graph;
+  const linked = new Set(g.edges.filter((e) => e.source === unitId && e.edge_type === "has_linked_resource").map((e) => e.target));
+  for (const id of ids) {
+    const node = st.node(id);
+    if (!node) continue;
+    if (node.node_type === "resource_file") {
+      const rid = ensureUnitPhotoResource(st, unitId);
+      if (g.edges.some((e) => e.source === rid && e.target === id && e.edge_type === "has_file")) continue;
+      const attrsOf = (e: EmEdge): Record<string, unknown> => ((e as { attributes?: Record<string, unknown> }).attributes ?? {});
+      const path = g.edges.filter((e) => e.target === id && e.edge_type === "has_file").map((e) => attrsOf(e).path).find((x) => typeof x === "string");
+      st.addEdge(rid, id, "has_file", { role: "member", ...(typeof path === "string" ? { path } : {}) }, `${rid}__has_file__${id}`);
+      n++;
+    } else if (node.node_type === "resource") {
+      if (linked.has(id)) continue;
+      st.addEdge(unitId, id, "has_linked_resource", undefined, `${unitId}__has_linked_resource__${id}`);
+      linked.add(id);
+      n++;
+    }
+  }
+  return n;
+}
+
+/** …and out of it: a file leaves the unit's photo resource (the file stays the
+ *  campaign's); a resource linked to the unit loses that edge. */
+function unlinkPicturesFromUnit(st: DocumentStore, unitId: string, ids: string[]): number {
+  const rid = unitPhotoResourceOf(st.doc.graph, unitId);
+  const drop = st.doc.graph.edges.filter((e) => ids.includes(e.target)
+    && ((rid && e.source === rid && e.edge_type === "has_file") || (e.source === unitId && e.edge_type === "has_linked_resource")));
+  for (const e of drop) st.deleteEdge(e);
+  return drop.length;
+}
+
+/** «Aggiungi immagini…»: a file or a folder of the disk (the app's picker);
+ *  each picture is stamped (sha256) and becomes a resource — the one already
+ *  there with the same bytes is reused — linked to the unit. One undo step. */
+async function addUnitImages(unitId: string): Promise<void> {
+  if (!store || refuseReadOnly()) return;
+  const st = store;
+  const unit = String(st.node(unitId)?.name || unitId);
+  // one picture, or every picture of a folder (the app's picker: one path)
+  const how = await openDialog({ title: t("insp.ui.addTitle", { u: unit }), message: t("insp.ui.addHint"),
+    choices: [{ key: "file", label: t("insp.ui.addFile") }, { key: "folder", label: t("insp.ui.addFolder") }] });
+  if (!how.choice || store !== st) return;
+  const mode = how.choice === "folder" ? "folder" : "file";
+  const picked = await pickPathInApp({ mode, title: t("insp.ui.addTitle", { u: unit }) });
+  if (!picked || store !== st) return;
+  let files: string[] = [picked];
+  if (mode === "folder") {
+    try {
+      files = (await fsList(picked)).entries.filter((e) => e.type === "file" && mediumOfLocator(e.name)).map((e) => e.path);
+    } catch { files = []; }
+  }
+  files = files.filter((f) => mediumOfLocator(f));
+  if (!files.length) { toast(t("insp.ui.noPictures")); return; }
+  const made: Array<{ path: string; checksum: string | null }> = [];
+  for (const f of files) made.push({ path: f, checksum: await bridgeChecksum(f) });
+  if (store !== st) return;
+  const rel = (abs: string) => (currentFilePath ? paths.relativeTo(currentFilePath, abs) : abs);
+  let n = 0;
+  st.batch(() => {
+    const ids: string[] = [];
+    for (const m of made) {
+      const existing = m.checksum ? findResource(st, m.checksum) : null;
+      if (existing) { ids.push(existing.id); continue; }
+      const name = paths.basename(m.path) || m.path;
+      const r = addResource(storeGraph(st), { resourceId: st.newId(), name, kind: "image",
+        files: [{ path: rel(m.path), ...(m.checksum ? { checksum: m.checksum } : {}) }] });
+      ids.push(r.id);
+    }
+    n = linkPicturesToUnit(st, unitId, ids);
+  });
+  const msg = t("insp.ui.added", { n: String(n), u: unit });
+  logInfo(msg, [unitId]);
+  toastUndo(msg, st);
+  refreshInspector();
+}
+
+/** «Collega per nome…» (B, B2.3): the pictures whose name opens with a unit's
+ *  code (`T15_*.jpg` → SF T15) — the files of `docId` (a campaign), or every
+ *  picture of the graph — proposed in pairs, with what is ambiguous listed and
+ *  never chosen; confirmed, one undo step. A file of a set enters the unit's
+ *  photo resource (the same node); a resource of one file is linked. */
+async function linkImagesByName(docId: string | null): Promise<void> {
+  if (!store || refuseReadOnly()) return;
+  const st = store;
+  const g = st.doc.graph;
+  const pics = docId ? campaignFiles(g, docId).map((f) => ({ id: f.id, name: f.name }))
+    : st.liveNodes().filter((x) => (x.node_type === "resource_file" || x.node_type === "resource")
+        && mediumOfLocator(locatorOfNode(x)) === "image" && !((x.data ?? {}) as Record<string, unknown>).unit_photos)
+      .map((x) => ({ id: x.id, name: String(x.name || "") || locatorOfNode(x) }));
+  const units = st.liveNodes().filter((x) => isStratigraphicType(x.node_type)).map((x) => ({ id: x.id, name: String(x.name || x.id) }));
+  const m = matchByName(pics, units);
+  // a pair already in place is not proposed again
+  const pairs = m.pairs.filter((p) => !unitImages(g, p.unit).some((grp) => grp.route === "direct" && grp.items.some((i) => i.id === p.file)));
+  const name = (id: string) => String(st.node(id)?.name || id);
+  const body = document.createElement("div");
+  body.className = "ui-byname";
+  body.dataset.uiByname = `${pairs.length}/${m.ambiguous.length}`;
+  body.style.cssText = "max-height:50vh;overflow:auto;font-size:12px;margin-top:6px";
+  const byUnit = new Map<string, string[]>();
+  for (const p of pairs) (byUnit.get(p.unit) ?? byUnit.set(p.unit, []).get(p.unit)!).push(p.file);
+  for (const [u, fs] of byUnit) {
+    const row = document.createElement("div");
+    row.dataset.uiBynameUnit = u;
+    row.style.cssText = "padding:2px 0;border-bottom:1px solid var(--border, #ddd)";
+    const b = document.createElement("b");
+    b.textContent = `${name(u)} ← ${fs.length}`;
+    const l = document.createElement("span");
+    l.className = "muted";
+    l.textContent = ` · ${fs.slice(0, 6).map(name).join(", ")}${fs.length > 6 ? ` +${fs.length - 6}` : ""}`;
+    row.append(b, l);
+    body.appendChild(row);
+  }
+  if (m.ambiguous.length) {
+    const amb = document.createElement("div");
+    amb.className = "warn";
+    amb.dataset.uiBynameAmbiguous = String(m.ambiguous.length);
+    amb.style.cssText = "margin-top:6px";
+    amb.textContent = t("insp.ui.byNameAmb", { list: m.ambiguous.map((a) => `${name(a.file)} (${a.units.map(name).join(" / ")})`).join("; ") });
+    body.appendChild(amb);
+  }
+  if (!pairs.length) {
+    await tell(t("insp.ui.byNameNone", { n: String(pics.length) }), { body: m.ambiguous.length ? body : undefined });
+    return;
+  }
+  const ans = await openDialog({ title: t("insp.ui.byNameTitle"),
+    message: t("insp.ui.byNameIntro", { p: String(pairs.length), u: String(byUnit.size) }), body, ok: t("insp.ui.byNameOk") });
+  if (!ans.ok || store !== st) return;
+  let n = 0;
+  st.batch(() => { for (const [u, fs] of byUnit) n += linkPicturesToUnit(st, u, fs); });
+  const msg = t("insp.ui.byNameDone", { n: String(n), k: String(byUnit.size) });
+  logInfo(msg, [...byUnit.keys()]);
+  toastUndo(msg, st);
+  refreshInspector();
+  renderViewer();
 }
 
 /**
@@ -16153,7 +16401,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 67;   // 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 68;   // 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -21600,6 +21848,8 @@ function refreshIssues(): void {
     library: libraryWarningsOf(s),
     renameRule: { label: t("naming.renameRule"), bulkLabel: (n) => t("naming.renameRuleAll", { n: String(n) }),
                   run: (ids) => renameExtractorsByRule(ids) },
+    docSeries: { label: t("naming.docSeries"), bulkLabel: (n) => t("naming.docSeriesAll", { n: String(n) }),
+                 run: (ids) => void renameDocumentsToSeries(ids) },
     fixers: issueFixers(s),
     // MICRO-BADGE-PD-CRONOLOGIA · the lane a node is drawn in, in the Matrix
     // (read from the engine's layout — the stored position in its swimlanes —
@@ -28120,6 +28370,66 @@ function renameExtractorsByRule(ids: string[]): void {
   if (!list.length) return;
   s.batch(() => { for (const r of list) s.updateNode(r.id, { name: r.to }); });
   const msg = t("naming.renamedRule", { n: String(list.length) });
+  logInfo(msg, list.map((r) => r.id));
+  toastUndo(msg, s);
+  refreshIssues();
+  refreshInspector();
+  draw();
+}
+
+/** MICRO-FOTO-DOCUMENTI-BBOX C · documents named outside the series D.nn
+ *  renamed into it: a preview (the name proposed and why, the extractors that
+ *  follow, those that do not), the confirmation, one undo step. The old name
+ *  stays in `data.former_name` (or `former_names`); no edge is touched. */
+async function renameDocumentsToSeries(ids: string[]): Promise<void> {
+  if (!store) return;
+  const s = store;
+  const list = documentSeriesRenames(s.doc, ids);
+  if (!list.length) return;
+  const body = document.createElement("div");
+  body.className = "doc-series-preview";
+  body.dataset.docSeriesPreview = String(list.length);
+  body.style.cssText = "max-height:50vh;overflow:auto;font-size:12px;margin-top:6px";
+  for (const r of list) {
+    const row = document.createElement("div");
+    row.dataset.docSeriesRow = r.id;
+    row.style.cssText = "padding:3px 0;border-bottom:1px solid var(--border, #ddd)";
+    const head = document.createElement("div");
+    const b = document.createElement("b");
+    b.textContent = `${r.from} → ${r.to}`;
+    const why = document.createElement("span");
+    why.className = "muted";
+    why.textContent = ` · ${t(r.fromFormer ? "naming.docSeriesFormer" : "naming.docSeriesFree")}`;
+    head.append(b, why);
+    row.appendChild(head);
+    if (r.extractors.length) {
+      const x = document.createElement("div");
+      x.className = "muted";
+      x.textContent = t("naming.docSeriesFollow", { list: r.extractors.map((e) => `${e.from} → ${e.to}`).join(", ") });
+      row.appendChild(x);
+    }
+    if (r.kept.length) {
+      const k = document.createElement("div");
+      k.className = "muted";
+      k.textContent = t("naming.docSeriesKept", { list: r.kept.map((e) => e.name || e.id).join(", ") });
+      row.appendChild(k);
+    }
+    body.appendChild(row);
+  }
+  const ans = await openDialog({ title: t("naming.docSeriesTitle"),
+    message: t("naming.docSeriesIntro", { n: String(list.length) }), body, ok: t("naming.docSeriesOk") });
+  if (!ans.ok || store !== s) return;
+  let k = 0;
+  s.batch(() => {
+    for (const r of list) {
+      s.updateNode(r.id, { name: r.to, data: dataWithFormerName(s.node(r.id)?.data, r.from, r.to) } as Partial<EmNode>);
+      for (const x of r.extractors) {
+        s.updateNode(x.id, { name: x.to, data: dataWithFormerName(s.node(x.id)?.data, x.from, x.to) } as Partial<EmNode>);
+        k++;
+      }
+    }
+  });
+  const msg = t("naming.docSeriesDone", { n: String(list.length), k: String(k) });
   logInfo(msg, list.map((r) => r.id));
   toastUndo(msg, s);
   refreshIssues();
@@ -52815,7 +53125,7 @@ function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, ba
   src.textContent = viewerSourceLine(target, {
     models: (n) => t("vw.src.models", { n: String(n) }), group: (g) => t("vw.src.group", { g }), own: t("vw.src.own"),
     linked: (n) => t("vw.src.linked", { n: String(n) }), crops: (n) => t("vw.src.crops", { n: String(n) }),
-    nothing: t("vw.src.nothing"), name,
+    nothing: t("vw.src.nothing"), name, unit: (n) => t("vw.src.unit", { n: String(n) }),
   });
   src.title = t("vw.sourceTitle");
   bar.append(title, src);
@@ -52838,31 +53148,13 @@ function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, ba
   // MICRO-VIEWER-SPAZIO-EMTREE p.5 · a document that groups several images:
   // the Gallery lays them out, a click opens one in Single
   const imgs = items.map((it, i) => ({ it, i })).filter((x) => x.it.kind === "part" && x.it.part.medium === "image");
+  // MICRO-FOTO-DOCUMENTI-BBOX B2.4 · a document of many pictures (a campaign)
+  // opens on its grid; the person can go to Single from there
+  if (onNow !== target.id && imgs.length >= 8 && (target.kind === "document" || target.kind === "unit")
+      && setWinModeOf(win, "gallery")) queueMicrotask(renderAreaHeaders);
   if (winModeOf(win) === "gallery" && imgs.length > 1) {
     disposeViewerScene(win.id);
-    const grid = document.createElement("div");
-    grid.className = "viewer-gallery";
-    grid.dataset.vwGallery = target.id;
-    for (const { it, i } of imgs) {
-      if (it.kind !== "part") continue;
-      const cell = document.createElement("button");
-      cell.type = "button";
-      cell.className = "viewer-thumb";
-      cell.title = it.part.name;
-      const url = vwPartUrl(it.part);
-      const img = document.createElement("img");
-      img.alt = it.part.name;
-      img.loading = "lazy";
-      if (url) img.src = signedImageUrl(url) ?? url;
-      const label = document.createElement("span");
-      label.className = "viewer-thumb-label";
-      label.textContent = it.part.name;
-      cell.append(img, label);
-      cell.addEventListener("click", () => { setWinCurrent(win, "item", i === 0 ? null : i); setWinModeOf(win, "single"); renderViewer(); renderAreaHeaders(); });
-      grid.appendChild(cell);
-    }
-    stage.appendChild(grid);
-    caption.textContent = `${name(target.id)} — ${imgs.length}`;
+    vwGallery(win, stage, caption, st, target, imgs.map(({ it, i }) => ({ part: (it as { part: ViewerPart }).part, i })));
     return true;
   }
   const index = Math.min(viewerIndex(win), items.length - 1);
@@ -52893,7 +53185,9 @@ function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, ba
   }
   disposeViewerScene(win.id);
   vwPartStage(win, stage, bar, target, item.part);
-  caption.textContent = `${item.part.name} · ${t(`vw.via.${item.part.via}`, { x: item.part.through ? name(item.part.through) : "" })}`;
+  caption.textContent = `${item.part.name} · ${item.part.via === "unit"
+    ? t(`ui.route.${item.part.route ?? "direct"}`, { x: item.part.through ? name(item.part.through) : "" })
+    : t(`vw.via.${item.part.via}`, { x: item.part.through ? name(item.part.through) : "" })}`;
   return true;
 }
 
@@ -53185,6 +53479,210 @@ function vwPartStage(win: Win, stage: HTMLElement, bar: HTMLElement, target: Vie
 
 function renderViewer(): void {
   refreshSurfaces("viewer");
+}
+
+/** MICRO-FOTO-DOCUMENTI-BBOX B2.4 · THE MULTI-FILE VIEWER: the grid of a
+ *  document with many pictures (a photographic campaign), or of a unit's
+ *  images — ONE component with the Inspector's «Immagini dell'unità». The
+ *  pictures are grouped by folder › sensor › date with their counts; the
+ *  thumbnails are lazy and queued (the cache shared with EM Tools). With a
+ *  UNIT selected (the Viewer pinned on the document, the unit in the Outliner
+ *  or the Inspector): «solo le foto di <unità>» shows the photos in its own
+ *  resource or read by an extractor that feeds it — off, the others stay, in
+ *  grey. ⌘/Ctrl/⇧ + click selects; «assegna a» / «togli da» the unit, one undo. */
+const vwGallerySel = new Map<string, Set<string>>();
+function vwGallery(win: Win, stage: HTMLElement, caption: HTMLElement, st: DocumentStore, target: ViewerTarget,
+                   imgs: Array<{ part: ViewerPart; i: number }>): void {
+  const g = st.doc.graph;
+  const name = (id: string) => String(st.node(id)?.name || id);
+  const unit = selectedId && selectedId !== target.id && isStratigraphicType(st.node(selectedId)?.node_type) ? selectedId : null;
+  const mine = unit ? new Set([...unitPhotoFiles(g, unit), ...filesReadForUnit(g, unit),
+    ...flatUnitIds(g, unit)]) : null;
+  const only = !!unit && winCurrent(win, "gallery.only") === true;
+  const sel = vwGallerySel.get(win.id) ?? new Set<string>();
+  vwGallerySel.set(win.id, sel);
+  for (const id of [...sel]) if (!imgs.some((x) => x.part.id === id)) sel.delete(id);
+  const wrap = document.createElement("div");
+  wrap.className = "viewer-gallery-wrap";
+  const bar = document.createElement("div");
+  bar.className = "viewer-gallery-bar";
+  if (unit) {
+    const lab = document.createElement("label");
+    lab.className = "vw-only";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = only;
+    box.dataset.vwOnly = unit;
+    box.addEventListener("change", () => { setWinCurrent(win, "gallery.only", box.checked); renderViewer(); });
+    lab.append(box, ` ${t("vw.onlyUnit", { u: name(unit), n: String(imgs.filter((x) => mine!.has(x.part.id)).length) })}`);
+    bar.appendChild(lab);
+    const act = (key: string, ids: string[], run: (ids: string[]) => number) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tv-act";
+      b.dataset.vwAct = key;
+      b.textContent = t(`vw.${key}`, { u: name(unit), n: String(ids.length) });
+      b.disabled = !ids.length;
+      b.addEventListener("click", () => {
+        if (refuseReadOnly()) return;
+        let n = 0;
+        st.batch(() => { n = run(ids); });
+        sel.clear();
+        toastUndo(t(`vw.${key}Done`, { u: name(unit), n: String(n) }), st);
+        refreshInspector();
+        renderViewer();
+      });
+      bar.appendChild(b);
+    };
+    const chosen = [...sel];
+    act("assign", chosen.filter((id) => !mine!.has(id)), (ids) => linkPicturesToUnit(st, unit, ids));
+    act("unassign", chosen.filter((id) => mine!.has(id)), (ids) => unlinkPicturesFromUnit(st, unit, ids));
+  }
+  if (target.kind === "document") {
+    const byName = document.createElement("button");
+    byName.type = "button";
+    byName.className = "tv-act";
+    byName.dataset.vwByName = target.id;
+    byName.textContent = t("insp.ui.byName");
+    byName.title = t("insp.ui.byNameHint");
+    byName.addEventListener("click", () => void linkImagesByName(target.id));
+    bar.appendChild(byName);
+  }
+  if (bar.childNodes.length) wrap.appendChild(bar);
+  // the tree: folder › sensor › date (a campaign's files say them; a unit's
+  // images are grouped by their road)
+  const facts = new Map(target.kind === "document" ? campaignFiles(g, target.id).map((f) => [f.id, f]) : []);
+  const keyOf = (p: ViewerPart): string => {
+    if (p.via === "unit") return t(`ui.route.${p.route ?? "direct"}`, { x: p.through ? name(p.through) : "" });
+    const f = facts.get(p.id);
+    return f ? [f.folder, f.camera, f.date].filter(Boolean).join(" › ") : "";
+  };
+  const shown = imgs.filter((x) => !only || mine!.has(x.part.id));
+  const groups = new Map<string, typeof shown>();
+  for (const x of shown) (groups.get(keyOf(x.part)) ?? groups.set(keyOf(x.part), []).get(keyOf(x.part))!).push(x);
+  for (const [key, list] of groups) {
+    if (key || groups.size > 1) {
+      const head = document.createElement("div");
+      head.className = "viewer-gallery-group";
+      head.dataset.vwGroup = key;
+      head.textContent = `${key || "—"} · ${list.length}`;
+      wrap.appendChild(head);
+    }
+    const grid = document.createElement("div");
+    grid.className = "viewer-gallery";
+    grid.dataset.vwGallery = target.id;
+    for (const { part, i } of list) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "viewer-thumb" + (mine && !mine.has(part.id) ? " vw-out" : "") + (sel.has(part.id) ? " vw-sel" : "")
+        + (mine?.has(part.id) ? " vw-in" : "");
+      cell.dataset.vwCell = part.id;
+      cell.title = part.name;
+      const img = document.createElement("img");
+      img.alt = part.name;
+      const label = document.createElement("span");
+      label.className = "viewer-thumb-label";
+      label.textContent = part.name;
+      cell.append(img, label);
+      cell.addEventListener("click", (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (sel.has(part.id)) sel.delete(part.id); else sel.add(part.id);
+          renderViewer();
+          return;
+        }
+        setWinCurrent(win, "item", i === 0 ? null : i); setWinModeOf(win, "single"); renderViewer(); renderAreaHeaders();
+      });
+      // the pointer drags the selection (or this one) onto a unit (Outliner, Inspector)
+      cell.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+        unitPointerDrag(e, sel.has(part.id) ? [...sel] : [part.id], part.name);
+      });
+      grid.appendChild(cell);
+      const ck = ((st.node(part.id)?.data ?? {}) as Record<string, unknown>).checksum;
+      onFirstVisible(cell, () => loadUnitThumb(img, cell, st, { id: part.id, name: part.name, locator: part.locator,
+        medium: part.medium === "pdf" ? "pdf" : "image", checksum: typeof ck === "string" ? ck : null }));
+    }
+    wrap.appendChild(grid);
+  }
+  stage.appendChild(wrap);
+  caption.textContent = `${name(target.id)} — ${shown.length}${shown.length !== imgs.length ? ` / ${imgs.length}` : ""}`
+    + (sel.size ? ` · ${t("vw.selected", { n: String(sel.size) })}` : "");
+}
+
+/** the pictures linked to a unit directly (its resources and their files) */
+function flatUnitIds(g: DocumentStore["doc"]["graph"], unit: string): string[] {
+  return unitImages(g, unit).filter((x) => x.route === "direct").flatMap((x) => x.items.map((i) => i.id));
+}
+
+/** A picture dragged with the POINTER (the desktop shell keeps HTML5's drag for
+ *  the Finder: MICRO-SPAZIO-CONTAINER) onto a unit: an Outliner row of a unit or
+ *  the Inspector's «Immagini dell'unità» (`[data-unit-drop]`). The label follows
+ *  the pointer; Esc cancels; a click without movement stays a click. */
+function unitPointerDrag(e0: PointerEvent, ids: string[], label: string): void {
+  let ghost: HTMLElement | null = null;
+  let over: HTMLElement | null = null;
+  const at = (x: number, y: number): HTMLElement | null => {
+    if (ghost) ghost.style.display = "none";
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (ghost) ghost.style.display = "";
+    const drop = el?.closest<HTMLElement>("[data-unit-drop]");
+    if (drop) return drop;
+    const row = el?.closest<HTMLElement>(".uo-row[data-id]");
+    return row && isStratigraphicType(store?.node(row.dataset.id!)?.node_type) ? row : null;
+  };
+  const unitOf = (el: HTMLElement) => el.dataset.unitDrop ?? el.dataset.id ?? "";
+  const light = (el: HTMLElement | null) => {
+    if (over === el) return;
+    over?.classList.remove("unit-drop-on");
+    over = el;
+    over?.classList.add("unit-drop-on");
+    if (ghost) ghost.textContent = el ? t("insp.ui.dropOn", { n: String(ids.length), u: String(store?.node(unitOf(el))?.name ?? "") })
+      : (ids.length > 1 ? t("vw.selected", { n: String(ids.length) }) : label);
+  };
+  const move = (e: PointerEvent): void => {
+    if (!ghost) {
+      if (Math.hypot(e.clientX - e0.clientX, e.clientY - e0.clientY) < 6) return;
+      ghost = document.createElement("div");
+      ghost.className = "al-drag-ghost";
+      ghost.dataset.unitDragGhost = "1";
+      ghost.textContent = ids.length > 1 ? t("vw.selected", { n: String(ids.length) }) : label;
+      document.body.appendChild(ghost);
+      document.body.classList.add("al-dragging");
+    }
+    ghost.style.left = `${e.clientX + 12}px`;
+    ghost.style.top = `${e.clientY + 8}px`;
+    light(at(e.clientX, e.clientY));
+    e.preventDefault();
+  };
+  const end = (e: PointerEvent | null): void => {
+    window.removeEventListener("pointermove", move, true);
+    window.removeEventListener("pointerup", up, true);
+    window.removeEventListener("keydown", key, true);
+    const target = e && ghost ? at(e.clientX, e.clientY) : null;
+    light(null);
+    ghost?.remove();
+    document.body.classList.remove("al-dragging");
+    const was = !!ghost;
+    ghost = null;
+    if (was) {
+      const swallow = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+    }
+    const st = store;
+    if (!target || !st || refuseReadOnly()) return;
+    const u = unitOf(target);
+    let n = 0;
+    st.batch(() => { n = linkPicturesToUnit(st, u, ids); });
+    toastUndo(t("insp.ui.added", { n: String(n), u: String(st.node(u)?.name ?? u) }), st);
+    refreshInspector();
+    renderViewer();
+  };
+  const up = (e: PointerEvent): void => end(e);
+  const key = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.stopPropagation(); end(null); } };
+  window.addEventListener("pointermove", move, true);
+  window.addEventListener("pointerup", up, true);
+  window.addEventListener("keydown", key, true);
 }
 
 /** SURFACE-AUDIT · the same preview, into any three boxes — so a viewer window

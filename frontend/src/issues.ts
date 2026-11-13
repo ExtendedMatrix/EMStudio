@@ -128,6 +128,9 @@ export interface IssueSources {
   /** RIFINITURE · «Rinomina secondo la regola» for the extractors named before
    *  `<source>.<NN>`: one node, or many at once (one undo step) */
   renameRule?: { label: string; bulkLabel: (n: number) => string; run: (nodes: string[]) => void };
+  /** MICRO-FOTO-DOCUMENTI-BBOX C · a document named outside the series D.nn:
+   *  «Rinomina…» (one, with its preview) and «Rinomina tutti» (one undo step) */
+  docSeries?: { label: string; bulkLabel: (n: number) => string; run: (nodes: string[]) => void };
   /** CATENA · s3dgraphy `api.validate["info"]`, the client reading of
    *  `diagnostics.extraction_source_hints`: an extractor that reads a unit
    *  without a property of the name it feeds. A SUGGESTION, never a warning. */
@@ -429,6 +432,16 @@ export function issues(src: IssueSources): Issue[] {
              txt: t("issues.nameRule", { n: name(id), s: st.suggestion ?? "" }),
              ...(r ? { action: { label: r.label, run: () => r.run([id]) },
                        bulk: { key: "name-rule", label: r.bulkLabel, run: r.run } } : {}) });
+      continue;
+    }
+    // MICRO-FOTO-DOCUMENTI-BBOX C · a document out of the series D.nn: said in
+    // words, with the name proposed and the rename (s3Dgraphy's rule)
+    if (st.status === "warn" && byId.get(id)?.node_type === "document" && name(id)) {
+      const r = src.docSeries;
+      push({ node: id, sev: "info", rule: "naming",
+             txt: t("issues.docSeries", { n: name(id), s: st.suggestion ?? "" }),
+             ...(r ? { action: { label: r.label, run: () => r.run([id]) },
+                       bulk: { key: "doc-series", label: r.bulkLabel, run: r.run } } : {}) });
       continue;
     }
     push({ node: id, sev: st.status === "dup" ? "warn" : "info", rule: "naming",

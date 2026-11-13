@@ -19,12 +19,15 @@
  */
 import type { EmEdge, EmNode } from "./types";
 import { mediumOfFile } from "./doc-form";
+import { unitImages, type UnitImageRoute } from "./unit-images";
 
 export type ViewerMedium = "image" | "text" | "pdf" | "3d";
 
 /** Where a part reaches the node shown: its own locator, a linked resource,
  *  the crop of one of its extractors, a representation model, a container. */
-export type ViewerVia = "own" | "linked" | "extractor" | "rm" | "container";
+export type ViewerVia = "own" | "linked" | "extractor" | "rm" | "container"
+  /** MICRO-FOTO-DOCUMENTI-BBOX B · an image of a UNIT, by one of its roads */
+  | "unit";
 
 /** One thing the Viewer can show of the node — an image, a text, a PDF, or a
  *  file of 3D that is not a representation model (a model is in `models`). */
@@ -37,11 +40,13 @@ export interface ViewerPart {
   via: ViewerVia;
   /** the node it came through (the extractor of a crop), when not the target */
   through?: string;
+  /** the road of a unit's image (`unit-images.ts`), when `via` is «unit» */
+  route?: UnitImageRoute;
 }
 
 export interface ViewerTarget {
   /** what kind of node is shown — `none` when the node holds nothing to see */
-  kind: "document" | "resource" | "model" | "group" | "none";
+  kind: "document" | "resource" | "model" | "group" | "unit" | "none";
   /** the node shown (an extractor selected shows its DOCUMENT) */
   id: string;
   /** the document annotations go to: the document shown, or the document of
@@ -117,11 +122,13 @@ export function viewerTargetOf(g: G, nodeId: string | null): ViewerTarget | null
   const docTarget = (docId: string): ViewerTarget => {
     const t = empty("document", docId, docId);
     const seen = new Map<string, ViewerPart>();
-    const push = (holder: EmNode, via: ViewerVia, through?: string) => {
+    const push = (holder: EmNode, via: ViewerVia, through?: string, byId?: boolean) => {
       const loc = locatorOf(holder);
       if (!loc) return;
       const medium = viewerMediumOf(loc);
-      const key = leafOf(loc);
+      // the files of a set (a campaign's photographs) are told apart by their
+      // node: two sensors may both write DSC_0001.JPG
+      const key = byId ? `id:${holder.id}` : leafOf(loc);
       const twin = seen.get(key);
       if (twin) {
         // the same file twice: the document's own locator and the resource
@@ -138,7 +145,16 @@ export function viewerTargetOf(g: G, nodeId: string | null): ViewerTarget | null
     };
     const d = byId.get(docId)!;
     push(d, "own");
-    for (const r of out(docId, "has_linked_resource")) push(byId.get(r)!, "linked");
+    for (const r of out(docId, "has_linked_resource")) {
+      // a set is its files: the folder itself is not a picture
+      if (!out(r, "has_file").length) push(byId.get(r)!, "linked");
+      // MICRO-FOTO-DOCUMENTI-BBOX B2 · a resource-folder (a photographic
+      // campaign): its files are the document's pictures
+      for (const f of out(r, "has_file")) {
+        const loc = locatorOf(byId.get(f));
+        if (loc && viewerMediumOf(loc) === "image") push(byId.get(f)!, "linked", undefined, true);
+      }
+    }
     // the crops its extractors took (D.07.01 … D.07.05 of D.07): pictures OF the document
     for (const x of inn(docId, "extracted_from")) {
       if (byId.get(x)?.node_type !== "extractor") continue;
@@ -198,6 +214,17 @@ export function viewerTargetOf(g: G, nodeId: string | null): ViewerTarget | null
     if (loc) t.parts.push({ id: nodeId, name: String(node.name || nodeId), medium: viewerMediumOf(loc), locator: loc, via: "own" });
     return t;
   }
+  // MICRO-FOTO-DOCUMENTI-BBOX B · a unit shows its images, by the four roads
+  // (the Inspector's «Immagini dell'unità»: one view, the Viewer's)
+  const groups = unitImages(g, nodeId);
+  if (groups.length) {
+    const t = empty("unit", nodeId, null);
+    for (const grp of groups)
+      for (const it of grp.items)
+        t.parts.push({ id: it.id, name: it.name, medium: it.medium, locator: it.locator, via: "unit",
+                       route: grp.route, ...(grp.via ? { through: grp.via.id } : {}) });
+    return t;
+  }
   return empty("none", nodeId, null);
 }
 
@@ -207,11 +234,14 @@ export function viewerTargetOf(g: G, nodeId: string | null): ViewerTarget | null
 export function viewerSourceLine(t: ViewerTarget, texts: {
   models: (n: number) => string; group: (name: string) => string; own: string; linked: (n: number) => string;
   crops: (n: number) => string; nothing: string; name: (id: string) => string;
+  unit?: (n: number) => string;
 }): string {
   const bits: string[] = [];
   const own = t.parts.filter((p) => p.via === "own").length;
   const linked = t.parts.filter((p) => p.via === "linked").length;
   const crops = t.parts.filter((p) => p.via === "extractor").length;
+  const unit = t.parts.filter((p) => p.via === "unit").length;
+  if (unit && texts.unit) bits.push(texts.unit(unit));
   if (own) bits.push(texts.own);
   if (linked) bits.push(texts.linked(linked));
   if (crops) bits.push(texts.crops(crops));

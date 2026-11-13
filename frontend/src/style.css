@@ -11758,3 +11758,24 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 .uo-arrow, .uo-mini, .uo-fail, .uo-warn { flex: none; }
 .uo-mini { display: none; }
 .uo-row:hover .uo-mini, .uo-row.uo-sel .uo-mini, .uo-mini.on { display: inline; }
+
+/* MICRO-FOTO-DOCUMENTI-BBOX B · «Immagini dell'unità» by road, lazy thumbnails */
+.insp-unit-images .insp-ui-bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 4px; }
+.insp-unit-images .insp-ui-route { font-size: 11px; margin: 6px 0 2px; }
+.insp-unit-images .insp-ui-grid { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.insp-unit-image { width: 72px; padding: 2px; border: 1px solid var(--border, #ccc); background: none;
+  cursor: pointer; text-align: center; font-size: 10px; }
+.insp-unit-image img { width: 64px; height: 64px; object-fit: cover; display: block; margin: 0 auto;
+  background: var(--bg-hover, #f2f2f2); }
+.insp-unit-image .insp-ui-cap { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp-ui-glyph { width: 64px; height: 64px; margin: 0 auto; display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 13px; color: var(--muted, #777); background: var(--bg-hover, #f2f2f2); }
+.unit-drop-on { outline: 2px solid var(--accent, #2b6cb0); outline-offset: -2px; background: var(--bg-hover, #eef4fb); }
+/* B2.4 · the multi-file viewer: groups, the unit's filter, the selection */
+.viewer-gallery-wrap { display: flex; flex-direction: column; gap: 4px; overflow: auto; height: 100%; }
+.viewer-gallery-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 6px; font-size: 12px; }
+.viewer-gallery-group { font-size: 11px; color: var(--muted, #777); padding: 4px 6px 0; }
+.viewer-gallery-wrap .viewer-gallery { overflow: visible; height: auto; }
+.viewer-thumb.vw-out { opacity: .35; filter: grayscale(1); }
+.viewer-thumb.vw-in { box-shadow: inset 0 0 0 2px var(--accent, #2b6cb0); }
+.viewer-thumb.vw-sel { outline: 3px solid var(--warn, #d69e2e); outline-offset: -3px; }
