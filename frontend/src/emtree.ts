@@ -254,6 +254,14 @@ export interface OpenFile {
    * (a reconnection, a restore) replaces it instead of opening a twin.
    */
   room?: { id: string; title: string; node: string } | null;
+  /**
+   * MICRO-PIU-FONTI · a room's document READ from a node (`GET /v1/rooms/<id>/document`),
+   * not joined: a source in reading. Nothing written here goes anywhere — an
+   * edit is taken back, there is no Save — and what is wanted elsewhere is
+   * COPIED out («Copia in…»). `cursor` and `takenAt` are the state it was read
+   * in: what a copy's provenance names.
+   */
+  nodeRead?: { node: string; room: string; title: string; cursor: string | null; takenAt: string | null } | null;
 }
 
 /** Inside the desktop shell (Tauri), read as `tauri.ts::isTauri` does — not

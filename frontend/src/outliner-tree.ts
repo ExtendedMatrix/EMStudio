@@ -107,10 +107,15 @@ export interface OutlinerGraphIn {
 export interface OutlinerSourceIn {
   id: string;
   name: string;
-  kind: "file" | "room" | "none";
+  /** MICRO-PIU-FONTI · `node`: a room read from a node, in reading */
+  kind: "file" | "room" | "node" | "none";
   /** a path, a node: the row's tooltip */
   where?: string;
   dirty?: boolean;
+  /** MICRO-PIU-FONTI · the source's colour (the title bar wears the active one's) */
+  color?: string;
+  /** nothing written here goes anywhere: copied out only */
+  readOnly?: boolean;
   graphs: OutlinerGraphIn[];
 }
 
@@ -157,6 +162,10 @@ export interface URow {
   /** a source's id / an aux file's id: the row's menu */
   source?: string;
   aux?: string;
+  /** MICRO-PIU-FONTI · a source's badge: «active», or the switch to make it so */
+  badge?: "active" | "activate";
+  /** a source's colour */
+  color?: string;
 }
 
 interface TNode {
@@ -372,8 +381,11 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
 function sourceNodes(b: BuildIn): TNode[] {
   return b.sources.map((s) => ({
     row: { key: `src:${s.id}`, kind: "source" as const, label: s.kind === "none" ? b.texts.sourceNone : s.name, title: s.where,
-      glyphText: s.kind === "room" ? "⇄" : s.kind === "none" ? "◌" : "▤", source: s.id, active: s.graphs.some((g) => g.active),
-      ...(s.dirty ? { count: "●" } : {}) },
+      glyphText: s.kind === "room" ? "⇄" : s.kind === "node" ? "◎" : s.kind === "none" ? "◌" : "▤", source: s.id,
+      active: s.graphs.some((g) => g.active),
+      ...(s.graphs.length ? { badge: s.graphs.some((g) => g.active) ? "active" as const : "activate" as const } : {}),
+      ...(s.color ? { color: s.color } : {}),
+      ...(s.dirty ? { count: "●" } : s.readOnly ? { count: "🔒" } : {}) },
     def: true,
     kids: s.graphs.map((g) => ({
       row: { key: `g:${g.slot}`, kind: "graph" as const, label: g.name, slot: g.slot, glyphText: "◆", active: g.active,

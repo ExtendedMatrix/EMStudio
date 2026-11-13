@@ -439,6 +439,7 @@ import { guessKind, mightBeTileset, planDesktopDrop, positionsArePhysical, toCss
 import * as paths from "./paths";
 import * as SR from "./save-rebase";
 import * as MG from "./memory-guard";
+import * as SC from "./source-copy";
 import * as SK from "./session-keep";
 import * as AL from "./asset-list";
 import { blendBlock, findMisplaced, type Misplaced } from "./version-misplaced";
@@ -3094,6 +3095,21 @@ window.__EM_SCENE__ = () => {
   /** B2 · the open files, with the room each one is the copy of */
   files: () => emtree.files.map((f) => ({ name: f.name, path: f.path, room: f.room ?? null,
     graphs: emtree.slotsOf(f.id).length })),
+  /** MICRO-PIU-FONTI · the sources (kind, colour, active, read-only, graphs with their slot ids) */
+  sources: () => unifiedSources().map((x) => ({ id: x.id, name: x.name, kind: x.kind, color: x.color ?? null,
+    readOnly: !!x.readOnly, active: x.graphs.some((g) => g.active), dirty: !!x.dirty,
+    graphs: x.graphs.map((g) => ({ slot: g.slot, name: g.name, nodes: g.nodes ?? 0, undo: emtree.get(g.slot)?.store.undoDepth ?? 0 })) })),
+  activateSource: (fileId: string) => activateSource(fileId),
+  /** «Copia in…» without the dialog: the plan, then (apply) the copy with the choices */
+  copyPlan: (destSlot: string, ids?: string[], choices?: SC.CopyChoices) => copyPlanFor(destSlot, ids ?? [...selectedIds], choices),
+  copyInto: (destSlot: string, ids?: string[], choices?: SC.CopyChoices) => copyInto(destSlot, ids ?? [...selectedIds], choices ?? {}),
+  openCopyDialog: (destSlot?: string) => openCopyDialog(destSlot),
+  openNodeRead: (node: string, room: string) => openNodeReadSource(node, room),
+  /** a graph's store, for the checks that write in a source that is not in front */
+  slotStore: (slotId: string) => emtree.get(slotId)?.store ?? null,
+  /** ⌘Z as the button does it: in the source in front */
+  undoHere: () => { const st = undoStore(); st?.undo(); return st === store; },
+  sourcesMb: () => sourcesMb(),
   roomPanel: (room?: string) => openRoomPanel(room),
   /** Y5 · a host's answer to a command, as the sync channel delivers it */
   commandResult: (res: Parameters<typeof applyCommandResult>[0]) => applyCommandResult(res),
@@ -4829,6 +4845,7 @@ function renderNameStrip(): void {
   const title = document.getElementById("ns-title");
   const ctx = document.getElementById("ns-ctx");
   if (!title || !ctx) return;
+  paintActiveSource();   // MICRO-PIU-FONTI · the active source's colour on the bar
   const n = store && selectedId ? store.node(selectedId) : null;
   if (!store) {
     title.textContent = t("strip.untitled");
@@ -4849,12 +4866,22 @@ function renderNameStrip(): void {
     if (file) {
       const f = document.createElement("span");
       f.className = "ns-file";
-      f.textContent = `${file.name} › `;
+      f.textContent = `${file.nodeRead?.title ?? file.name} › `;
       f.title = file.path ?? file.name;
       title.appendChild(f);
     }
     title.appendChild(document.createTextNode(graphTitle(store) + (slot?.originSuffix ? ` · ${slot.originSuffix}` : "")));
     ctx.textContent = t("strip.graphCtx", { n: String(store.liveNodes().length) });
+    // MICRO-PIU-FONTI · what kind of source is in front: a room (live, no
+    // Save), a room read from a node (copied out only); a file says nothing
+    const kind = sourceKindOf(file);
+    if (kind === "room" || kind === "node") {
+      const k = document.createElement("span");
+      k.className = "ns-src-kind";
+      k.dataset.srcKind = kind;
+      k.textContent = t(kind === "room" ? "src.kindRoom" : "src.kindNode");
+      ctx.appendChild(k);
+    }
     return;
   }
   // MICRO-SPAZIO-3D-3 p.11 · a model with versions: its name without the level
@@ -6806,9 +6833,21 @@ function wireStore(s: DocumentStore): void {
   // forward local graph mutations to a connected peer (op-log, ADR-002 §2).
   // Remote-applied ops don't re-emit (DocumentStore suppresses), so no echo.
   s.onOp((op) => {
-    if (s !== store) return;
+    // MICRO-PIU-FONTI · …or the store a «Copia in…» is writing into
+    if (s !== store && s !== copyTargetStore) return;
+    // MICRO-PIU-FONTI · a source in reading (a room read from a node): nothing
+    // written here goes anywhere, so nothing written here stays
+    if (nodeReadFileOf(s)) {
+      takeBackNodeRead(s);
+      return;
+    }
+    // MICRO-PIU-FONTI · a room and a local file open together: what is written
+    // in the FILE is the file's (saved on disk), never the room's. Until today
+    // every op of the active store went to the room while one was joined — a
+    // local copy with the room's graph id would have written into the room.
+    const inRoom = roomOwnsStore(s);
     // TAVOLO 6 · a room that lets this session read: the write is taken back
-    if (sync.room && !sync.canWrite) {
+    if (inRoom && !sync.canWrite) {
       takeBackReadOnlyWrite(s);
       return;
     }
@@ -6826,8 +6865,53 @@ function wireStore(s: DocumentStore): void {
       opRefused(t("ops.notSent", { why: (e as Error).message }));
       return;
     }
-    if (sync.room) hubSendLocal(wireOps, String((s.doc.graph as Record<string, unknown>).graph_id ?? ""));
-    else for (const w of wireOps) sync.sendOp(w);
+    if (inRoom) hubSendLocal(wireOps, String((s.doc.graph as Record<string, unknown>).graph_id ?? ""));
+    else if (!sync.room) for (const w of wireOps) sync.sendOp(w);
+  });
+}
+
+/**
+ * MICRO-PIU-FONTI · is this store a graph of the room this session is in?
+ *
+ * A store of a graph slot is the room's when its file is the room's live copy
+ * (`OpenFile.room`, the same room). A store that is not a graph slot (the
+ * corpus, the periodizations) follows the file it lives in when it has one,
+ * else it is the room's as it always was. A graph with no file while a room
+ * is joined (an import, a seed) stays local: it has no place in the room
+ * until it is copied there.
+ */
+function roomOwnsStore(s: DocumentStore): boolean {
+  if (!sync.room) return false;
+  const slot = emtree.slots.find((x) => x.store === s);
+  const file = slot ? emtree.fileOf(slot)
+    : s === periodizationStore ? emtree.file(periodizationHomeFileId) : null;
+  if (!slot && !file) return true;
+  return !!file?.room && file.room.id === sync.room;
+}
+
+/** the source in reading a store belongs to, or null */
+function nodeReadFileOf(s: DocumentStore): OpenFile | null {
+  const slot = emtree.slots.find((x) => x.store === s);
+  const f = slot ? emtree.fileOf(slot) : null;
+  return f?.nodeRead ? f : null;
+}
+
+/** A write into a source in reading, taken back (as in a room that lets this
+ *  session read): the store returns to the state before it, said once. */
+let nodeReadRevert: { st: DocumentStore; depth: number } | null = null;
+function takeBackNodeRead(st: DocumentStore): void {
+  if (nodeReadRevert) return;
+  nodeReadRevert = { st, depth: Math.max(0, st.undoDepth - 1) };
+  queueMicrotask(() => {
+    const back = nodeReadRevert;
+    nodeReadRevert = null;
+    if (!back) return;
+    back.st.takeBack(back.depth);
+    const f = nodeReadFileOf(back.st);
+    const say = t("src.readTakenBack", { src: f?.nodeRead?.title ?? f?.name ?? "" });
+    logWarn(say);
+    toast(say);
+    refreshInspector();
   });
 }
 
@@ -7675,6 +7759,13 @@ function wireCorpusStore(s: DocumentStore): void {
 let lastTouchedStore: DocumentStore | null = null;
 
 function undoStore(): DocumentStore | null {
+  // MICRO-PIU-FONTI · ONE UNDO PER SOURCE: ⌘Z takes back in the source in front.
+  // The last touched store wins only when it is not ANOTHER source's graph (the
+  // corpus, the periodizations): undoing in a graph nobody sees — the file left
+  // a moment ago, or the destination of a «Copia in…» — would be a change
+  // made where nobody is looking.
+  if (lastTouchedStore && lastTouchedStore !== store
+      && emtree.slots.some((sl) => sl.store === lastTouchedStore)) return store;
   if (lastTouchedStore && lastTouchedStore !== store) {
     // a corpus with nothing left to undo hands the turn back to the study, so
     // ⌘Z never becomes a dead key while an older study step is still waiting
@@ -7749,7 +7840,7 @@ function wirePeriodizationStore(s: DocumentStore): void {
     draw();
   });
   s.onOp((op) => {
-    if (sync.room && !sync.canWrite) {
+    if (roomOwnsStore(s) && !sync.canWrite) {
       takeBackReadOnlyWrite(s);
       return;
     }
@@ -7762,7 +7853,7 @@ function wirePeriodizationStore(s: DocumentStore): void {
       return;
     }
     const gid = String((s.doc.graph as Record<string, unknown>).graph_id ?? PERIODIZATIONS_MEMBER_ID);
-    if (sync.room) hubSendLocal(wireOps, gid);
+    if (roomOwnsStore(s)) hubSendLocal(wireOps, gid);
   });
 }
 
@@ -8945,8 +9036,12 @@ function hubSendLocal(ops: HubOp[], graphId = ""): void {
   // with this identity's mode (model.ts `stampNew` / `stampEdit`).
   // dev28 (decision 12) · …and the language a node is born in travels IN THE
   // OP, decided here once: the node's, else the study's, else `und`.
+  // MICRO-PIU-FONTI · the graph the ops are FOR (a «Copia in…» writes into a
+  // room graph that is not the one in front): its study language
+  const opGraph = (graphId ? emtree.slots.find((sl) => String((sl.store.doc.graph as Record<string, unknown>).graph_id ?? "") === graphId)?.store
+    : null) ?? store;
   for (const hubOp of ops) {
-    if (hubOp.op === "add_node") withOpLanguage(hubOp, store?.doc.graph ?? null);
+    if (hubOp.op === "add_node") withOpLanguage(hubOp, opGraph?.doc.graph ?? null);
     // TAVOLO 8 · the clock of an act is the moment it was MADE. A structural op
     // left without one (a deletion, an edge) was dated by the relay on arrival
     // — for work done without network, the moment it came back, not the moment
@@ -11032,6 +11127,14 @@ async function askShelfHome(file: OpenFile): Promise<void> {
 
 /** Write ONE file. Returns false when nothing was written (cancelled, failed). */
 async function saveFile(file: OpenFile): Promise<boolean> {
+  // MICRO-PIU-FONTI · a room is live (no Save: its members have every change as
+  // it is made); a source in reading has nothing to save — it is copied out
+  if (file.nodeRead || (file.room && !file.path)) {
+    const say = t(file.nodeRead ? "src.readNoSave" : "src.roomNoSave", { src: file.room?.title ?? file.nodeRead?.title ?? file.name });
+    info.textContent = say;
+    toast(say);
+    return true;
+  }
   await askShelfHome(file);
   if (isTauri()) {
     if (!file.path) {
@@ -11788,14 +11891,362 @@ function unifiedSources(): OutlinerSourceIn[] {
   const out: OutlinerSourceIn[] = [];
   for (const f of emtree.files) {
     const gs = emtree.slotsOf(f.id);
-    out.push({ id: f.id, name: f.name, kind: f.room ? "room" : "file",
-      where: f.room ? `${f.room.title} · ${f.room.node}` : f.path ?? t("uo.notOnDisk"),
-      dirty: emtree.fileDirty(f.id), graphs: gs.map(graphIn) });
+    const kind = sourceKindOf(f);
+    out.push({ id: f.id, name: f.nodeRead ? f.nodeRead.title : f.name, kind,
+      where: f.nodeRead ? t("src.whereRead", { room: f.nodeRead.room, node: f.nodeRead.node, at: f.nodeRead.takenAt ?? "" })
+        : f.room ? `${f.room.title} · ${f.room.node} · ${t("src.whereRoom")}` : f.path ?? t("uo.notOnDisk"),
+      // MICRO-PIU-FONTI · a room has no Save (live) and a source in reading nothing to save
+      dirty: kind === "file" && emtree.fileDirty(f.id), readOnly: kind === "node",
+      color: sourceColor(f.id), graphs: gs.map(graphIn) });
   }
   const loose = emtree.slotsOf(null);
-  if (loose.length) out.push({ id: "", name: "", kind: "none", graphs: loose.map(graphIn) });
+  if (loose.length) out.push({ id: "", name: "", kind: "none", color: sourceColor(""), graphs: loose.map(graphIn) });
   return out;
 }
+
+// ── MICRO-PIU-FONTI · several sources open, one active ──────────────────────
+//
+// The decisions (E.D., 7 Nov 2026, the note «un outliner unico e più fonti»):
+// a local em.json (Save on disk), a room (live, no Save, every member sees it),
+// a room READ from a node (copied out only), open together; ONE active source —
+// where the changes go, what the Matrix, the Space and the Properties show —
+// changed explicitly with the badge «active», its colour on the title bar;
+// between sources one COPIES («Copia in…»), never moves, ids kept; one undo per
+// source; the memory guard counts every source open.
+
+/** what kind of source an open file is */
+function sourceKindOf(f: OpenFile | null): SC.SourceKind {
+  if (!f) return "none";
+  return f.nodeRead ? "node" : f.room ? "room" : "file";
+}
+
+/** a source's colour, kept for as long as it is open: the lowest of the six
+ *  not taken when it is first asked for (closing one does not repaint the rest) */
+const sourceColors = new Map<string, number>();
+function sourceColor(fileId: string): string {
+  for (const k of [...sourceColors.keys()]) if (k && !emtree.file(k)) sourceColors.delete(k);
+  let n = sourceColors.get(fileId);
+  if (n == null) {
+    const used = new Set(sourceColors.values());
+    n = 1;
+    while (used.has(n) && n < 6) n++;
+    sourceColors.set(fileId, n);
+  }
+  return `var(--src-${n})`;
+}
+
+/** the badge «active» of a source pressed: its first graph (the one it last
+ *  showed, when that is known) becomes the active one */
+const lastSlotOfSource = new Map<string, string>();
+function activateSource(fileId: string): boolean {
+  const gs = emtree.slotsOf(fileId || null);
+  if (!gs.length) return false;
+  const want = lastSlotOfSource.get(fileId);
+  const slot = gs.find((g) => g.id === want) ?? gs[0];
+  if (slot.id === emtree.activeId) return false;
+  activateSlot(slot.id);
+  logInfo(t("src.activated", { src: unifiedSources().find((x) => x.id === fileId)?.name || t("uo.noFile") }));
+  return true;
+}
+
+/** the source of the active graph («» = the graphs with no file) */
+function activeSourceId(): string | null {
+  const a = emtree.active();
+  return a ? (a.fileId ?? "") : null;
+}
+
+/** the title bar wears the active source's colour and kind */
+function paintActiveSource(): void {
+  const strip = document.getElementById("name-strip");
+  if (!strip) return;
+  const a = emtree.active();
+  if (!a) { delete strip.dataset.srcKind; strip.style.removeProperty("--active-src"); return; }
+  lastSlotOfSource.set(a.fileId ?? "", a.id);
+  strip.dataset.srcKind = sourceKindOf(emtree.fileOf(a));
+  strip.style.setProperty("--active-src", sourceColor(a.fileId ?? ""));
+}
+
+/** MICRO-PIU-FONTI · what the open sources weigh in the page: every graph's
+ *  document and the snapshots of its undo (memory-guard.ts `sourcesMb`) —
+ *  measured on the JSON, once per change of the document */
+const sourceBytes = new WeakMap<DocumentStore, { rev: number; bytes: number }>();
+function sourcesMb(): number {
+  const list: MG.SourceWeight[] = [];
+  for (const sl of emtree.slots) {
+    let m = sourceBytes.get(sl.store);
+    if (!m || m.rev !== sl.store.rev) {
+      let bytes = 0;
+      try { bytes = JSON.stringify(sl.store.doc.graph).length; } catch { /* a document that does not serialise weighs nothing known */ }
+      m = { rev: sl.store.rev, bytes };
+      sourceBytes.set(sl.store, m);
+    }
+    list.push({ bytes: m.bytes, undo: sl.store.undoDepth });
+  }
+  return MG.sourcesMb(list);
+}
+
+/** MICRO-PIU-FONTI · a room's document READ from a node — not joined: a source
+ *  in reading (`GET /v1/rooms/<id>/document`, any role). It opens beside what is
+ *  open, never in its place, and is copied out with «Copia in…». */
+async function openNodeReadSource(nodeIn?: string, roomIn?: string): Promise<boolean> {
+  const node = (nodeIn ?? servingNode() ?? "").trim().replace(/\/+$/, "");
+  const room = roomIn ?? (await askText(t("src.readAskRoom"), ""))?.trim() ?? "";
+  if (!node || !room) { if (!node) toast(t("idw.noNode")); return false; }
+  logInfo(t("src.reading", { room, node }));
+  let r: Response;
+  try {
+    r = await nodeAuthFetch(`${node}/v1/rooms/${encodeURIComponent(room)}/document`, { cache: "no-store" });
+  } catch (exc) { toast(t("src.readFailed", { room, why: String(exc) })); return false; }
+  if (!r.ok) { toast(t("src.readFailed", { room, why: String(r.status) })); logWarn(t("src.readFailed", { room, why: String(r.status) })); return false; }
+  const j = await r.json().catch(() => null) as { doc?: unknown; cursor?: string | null; taken_at?: string | null } | null;
+  if (!j?.doc) { toast(t("src.readFailed", { room, why: "no document" })); return false; }
+  const before = new Set(emtree.files.map((f) => f.id));
+  const title = String(((j.doc as Record<string, unknown>).header as Record<string, unknown> | undefined)?.["name"] ?? "") || room;
+  loadContainerDocument(j.doc, `${room} (${t("src.inReading")})`, null, {});
+  const file = emtree.files.find((f) => !before.has(f.id));
+  if (!file) return false;
+  file.nodeRead = { node, room, title: `${title} · ${t("src.inReading")}`, cursor: j.cursor ?? null, takenAt: j.taken_at ?? null };
+  file.dirty = false;
+  for (const sl of emtree.slotsOf(file.id)) sl.store.dirty = false;
+  refreshEMTree();
+  paintActiveSource();
+  renderNameStrip();
+  return true;
+}
+// ── MICRO-PIU-FONTI · «Copia in…» ───────────────────────────────────────────
+//
+// From the ACTIVE source (its selection) into another open graph: a summary
+// before writing (`source-copy.ts`), the person's choices, the destination «as
+// it would be» checked, then ONE batch in the destination's store — one undo
+// step there, the source untouched. A room destination receives the
+// operations through the same door as any edit (`roomOwnsStore`), without
+// becoming the active source.
+
+/** the store a copy is writing into right now: its operations go out even
+ *  though it is not the store in front */
+let copyTargetStore: DocumentStore | null = null;
+
+/** the graphs a copy may go into: every open graph but the active one, except
+ *  a source in reading and a room this session cannot write (or is not in) */
+function copyDestinations(): Array<{ slot: GraphSlot; file: OpenFile | null; why?: string }> {
+  const act = emtree.activeId;
+  return emtree.slots.filter((sl) => sl.id !== act).map((sl) => {
+    const file = emtree.fileOf(sl);
+    const why = file?.nodeRead ? t("src.destRead")
+      : file?.room && (file.room.id !== sync.room || !sync.connected) ? t("src.destRoomAway")
+      : file?.room && !sync.canWrite ? t("src.destRoomRead") : undefined;
+    return { slot: sl, file, ...(why ? { why } : {}) };
+  });
+}
+
+/** what a copy says about where it comes from */
+function copyOriginOf(slot: GraphSlot): SC.CopyOrigin {
+  const f = emtree.fileOf(slot);
+  const gid = String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id);
+  const v = f?.version;
+  const version = v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v);
+  if (f?.nodeRead) return { kind: "node", name: f.nodeRead.title, locator: `${f.nodeRead.node}/${f.nodeRead.room}`, graphId: gid,
+    version, cursor: f.nodeRead.cursor, takenAt: f.nodeRead.takenAt };
+  if (f?.room) return { kind: "room", name: f.room.title || f.room.id, locator: `${f.room.node}/${f.room.id}`, graphId: gid, version };
+  if (f) return { kind: "file", name: f.name, locator: f.path ?? f.name, graphId: gid, version };
+  return { kind: "none", name: slotLabel(slot), locator: "", graphId: gid };
+}
+
+/** the checks the store knows (the epochs' own coherence and overlaps), on a
+ *  COPY of the document: never on the destination itself */
+function copyStoreChecks(d: EmDocument): SC.CopyProblem[] {
+  try {
+    const st = new DocumentStore(JSON.parse(JSON.stringify({ graph: d.graph })) as EmDocument);
+    const out: SC.CopyProblem[] = st.crossEpochWarnings().map((w) => ({ kind: "epoch_overlap", nodes: [], text: w }));
+    for (const ep of st.liveNodes().filter((n) => n.node_type === "EpochNode"))
+      for (const w of st.epochCoherenceWarnings(ep.id)) out.push({ kind: "epoch", nodes: [ep.id], text: w });
+    return out;
+  } catch { return []; }
+}
+
+interface CopyView {
+  ok: boolean;
+  plan: SC.CopyPlan;
+  ops: SC.CopyOps;
+  problems: SC.CopyProblem[];
+  from: string;
+  into: string;
+  why?: string;
+}
+
+/** The plan of a copy of `ids` from the active graph into `destSlot`, with the
+ *  destination as it would be checked. */
+function copyPlanFor(destSlot: string, ids: string[], choices: SC.CopyChoices = {}): CopyView | null {
+  const src = emtree.active();
+  const dst = emtree.get(destSlot);
+  if (!src || !dst || src === dst) return null;
+  const plan = SC.planCopy({ src: src.store.doc, dst: dst.store.doc, ids, origin: copyOriginOf(src), choices });
+  const ops = SC.applyCopy(plan, src.store.doc, choices);
+  const problems = SC.newContradictions(dst.store.doc, SC.wouldBe(dst.store.doc, ops), copyStoreChecks);
+  const why = copyDestinations().find((d) => d.slot.id === destSlot)?.why;
+  return { ok: !problems.length && !why, plan, ops, problems, from: slotLabel(src), into: slotLabel(dst), ...(why ? { why } : {}) };
+}
+
+/** The copy, written: refused when the destination as it would be does not
+ *  pass, or cannot be written. ONE step of the destination's undo. */
+async function copyInto(destSlot: string, ids: string[], choices: SC.CopyChoices): Promise<CopyView | null> {
+  const v = copyPlanFor(destSlot, ids, choices);
+  if (!v) return null;
+  const dst = emtree.get(destSlot)!;
+  if (!v.ok) {
+    const say = v.why ?? t("copy.refused", { n: String(v.problems.length), what: v.problems.map((p) => copyProblemText(p, dst.store)).join(" · ") });
+    logWarn(say);
+    toast(say);
+    return v;
+  }
+  const st = dst.store;
+  copyTargetStore = st;
+  try {
+    st.batch(() => {
+      for (const n of v.ops.add) st.addNode(n);
+      for (const u of v.ops.update) st.updateNode(u.id, u.patch);
+      for (const e of v.ops.removeEdges) st.deleteEdge(e);
+      for (const e of v.ops.edges) {
+        const { id, source, target, edge_type, attributes } = e as EmEdge & { attributes?: Record<string, unknown> };
+        st.addEdge(source, target, String(edge_type), attributes, id);
+      }
+    });
+  } finally {
+    copyTargetStore = null;
+  }
+  // the new nodes get their places (from the sketch: what was placed stays)
+  await runLayout(false, st, false, true);
+  const pl = v.plan;
+  logInfo(t("copy.done", { n: String(pl.nodes.length), e: String(v.ops.edges.length), from: v.from, into: v.into,
+    c: String(pl.collisions.length), l: String(pl.left.length) }), pl.nodes.slice(0, 50).map((n) => n.id));
+  for (const a of pl.embargo.filter((x) => x.out)) logWarn(t("copy.embargoOut", { x: a.name, until: a.until ?? "" }));
+  toast(t("copy.doneToast", { n: String(pl.nodes.length), into: v.into }));
+  refreshEMTree();
+  refreshSurfaces("outliner");
+  updateToolbar();
+  return v;
+}
+
+function copyProblemText(p: SC.CopyProblem, st: DocumentStore | null): string {
+  const nm = (id: string): string => String(st?.node(id)?.name ?? emtree.active()?.store.node(id)?.name ?? id);
+  if (p.kind === "cycle") return t("copy.pCycle", { x: p.nodes.map(nm).join(" → ") });
+  if (p.kind === "same_time") return t("copy.pSame", { a: nm(p.nodes[0]), b: nm(p.nodes[1]) });
+  if (p.kind === "epoch_order") return t("copy.pEpochOrder", { a: nm(p.nodes[0]), b: nm(p.nodes[1]) });
+  return p.text ?? p.kind;
+}
+
+/** «Copia in…»: the summary, the choices, the check, then the copy. */
+function openCopyDialog(destSlot?: string): void {
+  const src = emtree.active();
+  const ids = [...selectedIds];
+  if (!src || !ids.length) { toast(t("copy.needSelection")); return; }
+  const dests = copyDestinations();
+  if (!dests.length) { toast(t("copy.noDest")); return; }
+  let dest = destSlot && dests.some((d) => d.slot.id === destSlot) ? destSlot
+    : (dests.find((d) => !d.why) ?? dests[0]).slot.id;
+  const fields = new Set<string>(), relations = new Set<string>(), embargoed = new Set<string>();
+  let epoch: string | null = null;
+  document.getElementById("cp-pop")?.remove();
+  const pop = document.createElement("div");
+  pop.id = "cp-pop";
+  pop.className = "modal";
+  const card = document.createElement("div");
+  card.className = "modal-card cp-card";
+  card.dataset.copyDialog = "1";
+  pop.appendChild(card);
+  const close = (): void => { pop.remove(); document.removeEventListener("keydown", onKey, true); };
+  const onKey = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  document.addEventListener("keydown", onKey, true);
+  const esc = (x: unknown): string => escapeHtml(String(x ?? ""));
+  const draw = (): void => {
+    const choices: SC.CopyChoices = { fields, relations, embargoed, epoch };
+    const v = copyPlanFor(dest, ids, choices);
+    if (!v) { close(); return; }
+    const dSlot = emtree.get(dest)!;
+    const pl = v.plan;
+    const nm = (id: string): string => String(src.store.node(id)?.name ?? dSlot.store.node(id)?.name ?? id);
+    const label = (et: string): string => { try { return edgeLabel(et); } catch { return et; } };
+    const colorA = sourceColor(src.fileId ?? ""), colorB = sourceColor(dSlot.fileId ?? "");
+    card.style.setProperty("--src-a", colorA);
+    card.style.setProperty("--src-b", colorB);
+    const destOpts = dests.map((d) => `<option value="${esc(d.slot.id)}"${d.slot.id === dest ? " selected" : ""}${d.why ? " disabled" : ""}>`
+      + `${esc((d.file?.nodeRead?.title ?? d.file?.room?.title ?? d.file?.name ?? t("uo.noFile")) + " › " + slotLabel(d.slot))}${d.why ? ` — ${esc(d.why)}` : ""}</option>`).join("");
+    const dEpochs = dSlot.store.liveNodes().filter((n) => n.node_type === "EpochNode");
+    const epochOpts = [`<option value="">${esc(t("copy.epochAsSource"))}</option>`,
+      ...dEpochs.map((n) => `<option value="${esc(n.id)}"${n.id === epoch ? " selected" : ""}>${esc(n.name ?? n.id)}</option>`)].join("");
+    const c = pl.counts;
+    const bytes = pl.files.reduce((a, f) => a + (f.bytes ?? 0), 0);
+    const leftBy = (w: string): number => pl.left.filter((l) => l.why === w).length;
+    const parts: string[] = [];
+    parts.push(`<div class="modal-head"><span>${esc(t("copy.title"))} — <b class="cp-src">${esc(v.from)}</b> → <b class="cp-dst">${esc(v.into)}</b></span><button class="modal-x" data-cp="x" aria-label="Close">✕</button></div>`);
+    parts.push(`<div class="cp-body">`);
+    parts.push(`<label>${esc(t("copy.dest"))} <select data-cp="dest">${destOpts}</select></label>`);
+    parts.push(`<h4>${esc(t("copy.what"))}</h4><div class="cp-sum" data-cp-sum="1">`
+      + (["units", "documents", "paradata", "resources", "files", "rights", "dtc", "epochs", "other"] as SC.CountKey[])
+        .filter((k) => c[k]).map((k) => `<span data-count="${k}"><b>${c[k]}</b> ${esc(t(`copy.c.${k}`))}</span>`).join("")
+      + `<span data-count="edges"><b>${v.ops.edges.length}</b> ${esc(t("copy.c.edges"))}</span>`
+      + `<span data-count="assets"><b>${pl.files.length}</b> ${esc(t("copy.c.assets", { mb: (bytes / 1048576).toFixed(1) }))}</span>`
+      + (pl.left.length ? `<span data-count="left" title="${esc(t("copy.leftHint"))}"><b>${pl.left.length}</b> ${esc(t("copy.c.left", { m: String(leftBy("missing_end")), e: String(leftBy("embargo")) }))}</span>` : "")
+      + `</div>`);
+    parts.push(`<h4>${esc(t("copy.epochs"))}</h4><label>${esc(t("copy.epochDest"))} <select data-cp="epoch">${epochOpts}</select></label>`
+      + (pl.epochs.length ? `<table data-cp-epochs="1">${pl.epochs.map((e) => `<tr><td>${esc(e.name)}</td><td>→ ${esc(nm(e.to))}</td><td>${esc(t(`copy.how.${e.how}`))}</td></tr>`).join("")}</table>` : ""));
+    parts.push(`<h4>${esc(t("copy.prov"))}</h4><div class="cp-prov">${esc(t("copy.provSays", { src: copyOriginOf(src).name, state: JSON.stringify(SC.provenance(copyOriginOf(src), new Date().toISOString()).state) }))}</div>`);
+    if (pl.embargo.length) {
+      parts.push(`<h4>${esc(t("copy.rights"))}</h4><table data-cp-embargo="1">`);
+      for (const a of pl.embargo)
+        parts.push(`<tr><td>${esc(a.name)}</td><td>${esc(t("copy.until", { d: a.until ?? "?" }))}</td><td><label><input type="checkbox" data-cp-emb="${esc(a.id)}"${a.out ? " checked" : ""}> ${esc(t("copy.letOut"))}</label></td></tr>`);
+      parts.push(`</table>`);
+    }
+    const diverging = pl.collisions.filter((x) => x.fields.length);
+    parts.push(`<h4>${esc(t("copy.collisions", { n: String(pl.collisions.length), d: String(diverging.length) }))}</h4>`);
+    if (diverging.length) {
+      parts.push(`<table data-cp-collisions="1"><tr><th></th><th>${esc(t("copy.field"))}</th><th class="cp-src">${esc(t("copy.inSource"))}</th><th class="cp-dst">${esc(t("copy.inDest"))}</th></tr>`);
+      for (const x of diverging) {
+        parts.push(`<tr data-col="${esc(x.id)}"><td colspan="4"><label><input type="checkbox" data-cp-field="${esc(x.id)}"${fields.has(x.id) ? " checked" : ""}> <b>${esc(x.name)}</b> — ${esc(t("copy.takeSourceFields"))}</label></td></tr>`);
+        for (const f of x.fields.slice(0, 8))
+          parts.push(`<tr><td></td><td>${esc(f.field)}</td><td class="cp-v cp-src" title="${esc(f.src)}">${esc(f.src)}</td><td class="cp-v cp-dst" title="${esc(f.dst)}">${esc(f.dst)}</td></tr>`);
+      }
+      parts.push(`</table>`);
+    }
+    parts.push(`<h4>${esc(t("copy.relations", { n: String(pl.relations.length) }))}</h4>`);
+    if (pl.relations.length) {
+      parts.push(`<table data-cp-relations="1">`);
+      for (const r of pl.relations) {
+        const e = r.edge;
+        parts.push(`<tr data-rel="${esc(r.key)}"><td>${esc(t(`copy.rel.${r.kind}`))}</td><td>${esc(nm(e.source))} — ${esc(label(String(e.edge_type)))} → ${esc(nm(e.target))}</td>`
+          + `<td><label><input type="checkbox" data-cp-rel="${esc(r.key)}"${relations.has(r.key) ? " checked" : ""}> ${esc(t(`copy.take.${r.kind}`))}</label></td></tr>`);
+      }
+      parts.push(`</table><div class="cp-note">${esc(t("copy.destWins"))}</div>`);
+    }
+    parts.push(`<div class="cp-check" data-ok="${v.ok ? 1 : 0}" data-cp-check="1">${v.ok ? esc(t("copy.checkOk"))
+      : esc(v.why ?? t("copy.checkNo", { what: v.problems.map((p) => copyProblemText(p, dSlot.store)).join(" · ") }))}</div>`);
+    parts.push(`</div><div class="cp-foot"><button type="button" data-cp="cancel">${esc(t("common.cancel"))}</button>`
+      + `<button type="button" class="primary" data-cp="ok"${v.ok ? "" : " disabled"}>${esc(t("copy.go", { n: String(pl.nodes.length) }))}</button></div>`);
+    card.innerHTML = parts.join("");
+    card.querySelector('[data-cp="x"]')!.addEventListener("click", close);
+    card.querySelector('[data-cp="cancel"]')!.addEventListener("click", close);
+    card.querySelector<HTMLSelectElement>('[data-cp="dest"]')!.addEventListener("change", (e) => {
+      dest = (e.target as HTMLSelectElement).value; fields.clear(); relations.clear(); epoch = null; draw();
+    });
+    card.querySelector<HTMLSelectElement>('[data-cp="epoch"]')!.addEventListener("change", (e) => {
+      epoch = (e.target as HTMLSelectElement).value || null; draw();
+    });
+    const toggle = (sel: string, attr: string, set: Set<string>): void => {
+      for (const b of card.querySelectorAll<HTMLInputElement>(sel))
+        b.addEventListener("change", () => { const k = b.getAttribute(attr)!; if (b.checked) set.add(k); else set.delete(k); draw(); });
+    };
+    toggle("[data-cp-field]", "data-cp-field", fields);
+    toggle("[data-cp-rel]", "data-cp-rel", relations);
+    toggle("[data-cp-emb]", "data-cp-emb", embargoed);
+    card.querySelector<HTMLButtonElement>('[data-cp="ok"]')!.addEventListener("click", () => {
+      close();
+      void copyInto(dest, ids, { fields, relations, embargoed, epoch });
+    });
+  };
+  draw();
+  document.body.appendChild(pop);
+}
+
 function auxTypeLabel(ft: string): string {
   return AUX_FILE_TYPES.find((x) => x.value === ft)?.label ?? ft;
 }
@@ -11850,18 +12301,26 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
       const n = r.id ? (r.slot === emtree.activeId ? store?.node(r.id) : emtree.get(r.slot ?? "")?.store.node(r.id)) : null;
       return rowMark({ node_type: n?.node_type ?? r.glyph ?? "", data: n?.data ?? {} } as EmNode);
     },
-    word: (k) => t(k === "eye" ? "uo.eye" : k === "menu" ? "uo.menu" : "uo.absent"),
+    word: (k) => t(k === "eye" ? "uo.eye" : k === "menu" ? "uo.menu" : k === "active" ? "src.badgeActive"
+      : k === "activate" ? "src.badgeActivate" : "uo.absent"),
+    activate: (r) => { if (r.kind === "source") activateSource(r.source ?? ""); },
   };
 }
 
 /** A row picked: a graph becomes the active one; a node is selected in its
  *  graph (`unifiedReveal`); ⌘/Ctrl adds it to the selection. */
 function unifiedPick(r: URow, e: MouseEvent): void {
-  if (r.kind === "source") {
-    const first = emtree.slotsOf(r.source || null)[0];
-    if (first && first.id !== emtree.activeId) activateSlot(first.id);
+  // MICRO-PIU-FONTI · the active SOURCE changes only with its badge: a click on
+  // a source, or on a graph or a node of another source, does not move the
+  // changes elsewhere — it says where the switch is
+  const rowSource = r.kind === "source" ? (r.source ?? "") : r.slot ? (emtree.get(r.slot)?.fileId ?? "") : null;
+  if (rowSource !== null && rowSource !== activeSourceId()) {
+    const say = t("src.notActive", { src: unifiedSources().find((x) => x.id === rowSource)?.name || t("uo.noFile") });
+    info.textContent = say;
+    toast(say);
     return;
   }
+  if (r.kind === "source") return;
   if (r.slot && r.slot !== emtree.activeId) activateSlot(r.slot);
   if (r.kind === "graph" || !r.id) return;
   if ((e.metaKey || e.ctrlKey) && selectedId) {
@@ -11892,8 +12351,18 @@ function unifiedMenu(r: URow, anchor: HTMLElement): void {
   if (r.kind === "graph" && r.slot) { openGraphMenu(r.slot, anchor); return; }
   if (r.kind === "source") {
     const fid = r.source ?? "";
+    const kind = sourceKindOf(emtree.file(fid));
+    const isActive = fid === activeSourceId();
     spaceMenu(box.left, box.bottom + 2, r.label, [
-      ...(fid ? [{ label: t("uo.saveFile"), act: "save", run: () => emtreeHandlers.onSaveFile?.(fid) },
+      // MICRO-PIU-FONTI · make it the active source; copy the selection into
+      // another source; read a room from a node beside what is open
+      ...(!isActive ? [{ label: t("src.makeActive"), act: "activate", run: () => void activateSource(fid) }] : []),
+      ...(isActive && selectedIds.size && emtree.slots.length > 1
+        ? [{ label: t("src.copyInto"), act: "copy-into", run: () => openCopyDialog() }] : []),
+      { label: t("src.openRead"), act: "open-read", run: () => void openNodeReadSource() },
+      "sep" as const,
+      ...(fid && kind === "file" ? [{ label: t("uo.saveFile"), act: "save", run: () => emtreeHandlers.onSaveFile?.(fid) }] : []),
+      ...(fid ? [
                  { label: t("uo.closeFile"), act: "close", run: () => void emtreeHandlers.onCloseFile?.(fid) }] : []),
       { label: t("uo.addAux"), act: "aux-add", run: () => {
         const first = emtree.slotsOf(fid || null)[0];
@@ -30285,7 +30754,9 @@ function sceneCeilingMb(auto = false): number {
 /** what a scene's guard reads at each rebuild */
 const sceneMemory = (): { ceilingMb: number; availableMb: number | null } => {
   void refreshMachineMemory();
-  return { ceilingMb: sceneCeilingMb(), availableMb: machineMemory.available };
+  // MICRO-PIU-FONTI · the sources open (every graph, with its undo) are taken
+  // off the ceiling first: the scene has what they leave
+  return { ceilingMb: Math.max(0, sceneCeilingMb() - sourcesMb()), availableMb: machineMemory.available };
 };
 /** a model the guard did not load: said once per model and estimate, in the Log
  *  and in a toast that names the way on (the strip has the buttons) */

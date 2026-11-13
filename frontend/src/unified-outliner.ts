@@ -38,7 +38,9 @@ export interface UnifiedDeps {
   /** the glyph of a row (the 2D glyphs of the datamodel) */
   mark: (row: URow) => HTMLElement;
   /** words of the rows' buttons */
-  word: (k: "eye" | "menu" | "absent") => string;
+  word: (k: "eye" | "menu" | "absent" | "active" | "activate") => string;
+  /** MICRO-PIU-FONTI · the badge of a source not active: the explicit switch */
+  activate?: (row: URow) => void;
 }
 
 export interface UnifiedApi {
@@ -106,6 +108,19 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     el.appendChild(lab);
     const tip = r.desc ? `${r.label} — ${r.desc}` : r.label;
     el.title = r.absent ? `${tip} — ${d.word("absent")}` : r.title ? `${tip} — ${r.title}` : tip;
+    if (r.color) el.style.setProperty("--src-color", r.color);
+    if (r.badge) {
+      // MICRO-PIU-FONTI · ONE active source, changed explicitly: the badge says
+      // «active» on it, and on the others it is the switch
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `uo-badge uo-badge-${r.badge}`;
+      b.dataset.badge = r.badge;
+      b.textContent = d.word(r.badge);
+      b.title = d.word(r.badge);
+      if (r.badge === "active") b.setAttribute("aria-pressed", "true");
+      el.appendChild(b);
+    }
     if (r.count) {
       const c = document.createElement("span");
       c.className = "uo-count";
@@ -178,6 +193,8 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     }
     const m = t.closest<HTMLElement>("[data-menu]");
     if (m) { e.stopPropagation(); d.menu(r, m); return; }
+    const badge = t.closest<HTMLElement>("[data-badge]");
+    if (badge) { e.stopPropagation(); if (r.badge === "activate") d.activate?.(r); return; }
     if (r.id || r.kind === "graph" || r.kind === "source") { d.pick(r, e); paint(true); return; }
     if (r.parent) toggleOpen(r);
   });

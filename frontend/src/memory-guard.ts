@@ -84,3 +84,22 @@ export function lighterThatFits<T extends { est: number | null }>(cands: T[], ro
 export function mbSay(mb: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 }
+
+// MICRO-PIU-FONTI · the guard counts EVERY source open (E.D., 7 Nov 2026): a
+// room and two files open together are three documents in the page, each with
+// its undo, and the scene's room is what is left of the ceiling after them.
+/** one open graph: its document's JSON, and how many undo snapshots it holds */
+export interface SourceWeight { bytes: number; undo: number }
+/** A document in the page costs ~4× its JSON (objects, strings, the indexes
+ *  the views build on it); an undo step is one JSON snapshot of the graph
+ *  (`model.ts::take`), kept as a string (2 B a character, at worst). */
+export const PER_DOC = 4;
+export const PER_SNAPSHOT = 2;
+export function sourcesMb(list: SourceWeight[]): number {
+  let b = 0;
+  for (const s of list) {
+    const bytes = num(s.bytes) ?? 0;
+    b += bytes * PER_DOC + bytes * PER_SNAPSHOT * Math.max(0, Math.floor(s.undo || 0));
+  }
+  return Math.ceil(b / MB);
+}

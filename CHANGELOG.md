@@ -7,6 +7,29 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **Several sources open, one active, «Copia in…»** (MICRO-PIU-FONTI, giro B;
+  decided by E.D. on 7 November 2026). A local em.json (Save on disk), a room
+  (live: no Save) and a room READ from a node (`GET /v1/rooms/<id>/document`,
+  read only: an edit is taken back, copied out only) stand side by side in the
+  Outliner. ONE active source, changed only with its badge «attiva» (a click on
+  another source's rows says where the switch is); each source has a colour and
+  the title bar wears the active one's, with «stanza · dal vivo» / «in lettura».
+  Between sources one copies, never moves (`source-copy.ts`, pure): a unit
+  brings its paradata, group, proxies, documents, resources and files, the DTC
+  that made them and their rights; the ids are kept; the epochs by id, by name,
+  copied or chosen; collisions show the fields that differ and, apart, the
+  relations in more, in less and turned round — the destination wins unless
+  chosen case by case; an asset under a running embargo stays out, or leaves
+  signalled with its embargo; every node that enters carries
+  `data.derived_from` (source, graph, version/cursor/instant). The destination
+  «as it would be» must pass the checks (cycles in the sequence,
+  contemporaneity, a relation against the epochs, the epochs' own coherence):
+  otherwise it is said and not applied. The copy is ONE undo step of the
+  destination; ⌘Z acts on the source in front. Fixed on the way: while a room
+  was joined, every edit of a LOCAL file was sent to the room (and taken back if
+  the room was read-only). The memory guard takes the open sources (documents
+  and their undo) off the scene's ceiling. IT/EN. Checks: check-source-copy
+  (new), check-memory-guard.
 - **One Outliner, columns from top to bottom** (MICRO-OUTLINER-UNICO, giro A;
   decided by E.D. on 7 November 2026). The Outliner (`outliner-tree.ts`, drawn
   as a virtual list by `unified-outliner.ts`) takes the place of three lists —

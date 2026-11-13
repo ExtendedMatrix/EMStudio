@@ -11576,3 +11576,34 @@ td.al-cloud { color: var(--accent-ink); }
 .uo-desc { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 .uo-search { width: 120px; }
 .uo-sel-btn { white-space: nowrap; width: auto !important; padding: 0 6px !important; }
+
+/* ── MICRO-PIU-FONTI · several sources open, ONE active ─────────────────────
+   Each source has a colour (`--src-color`, set by the row); the active one's
+   colour is worn by the title bar (#name-strip, `--active-src`). The badge
+   «active» is on the active source; on the others it is the switch. */
+:root { --src-1: #2f6fdf; --src-2: #c2571a; --src-3: #2b8a3e; --src-4: #9c36b5; --src-5: #b08800; --src-6: #0c8599; }
+.uo-source { box-shadow: inset 3px 0 0 var(--src-color, transparent); }
+.uo-badge { flex: none; font-size: 9.5px; line-height: 14px; height: 15px; padding: 0 6px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--src-color, var(--border)); background: none; color: inherit; text-transform: lowercase; }
+.uo-badge-active { background: var(--src-color, var(--accent)); color: #fff; border-color: transparent; cursor: default; font-weight: 600; }
+.uo-badge-activate { opacity: 0; }
+.uo-row:hover .uo-badge-activate, .uo-badge-activate:focus-visible { opacity: 0.85; }
+#name-strip[data-src-kind] { box-shadow: inset 4px 0 0 var(--active-src, transparent); }
+#name-strip .ns-file { color: var(--active-src, inherit); }
+#name-strip .ns-src-kind { font-size: 10.5px; margin-left: 6px; padding: 0 6px; border-radius: 8px; vertical-align: 3px;
+  border: 1px solid var(--active-src, var(--border)); color: var(--active-src, inherit); font-weight: 600; letter-spacing: 0; }
+/* «Copia in…» */
+.cp-card { width: min(760px, 94vw); max-height: 88vh; display: flex; flex-direction: column; }
+.cp-body { overflow: auto; padding: 8px 14px 12px; font-size: 12.5px; }
+.cp-body h4 { margin: 12px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.cp-body table { border-collapse: collapse; width: 100%; }
+.cp-body td, .cp-body th { padding: 2px 6px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.cp-body td.cp-v { font-family: var(--font-mono, monospace); font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-body .cp-src { color: var(--src-a, inherit); } .cp-body .cp-dst { color: var(--src-b, inherit); }
+.cp-sum { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.cp-sum span b { font-variant-numeric: tabular-nums; }
+.cp-check { margin-top: 10px; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.cp-check[data-ok="0"] { border-color: #c92a2a; background: rgba(201, 42, 42, 0.08); }
+.cp-check[data-ok="1"] { border-color: #2b8a3e; background: rgba(43, 138, 62, 0.08); }
+.cp-foot { display: flex; gap: 8px; justify-content: flex-end; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border); }
+.cp-foot select { max-width: 280px; }

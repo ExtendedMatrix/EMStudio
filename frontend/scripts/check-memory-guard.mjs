@@ -57,4 +57,12 @@ const main = readFileSync(`${SRC}main.ts`, "utf8");
 eq((main.match(/memory: sceneMemory, onMemoryGate,/g) ?? []).length, 2, "main: the Space and the Viewer both mount the guard");
 eq(/\/machine\/memory/.test(readFileSync(new URL("../../tools/em_bridge.py", import.meta.url), "utf8")), true, "the bridge answers /machine/memory");
 
+// MICRO-PIU-FONTI · every source open is counted: a document ~4× its JSON, an
+// undo step one snapshot (2 B a character at worst); the scene has what they leave
+eq(G.sourcesMb([]), 0, "no source: nothing");
+eq(G.sourcesMb([{ bytes: 3.25 * MB, undo: 0 }]), 13, "Templu Mare v9 (3.25 MB of JSON), no undo: ~13 MB");
+eq(G.sourcesMb([{ bytes: 3.25 * MB, undo: 10 }, { bytes: 1 * MB, undo: 2 }]), 86, "Templu with 10 steps + a room of 1 MB with 2: ~86 MB");
+eq(G.sourcesMb([{ bytes: NaN, undo: 3 }]), 0, "nonsense weighs nothing");
+eq(/ceilingMb: Math\.max\(0, sceneCeilingMb\(\) - sourcesMb\(\)\)/.test(main), true, "main: the scene's ceiling less the sources open");
+
 console.log(`check-memory-guard: ${checks} checks OK`);
