@@ -51,10 +51,11 @@ const eq = (got, want, what) => {
   ok(W.applyArrangement("canvas"), "the Stratigrafia arrangement applies");
   const ids = W.paneIds(W.layoutOf("canvas"));
   // G7 (MICRO grafo reattivo) · the graphs of the workspace above the Outliner
-  eq(W.windowsOf("canvas").map((w) => w.type), ["graph", "emtree", "outliner", "table", "inspector"],
-     "five windows: graph (the anchor), the graphs, outliner, the warnings table, inspector");
+  // MICRO-OUTLINER-UNICO · the one Outliner, then the Matrix and the Inspector to the bottom
+  eq(W.windowsOf("canvas").map((w) => w.type), ["graph", "outliner", "inspector"],
+     "three windows: graph (the anchor), the one Outliner, inspector");
   eq(ids.map((id) => W.windowsOf("canvas").find((w) => w.id === id).type),
-     ["emtree", "outliner", "graph", "table", "inspector"], "graphs above the outliner | graph above the table | inspector");
+     ["outliner", "graph", "inspector"], "outliner | graph | inspector, columns from top to bottom");
   // SHIFT-A (1 ott 2026) · the outliner is a WINDOW TYPE of its own, not the
   // second tab of an EMtree window: nothing to open it «on»
   eq(W.windowsOf("canvas")[1].state["current.panel"], undefined,
@@ -126,9 +127,9 @@ const eq = (got, want, what) => {
   ok(root, "…and the root divider is listed");
   const before = W.windowsOf("canvas").length;
   const gone = W.closeSplitSide("", "a", "canvas");
-  // G7 · the left side is the graphs ABOVE the outliner: both go with it
-  eq(gone.length, 2, "dragging the root divider over the left column closes it (the graphs and the outliner)");
-  eq(W.windowsOf("canvas").length, before - 2, "…and only them");
+  // MICRO-OUTLINER-UNICO · the left column is the one Outliner: it goes alone
+  eq(gone.length, 1, "dragging the root divider over the left column closes it (the Outliner)");
+  eq(W.windowsOf("canvas").length, before - 1, "…and only it");
   ok(W.paneIds(W.layoutOf("canvas")).includes(W.activeWin("canvas").id),
      "the focus lands in what stayed");
   for (const t of Object.keys(W.WINDOW_TYPE_META))

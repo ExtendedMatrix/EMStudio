@@ -7,6 +7,21 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **One Outliner, columns from top to bottom** (MICRO-OUTLINER-UNICO, giro A;
+  decided by E.D. on 7 November 2026). The Outliner (`outliner-tree.ts`, drawn
+  as a virtual list by `unified-outliner.ts`) takes the place of three lists —
+  the EMTree, the list of the units and the Space's own Outliner — in every
+  space: the sources (files, rooms) hold the graphs, a graph holds its
+  dimensions as lists (units, documents with their RMDoc, authors, epochs,
+  models and tilesets, proxies, GIS layers, paradata, the rest, auxiliary
+  files), by epoch, alphabetical or by type; synced with what has a 3D
+  representation (the rest grey or filtered; paradata off by default when
+  synced); the selection is the app's; the selector and the search in the
+  window's own bar. The five spaces are re-seeded (rev 6): the Outliner on the
+  left, the Matrix and the Properties down to the bottom, the table only under
+  the 3D view. The RMDocs are a layer of their own in the Space. The texts E.D.
+  saw (GIS, Snap, Selected object, Level of detail, Temporal bounds, the empty
+  Space) stand behind a «?» (`help-glyph.ts`).
 - **The value of a property in two places** (MICRO valore-proprietà, decided by
   E.D. on 28 October 2026). `description` (EM's historical place) and
   `data.value`, which mirrors it, are written together by every gesture:

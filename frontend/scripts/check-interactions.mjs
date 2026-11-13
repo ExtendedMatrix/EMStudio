@@ -77,7 +77,7 @@ const { chromium } = await playwright();
 const browser = withExperimental(await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined }));
 
 /** A fresh page on a fixture, in a language, with an optional workspace. */
-async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init, hook, query = "", route, wsRoute } = {}) {
+async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init, hook, query = "", route, wsRoute, emtree } = {}) {
   const d = doc ? (typeof doc === "string" ? fixture(doc) : doc) : null;
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, ignoreHTTPSErrors: true });
   // RISORSA-FILE · a simulated store, answered before the network
@@ -116,6 +116,10 @@ async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, ini
   else await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
   await p.waitForTimeout(500);
   if (ws) await workspace(p, ws);
+  // MICRO-OUTLINER-UNICO · the EMTree left the arrangements (the files and the
+  // graphs are the one Outliner's roots): the cases that drive the EMTree's
+  // own panel (its Overview, a file's verbs) open it as a window, under the Outliner
+  if (emtree) { p.__emtree = true; await p.evaluate(() => window.__EM_DRAG__.openEMTreeWindow?.()); await p.waitForTimeout(400); }
   return { p, ctx, errors };
 }
 /** The app's own dialogs (app-dialog.ts), answered as `page.on("dialog")` used
@@ -151,6 +155,12 @@ const seenDialogs = (p) => p.evaluate(() => window.__EM_DIALOG_SEEN__ ?? []);
 const workspace = async (p, ws) => {
   await p.click(`#workspace-bar .ws-tab[data-ws="${ws}"]`);
   await p.waitForTimeout(700);
+  // MICRO-OUTLINER-UNICO · in the Space the scene's own Outliner steps aside for
+  // the one Outliner window; the cases drive the scene's (versions, alternatives,
+  // sketches, Isolate): T brings it back beside the other
+  if (ws === "space") await p.evaluate(() => window.__EM_DRAG__.sceneOwnOutliner?.(true));
+  // …and a case that drives the EMTree finds it in every space it goes to
+  if (p.__emtree) { await p.evaluate(() => window.__EM_DRAG__.openEMTreeWindow?.()); await p.waitForTimeout(400); }
 };
 /** the Narrativa space, with its story: since A8 the story is made at the
  *  first gesture («Proponi i capitoli»), not by opening the window */
@@ -351,10 +361,13 @@ test("A5", "due finestre grafo: il clic nella finestra Graph seleziona il suo no
   await workspace(p, "provenance");
   const win = await winOf(p, "graph");
   const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
-  // a unit visible inside the window
-  const box = ws.boxes.find((b) => b.id === "USM101" && b.x > ws.rect.x && b.y > ws.rect.y
+  // a unit visible inside the window — and not a container drawn open around
+  // another (MICRO-OUTLINER-UNICO: in Fonti's narrower Matrix USM101 is drawn
+  // open, and the centre of its box is its member RSF100b, rightly picked)
+  const holds = (b) => ws.boxes.some((o) => o !== b && o.x >= b.x && o.y >= b.y && o.x + o.w <= b.x + b.w && o.y + o.h <= b.y + b.h);
+  const box = ws.boxes.find((b) => b.id === "USM101" && !holds(b) && b.x > ws.rect.x && b.y > ws.rect.y
     && b.x + b.w < ws.rect.x + ws.rect.w && b.y + b.h < ws.rect.y + ws.rect.h)
-    ?? ws.boxes.find((b) => b.x > ws.rect.x + 5 && b.y > ws.rect.y + 5
+    ?? ws.boxes.find((b) => !holds(b) && b.x > ws.rect.x + 5 && b.y > ws.rect.y + 5
       && b.x + b.w < ws.rect.x + ws.rect.w - 5 && b.y + b.h < ws.rect.y + ws.rect.h - 5 && b.w > 20);
   await p.mouse.move(box.x + box.w / 2, box.y + box.h / 2);
   await p.waitForTimeout(150);
@@ -731,7 +744,7 @@ async function openDocImage(p) {
   // AUDIT N8 · in Fonti the Documents table is the list: the VIEWER shows its pick
   // (MICRO-VIEWER-UNICO: the Doc window is the Viewer, the table is in rows —
   // its gutter ● picks the row's node)
-  await p.locator('[data-win$=":docs"] [data-pick="D3"]').first().click();
+  await p.locator('[data-win$=":outliner"] .uo-row[data-id="D3"] .uo-label').first().click();   // MICRO-OUTLINER-UNICO · Fonti's documents are the Outliner's
   await p.waitForSelector(".rd-img img", { timeout: 8000 });
   await p.waitForFunction(() => document.querySelector(".rd-img img")?.complete, null, { timeout: 8000 });
   await p.waitForTimeout(300);
@@ -918,7 +931,10 @@ test("6.lanemenu", "TempluMare: il clic destro sull'intestazione della corsia ap
   const { p, ctx } = await open({ doc: "TempluMare" });
   const win = await winOf(p, "graph");
   const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
-  const x = ws.rect.x + 60, y = ws.rect.y + ws.rect.h * 0.4;
+  // MICRO-OUTLINER-UNICO · the Matrix is full height now: the lanes are framed
+  // in its middle, and 40 % of it is the empty band above them; 60 % is a lane
+  // in the old area (510 px) and in the new (827 px)
+  const x = ws.rect.x + 60, y = ws.rect.y + ws.rect.h * 0.6;
   await p.mouse.move(x, y);
   await p.waitForTimeout(100);
   const vp0 = await p.evaluate(() => window.__EM_SCENE__().vp);
@@ -932,11 +948,11 @@ test("6.lanemenu", "TempluMare: il clic destro sull'intestazione della corsia ap
 
 // ── PARTE 7 · stati vuoti che parlano, e i titoli ───────────────────────────
 test("7.new", "File ▸ Nuovo: niente minimappa, e ogni finestra ha la sua frase", async () => {
-  const { p, ctx } = await open({ doc: null });
+  const { p, ctx } = await open({ emtree: true, doc: null });
   const before = await p.evaluate(() => ({
     minimap: [...document.querySelectorAll(".win-overview")].filter((m) => m.offsetParent && !m.classList.contains("hidden")).length,
     hint: document.querySelector(".canvas-empty-hint:not(.hidden)")?.innerText ?? "",
-    outliner: document.querySelector(".nl-empty")?.textContent ?? "",
+    outliner: document.querySelector(".uo-row.uo-empty")?.textContent ?? "",
     inspector: document.querySelector('[data-win$="inspector"] .win-empty')?.textContent ?? "",
     title: document.getElementById("ns-title")?.textContent ?? "",
   }));
@@ -971,23 +987,29 @@ test("7.dtc", "la finestra DTC vuota dice che il DTC nasce dai timbri, e offre l
 });
 
 // ── PARTE 8 · outliner e ricerca ───────────────────────────────────────────
-test("8.count", "l'outliner conta «358 nodi · 12 epoche», e «n su 358» quando filtra", async () => {
+test("8.count", "MICRO-OUTLINER-UNICO · l'Outliner unico: la riga del grafo conta i suoi nodi (358), «Epoche» le sue epoche e fasi; la ricerca nella testata lascia le righe che la contengono", async () => {
   const { p, ctx } = await open({ doc: "epochs48" });
-  const c0 = await p.evaluate(() => document.querySelector(".nl-count")?.textContent ?? "");
-  await p.fill(".nl-filter", "USM10");
-  await p.waitForTimeout(300);
-  const c1 = await p.evaluate(() => document.querySelector(".nl-count")?.textContent ?? "");
+  await p.waitForSelector(".uo-row.uo-graph", { timeout: 8000 }).catch(() => {});
+  const c0 = await p.evaluate(() => document.querySelector(".uo-row.uo-graph .uo-count")?.textContent ?? "");
+  const epochs = await p.evaluate(() => window.__EM_DRAG__.uoRows().find((r) => r.kind === "dim" && r.key.endsWith("dim:epochs"))?.count ?? "");
+  const epochNodes = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.filter((n) => n.node_type === "EpochNode" && !n.data?.removed).length);
+  await p.fill(".tile-bar .uo-search", "USM10");
+  await p.waitForTimeout(400);
+  const hits = await p.evaluate(() => window.__EM_DRAG__.uoRows().filter((r) => r.kind === "node").map((r) => r.label));
   await ctx.close();
-  const m = /^(\d+) su 358$/.exec(c1);
-  return { pass: c0 === "358 nodi · 12 epoche" && !!m && Number(m[1]) <= 358, detail: { c0, c1 } };
+  return { pass: c0 === "358" && epochs === String(epochNodes) && epochNodes >= 12 && hits.length > 0 && hits.length < 358 && hits.some((n) => /USM10/.test(n)),
+           detail: { c0, epochs, epochNodes, hits: hits.slice(0, 8), n: hits.length } };
 });
-test("8.once", "un elenco solo: per epoca ogni unità compare una volta; A–Z senza proprietà temporali", async () => {
+test("8.once", "un elenco solo: per epoca ogni unità compare una volta; A–Z senza proprietà temporali (l'Outliner unico, ramo «Unità»)", async () => {
   const { p, ctx } = await open({ doc: "catena" });
-  const byEpoch = await p.evaluate(() => [...document.querySelectorAll(".nl-rows .nl-row")].map((r) => r.querySelector("b")?.textContent));
-  await p.click('.nl-mode[data-mode="az"]');
+  await p.waitForSelector(".uo-row.uo-graph", { timeout: 8000 }).catch(() => {});
+  const units = () => p.evaluate(() => window.__EM_DRAG__.uoRows().filter((r) => r.kind === "node" && r.key.includes("|units/")).map((r) => r.label));
+  const byEpoch = await units();
+  await p.click("[data-uo-selector]");
+  await p.click('[data-uo-opt="hier:alpha"]');
+  await p.mouse.click(5, 990);
   await p.waitForTimeout(200);
-  const az = await p.evaluate(() => [...document.querySelectorAll(".nl-rows .nl-row")].map((r) => r.querySelector("b")?.textContent));
-  await p.click('.nl-mode[data-mode="epoch"]');
+  const az = await units();
   await ctx.close();
   const dup = byEpoch.filter((n, i) => byEpoch.indexOf(n) !== i);
   return { pass: !dup.length && byEpoch.includes("USM101") && az.includes("USM101") && !az.some((n) => /^absolute_time_(start|end)$/.test(n ?? "")),
@@ -1020,7 +1042,7 @@ test("8.search", "«USM101» + Invio seleziona l'unità, non PD_USM101; la tendi
 test("9.docsel", "documento scelto (nella Tabular Documenti di Fonti) → il Viewer lo mostra e l'ispettore è del documento", async () => {
   const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
   const docList = await p.evaluate(() => !!document.querySelector(".doc-list"));
-  await p.locator('[data-win$=":docs"] [data-pick="D3"]').first().click();
+  await p.locator('[data-win$=":outliner"] .uo-row[data-id="D3"] .uo-label').first().click();   // MICRO-OUTLINER-UNICO · Fonti's documents are the Outliner's
   await p.waitForTimeout(500);
   const r = await p.evaluate(() => ({ sel: window.__EM_DRAG__.selected()[0], doc: document.querySelector(".rd-stage")?.dataset.doc,
     viewer: !!document.querySelector(".rd-stage")?.closest('[data-surface-type="viewer"]'),
@@ -1034,7 +1056,7 @@ test("9.docsel", "documento scelto (nella Tabular Documenti di Fonti) → il Vie
 test("9.reveal", "un documento scelto in Fonti è mostrato dal grafo sotto il Viewer; nessuna finestra cambia tipo né spazio", async () => {
   const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
   const before = await p.evaluate(() => window.__EM_DRAG__.wins().map((w) => w.type).sort().join());
-  await p.locator('[data-win$=":docs"] [data-pick="D3"]').first().click();
+  await p.locator('[data-win$=":outliner"] .uo-row[data-id="D3"] .uo-label').first().click();   // MICRO-OUTLINER-UNICO · Fonti's documents are the Outliner's
   await p.waitForTimeout(700);
   const after = await p.evaluate(() => window.__EM_DRAG__.wins().map((w) => w.type).sort().join());
   const ws = await p.evaluate(() => document.querySelector("#workspace-bar .ws-tab.active")?.dataset.ws);
@@ -1089,10 +1111,12 @@ test("10.warnings", "la pillola degli avvisi porta alla tabella, non apre un pop
   await p.waitForTimeout(400);
   const r = await p.evaluate(() => ({ pop: !!document.getElementById("issues-pop") && !document.getElementById("issues-pop").classList.contains("hidden"),
     tables: window.__EM_DRAG__.wins().filter((w) => w.type === "table").length,
-    active: document.querySelector(".tile-active")?.dataset.win, pill: document.getElementById("footer-warnings").textContent,
+    active: document.querySelector(".tile-active")?.dataset.win, activeType: document.querySelector(".tile-active")?.dataset.surfaceType,
+    pill: document.getElementById("footer-warnings").textContent,
     issues: window.__EM_DRAG__.issues().filter((i) => i.rule === "log").length }));
   await ctx.close();
-  return { pass: !r.pop && r.tables === 1 && /issues/.test(r.active ?? "") && !r.issues, detail: r };
+  // MICRO-OUTLINER-UNICO · the warnings' table left Stratigrafia: the pill opens one under the Matrix, and it has the focus
+  return { pass: !r.pop && r.tables === 1 && r.activeType === "table" && !r.issues, detail: r };
 });
 test("10.publish", "«Pubblica» ha un posto solo: la striscia del nome; la narrativa «Esporta»", async () => {
   const { p, ctx } = await open({ doc: "catena" });
@@ -1170,7 +1194,7 @@ test("WS1.add", "il «+» dei workspace: chiede il nome con il dialogo dell'app 
     detail: { before: before.length, after, shape, afterEsc: afterEsc.length, reloaded, native, errors } };
 });
 test("WS2.dialogs", "i dialoghi dell'app dove la desktop era sbagliata: File ▸ Chiudi su un grafo modificato chiede (Annulla lo tiene, OK lo chiude) — nella desktop `confirm` tornava una Promise e chiudeva senza chiedere; nessuna chiamata nativa", async () => {
-  const { p, ctx, errors } = await open({ doc: "catena", locale: "en", hook: DESKTOP_DIALOGS });
+  const { p, ctx, errors } = await open({ emtree: true, doc: "catena", locale: "en", hook: DESKTOP_DIALOGS });
   // reshape a built-in, then ask to reset it
   await p.evaluate(() => window.__EM_DRAG__.edit(window.__EM_DRAG__.idsOfType("US")[0], { description: "edited, not saved" }));
   await answerAppDialogs(p, false);
@@ -1216,7 +1240,7 @@ async function gdelOpenDialog(p, name) {
   });
 }
 test("GD1.delete", "«Elimina il grafo dal file…» (menu ⇄ del grafo): il dialogo dice nodi e archi, i rapporti di B che resterebbero appesi, la voce dello shelf solo sua, il file che nessun altro usa (resta sul disco); OK: il grafo esce dal documento, il rapporto di B resta SEGNATO, il documento è modificato; un annulla rimette tutto", async () => {
-  const { p, ctx, errors } = await open({ doc: GDEL_DOC(), locale: "en" });
+  const { p, ctx, errors } = await open({ emtree: true, doc: GDEL_DOC(), locale: "en" });
   await p.waitForFunction(() => window.__EM_DRAG__.slots().length === 3, null, { timeout: 30000 }).catch(() => {});
   const before = await gdelState(p);
   const dlg = await gdelOpenDialog(p, "Saggio A");
@@ -1241,7 +1265,7 @@ test("GD1.delete", "«Elimina il grafo dal file…» (menu ⇄ del grafo): il di
   return { pass, detail: { before, dlg, after, dirty, toast, undone, errors } };
 });
 test("GD2.options", "«Elimina il grafo…» con le due scelte: i rapporti di B verso A tolti, la voce dello shelf solo di A tolta (res0), le altre restano; Annulla del dialogo non cambia nulla; l'unico grafo rimasto non si elimina (lo dice)", async () => {
-  const { p, ctx, errors } = await open({ doc: GDEL_DOC(), locale: "en" });
+  const { p, ctx, errors } = await open({ emtree: true, doc: GDEL_DOC(), locale: "en" });
   await p.waitForFunction(() => window.__EM_DRAG__.slots().length === 3, null, { timeout: 30000 }).catch(() => {});
   // Escape = Cancel: nothing changes
   await gdelOpenDialog(p, "Saggio A");
@@ -1279,7 +1303,7 @@ const SHELF3 = { id: "shelf", name: "Shelf di prova", entries: [
   { id: "sh3", name: "scheda_US105.pdf", kind: "document", locator: "s3://bucket/room/scheda_US105.pdf", scope: "own-study", residency: "resident" }] };
 for (const w of [1280, 1600]) {
   test(`11.shelf${w}`, `shelf a ${w}: righe a due livelli senza testo sovrapposto, conteggio intero (MICRO-PROVA-DEV47 p.6: l'intestazione su una riga, il conteggio raggiunto scorrendola)`, async () => {
-    const { p, ctx } = await open({ doc: withShelf("catena", SHELF3), ws: "assets", w, h: 860 });
+    const { p, ctx } = await open({ emtree: true, doc: withShelf("catena", SHELF3), ws: "assets", w, h: 860 });
     await p.waitForTimeout(500);
     const r = await p.evaluate(() => {
       const x = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
@@ -2937,7 +2961,16 @@ test("S5.doors", "«Elimina e travasa…» anche nel menu della corsia e nell'is
 
 // ── NIGHT-SPAZIO · parte 6 · i fogli della Tabella ──────────────────────────
 /** the sheet menu of the first Table window: groups, labels, counts, notes */
+/** MICRO-OUTLINER-UNICO · Stratigrafia has no table any more (the table stays
+ *  only under the 3D view): a case that drives the Tabular opens one, as the
+ *  status bar's ⚠ does — under the Matrix */
+async function ensureTable(p) {
+  if (await p.evaluate(() => window.__EM_DRAG__.wins().some((w) => w.type === "table"))) return;
+  await p.evaluate(() => window.__EM_DRAG__.openIssuesTable?.());
+  await p.waitForTimeout(500);
+}
 async function sheetMenu(p) {
+  await ensureTable(p);
   const bar = p.locator('[data-win] .tile-bar', { has: p.locator(".win-mode-toggle") }).filter({ hasText: /Tabular|Tabella/ }).first();
   const open = () => p.evaluate(() => [...document.querySelectorAll(".dd-menu:not(.hidden)")].some((m) => m.querySelector("[data-sheet]")));
   if (!(await open())) await bar.locator(".win-mode-toggle").click();
@@ -2959,7 +2992,8 @@ async function sheetMenu(p) {
   return { bar, items };
 }
 test("S6.sheets", "Tabella · due gruppi (Schede, Viste calcolate), ogni voce con il conteggio e una riga che dice cosa contiene; i conteggi coincidono con le righe", async () => {
-  const { p, ctx, errors } = await open({ doc: "spazio" });
+  // MICRO-OUTLINER-UNICO · the table stays only under the 3D view: the Space's
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   const { items } = await sheetMenu(p);
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s6-menu-fogli.png` }).catch(() => {});
   await p.keyboard.press("Escape");
@@ -3102,7 +3136,7 @@ test("U1.door", "File ▸ Importa ▸ Tabella con mappatura apre il Mapping edit
     detail: { inImport, st } };
 });
 test("U1.aux", "EMtree ▸ «Allega…» su un file ausiliario apre lo STESSO editor, con quel file, su questo grafo, «Allegata»", async () => {
-  const { p, ctx } = await open({ doc: "catena" });
+  const { p, ctx } = await open({ emtree: true, doc: "catena" });
   const id = await p.evaluate((l) => window.__EM_DRAG__.auxAdd({ locator: `${l}/usm.csv`,
     options: { mappingPath: `${l}/usm_mapping.json` } }), TAB());
   await p.waitForTimeout(400);
@@ -4781,7 +4815,7 @@ test("W07.scan", "U7 · «Scansiona come DosCo…» è sulla cartella dello Stor
 });
 
 test("W08.save", "U8 · nel desktop, dopo «Salva come» e un cambio di grafo, «Salva» scrive sul file aperto senza riaprire il dialogo", async () => {
-  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriHook(),
+  const { p, ctx, errors } = await open({ emtree: true, doc: LITE(), locale: "en", hook: tauriHook(),
     init: undefined });
   await p.evaluate(([b, sp]) => { window.__BRIDGE__ = b; window.__SAVE_PATH__ = sp; }, [BRIDGE, "/tmp/dev30-u8/study.em.json"]);
   await p.keyboard.press("Meta+s");
@@ -5025,7 +5059,7 @@ const ofPositions = (section) => Object.fromEntries(Object.entries(section.layou
 test("F1.files", "F1–F4 · due file, tre grafi: l'EMTree li mostra per file; ⌘S scrive il file del grafo attivo con i soli suoi grafi; riaperti, ogni grafo ha le sue posizioni", async () => {
   const files = OF_FILES();
   const want = Object.fromEntries(Object.values(files).flatMap((f) => Object.entries(f.graphs)).map(([g, s]) => [g, ofPositions(s)]));
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", hook: tauriWrites() });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
   await p.evaluate(([b]) => { window.__BRIDGE__ = b; }, [BRIDGE]);
   await p.evaluate(([a]) => window.__EM_DRAG__.openAt(a, "/tmp/of/A.em.json"), [files.A]);
@@ -5062,7 +5096,7 @@ test("F1.files", "F1–F4 · due file, tre grafi: l'EMTree li mostra per file; �
   const posWritten = docs.length === 2 && Object.fromEntries([...Object.entries(A.graphs), ...Object.entries(B.graphs)]
     .map(([g, s]) => [g, ofPositions(s)]));
   // reopen both files from what was written: every graph has ITS positions
-  const r = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  const r = await open({ emtree: true, doc: null, locale: "en", hook: tauriWrites() });
   await r.p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
   const reopened = {};
   if (A && B) {
@@ -5096,7 +5130,7 @@ test("F1.files", "F1–F4 · due file, tre grafi: l'EMTree li mostra per file; �
 
 test("F2.saveas", "F2 · un grafo importato sta in «Senza file»; ⌘S è «Salva come», e gli dà un file suo con lui solo", async () => {
   const files = OF_FILES();
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", hook: tauriWrites() });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
   await p.evaluate(([b, sp]) => { window.__BRIDGE__ = b; window.__SAVE_PATH__ = sp; }, [BRIDGE, "/tmp/of/nuovo.em.json"]);
   await p.evaluate(([a]) => window.__EM_DRAG__.openAt(a, "/tmp/of/A.em.json"), [files.A]);
@@ -5127,7 +5161,7 @@ test("F4.oldfile", "F4 · un file VECCHIO (un solo layout, del grafo attivo): il
   const top = gX.layout; delete gX.layout; delete gY.layout;
   // as San Pietro was: the other graph FIRST in the file, the real one active
   const old = { header: { format: "em.json", version: "1.0" }, active_graph_id: "gX", graphs: { gY, gX }, layout: top };
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", hook: tauriWrites() });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
   await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/of/vecchio.em.json"), [old]);
   await p.waitForTimeout(2500);
@@ -5164,7 +5198,7 @@ const g3Sections = (doc) => Object.fromEntries(Object.entries(doc?.graphs ?? {})
     lanes: (g.layout?.swimlanes ?? []).length }];
 }));
 async function g3Save(doc, path) {
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", hook: tauriWrites() });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
   await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [doc, path]);
   await p.waitForTimeout(4000);
@@ -5361,7 +5395,7 @@ test("Y2.blender", "Y2 · un file «Temple» (EM 1.6.16) aperto, poi Sidecar: il
   const temple = (em, units) => ({ header: { format: "em.json", version: "1.0", datamodel_versions: { nodes: em } },
     graph: { graph_id: `t-${em}`, name: "Temple", nodes: units.map((u) => ({ id: u, node_type: "US", name: u })), edges: [] } });
   const fromBlender = temple("1.6.24", ["SU001", "SU002"]);
-  const { p, ctx, errors } = await open({ doc: null, locale: "en",
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en",
     init: { "emstudio.settings": JSON.stringify({ sync: { protocol: "ws", host: "localhost", port: 8898 } }) },
     wsRoute: { pattern: /localhost:8898/, handler: (ws) => {
       ws.onMessage((m) => {
@@ -5783,7 +5817,7 @@ test("TC1.storage", "T-C1 · due file aperti in cartelle diverse: lo Storage mos
   const a = `${FS_ROOT}/dev33/c1/scavoA`, b = `${FS_ROOT}/dev33/c1/scavoB`;
   mkdirSync(a, { recursive: true }); mkdirSync(b, { recursive: true });
   const one = (id, u) => ({ header: { format: "em.json", version: "1.0" }, graph: { graph_id: id, name: id, nodes: [{ id: u, node_type: "US", name: u }], edges: [] } });
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", ws: "assets" });
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", ws: "assets" });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
   await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [one("gA", "UA1"), `${a}/A.em.json`]);
   await p.waitForTimeout(1500);
@@ -6351,7 +6385,7 @@ const CORPUS_FILES = () => ({
 
 test("E5.corpus", "E5 · due file col proprio corpus DTC: ognuno lo dice sotto il suo nome nell'EMTree (mostrato / tenuto nel file); «Mostra» porta quello del secondo nel DTC e il primo torna nel suo file; salvati, ognuno scrive il suo corpus", async () => {
   const files = CORPUS_FILES();
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", hook: tauriWrites() });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
   await p.evaluate(([a]) => window.__EM_DRAG__.openAt(a, "/tmp/e5/A.em.json"), [files.A]);
   await p.waitForTimeout(1500);
@@ -6491,7 +6525,7 @@ test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zon
   const doc = { header: { format: "em.json", version: "1.0" },
     graph: { graph_id: "gt-1", name: "GreatTemple", nodes: [{ id: "SU001", node_type: "US", name: "SU001" }], edges: [] } };
   const host = { tool: "Blender", file: "GreatTemple_2026_v3.blend" };
-  const { p, ctx, errors } = await open({ doc: null, locale: "en",
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en",
     init: { "emstudio.settings": JSON.stringify({ sync: { protocol: "ws", host: "localhost", port, hubUrl: "https://em.localhost:8443/em" } }) },
     wsRoute: { pattern: new RegExp(`localhost:${port}`), handler: (ws) => {
       sock = ws; connects++;
@@ -6542,7 +6576,7 @@ test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zon
 });
 
 if (K_NODE) test("TZ.room", "T-Z + T-B2 dal vivo · in stanza: quattro zone, zona 1 «Room Cantiere · demo · em.localhost», zona 2 nome + ruolo; una seconda istantanea della stessa stanza NON apre un secondo file; il file dice «in the room … on em.localhost:8443», mai «opened in the browser»", async () => {
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_SETTINGS() });
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", init: K_SETTINGS() });
   const tok = kToken("dev");
   await p.evaluate(([u, tk]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tk), [K_NODE, tok]);
   await p.waitForFunction(() => /^Room /.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
@@ -6568,7 +6602,7 @@ if (K_NODE) test("TZ.room", "T-Z + T-B2 dal vivo · in stanza: quattro zone, zon
 
 if (K_NODE) test("TR1.live", "T-R1 dal vivo · il pannello Connessione chiede GET /v1/rooms: dev vede «Your rooms» con le sue stanze (e scavo-2026 se il nodo la elenca), viewer vede «cantiere-demo» in «Shared with you» col ruolo viewer; un clic entra nella stanza", async () => {
   const run = async (user) => {
-    const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_SETTINGS() });
+    const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", init: K_SETTINGS() });
     const tok = kToken(user);
     await p.evaluate(([u, tk]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tk), [K_NODE, tok]);
     await p.waitForFunction(() => /^Room /.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
@@ -6606,7 +6640,7 @@ const DEV_ID = () => JSON.stringify({ current: "0000-0002-1825-0097",
 /** open `doc` at `path`, sign in as dev, «Bring into a room…» named `name`: the
  *  page with the dialog showing the engine's plan */
 async function bringPage(doc, path, name, { w = 1600, h = 1000 } = {}) {
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", w, h, init: {
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, locale: "en", w, h, init: {
     "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }), "emstudio.identities": DEV_ID() } });
   await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, path]);
   await p.waitForTimeout(1500);
@@ -7250,7 +7284,7 @@ test("PU1.strip", "PULIZIA p.1 · barra del nome: niente «em.json»; un pallino
 });
 
 test("PU2.emtree", "PULIZIA p.2 · pannello dei file e dei grafi: niente testo introduttivo (è un «?» nella testata), niente Nuovo/Apri/Recenti; i file aperti con i loro grafi, l'attivo evidenziato; il triangolino solo dove il pannello è impilato su un altro; file ausiliari con un «?»", async () => {
-  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
+  const { p, ctx, errors } = await open({ emtree: true, doc: "TempluMare", locale: "it" });
   const look = (win) => p.evaluate((win) => {
     const a = document.querySelector(`.tile-area[data-win="${win}"]`);
     const bar = a?.querySelector(".tile-bar");
@@ -7261,12 +7295,15 @@ test("PU2.emtree", "PULIZIA p.2 · pannello dei file e dei grafi: niente testo i
       active: a?.querySelectorAll(".et-slot.active").length ?? 0, move: a?.querySelectorAll(".et-more").length ?? 0,   // MICRO-CONTENTS-1 · the graph's one «⋯»
       auxQ: a?.querySelector(".aux-sect-head .et-q")?.title ?? "", todo: !!a?.querySelector(".et-todo") };
   }, win);
-  const stacked = await look("canvas:graphs");
+  // MICRO-OUTLINER-UNICO · the EMTree is no longer in the arrangement: the one
+  // opened under the Outliner (open's `emtree`) is the stacked one
+  const stackedWin = await p.evaluate(() => document.querySelector('.tile-area[data-surface-type="emtree"]')?.dataset.win);
+  const stacked = await look(stackedWin);
   // the Inspector is alone in its column: turned into the EMtree it has no triangle
   await p.click('.tile-area[data-win="canvas:inspector"] .win-type-toggle');
   await p.click('.tile-area[data-win="canvas:inspector"] .dd-menu [data-wt="emtree"]');
   await p.waitForTimeout(500);
-  const aloneWin = await p.evaluate(() => [...document.querySelectorAll(".tile-area")].find((a) => a.dataset.surfaceType === "emtree" && a.dataset.win !== "canvas:graphs")?.dataset.win);
+  const aloneWin = await p.evaluate((stackedWin) => [...document.querySelectorAll(".tile-area")].find((a) => a.dataset.surfaceType === "emtree" && a.dataset.win !== stackedWin)?.dataset.win, stackedWin);
   const alone = aloneWin ? await look(aloneWin) : null;
   await p.screenshot({ path: SHOT("pu2-pannello-file-grafi") }).catch(() => {});
   await ctx.close();
@@ -7501,8 +7538,12 @@ test("PU8.index", "PULIZIA p.8 · Indice della narrativa: un titolo lungo accant
 });
 
 test("PU9.tables", "PULIZIA p.9 · le tabelle si ordinano e si filtrano: clic sull'intestazione (crescente, decrescente, ordine della tabella) con aria-sort e freccia; un filtro per colonna (scelta per i valori fissi); «Azzera filtri»; lo stato resta quando la tabella si ridisegna", async () => {
+  // MICRO-OUTLINER-UNICO · the warnings' table left Stratigrafia (the table
+  // stays only under the 3D view): the Issues sheet in a window of its own
   const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
-  const T = '[data-win="canvas:issues"]';
+  await p.evaluate(() => window.__EM_DRAG__.openIssuesTable?.());
+  await p.waitForTimeout(500);
+  const T = `[data-win="${await p.evaluate(() => document.querySelector('.tile-area[data-surface-type="table"]')?.dataset.win)}"]`;
   await p.waitForSelector(`${T} table[data-tt="1"]`, { timeout: 8000 }).catch(() => {});
   const read = () => p.evaluate((T) => { const tb = document.querySelector(`${T} table[data-tt="1"]`);
     const heads = [...(tb?.tHead?.rows[0]?.cells ?? [])];
@@ -7854,6 +7895,8 @@ test("VS6.emtree", "VIEWER-SPAZIO-EMTREE p.6 · l'EMtree: un file per riga col s
   const { p, ctx, errors } = await openV33();
   await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("PortaMarina-lite"), "/tmp/vse/scavi/PortaMarina/PortaMarina-lite.em.json"]);
   await p.waitForTimeout(1200);
+  // MICRO-OUTLINER-UNICO · the EMTree as a window again, under the Outliner
+  await p.evaluate(() => window.__EM_DRAG__.openEMTreeWindow?.()); await p.waitForTimeout(400);
   await p.evaluate(() => window.__EM_DRAG__.auxAdd({ locator: "/tmp/vse/scavi/PortaMarina/US_schede_2024.xlsx", fileType: "emdb_xlsx", expanded: false }));
   await p.waitForTimeout(500);
   const r = {};
@@ -8006,7 +8049,7 @@ test("VU4.image", "VIEWER-UNICO p.3/p.4 · il documento di un'immagine nel Viewe
   return { pass, detail: { tools, img: !!img, bubble, before, after, regions, menuItems: menuItems.slice(0, 10), errors } };
 });
 
-test("VU5.sources", "VIEWER-UNICO p.5 · la finestra Doc non c'è più: Fonti è Tabular dei documenti · Viewer · Matrix · Inspector; nessun Doc nel menu dei tipi; un workspace salvato con una Doc la apre come Viewer (tenuto sul suo documento se era tuo); l'Inspector del documento ha la sua scheda", async () => {
+test("VU5.sources", "VIEWER-UNICO p.5 · la finestra Doc non c'è più: Fonti è Outliner (i documenti) · Viewer · Matrix · Inspector (MICRO-OUTLINER-UNICO); nessun Doc nel menu dei tipi; un workspace salvato con una Doc la apre come Viewer (tenuto sul suo documento se era tuo); l'Inspector del documento ha la sua scheda", async () => {
   const saved = { provenance: { activeId: "provenance:doc", wins: [
     { id: "provenance:doc", type: "doc", state: { "current.doc": "D3", "current.doc.role": "user" } },
     { id: "provenance:graph", type: "graph", state: { mode: "matrix" } },
@@ -8028,14 +8071,17 @@ test("VU5.sources", "VIEWER-UNICO p.5 · la finestra Doc non c'è più: Fonti è
   await workspace(old.p, "provenance");
   const migrated = await old.p.evaluate(() => window.__EM_DRAG__.wins().map((w) => ({ type: w.type, keep: w.state["current.viewer.keep"] ?? null })));
   await old.ctx.close();
-  const pass = types[0] === "viewer" && types.includes("table:Documents") && types.includes("graph") && types.includes("inspector") && !anyDoc
+  // MICRO-OUTLINER-UNICO · Fonti is Outliner · Viewer · Matrix · Inspector: the
+  // documents' list is the Outliner's «Documenti» (the sheet left the space)
+  const pass = types[0] === "viewer" && types.includes("outliner") && !types.some((x) => x.startsWith("table")) && types.includes("graph") && types.includes("inspector") && !anyDoc
     && card.head && card.fields.join() === "title,url" && !typeMenu.includes("doc")
     && !migrated.some((w) => w.type === "doc") && !fresh.errors.length && !old.errors.length;
   return { pass, detail: { types, card, typeMenu, migrated, errors: [...fresh.errors, ...old.errors] } };
 });
 
 test("VU6.tables", "VIEWER-UNICO p.6 · Risorse, Interpretazioni, Combinatori nella Tabular (una riga = un nodo, il clic lo seleziona, «↑ D.xx» sale al documento); con due e tre Tabular su schede diverse ognuna va alla sua riga, cambia scheda solo se il nodo non c'è, un filtro che nasconde la riga si toglie e lo si dice; la finestra cliccata non si muove", async () => {
-  const { p, ctx, errors } = await open({ doc: "catena", w: 1800, h: 1100 });
+  const { p, ctx, errors } = await open({ emtree: true, doc: "catena", w: 1800, h: 1100 });
+  await ensureTable(p);
   const wins = await p.evaluate(() => window.__EM_DRAG__.wins().map((w) => ({ id: w.id, type: w.type })));
   const T1 = wins.find((w) => w.type === "table").id, T2 = wins.find((w) => w.type === "outliner").id;
   await p.evaluate((x) => window.__EM_DRAG__.retype(x, "table"), T2);
@@ -8550,6 +8596,8 @@ test("IP2.pill", "INSTALLER-PULSANTE p.2 · «Ritrova i file» sempre a portata:
 
 test("IP2.failmenu", "INSTALLER-PULSANTE p.2 · nell'Outliner dello Spazio il segno ⚠ di un modello che non arriva apre un piccolo menu: il motivo, poi «Ritrova…», che apre «Ritrova i file»; lo stesso «Ritrova…» in cima al menu del tasto destro sul modello", async () => {
   const { p, ctx, errors } = await wmOpen({ refuse: true });
+  // MICRO-OUTLINER-UNICO · the mark lives in the Space's own Outliner: T brings it back beside the one Outliner
+  await p.evaluate(() => window.__EM_DRAG__.sceneOwnOutliner?.(true));
   await p.waitForSelector(".sol-fail-menu", { timeout: 60000 });
   const mark = await p.evaluate(() => { const f = document.querySelector(".sol-fail-menu"); return { tag: f.tagName, title: f.title }; });
   await p.click(".sol-fail-menu");
@@ -9146,6 +9194,7 @@ test("GL5.lane", "CORSIA p.1 · un'unità messa in un'altra epoca fuori dal tras
   const pa = g.lanes.find((l) => l.label === "Post antiquity");
   const out = { from: [Math.round(u.x), Math.round(u.y), laneOf(g, u)] };
   const s0 = snap(g);
+  await ensureTable(p);
   const bar = p.locator("[data-win] .tile-bar", { has: p.locator(".win-mode-toggle") }).filter({ hasText: /Tabular|Tabella/ }).first();
   await bar.locator(".win-mode-toggle").click(); await p.waitForTimeout(300);
   await p.locator('.dd-menu:not(.hidden) button[data-sheet="Units"]').first().click(); await p.waitForTimeout(800);
@@ -12328,7 +12377,7 @@ test("AR8.project", "File ▸ Riordina secondo lo standard: il piano crea GIS/ e
   const { pr, at } = await abProject(root, "ab8");
   writeFileSync(`${pr}/mura.geojson`, '{"type":"FeatureCollection","features":[]}');
   writeFileSync(`${pr}/rotto.tif`, "non un tiff");
-  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  const { p, ctx, errors } = await open({ emtree: true, doc: null, ws: "assets", w: 1900, h: 1000 });
   await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
   await p.waitForTimeout(2500);
   const menu = await p.evaluate(() => ["btn-open-project", "btn-reorder-project", "btn-close-project"].map((id) => !!document.getElementById(id)));

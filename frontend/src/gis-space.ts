@@ -9,6 +9,7 @@
  * the bridge's deltas, one undo step each).
  */
 import { basename } from "./paths";
+import { helpGlyph, lineWithHelp } from "./help-glyph";
 import { createGisDriver, frameOf, gisLayersOf, surfacesOf, type GisDriver } from "./gis-scene";
 import type { SpaceSceneHandle } from "./scene3d";
 
@@ -44,6 +45,10 @@ export interface GisSpace {
   refresh(): void;
   destroy(): void;
   state(): unknown;
+  /** MICRO-OUTLINER-UNICO · the eye of a layer in the Outliner's GIS branch:
+   *  the same «hidden» the section's checkbox writes */
+  shown(id: string): boolean;
+  setShown(id: string, on: boolean): void;
 }
 
 interface Saved { panel: boolean; hidden: string[]; interval: number; opacity: Record<string, number> }
@@ -119,22 +124,20 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     panel.textContent = "";
     const h = document.createElement("div");
     h.className = "sol-lay-h";
-    h.textContent = t("gis.title");
+    // MICRO-OUTLINER-UNICO · a title and a line of state; what they mean behind «?»
+    h.textContent = t("gis.short");
+    h.append(" ", helpGlyph(t("gis.title"), "gis-title"));
     panel.appendChild(h);
     const f = frameOf(d.doc());
-    const note = document.createElement("div");
-    note.className = "geo-anchor";
-    note.textContent = f ? t("gis.frame", { epsg: String(f.epsg) }) : t("gis.noFrame");
+    const note = lineWithHelp("geo-anchor", f ? t("gis.frameShort", { epsg: String(f.epsg) }) : t("gis.noFrameShort"),
+      f ? t("gis.frame", { epsg: String(f.epsg) }) : t("gis.noFrame"), "gis-frame");
     panel.appendChild(note);
     const all = gisLayersOf(d.doc());
     const surfaces = surfacesOf(d.doc());
     const list = document.createElement("div");
     list.className = "gis-list";
     if (!all.length && !surfaces.length) {
-      const p = document.createElement("p");
-      p.className = "xf-note";
-      p.textContent = t("gis.none");
-      list.appendChild(p);
+      list.appendChild(lineWithHelp("xf-note", t("gis.noneShort"), t("gis.none"), "gis-none"));
     }
     const st = (driver?.state().drawn ?? []) as Array<Record<string, unknown>>;
     const row = (id: string, name: string, what: string, extra: HTMLElement[] = []) => {
@@ -306,5 +309,11 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     refresh() { void sync().then(draw); },
     destroy() { d.handle.setGis(null); driver = null; panel.remove(); },
     state() { return { panel: s.panel, hidden: s.hidden, driver: driver?.state() ?? null, layers: gisLayersOf(d.doc()), surfaces: surfacesOf(d.doc()) }; },
+    shown(id) { if (key() !== loadedFor) { s = load(); loadedFor = key(); } return !s.hidden.includes(id); },
+    setShown(id, on) {
+      s.hidden = on ? s.hidden.filter((x) => x !== id) : [...new Set([...s.hidden, id])];
+      save();
+      void sync().then(draw);
+    },
   };
 }

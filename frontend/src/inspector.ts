@@ -1,5 +1,6 @@
 import { numField } from "./num-field";
 import { t } from "./i18n";
+import { helpGlyph } from "./help-glyph";
 import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
 import { dataGlyphLabel, glyphFor, glyphSvg } from "./glyphs";
@@ -740,39 +741,40 @@ export function renderInspector(
       if (!empty) root.appendChild(el("div", "insp-hint", t("insp.epochMoveLocked")));
     }
 
-    root.appendChild(el("h3", "insp-sect", "Temporal bounds"));
+    root.appendChild(el("h3", "insp-sect", t("insp.temporalBounds")));
     const qs = qualiaList();
     const mkField = (
-      label: string,
       which: "start" | "end",
       key: string,
       qid: string,
     ): void => {
-      root.appendChild(el("label", "insp-field-label", label));
+      // MICRO-OUTLINER-UNICO · the datamodel's rationale of the bound beside its
+      // label, behind a «?» (it was a paragraph under each field)
+      const q = qs.find((x) => x.id === qid);
+      const lab = el("label", "insp-field-label", which === "start" ? t("insp.boundStart") : t("insp.boundEnd"));
+      if (q?.rationale) lab.append(" ", helpGlyph(q.example ? `${q.rationale} ${t("insp.eg")} ${q.example}` : q.rationale, `bound-${which}`));
+      root.appendChild(lab);
       const inp = document.createElement("input");
       inp.className = "insp-name-input";
       const cur = ((node as EmNode).data ?? {}) as Record<string, unknown>;
       inp.value = cur[key] != null ? String(cur[key]) : "";
-      inp.placeholder = "e.g. -27  (negative = BCE)";
+      inp.placeholder = t("insp.boundPlaceholder");
       root.appendChild(inp);
       // authoring a bound is what makes its absolute_time_* PropertyNode
       // (F5: in the epoch's group, with has_property) — one undo step
-      bindMulti(scope, nodeId, inp, label === "Start" ? t("multi.f.epochStart") : t("multi.f.epochEnd"),
+      bindMulti(scope, nodeId, inp, which === "start" ? t("multi.f.epochStart") : t("multi.f.epochEnd"),
         (n) => n.node_type === "EpochNode", (id, v) => store.setEpochBound(id, which, v));
-      const q = qs.find((x) => x.id === qid);
-      if (q?.rationale)
-        root.appendChild(
-          el("div", "insp-hint", q.example ? `${q.rationale} e.g. ${q.example}` : q.rationale),
-        );
     };
-    mkField("Start", "start", "start_time", "absolute_time_start");
-    mkField("End", "end", "end_time", "absolute_time_end");
+    mkField("start", "start_time", "absolute_time_start");
+    mkField("end", "end_time", "absolute_time_end");
 
     // Temporal paradata: the absolute_time_start / absolute_time_end
     // PropertyNodes live in the epoch's ParadataNodeGroup (F5: made when a
     // bound is written, with has_property from the epoch). Double-click the box in the lane to
     // open the group and attach a provenance chain to either bound.
-    root.appendChild(el("h3", "insp-sect", "Temporal paradata"));
+    { const h = el("h3", "insp-sect", t("insp.temporalParadata"));
+      h.append(" ", helpGlyph(t("insp.temporalParadataHelp"), "temporal-paradata"));
+      root.appendChild(h); }
     const pdgId = store.epochParadataGroup(nodeId);
     if (pdgId) {
       const props = store.doc.graph.edges
@@ -793,9 +795,6 @@ export function renderInspector(
         row.appendChild(b);
         root.appendChild(row);
       }
-      root.appendChild(
-        el("div", "insp-hint", "Double-click the box in the lane to open it."),
-      );
     }
 
     // Phases (sub-epochs): ONLY a top-level epoch manages phases. A phase gets

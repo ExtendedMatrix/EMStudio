@@ -60,6 +60,8 @@ export type OverlayKey =
   | "s3_proxy_wire"
   | "s3_rm"
   | "s3_tiles"
+  /** MICRO-OUTLINER-UNICO · the RMDocs, a layer of their own */
+  | "s3_rmdoc"
   | "s3_grid"
   | "s3_epoch_box"
   | "s3_sel_outline"
@@ -173,6 +175,7 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     { key: "s3_proxy_wire", text: "▱" },
     { key: "s3_rm", kind: "representation_model" },
     { key: "s3_tiles", kind: "tileset" },
+    { key: "s3_rmdoc", kind: "representation_model_doc" },
     { key: "s3_sketches", text: "◇" },
     { key: "s3_instances", text: "┄" },
     { key: "s3_sel_outline", text: "◌" },

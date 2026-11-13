@@ -205,7 +205,12 @@ import {
   watchSystemTheme,
   type ThemeMode,
 } from "./theme";
-import { buildNodeList, type NodeListCallbacks } from "./nodelist";
+import { buildNodeList, rowMark, type NodeListCallbacks } from "./nodelist";
+// MICRO-OUTLINER-UNICO · the one Outliner (sources → graphs → every dimension)
+import { emptyFacts, type Dim, type OutlinerOpts, type OutlinerSourceIn, type ThreeFacts, type URow } from "./outliner-tree";
+import { mountUnifiedOutliner, outlinerSelector, readOpts } from "./unified-outliner";
+import { helpGlyph } from "./help-glyph";
+import { gisLayersOf, surfacesOf } from "./gis-scene";
 import { issues as computeIssues, unitOfIssue, type Issue, type IssueFixers, type IssueSources } from "./issues";
 import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
 import { iconUrlFor } from "./icons";
@@ -279,7 +284,7 @@ import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type
 import { chooseForHardware, chooseVersion, HARDWARE, SCENE_USES, USES, type Hardware, type HardwareEntry } from "./asset-versions";
 import { ERROR_MANUAL_MIN, ERROR_PROFILES, normaliseErrorChoice, type ErrorChoice } from "./tiles-error";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
-import { mountGisSpace, type GisSpaceDeps } from "./gis-space";
+import { mountGisSpace, type GisSpace, type GisSpaceDeps } from "./gis-space";
 import { epsgOf, georefSummary, parseShiftTxt } from "./georef";
 import {
   actFor, documentNode, documentsOf, effective, entering, frameData, newIngress, stampParameters,
@@ -448,7 +453,7 @@ import {
   renderStratiMiner,
   unreadWarnings,
 } from "./stratiminer";
-import { EMTree, pathTail, renameGraphInTree, renderEMTree, slotLabel, slotName } from "./emtree";
+import { AUX_FILE_TYPES, EMTree, pathTail, renameGraphInTree, renderEMTree, slotLabel, slotName } from "./emtree";
 import type {
   AuxFileType, AuxiliaryFile, AuxMapReport, EMTreeHandlers, GraphSlot, OpenFile, SlotViewState,
 } from "./emtree";
@@ -2567,6 +2572,16 @@ window.__EM_SCENE__ = () => {
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
   selected: () => [...selectedIds],
+  /** MICRO-OUTLINER-UNICO · every Outliner rebuilt now (its cost, measured), its rows */
+  uoRefresh: () => { for (const a of unifiedApis.values()) a.refresh(); },
+  uoPaint: () => { for (const a of unifiedApis.values()) a.paintNow(); },
+  /** …and the Space's own Outliner beside it (T), for the cases that drive it */
+  sceneOwnOutliner: (on: boolean) => setSpace3dPrefs({ ...space3dPrefs(), tWithOutliner: on, ...(on ? { shown: true } : {}) }),
+  /** …and the EMTree as a window again, under the Outliner (its Overview, the files' verbs) */
+  openEMTreeWindow: () => openEMTreeWindow(),
+  /** the warnings' table (the status bar's ⚠ → «Apri la tabella degli avvisi») */
+  openIssuesTable: () => openIssuesTable(),
+  uoRows: (winId?: string) => [...unifiedApis.entries()].filter(([k]) => !winId || k === winId).flatMap(([, a]) => a.rows()),
   /** MICRO-MEMORIA-SESSIONE · a line in the Log (p.3), the session's copy written now (p.2) */
   logLine: (m: string) => logInfo(m),
   sessionCopy: () => writeSessionCopy(),
@@ -11695,6 +11710,262 @@ const nodeList = {
   refresh: (): void => refreshSurfaces("outliner"),
   setSelected: (id: string | null): void => selectInSurfaces("outliner", id),
 };
+// ── MICRO-OUTLINER-UNICO · the ONE outliner ─────────────────────────────────
+//
+// It takes the place of three lists (E.D., 7 Nov 2026): the EMTree (files and
+// graphs), the list of the units, and the Space's own Outliner. The SOURCES are
+// the EMTree's open files (a room's live copy is a source of its own kind), each
+// with its graphs; a graph holds every dimension of itself as a list
+// (`outliner-tree.ts`). Per window: the hierarchy, the dimensions, the sync
+// with the 3D and what it does with the rest, the rows open — in the window's
+// state, never in the em.json. The search is per window and per session.
+
+const unifiedApis = new Map<string, ReturnType<typeof mountUnifiedOutliner>>();
+const unifiedQuery = new Map<string, string>();
+const unifiedSearchEls = new Map<string, HTMLInputElement>();
+
+/** an Outliner window in this workspace: the Space's own Outliner steps aside */
+function unifiedOutlinerOnScreen(): boolean {
+  return windowsOf().some((w) => w.type === "outliner");
+}
+
+function unifiedOptsOf(win: Win): OutlinerOpts {
+  const saved = winCurrent(win, "outliner.opts");
+  // in the Space the Outliner starts synced with the 3D: it replaces the
+  // scene's own (a choice of the person after that, kept)
+  const o = saved ? readOpts(saved) : { ...readOpts(null), sync3d: win.id.startsWith("space:") };
+  // in Fonti the Outliner took the place of the Documents sheet: its documents open first
+  return { ...o, query: unifiedQuery.get(win.id) ?? "", ...(win.id.startsWith("provenance:") ? { firstOpen: "documents" as Dim } : {}) };
+}
+function setUnifiedOpts(win: Win, o: OutlinerOpts): void {
+  const { query, ...keep } = o;
+  void query;
+  setWinCurrent(win, "outliner.opts", keep);
+  unifiedApis.get(win.id)?.refresh();
+  renderAreaHeaders();
+}
+
+/** what has a 3D representation in the active graph, once per state */
+let unifiedFactsMemo: { store: unknown; rev: number; sp: unknown; v: ThreeFacts } | null = null;
+function unifiedFacts(): ThreeFacts {
+  const st = store;
+  if (!st) return emptyFacts();
+  const sp = currentSpace();
+  const m = unifiedFactsMemo;
+  if (m && m.store === st && m.rev === st.rev && m.sp === sp) return m.v;
+  const doc = st.doc;
+  const v = emptyFacts();
+  for (const id of unitsWithout3d(doc).with) v.proxies.add(id);
+  for (const [d, r] of documentRmDocs(doc)) v.rmdocs.set(d, r);
+  for (const e of doc.graph.edges) {
+    if (e.edge_type !== "has_representation_model_sf" || (e as { attributes?: { removed?: unknown } }).attributes?.removed) continue;
+    const l = v.rmsf.get(e.source);
+    if (l) l.push(e.target); else v.rmsf.set(e.source, [e.target]);
+  }
+  for (const r of sp?.rms ?? []) {
+    if (r.resource?.tiles) v.tilesets.add(r.id);
+    v.rmEpochs.set(r.id, r.exactEpochs ?? r.epochs);
+  }
+  // no Space (no epochs): a model's epochs as the graph says them
+  if (!sp) for (const e of doc.graph.edges)
+    if (e.edge_type === "has_representation_model") { const l = v.rmEpochs.get(e.target); if (l) l.push(e.source); else v.rmEpochs.set(e.target, [e.source]); }
+  for (const s of surfacesOf(doc as Parameters<typeof surfacesOf>[0])) v.gis.push({ id: s.id, name: s.name, kind: "surface" });
+  for (const l of gisLayersOf(doc as Parameters<typeof gisLayersOf>[0])) v.gis.push({ id: l.id, name: l.name, kind: l.format === "geotiff" ? "raster" : "layer" });
+  unifiedFactsMemo = { store: st, rev: st.rev, sp, v };
+  return v;
+}
+
+/** the sources: the open files with their graphs, then the graphs with no file */
+function unifiedSources(): OutlinerSourceIn[] {
+  const act = emtree.activeId;
+  const graphIn = (s: GraphSlot) => ({
+    slot: s.id, name: slotLabel(s), active: s.id === act,
+    doc: () => s.store.doc,
+    facts: () => (s.id === act ? unifiedFacts() : emptyFacts()),
+    aux: s.auxiliaryFiles.map((a) => ({ id: a.id, name: a.name, type: auxTypeLabel(a.fileType), mapped: !!a.mapped })),
+    nodes: s.store.liveNodes().length,
+  });
+  const out: OutlinerSourceIn[] = [];
+  for (const f of emtree.files) {
+    const gs = emtree.slotsOf(f.id);
+    out.push({ id: f.id, name: f.name, kind: f.room ? "room" : "file",
+      where: f.room ? `${f.room.title} · ${f.room.node}` : f.path ?? t("uo.notOnDisk"),
+      dirty: emtree.fileDirty(f.id), graphs: gs.map(graphIn) });
+  }
+  const loose = emtree.slotsOf(null);
+  if (loose.length) out.push({ id: "", name: "", kind: "none", graphs: loose.map(graphIn) });
+  return out;
+}
+function auxTypeLabel(ft: string): string {
+  return AUX_FILE_TYPES.find((x) => x.value === ft)?.label ?? ft;
+}
+
+const UO_DIM_KEYS: Record<Dim, string> = {
+  units: "uo.dim.units", documents: "uo.dim.documents", authors: "uo.dim.authors", epochs: "uo.dim.epochs",
+  models: "uo.dim.models", proxies: "uo.dim.proxies", gis: "uo.dim.gis", paradata: "uo.dim.paradata",
+  other: "uo.dim.other", aux: "uo.dim.aux",
+};
+const uoDimWords = (): Record<Dim, string> =>
+  Object.fromEntries(Object.entries(UO_DIM_KEYS).map(([k, v]) => [k, t(v)])) as Record<Dim, string>;
+
+function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
+  return {
+    sources: unifiedSources,
+    texts: () => ({ dim: uoDimWords(), noEpoch: t("uo.noEpoch"), typeLabel: unitTypeLabel, sourceNone: t("uo.noFile"), empty: t("uo.empty"),
+                    noSources: t("uo.noSources") }),
+    opts: () => unifiedOptsOf(win),
+    toggled: () => new Set((winCurrent(win, "outliner.toggled") as string[] | null) ?? []),
+    setToggled: (s) => setWinCurrent(win, "outliner.toggled", s.size ? [...s] : null),
+    selectedId: () => selectedId,
+    pick: (r, e) => unifiedPick(r, e),
+    frame: (r) => {
+      const key = r.eye ?? (r.id && unifiedFacts().proxies.has(r.id) ? `proxy:${r.id}` : null);
+      if (!key) { if (r.id) unifiedReveal(r.id); return; }
+      let framed = false;
+      for (const h of sceneHandles.values()) framed = h.frameKeys([key]) || framed;
+      if (!framed && key.startsWith("proxy:")) openUnitInSpace(key.slice(6));
+    },
+    eyeOpen: (k) => !space3dPrefs().hidden.includes(k),
+    toggleEye: (k) => {
+      const p = space3dPrefs();
+      const h = new Set(p.hidden);
+      if (h.has(k)) h.delete(k); else h.add(k);
+      setSpace3dPrefs({ ...p, hidden: [...h] });
+    },
+    gisOpen: (id) => [...gisSpaces.values()][0]?.shown(id) ?? true,
+    toggleGis: (id) => {
+      const g = [...gisSpaces.values()];
+      if (!g.length) { toast(t("uo.gisNoSpace")); return; }
+      const on = !g[0].shown(id);
+      for (const x of g) x.setShown(id, on);
+    },
+    menu: (r, anchor) => unifiedMenu(r, anchor),
+    mark: (r) => {
+      if (r.glyphText) {
+        const el = document.createElement("span");
+        el.className = "nl-dot uo-gtext";
+        el.textContent = r.glyphText;
+        return el;
+      }
+      const n = r.id ? (r.slot === emtree.activeId ? store?.node(r.id) : emtree.get(r.slot ?? "")?.store.node(r.id)) : null;
+      return rowMark({ node_type: n?.node_type ?? r.glyph ?? "", data: n?.data ?? {} } as EmNode);
+    },
+    word: (k) => t(k === "eye" ? "uo.eye" : k === "menu" ? "uo.menu" : "uo.absent"),
+  };
+}
+
+/** A row picked: a graph becomes the active one; a node is selected in its
+ *  graph (`unifiedReveal`); ⌘/Ctrl adds it to the selection. */
+function unifiedPick(r: URow, e: MouseEvent): void {
+  if (r.kind === "source") {
+    const first = emtree.slotsOf(r.source || null)[0];
+    if (first && first.id !== emtree.activeId) activateSlot(first.id);
+    return;
+  }
+  if (r.slot && r.slot !== emtree.activeId) activateSlot(r.slot);
+  if (r.kind === "graph" || !r.id) return;
+  if ((e.metaKey || e.ctrlKey) && selectedId) {
+    selectMany([...new Set([...selectedIds, r.id])]);
+    refreshInspector();
+    return;
+  }
+  if (r.kind === "gis") { select(r.id); refreshInspector(); return; }
+  unifiedReveal(r.id);
+}
+
+/** A node picked in the Outliner: the groups closed around it open (as the old
+ *  Outliner's jump), then the Table's reveal — selected, framed by «Zoom to
+ *  selection» in the graph window, «Indietro» comes back, and the focus STAYS
+ *  on the list (↑ ↓ walk it): a list is read row by row, as the Table is. */
+function unifiedReveal(id: string): void {
+  if (!store?.node(id)) return;
+  const closed = closedGroupsAround(id);
+  if (closed.length) store.setFoldedMany(closed, false);
+  revealFromTable(id);
+  refreshInspector();
+}
+
+/** the «⋯» of a source (save, close, an auxiliary file), a graph (its menu
+ *  of the EMTree), an auxiliary file (map, unmap, remove) */
+function unifiedMenu(r: URow, anchor: HTMLElement): void {
+  const box = anchor.getBoundingClientRect();
+  if (r.kind === "graph" && r.slot) { openGraphMenu(r.slot, anchor); return; }
+  if (r.kind === "source") {
+    const fid = r.source ?? "";
+    spaceMenu(box.left, box.bottom + 2, r.label, [
+      ...(fid ? [{ label: t("uo.saveFile"), act: "save", run: () => emtreeHandlers.onSaveFile?.(fid) },
+                 { label: t("uo.closeFile"), act: "close", run: () => void emtreeHandlers.onCloseFile?.(fid) }] : []),
+      { label: t("uo.addAux"), act: "aux-add", run: () => {
+        const first = emtree.slotsOf(fid || null)[0];
+        if (first && first.id !== emtree.activeId) activateSlot(first.id);
+        emtreeHandlers.onAuxAdd?.();
+      } },
+      "sep",
+      { label: t("uo.manage"), act: "emtree", run: () => openEMTreeWindow() },
+    ]);
+    return;
+  }
+  if (r.kind === "aux" && r.aux) {
+    if (r.slot && r.slot !== emtree.activeId) activateSlot(r.slot);
+    const a = emtree.active()?.auxiliaryFiles.find((x) => x.id === r.aux);
+    const id = r.aux;
+    spaceMenu(box.left, box.bottom + 2, r.label, [
+      a?.mapped ? { label: t("uo.auxUnmap"), act: "unmap", run: () => emtreeHandlers.onAuxUnmap?.(id) }
+        : { label: t("uo.auxMap"), act: "map", run: () => emtreeHandlers.onAuxMap?.(id) },
+      { label: t("uo.auxRemove"), act: "remove", run: () => emtreeHandlers.onAuxRemove?.(id) },
+      "sep",
+      { label: t("uo.manage"), act: "emtree", run: () => openEMTreeWindow() },
+    ]);
+  }
+}
+
+/** the EMTree as a window again (its Overview and the auxiliary files' options
+ *  live there): this workspace's, else a window that becomes one */
+function openEMTreeWindow(): void {
+  const existing = windowsOf().find((w) => w.type === "emtree");
+  if (existing) { selectWindow(existing.id); return; }
+  // above the Outliner, a third of the column (where the seed of rev 5 had it):
+  // stacked on another panel, its ▾ compresses it to its header
+  const anchor = windowsOf().find((w) => w.type === "outliner") ?? activeWin();
+  const made = splitWindow(anchor.id, "col", activeWorkspace(), 0.36, "a");
+  if (!made) return;
+  for (const k of Object.keys(made.state)) delete made.state[k];   // not the Outliner's options
+  setWinType(made, "emtree");
+  setWinCurrent(made, "panel", "emtree");
+  renderTiles();
+}
+
+/** the Outliner's header: the selector and the search, one row (E.D.) */
+function unifiedHeader(win: Win): HTMLElement[] {
+  const sel = outlinerSelector(() => unifiedOptsOf(win), (o) => setUnifiedOpts(win, o), {
+    selector: t("uo.selector"), search: t("uo.search"), hierarchy: t("uo.hierarchy"),
+    hier: { epoch: t("uo.hier.epoch"), alpha: t("uo.hier.alpha"), type: t("uo.hier.type") },
+    dims: t("uo.dims"), dim: uoDimWords(), sync: t("uo.sync"), syncHint: t("uo.syncHint"),
+    grey: t("uo.grey"), filter: t("uo.filter"), paradata: t("uo.dim.paradata"), help: t("uo.help"),
+  });
+  let inp = unifiedSearchEls.get(win.id);
+  if (!inp) {
+    inp = document.createElement("input");
+    inp.type = "search";
+    inp.className = "uo-search";
+    inp.dataset.uoSearch = win.id;
+    let timer = 0;
+    const el = inp;
+    el.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => { unifiedQuery.set(win.id, el.value); unifiedApis.get(win.id)?.refresh(); }, 120);
+    });
+    el.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") { el.value = ""; unifiedQuery.set(win.id, ""); unifiedApis.get(win.id)?.refresh(); }
+    });
+    unifiedSearchEls.set(win.id, el);
+  }
+  inp.placeholder = t("uo.search");
+  inp.title = t("uo.searchHint");
+  return [sel, inp];
+}
+
 
 /*
  * GONE (15 set 2026) · the ONE overview.
@@ -19720,6 +19991,7 @@ function refreshEMTree(): void {
   // same sentence said better: the registry has no instances of this type, so
   // the loop does nothing. Nobody reads the DOM to find out where a thing lives.
   refreshSurfaces("emtree");
+  refreshSurfaces("outliner");   // MICRO-OUTLINER-UNICO · its sources are the EMTree's
   paintGraphLines();   // MICRO-CONTENTS-1 · «Grafo: … ▾» follows the active graph
 }
 
@@ -19735,7 +20007,8 @@ function refreshEMTree(): void {
  * transform every other "show me that instead" performs.
  */
 function openEMTree(): void {
-  const existing = windowsOf().find((w) => w.type === "emtree");
+  // MICRO-OUTLINER-UNICO · the files and their graphs are the Outliner's roots
+  const existing = windowsOf().find((w) => w.type === "emtree") ?? windowsOf().find((w) => w.type === "outliner");
   if (existing) {
     selectWindow(existing.id);
     return;
@@ -27965,6 +28238,8 @@ const spaceLayerSections = new Map<string, () => HTMLElement>();
 const HAS3D_BADGE = "has3d:";
 /** MICRO-MATRIX-FASI p.3 · …and of a document's «RMDoc» badge (+ the RMDoc's id) */
 const RMDOC_BADGE = "rmdoc:";
+/** MICRO-OUTLINER-UNICO · each Space's GIS (its layers' eyes, for the Outliner) */
+const gisSpaces = new Map<string, GisSpace>();
 
 /**
  * MICRO-SPAZIO-3D p.5 · a click on «ha 3D»: the Space (this workspace's, else
@@ -28043,7 +28318,12 @@ function openEpochInSpace(epochId: string): void {
 /** the overlays that are CONTENT (what is drawn), not decorators: the general
  *  switch leaves them as they are — switching the overlays off does not empty
  *  the scene, as in Blender */
-const CONTENT_3D = new Set<OverlayKey>(["s3_proxies", "s3_rm", "s3_tiles", "s3_sketches", "s3_proxy_wire"]);
+const CONTENT_3D = new Set<OverlayKey>(["s3_proxies", "s3_rm", "s3_tiles", "s3_sketches", "s3_proxy_wire", "s3_rmdoc"]);
+/** MICRO-OUTLINER-UNICO · an RMDoc (a document placed in space) is the layer «RMDoc», not «RM» */
+function rmLayerOf(r: { id: string; resource?: { tiles?: string } | null }): OverlayKey {
+  if (r.resource?.tiles) return "s3_tiles";
+  return store?.node(r.id)?.node_type === "representation_model_doc" ? "s3_rmdoc" : "s3_rm";
+}
 /** MICRO-OVERLAY-PER-FINESTRA · the 3D window whose overlays a question about
  *  «the Space» answers when none is named: the focused one, else the first */
 function spaceWinId(): string | null {
@@ -28065,6 +28345,7 @@ function setSpace3dPrefs(p: Space3dPrefs): void {
   sp3 = { person: overlayPerson(), prefs: p };
   saveSpacePrefs(sp3.person, p);
   refreshSurfaces("scene");
+  refreshSurfaces("outliner");   // MICRO-OUTLINER-UNICO · its eyes are the Space's
 }
 /** MICRO-SPAZIO-3D-3 p.12 · the objects not drawn because their alternative is: key → by what */
 const spaceSubstituted = new Map<string, string>();
@@ -28149,7 +28430,7 @@ function spaceVisibleKeys(sp: Space | null = currentSpace()): string[] {
   const hidden = new Set(prefs.hidden), locked = new Set(prefs.locked);
   const ok = (k: string) => !hidden.has(k) && !locked.has(k) && (!spaceIsolated || spaceIsolated === k);
   if (sum && sp) {
-    for (const r of sum.rms) if (space3dShown(r.resource?.tiles ? "s3_tiles" : "s3_rm") && ok(`rm:${r.id}`)) out.push(`rm:${r.id}`);
+    for (const r of sum.rms) if (space3dShown(rmLayerOf(r)) && ok(`rm:${r.id}`)) out.push(`rm:${r.id}`);
     if (space3dShown("s3_proxies")) for (const u of sum.withProxy) if (sp.proxies.has(u) && ok(`proxy:${u}`)) out.push(`proxy:${u}`);
   }
   if (space3dShown("s3_sketches")) for (const s of listSketches()) if (ok(`sketch:${s.id}`)) out.push(`sketch:${s.id}`);
@@ -28364,7 +28645,7 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
   tab.setAttribute("aria-pressed", "true");
   tabs.appendChild(tab);
   el.appendChild(tabs);
-  const sect = (title: string, probe: string) => {
+  const sect = (title: string, probe: string, help?: string) => {
     const d = document.createElement("div");
     d.className = "np-sect";
     d.dataset.np = probe;
@@ -28373,6 +28654,8 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     const key = `np:${probe}`;
     const folded = (space3dPrefs().collapsed ?? []).includes(key);
     h5.textContent = `${folded ? "▸" : "▾"} ${title}`;
+    // MICRO-OUTLINER-UNICO · what the section is for, behind a «?» in its title
+    if (help) h5.append(" ", helpGlyph(help, `np-${probe}`));
     h5.className = "np-fold";
     h5.dataset.fold = key;
     h5.addEventListener("click", () => foldPanel(key, !folded));
@@ -28382,7 +28665,7 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     return d;
   };
   // the 3D cursor: X Y Z and rotation, in the scene's frame (Blender's axes)
-  const cur = sect(t("s3.nCursor"), "cursor");
+  const cur = sect(t("s3.nCursor"), "cursor", t("s3.nCursorNote"));
   const at = threeToBlender(h.cursor());
   const grid = document.createElement("div");
   grid.className = "xf-grid";
@@ -28423,14 +28706,10 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
   centre.addEventListener("click", () => { h.centreScene(); renderSpaceNPanels(); });
   acts.appendChild(centre);
   cur.appendChild(acts);
-  const note = document.createElement("p");
-  note.className = "xf-note";
-  note.textContent = t("s3.nCursorNote");
-  cur.appendChild(note);
   // the selected object: its nine values, the same as the Inspector's.
   // MICRO-SPAZIO-3D-3 · the ACTIVE one; with others selected, a value changed
   // here carries to all of them by the same amount (`carryXf`), one step
-  const obj = sect(t("s3.nObject"), "object");
+  const obj = sect(t("s3.nObject"), "object", t("s3.nNothing"));
   const ssel = spaceSel(sp);
   const others = ssel.keys.filter((k) => k !== ssel.active);
   const xfOfKey = (k: string): Xf | null => {
@@ -28483,16 +28762,17 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
         onCommit: (xf) => commitAll(key, before, xf), onReset: () => commitAll(key, before, IDENTITY) });
     }
   } else {
+    // MICRO-OUTLINER-UNICO · an empty state is one line (the how is the title's «?»)
     const none = document.createElement("p");
     none.className = "xf-note";
-    none.textContent = t("s3.nNothing");
+    none.textContent = t("s3.nNothingShort");
     obj.appendChild(none);
   }
   // MICRO-PROVA-DEV47 p.3b · the level of detail, for the active, the selection, the epoch
-  renderLodSection(sect(t("lod.title"), "lod"), sp);
+  renderLodSection(sect(t("lod.title"), "lod", t("lod.modeTitle")), sp);
   // MICRO-SPAZIO-3D-3 p.5 · the snap: Ctrl during G lays the object on the face
   // under the pointer; «Allinea alla normale» (off by default) turns it too
-  const sn = sect(t("s3.nSnap"), "snap");
+  const sn = sect(t("s3.nSnap"), "snap", t("s3.nSnapNote"));
   const lab = document.createElement("label");
   lab.className = "settings-check";
   const cb = document.createElement("input");
@@ -28504,10 +28784,6 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
   sp1.textContent = t("s3.nSnapAlign");
   lab.append(cb, sp1);
   sn.appendChild(lab);
-  const snNote = document.createElement("p");
-  snNote.className = "xf-note";
-  snNote.textContent = t("s3.nSnapNote");
-  sn.appendChild(snNote);
   // the view and the lens
   const v: SceneView = h.view();
   const vw = sect(t("s3.nViewSect"), "view");
@@ -30342,7 +30618,7 @@ function renderLodSection(host: HTMLElement, sp: Space | null): void {
   if (!withVersions.length) {
     const p = document.createElement("p");
     p.className = "xf-note";
-    p.textContent = ids.length ? t("lod.noLevels") : t("lod.noModel");
+    p.textContent = ids.length ? t("lod.noLevels") : t("lod.noModelShort");
     host.appendChild(p);
     return;
   }
@@ -31571,7 +31847,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onMark: (id) => { if (EXPERIMENTAL && onSiteMark(id)) return; if (id.startsWith("inst:")) goToInstance(id.slice(5)); },
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
-      if (a === "outliner") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, shown: !p.shown }); return true; }
+      if (a === "outliner") { const p = space3dPrefs();
+        // MICRO-OUTLINER-UNICO · beside the one Outliner, the first T brings the
+        // scene's back; from then on T opens and closes it as before
+        setSpace3dPrefs(unifiedOutlinerOnScreen() && !p.tWithOutliner ? { ...p, tWithOutliner: true, shown: true } : { ...p, shown: !p.shown }); return true; }
       if (a === "sidebar") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, nShown: !p.nShown }); return true; }
       if (a === "add-menu") {
         const r = host.getBoundingClientRect();
@@ -31632,7 +31911,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     log: (m) => logWarn(m),
   });
   // MICRO-GIS-BASE · the graph's GIS layers in this Space: drawn, shown/hidden, brought in
-  const gisSpace = mountGisSpace({
+  const gisSpace: GisSpace = mountGisSpace({
     host, handle, t: (k, v) => t(k, v), person: () => overlayPerson(),
     doc: () => (store?.doc ?? null) as ReturnType<GisSpaceDeps["doc"]>,
     docPath: () => emtree.activeFile()?.path ?? currentFilePath,
@@ -31682,10 +31961,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       return r;
     };
     box.append(row(t("space.layerRm"), "s3_rm", "s3_opacity_rm", "rm"), row(t("lay.tiles"), "s3_tiles", null, "tiles"),
+      // MICRO-OUTLINER-UNICO · the RMDocs, a layer of their own (on or off, as the Territory)
+      row(t("lay.rmdoc"), "s3_rmdoc", null, "rmdoc"),
       row(t("space.layerPx"), "s3_proxies", "s3_opacity_proxy", "px"), geoSpace.section(), gisSpace.section());
     return box;
   };
   spaceLayerSections.set(win.id, spaceLayersSection);
+  gisSpaces.set(win.id, gisSpace);   // MICRO-OUTLINER-UNICO · the eyes of the Outliner's GIS branch
   const onBar = (e: Event) => {
     if (geoSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     if (gisSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
@@ -31748,10 +32030,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const sum = sp && epochId ? sp.summary(epochId) : null;
     // the Outliner
     const prefs = space3dPrefs();
-    outl.classList.toggle("hidden", !prefs.shown);
-    grip.classList.toggle("hidden", !prefs.shown);
-    tab.classList.toggle("hidden", prefs.shown);
-    if (prefs.shown) renderSpaceOutliner(outl, win, sp);
+    // MICRO-OUTLINER-UNICO · with an Outliner window in the workspace the
+    // scene's own steps aside (T brings it back, for its versions, its
+    // alternatives and its sketches: `tWithOutliner`)
+    const uni = unifiedOutlinerOnScreen();
+    // brought back with T, it behaves as before: squeezed it closes, its triangle reopens it
+    const showT = uni ? !!prefs.tWithOutliner && prefs.shown : prefs.shown;
+    outl.classList.toggle("hidden", !showT);
+    grip.classList.toggle("hidden", !showT);
+    tab.classList.toggle("hidden", uni ? !prefs.tWithOutliner || prefs.shown : prefs.shown);
+    if (showT) renderSpaceOutliner(outl, win, sp);
     npanel.classList.toggle("hidden", !prefs.nShown);
     ngrip.classList.toggle("hidden", !prefs.nShown);
     ntab.classList.toggle("hidden", prefs.nShown);
@@ -31944,7 +32232,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // referenced. MICRO-SPAZIO-3D · with the Outliner open the models are
     // listed there: the summary says how many, not each one
     const rmPart = !sum.rms.length ? `<span class="miss">${escapeHtml(t("space.noRm"))}</span>`
-      : prefs.shown && sum.rms.length > 3
+      : showT && sum.rms.length > 3
         ? `<span data-sum="rms">${escapeHtml(t("s3.rmCount", { n: String(sum.rms.length),
             ok: String(sum.rms.filter((r) => r.resource?.state === "resident").length) }))}</span>`
         : sum.rms.map((r) => `RM <button type="button" class="link" data-go="${escapeHtml(r.id)}">${escapeHtml(r.name)}</button>`
@@ -32000,9 +32288,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const nothing = !sum.rms.length && !sum.withProxy.length && !previewItem && !listSketches().length;
     empty.classList.toggle("hidden", !nothing);
     if (nothing) {
-      empty.innerHTML = `<b>${escapeHtml(t("space.emptyTitle", { x: sum.epoch.name }))}</b>`
-        // MICRO-LAB bande-2 · read by horizons, the scene says «horizon»
-        + `<p>${escapeHtml(t(spaceBandsWin() ? "space.emptyBodyHz" : "space.emptyBody", { n: String(sum.units.length) }))}</p>`;
+      // MICRO-OUTLINER-UNICO · an empty state is one line: the title; how a
+      // model or a proxy arrives is behind its «?»
+      // MICRO-LAB bande-2 · read by horizons, the scene says «horizon»
+      empty.innerHTML = `<b>${escapeHtml(t("space.emptyTitle", { x: sum.epoch.name }))}</b> `;
+      empty.appendChild(helpGlyph(t(spaceBandsWin() ? "space.emptyBodyHz" : "space.emptyBody", { n: String(sum.units.length) }), "space-empty"));
       handle.update([]);
       return;
     }
@@ -32031,7 +32321,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const items: SceneItem[] = [];
     for (const r of sum.rms) {
       const isTiles = !!r.resource?.tiles;
-      if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm", win.id) || !shown(`rm:${r.id}`)) continue;
+      if (!space3dShown(rmLayerOf(r), win.id) || !shown(`rm:${r.id}`)) continue;
       // p.12 · one of the two drawn: the other is «sostituito da» (manual modes), or the scene decides (auto)
       const alt = altOfRm.get(r.id);
       if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) continue;
@@ -50924,7 +51214,10 @@ const PANEL_TABS: Partial<Record<WindowType, { id: string; labelKey: string }[]>
   //  · Inspector — what the selection is;
   //  · the Log — what happened: a drawer of the status bar, not a tab here.
   emtree: [{ id: "emtree", labelKey: "panel.multigraph" }],
-  outliner: [{ id: "nodelist", labelKey: "panel.outliner" }],
+  // MICRO-OUTLINER-UNICO · the Outliner is the ONE outliner now: the sources,
+  // their graphs and every dimension of a graph («nodelist», the list of the
+  // units, is its «Units» branch; a saved «current.panel» naming it falls back)
+  outliner: [{ id: "unified", labelKey: "panel.outliner" }],
   inspector: [{ id: "inspector", labelKey: "panel.inspector" }],
 };
 
@@ -50988,6 +51281,12 @@ function mountPanel(panelId: string, host: HTMLElement, win: Win): PanelMount {
     const paint = (): void => renderEMTree(host, emtree, emtreeHandlers, labels);
     paint();
     return { refresh: paint };
+  }
+  if (panelId === "unified") {
+    const api = mountUnifiedOutliner(host, unifiedDeps(win));
+    unifiedApis.set(win.id, api);
+    return { refresh: api.refresh, select: (id) => api.setSelected(id, getSettings().interaction.zoomToSelection),
+             destroy: () => { unifiedApis.delete(win.id); api.destroy(); } };
   }
   if (panelId === "nodelist") {
     const api = buildNodeList(host, () => store?.doc ?? null, pickFromOutliner,
@@ -51546,6 +51845,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
   if (type === "emtree") frag.appendChild(helpMark(t(activeWorkspace() === "assets" ? "emtree.introContents" : "emtree.intro")));
   // MICRO-VIEWER-SPAZIO-EMTREE p.1–2 · the clicks of the 3D, said where the 3D is
   if (type === "scene") { const q = helpMark(t("s3.gestures")); q.dataset.gestures = "space"; frag.appendChild(q); }
+  // MICRO-OUTLINER-UNICO · the selector and the search, in this one row
+  if (type === "outliner") { frag.append(...unifiedHeader(win), helpMark(t("uo.help"))); }
   if (type === "viewer") { const q = helpMark(t("vw.gestures")); q.dataset.gestures = "viewer"; frag.appendChild(q); }
   if (type === "graph") {
     // MICRO-PULIZIA p.4 · the «+» left the bar: «Aggiungi» is ⇧A and Tools ▸
@@ -52294,6 +52595,10 @@ function renderAreaHeaders(): void {
   // `#window-header` is gone with `#canvas-wrap`: every area has a `.tile-bar`,
   // built here by the one builder, and there is no privileged one to do first.
   // (every area, the detached windows' too: `winAreas`, not this document)
+  // MICRO-OUTLINER-UNICO · the Outliner's search lives in its bar: a rebuild
+  // keeps the element, its text, its caret and its focus
+  const typing = document.activeElement instanceof HTMLInputElement && document.activeElement.dataset.uoSearch
+    ? { el: document.activeElement, a: document.activeElement.selectionStart, b: document.activeElement.selectionEnd } : null;
   for (const area of winAreas.values()) {
     const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
     const win = windowsOf().find((w) => w.id === area.dataset.win);
@@ -52308,6 +52613,7 @@ function renderAreaHeaders(): void {
     bar.appendChild(buildAreaHeader(win));
     if (isDetachedWin(win.id)) bar.appendChild(detachedBarTail(win));
   }
+  if (typing?.el.isConnected) { typing.el.focus(); typing.el.setSelectionRange(typing.a, typing.b); }
   syncGraphLines();
   // STEP A · every area publishes the height ITS bar takes, the way the focused
   // one always has (`--winbar-h`): the resources panel and its chevron sit below

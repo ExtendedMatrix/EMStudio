@@ -15,7 +15,7 @@ import { listStep } from "./list-keys";
 /** SHIFT-A fase 6b · a row's mark: the node's GLYPH, inline, when the datamodel
  *  draws it from paths (extractor, combiner, the ornaments, the DTC kinds) —
  *  the same paths as the canvas — else the coloured dot of its style. */
-function rowMark(n: EmNode): HTMLElement {
+export function rowMark(n: Pick<EmNode, "node_type" | "data">): HTMLElement {
   const g = glyphFor(n.node_type, n.data as Record<string, unknown> | undefined);
   const el = document.createElement("span");
   if (g) {

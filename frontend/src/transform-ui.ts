@@ -11,6 +11,7 @@
  * changed) is one call of `onCommit`, one step of undo.
  */
 import { coordDecimals, deg, isIdentity, rad, xfQuaternion, type Xf } from "./transform3d";
+import { helpGlyph } from "./help-glyph";
 import { NumGroup, formatNumber, numField, parseNumber } from "./num-field";
 import type { V3 } from "./space-nav";
 
@@ -126,7 +127,10 @@ export function renderTransformForm(host: HTMLElement, o: TransformFormOptions):
   host.appendChild(grid);
   const foot = document.createElement("p");
   foot.className = "xf-note";
-  foot.textContent = o.texts.upAxis(xf.up_axis) + (o.note ? ` · ${o.note}` : "");
+  // MICRO-OUTLINER-UNICO · the axis is the state, the note (which field it
+  // writes, why it is read-only) an explanation: behind a «?»
+  foot.textContent = o.texts.upAxis(xf.up_axis);
+  if (o.note) foot.append(" ", helpGlyph(o.note, "xf-note"));
   host.appendChild(foot);
   if (!o.readOnly && o.onReset) {
     const row = document.createElement("div");

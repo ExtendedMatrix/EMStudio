@@ -244,21 +244,18 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
     arrangement: {
       wins: [
         { name: "canvas", type: "graph", state: { mode: "matrix" } },
-        { name: "graphs", type: "emtree" },
         { name: "outliner", type: "outliner" },
-        { name: "issues", type: "table", state: { "current.table.sheet": "Issues" } },
         { name: "inspector", type: "inspector" },
       ],
       active: "canvas",
-      // G7 (MICRO grafo reattivo) · the graphs of the workspace above the
-      // Outliner, in the left column: EMTree, its line, New graph / Open…, the
-      // recent files. A third of the column; resizable by its divider, and
-      // compressed to its header by its ▾ (`toggleCompressed`)
-      layout: { dir: "row", ratio: 0.17,
-                a: { dir: "col", ratio: 0.32, a: { win: "graphs" }, b: { win: "outliner" } },
-                b: { dir: "row", ratio: 0.76,
-                     a: { dir: "col", ratio: 0.64, a: { win: "canvas" }, b: { win: "issues" } },
-                     b: { win: "inspector" } } },
+      // MICRO-OUTLINER-UNICO (E.D., 7 Nov 2026) · COLUMNS FROM TOP TO BOTTOM:
+      // the one Outliner on the left (the files and their graphs are its roots:
+      // the EMTree above it went), the Matrix and the Properties down to the
+      // bottom of the window. The table stays only under the 3D view, so the
+      // warnings' table left this space: the Matrix takes the room below (the
+      // warnings are the status bar's ⚠ and the Table's sheet «Issues»)
+      layout: { dir: "row", ratio: 0.17, a: { win: "outliner" },
+                b: { dir: "row", ratio: 0.74, a: { win: "canvas" }, b: { win: "inspector" } } },
     },
   },
   // FONTI · «Da dove viene questo dato?» MICRO-VIEWER-UNICO (E.D., 20 Oct
@@ -272,15 +269,18 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
     arrangement: {
       wins: [
         { name: "viewer", type: "viewer" },
-        { name: "docs", type: "table", state: { "current.table.sheet": "Documents" } },
+        { name: "outliner", type: "outliner" },
         // DEV30 U6 · the standard view of every graph window is the Matrix
         { name: "graph", type: "graph", state: { mode: "matrix" } },
         { name: "inspector", type: "inspector" },
       ],
       active: "viewer",
-      layout: { dir: "row", ratio: 0.22, a: { win: "docs" },
-                b: { dir: "row", ratio: 0.72,
-                     a: { dir: "col", ratio: 0.55, a: { win: "viewer" }, b: { win: "graph" } },
+      // MICRO-OUTLINER-UNICO · the Outliner on the left (its «Documents» are
+      // the list the Documents sheet was here), the Viewer, then the Matrix and
+      // the Properties down to the bottom
+      layout: { dir: "row", ratio: 0.17, a: { win: "outliner" },
+                b: { dir: "row", ratio: 0.74,
+                     a: { dir: "row", ratio: 0.56, a: { win: "viewer" }, b: { win: "graph" } },
                      b: { win: "inspector" } } },
     },
   },
@@ -293,7 +293,8 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
     arrangement: {
       wins: [
         { name: "files", type: "storage", state: { "mode.storage": "filesystem" } },
-        { name: "emtree", type: "emtree" },
+        // MICRO-OUTLINER-UNICO · the one Outliner where the EMtree was
+        { name: "outliner", type: "outliner" },
         { name: "shelf", type: "shelf" },
         // MICRO-CONTENTS-3 F1 F2 F18 · the CHAIN: a graph window fixed on the DTC
         // (`isChainWin`), «Catena (DTC)» in its header, no other projection
@@ -304,7 +305,7 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
       // the Shelf under the File window, its right half for the previews; the
       // EMtree alone on the left, the Chain on the right
       layout: { dir: "row", ratio: 0.18,
-                a: { win: "emtree" },
+                a: { win: "outliner" },
                 b: { dir: "row", ratio: 0.66,
                      a: { dir: "col", ratio: 0.6, a: { win: "files" }, b: { win: "shelf" } },
                      b: { win: "chain" } } },
@@ -320,13 +321,17 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
       wins: [
         { name: "story", type: "narrative", state: { "current.reading": "write" } },
         { name: "index", type: "narrative-index" },
+        { name: "outliner", type: "outliner" },
         { name: "canvas", type: "graph", state: { mode: "matrix" } },
         { name: "inspector", type: "inspector" },
       ],
       active: "story",
-      layout: { dir: "row", ratio: 0.19, a: { win: "index" },
-                b: { dir: "row", ratio: 0.6, a: { win: "story" },
-                     b: { dir: "col", ratio: 0.5, a: { win: "canvas" }, b: { win: "inspector" } } } },
+      // MICRO-OUTLINER-UNICO · the left column is the story's Index above the
+      // Outliner; the Matrix and the Properties side by side, down to the bottom
+      layout: { dir: "row", ratio: 0.18,
+                a: { dir: "col", ratio: 0.45, a: { win: "index" }, b: { win: "outliner" } },
+                b: { dir: "row", ratio: 0.52, a: { win: "story" },
+                     b: { dir: "row", ratio: 0.55, a: { win: "canvas" }, b: { win: "inspector" } } } },
     },
   },
   // SPAZIO · «Dove sta, e che forma ha in ogni epoca?» (scrivania v11b, 30 set
@@ -339,14 +344,19 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
     arrangement: {
       wins: [
         { name: "scene", type: "scene" },
+        { name: "outliner", type: "outliner" },
         { name: "models", type: "table", state: { "current.table.sheet": "Models" } },
         { name: "canvas", type: "graph", state: { mode: "matrix" } },
         { name: "inspector", type: "inspector" },
       ],
       active: "scene",
-      layout: { dir: "row", ratio: 0.62,
-                a: { dir: "col", ratio: 0.6, a: { win: "scene" }, b: { win: "models" } },
-                b: { dir: "row", ratio: 0.52, a: { win: "canvas" }, b: { win: "inspector" } } },
+      // MICRO-OUTLINER-UNICO · the Outliner on the left (synced with the 3D: it
+      // replaces the scene's own), the table only under the 3D view, the Matrix
+      // and the Properties down to the bottom
+      layout: { dir: "row", ratio: 0.16, a: { win: "outliner" },
+                b: { dir: "row", ratio: 0.62,
+                     a: { dir: "col", ratio: 0.64, a: { win: "scene" }, b: { win: "models" } },
+                     b: { dir: "row", ratio: 0.52, a: { win: "canvas" }, b: { win: "inspector" } } } },
     },
   },
 ];
@@ -793,14 +803,25 @@ export function workspaceModified(ws: WorkspaceId = active): boolean {
 export const LEGACY_SIGNATURES: Record<string, string[]> = {
   canvas: ["row(outliner,row(graph:matrix,inspector))", "row(emtree,row(graph:matrix,inspector))",
            // rev 4 (G7) · the Stratigraphy seed before the graphs panel came in
-           "row(outliner,row(col(graph:matrix,table),inspector))"],
+           "row(outliner,row(col(graph:matrix,table),inspector))",
+           // rev 6 (MICRO-OUTLINER-UNICO) · the seed with the EMtree, the
+           // Outliner of the units and the warnings' table under the Matrix
+           "row(col(emtree,outliner),row(col(graph:matrix,table),inspector))"],
   provenance: ["row(storage,row(graph:dtc,inspector))",
                // rev 5 (MICRO-VIEWER-UNICO) · the Fonti seed with the Doc window
-               "row(table,row(col(doc,graph:matrix),inspector))"],
-  assets: ["row(storage,row(storage,col(graph:dtc,inspector)))"],
-  narrative: ["row(narrative,viewer)"],
+               "row(table,row(col(doc,graph:matrix),inspector))",
+               // rev 6 · the Documents sheet on the left, the Matrix under the Viewer
+               "row(table,row(col(viewer,graph:matrix),inspector))"],
+  assets: ["row(storage,row(storage,col(graph:dtc,inspector)))",
+           // rev 6 · the EMtree on the left
+           "row(emtree,row(col(storage,shelf),graph:dtc))"],
+  narrative: ["row(narrative,viewer)",
+              // rev 6 · no Outliner, the Matrix above the Properties
+              "row(narrative-index,row(narrative,col(graph:matrix,inspector)))"],
+  // rev 6 · no Outliner, the scene's own in the 3D view
+  space: ["row(col(scene,table),row(graph:matrix,inspector))"],
 };
-export const WORKSPACES_REV = 5;
+export const WORKSPACES_REV = 6;
 const REV_KEY = "emstudio.workspaces.rev";
 
 export function migrateSavedArrangements(

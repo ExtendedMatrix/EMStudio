@@ -210,6 +210,8 @@ export interface Space3dPrefs {
   hardware?: "desktop" | "web" | "mobile";
   /** p.12 · a container with its tileset's alternative: models, the tileset, or the distance (absent = auto) */
   altModes?: Record<string, "models" | "tileset" | "auto" | "use">;
+  /** MICRO-OUTLINER-UNICO · this Outliner shown (T) beside the one Outliner window */
+  tWithOutliner?: boolean;
 }
 
 export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [], versionModes: {} };
@@ -254,6 +256,7 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
         .filter(([, v]) => v && typeof v === "object" && ["manual", "use", "auto", "light"].includes(String((v as { mode?: unknown }).mode)))
         .map(([k, v]) => [k, { mode: (v as { mode: "manual" | "use" | "auto" | "light" }).mode, ...(typeof (v as { versionId?: unknown }).versionId === "string" ? { versionId: (v as { versionId: string }).versionId } : {}) }])) : {},
       ...(typeof p.deviceUse === "string" ? { deviceUse: p.deviceUse } : {}),
+      ...(p.tWithOutliner === true ? { tWithOutliner: true } : {}),
       ...(p.altModes && typeof p.altModes === "object" ? { altModes: Object.fromEntries(Object.entries(p.altModes as Record<string, unknown>)
         .filter(([, v]) => v === "models" || v === "tileset" || v === "auto" || v === "use")) as Record<string, "models" | "tileset" | "auto" | "use"> } : {}),
     };

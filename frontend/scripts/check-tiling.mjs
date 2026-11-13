@@ -333,47 +333,54 @@ const eq = (got, want, what) => {
   // MICRO-VIEWER-UNICO · the Annotator went: it was Fonti with the Viewer large
   eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons"], "the rest stay parked");
   const sig = (id) => W.arrangementSignature(W.WORKSPACES.find((w) => w.id === id).arrangement);
-  // G7 (MICRO grafo reattivo) · the graphs of the workspace above the Outliner
-  eq(sig("canvas"), "row(col(emtree,outliner),row(col(graph:matrix,table),inspector))",
-     "Stratigrafia: EMTree above the Outliner · Matrix above the table · Inspector — complete from the start");
+  // MICRO-OUTLINER-UNICO (rev 6) · columns from top to bottom: the one
+  // Outliner (the files and graphs are its roots), the Matrix, the Inspector
+  eq(sig("canvas"), "row(outliner,row(graph:matrix,inspector))",
+     "Stratigrafia: Outliner · Matrix · Inspector, each down to the bottom");
+  ok(W.LEGACY_SIGNATURES.canvas.includes("row(col(emtree,outliner),row(col(graph:matrix,table),inspector))") && W.WORKSPACES_REV >= 6,
+     "the rev-5 Stratigrafia seed (EMTree, Outliner, table under the Matrix) is a legacy signature: untouched, it is re-seeded");
+  for (const [ws, old] of [["provenance", "row(table,row(col(viewer,graph:matrix),inspector))"], ["assets", "row(emtree,row(col(storage,shelf),graph:dtc))"],
+                           ["narrative", "row(narrative-index,row(narrative,col(graph:matrix,inspector)))"], ["space", "row(col(scene,table),row(graph:matrix,inspector))"]])
+    ok(W.LEGACY_SIGNATURES[ws]?.includes(old), `…and so is the rev-5 seed of ${ws}`);
   // …a saved Stratigrafia of the rev-3 seed (untouched) is re-seeded at rev 4
   {
     const before = W.LEGACY_SIGNATURES.canvas;
     ok(before.includes("row(outliner,row(col(graph:matrix,table),inspector))") && W.WORKSPACES_REV >= 4,
        "the rev-3 Stratigrafia seed is a legacy signature: an untouched one opens with the graphs panel");
   }
-  // …and the panel compresses to its header and comes back
+  // …and a panel stacked above another compresses to its header and comes back
+  // (the Index above the Outliner, in Narrativa: the graphs panel left Stratigrafia)
   {
-    W.applyArrangement("canvas");
-    const ids = W.paneIds(W.layoutOf("canvas"));
+    W.applyArrangement("narrative");
+    const ids = W.paneIds(W.layoutOf("narrative"));
     const graphs = ids[0];
-    const r0 = W.stackedRatio(graphs, "canvas");
-    ok(typeof r0 === "number" && Math.abs(r0 - 0.32) < 1e-9, "the graphs panel is the upper third of the left column");
-    eq(W.toggleCompressed(graphs, 0.04, "canvas"), true, "▾ compresses it");
-    eq(W.stackedRatio(graphs, "canvas"), 0.04, "…to its header's share");
-    ok(W.isCompressed(graphs, "canvas"), "…and the window knows it");
-    eq(W.toggleCompressed(graphs, 0.04, "canvas"), false, "▸ brings it back");
-    eq(W.stackedRatio(graphs, "canvas"), r0, "…to the ratio it had");
-    eq(W.toggleCompressed(ids[1], 0.04, "canvas"), null,
+    const r0 = W.stackedRatio(graphs, "narrative");
+    ok(typeof r0 === "number" && Math.abs(r0 - 0.45) < 1e-9, "the Index is the upper part of the left column");
+    eq(W.toggleCompressed(graphs, 0.04, "narrative"), true, "▾ compresses it");
+    eq(W.stackedRatio(graphs, "narrative"), 0.04, "…to its header's share");
+    ok(W.isCompressed(graphs, "narrative"), "…and the window knows it");
+    eq(W.toggleCompressed(graphs, 0.04, "narrative"), false, "▸ brings it back");
+    eq(W.stackedRatio(graphs, "narrative"), r0, "…to the ratio it had");
+    eq(W.toggleCompressed(ids[1], 0.04, "narrative"), null,
        "the Outliner, the lower side of the stack, is left alone (null)");
   }
   // DEV30 U6 · the graph window of Fonti opens on the Matrix, the standard view
   // MICRO-VIEWER-UNICO · the Doc window went: Fonti is the Tabular of the
   // documents, the Viewer above the Matrix, the Inspector
-  eq(sig("provenance"), "row(table,row(col(viewer,graph:matrix),inspector))",
-     "Fonti: Documents · the Viewer above the graph · Inspector");
+  eq(sig("provenance"), "row(outliner,row(row(viewer,graph:matrix),inspector))",
+     "Fonti: Outliner · the Viewer · the Matrix · Inspector, each down to the bottom");
   // MICRO-ARCHIVIO-2 · V3: the Shelf under the File window
-  eq(sig("assets"), "row(emtree,row(col(storage,shelf),graph:dtc))",
-     "Contenuti: EMTree · the File window above the Shelf · DTC — and no Inspector");
-  eq(sig("space"), "row(col(scene,table),row(graph:matrix,inspector))",
-     "Spazio: the Scena 3D above the Table (Modelli e proxy) · Matrix · Inspector");
+  eq(sig("assets"), "row(outliner,row(col(storage,shelf),graph:dtc))",
+     "Contenuti: Outliner · the File window above the Shelf · DTC — and no Inspector");
+  eq(sig("space"), "row(outliner,row(col(scene,table),row(graph:matrix,inspector)))",
+     "Spazio: Outliner · the Scena 3D above the Table (Modelli e proxy) — the table only under the 3D — · Matrix · Inspector");
   eq(W.WORKSPACES.find((w) => w.id === "space").arrangement.wins.find((w) => w.type === "table").state["current.table.sheet"],
      "Models", "…and the Table opens on «Modelli e proxy»");
-  eq(sig("narrative"), "row(narrative-index,row(narrative,col(graph:matrix,inspector)))",
-     "Narrativa: Index · the page · Matrix above the Inspector");
+  eq(sig("narrative"), "row(col(narrative-index,outliner),row(narrative,row(graph:matrix,inspector)))",
+     "Narrativa: Index above the Outliner · the page · Matrix · Inspector");
   const canvas = W.WORKSPACES.find((w) => w.id === "canvas").arrangement;
-  eq(canvas.wins.find((w) => w.type === "table").state["current.table.sheet"], "Issues",
-     "the Stratigrafia table opens on the warnings");
+  ok(!canvas.wins.some((w) => w.type === "table"),
+     "no table in Stratigrafia: the table stays only under the 3D view (the warnings: ⚠ in the status bar, the sheet «Issues»)");
   ok(W.WINDOW_TYPE_META["narrative-index"]?.labelKey === "win.narrativeIndex", "the Index is a window type");
   // «modified»: the shape and the windows, not the ratios
   W.applyArrangement("narrative");
