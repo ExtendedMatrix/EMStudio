@@ -45,6 +45,9 @@ export interface InspectorCallbacks {
   /** MICRO-SERVSF-FINE-ISTANZE p.2 · a BR's own section: its unit, the type of
    *  the end, the CIDOC class, the epoch and its rule, its own dating */
   endOfUnit?: (nodeId: string) => HTMLElement | null;
+  /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · the epochs of a unit, a model or a
+   *  container, each with «Sposta qui» / «Estendi anche qui» / «Togli da qui» */
+  epochMoves?: (nodeId: string) => HTMLElement | null;
   /** MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of an object in the epochs */
   epochInstances?: (nodeId: string) => HTMLElement | null;
   /** MICRO-UN-POSTO · open the site selector on the graph node */
@@ -952,6 +955,11 @@ export function renderInspector(
       bar.appendChild(b);
       root.appendChild(bar);
     }
+  }
+
+  if (nodeId && cb.epochMoves && node.node_type !== "EpochNode") {
+    const sec = cb.epochMoves(nodeId);
+    if (sec) root.appendChild(sec);
   }
 
   if (nodeId && cb.endOfUnit && node.node_type === "BR") {

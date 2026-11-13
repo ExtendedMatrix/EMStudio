@@ -11705,3 +11705,56 @@ details.nidx-covrow[open] > summary::before { content: "▾"; }
 .al-drag-ghost { position: fixed; z-index: 3000; pointer-events: none; padding: 2px 8px; font-size: 12px; border-radius: var(--radius-sm);
   background: var(--bg-panel); border: 1px solid var(--accent, #c9a227); box-shadow: 0 4px 12px rgba(0,0,0,.25); }
 body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select: none !important; }
+
+/* MICRO-OUTLINER-EPOCHE-TOOLTIP p.3 · the one popover of every «?» (help-tip.ts):
+   beside the glyph, a reading width (~40–60 characters), above every panel */
+.help-tip { position: fixed; z-index: 3000; max-width: min(340px, calc(100vw - 12px)); min-width: 140px;
+  padding: 7px 10px; border-radius: var(--radius-sm, 4px); background: var(--bg-panel, #fff); color: var(--text, #222);
+  border: 1px solid var(--border-strong, #999); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.22);
+  font-size: 12.5px; line-height: 1.45; font-weight: 400; text-transform: none; letter-spacing: 0;
+  white-space: pre-line; overflow-wrap: break-word; hyphens: auto; user-select: text; pointer-events: auto; }
+.help-tip.pinned { border-color: var(--accent, #2f6fdf); box-shadow: 0 0 0 1px var(--accent, #2f6fdf), 0 6px 22px rgba(0, 0, 0, 0.22); }
+.help-tip-pinned { outline: 2px solid var(--accent, #2f6fdf); outline-offset: 1px; }
+
+/* MICRO-OUTLINER-EPOCHE-TOOLTIP · the container as a branch, a member out of its
+   epoch, the drag between epochs, the Space's controls on the one Outliner */
+.uo-note { font-size: 10.5px; color: var(--text-muted); margin-left: 4px; white-space: nowrap; border: 1px dashed var(--border-strong); border-radius: 8px; padding: 0 5px; }
+.uo-warn { background: none; border: 0; padding: 0 3px; color: #c27a00; cursor: pointer; font-size: 12px; }
+.uo-alt .uo-label::after { content: " · alt"; font-size: 10px; color: var(--text-muted); }
+.uo-ghost { opacity: 0.55; font-style: italic; }
+.uo-dragging .uo-row { cursor: grabbing; }
+.uo-row.uo-drop { box-shadow: inset 0 -2px 0 var(--accent, #2f6fdf); background: var(--bg-accent-soft, rgba(47, 111, 223, 0.08)); }
+.uo-row.uo-drop-extend { box-shadow: inset 0 -2px 0 #2b8a3e; background: rgba(43, 138, 62, 0.09); }
+.uo-dragtag { position: fixed; z-index: 2500; pointer-events: none; font-size: 12px; padding: 2px 8px; border-radius: 10px;
+  background: var(--accent, #2f6fdf); color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); white-space: nowrap; }
+.uo-dragtag.uo-dragtag-extend { background: #2b8a3e; }
+.uo-dragtag.uo-dragtag-none { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border); }
+.uo-arrow, .uo-mini, .uo-fail, .uo-chip { background: none; border: 0; padding: 0 3px; cursor: pointer; color: inherit; font-size: 11.5px; line-height: 1; }
+.uo-arrow-off { opacity: 0.3; }
+.uo-fail { color: #c92a2a; }
+.uo-chip { border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; font-size: 10px; white-space: nowrap; }
+.uo-mini { opacity: 0; }
+.uo-row:hover .uo-mini, .uo-row.uo-sel .uo-mini, .uo-mini.on { opacity: 0.85; }
+.uo-mini.on { color: var(--accent, #2f6fdf); }
+.uo-version-row .uo-label { font-size: 11.5px; }
+.uo-version-row.uo-drawn .uo-label { font-weight: 600; }
+.uo-uses { font-size: 10px; color: var(--text-muted); margin-left: 4px; white-space: nowrap; }
+.uo-auto { font-size: 9.5px; border: 1px solid var(--border); border-radius: 3px; padding: 0 2px; margin-left: 3px; }
+.scn-mark.ghost polyline, .scn-mark.ghost polygon { stroke-dasharray: 4 3; opacity: 0.6; }
+.scn-mark.ghost circle { fill: transparent; stroke: #ffd400; stroke-dasharray: 2 2; }
+.scn-mark-label.ghost { opacity: 0.7; font-style: italic; }
+.sol-retiring { font-size: 11px; padding: 4px 8px; background: var(--bg-accent-soft, #eef3fd); color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.insp-ep-list { display: flex; flex-direction: column; gap: 2px; }
+.insp-ep-row { display: flex; align-items: center; gap: 6px; font-size: 12px; min-height: 22px; }
+.insp-ep-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp-ep-row .insp-btn, .insp-ep-row .insp-ep-state { flex: 0 0 auto; width: auto; white-space: nowrap; }
+.insp-ep-name.here { font-weight: 600; }
+.insp-ep-state { font-size: 10.5px; color: var(--text-muted); }
+.insp-ep-btn { padding: 1px 6px !important; font-size: 11px !important; }
+.uo-dragging, .uo-dragging * { user-select: none; -webkit-user-select: none; }
+/* the Space's controls on a narrow Outliner: the name keeps a few letters, the chips give way first */
+.uo-row .uo-label { min-width: 4.5em; }
+.uo-chip, .uo-note { flex: 0 1 auto; min-width: 2.2em; max-width: 72px; overflow: hidden; text-overflow: ellipsis; }
+.uo-arrow, .uo-mini, .uo-fail, .uo-warn { flex: none; }
+.uo-mini { display: none; }
+.uo-row:hover .uo-mini, .uo-row.uo-sel .uo-mini, .uo-mini.on { display: inline; }

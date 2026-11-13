@@ -149,7 +149,7 @@ if (path) {
 // Space key; «by type» stays the graph's dimensions
 {
   doc.graph.nodes.push(N("G1", "RepresentationModelNodeGroup", "Survey"), N("RM2", "representation_model", "Mesh 2"));
-  doc.graph.edges.push(E("E1", "RM2", "has_representation_model"));
+  doc.graph.edges.push(E("E1", "RM2", "has_representation_model"), E("RM2", "G1", "is_in_representation_model_group"));
   const f2 = () => ({ ...facts(), rmEpochs: new Map([["RM1", ["E1"]], ["RM2", ["E1"]], ["RMD1", ["E1"]], ["RMSF1", ["E0"]]]),
     rmGroup: new Map([["RM2", "G1"]]), gis: [{ id: "L1", name: "Catasto", kind: "layer" }] });
   const src2 = [{ ...sources[0], graphs: [{ ...sources[0].graphs[0], facts: f2 }] }];
@@ -168,5 +168,64 @@ if (path) {
   ok(!rows.some((r) => r.kind === "dim"), "no graph dimension in the Space's tree by epoch");
   ok(O.flattenOutliner({ sources: src2, opts: { ...O.DEFAULT_OPTS, space: true, hierarchy: "type" }, texts: t2, toggled: new Set() }).some((r) => r.kind === "dim"),
     "«by type» is the graph's dimensions");
+}
+// MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 · the container is a BRANCH: epoch → container →
+// its members (and its alternative, marked); a model in a container is not listed again
+// under the epoch; a member in another epoch is listed under its container with that
+// epoch said; a container out of step with its reference says it (s3Dgraphy's rule)
+{
+  const N2 = (id, t, name = id, data = {}) => ({ id, node_type: t, name, data });
+  const E2 = (source, target, edge_type) => ({ source, target, edge_type });
+  const d2 = { graph: { graph_id: "g2", nodes: [
+    N2("XX", "EpochNode", "XX sec", { start_time: 1900, end_time: 2000 }), N2("Y15", "EpochNode", "2015", { start_time: 2015, end_time: 2015 }),
+    N2("S15", "RepresentationModelNodeGroup", "Survey2015"), N2("M1", "representation_model", "SM_OB_EST"), N2("M2", "representation_model", "SM_OB_INT"),
+    N2("M3", "representation_model", "SM_OB_PODIO"), N2("TS", "resource", "TempluMare tileset"), N2("RMSF", "representation_model_sf", "RMSF prato"),
+    N2("LO", "representation_model", "Loose"), N2("T15", "representation_model", "Survey_2015_egm2008"),
+    N2("D1", "document", "D.01"), N2("X1", "extractor", "D.01.61"), N2("AR", "annotation_region", "D.01.61 · point"),
+  ], edges: [
+    E2("XX", "M1", "has_representation_model"), E2("XX", "M2", "has_representation_model"), E2("Y15", "M3", "has_representation_model"),
+    E2("XX", "LO", "has_representation_model"), E2("Y15", "T15", "has_representation_model"),
+    E2("M1", "S15", "is_in_representation_model_group"), E2("M2", "S15", "is_in_representation_model_group"),
+    E2("M3", "S15", "is_in_representation_model_group"), E2("RMSF", "S15", "is_in_representation_model_group"),
+    E2("S15", "TS", "has_linked_resource"), E2("D1", "M1", "has_representation_model"), E2("XX", "Y15", "has_sub_epoch"),
+  ] } };
+  const f3 = () => ({ ...O.emptyFacts(), tilesets: new Set(["T15"]), rmEpochs: new Map([["M1", ["XX"]], ["M2", ["XX"]], ["M3", ["Y15"]], ["LO", ["XX"]], ["T15", ["Y15"]]]),
+    versions: (id) => id === "M1" ? [{ id: "V0", name: "master", drawn: false, chosen: false }, { id: "V1", name: "LOD1", drawn: true, chosen: true, level: "LOD1" }] : [],
+    x3d: new Map([["D1", [{ id: "X1", name: "D.01.61" }]]]), docLit: () => false, sketches: [{ id: "k1", name: "Cubo" }] });
+  const src3 = [{ id: "f2", name: "v9.em.json", kind: "file", graphs: [{ slot: "s2", name: "Temple", active: true, doc: () => d2, facts: f3, aux: [] }] }];
+  const t3 = { ...texts, space: { proxies: "Proxy", models: "Modelli", rmdoc: "RMDoc", rmsf: "RMSF", gis: "GIS", x3d: "Estrattori 3D", sketches: "Abbozzi", x3dOff: "spento" },
+    container: { alternative: "alt", livesIn: (e) => `vive in ${e}`, outOfStep: (n, a, b) => `${n} fuori passo: ${a} / ${b}`, follows: "segue" } };
+  const open = new Set(["s2|models/ep:XX/grp/S15", "s2|models/ep:Y15/grp/S15"]);
+  const rows = O.flattenOutliner({ sources: src3, opts: { ...O.DEFAULT_OPTS, dims: ["models"], firstOpen: "models" }, texts: t3, toggled: open });
+  const L = labels(rows); if (process.env.DUMP) console.log(L.join("\n"));
+  const xx = L.indexOf("      XX sec");
+  ok(xx >= 0 && L[xx + 1] === "        Survey2015", "Models by epoch: the container is a branch under XX sec");
+  ok(L[xx + 2] === "          TempluMare tileset" && rows[xx + 2].alt === true, "…its alternative first, marked as such");
+  ok(L.slice(xx, xx + 8).includes("          SM_OB_EST") && L.slice(xx, xx + 8).includes("          SM_OB_INT"), "…its members under it");
+  const podio = rows.find((r) => r.label === "SM_OB_PODIO" && r.key.includes("ep:XX"));
+  ok(!!podio && podio.note === "⟂ 2015" && podio.noteTitle === "vive in 2015", "a member in another epoch: listed under its container, its epoch said");
+  ok(rows.find((r) => r.label === "RMSF prato" && r.key.includes("ep:XX"))?.noteTitle === "segue", "a member without an epoch follows its container");
+  ok(L.includes("        Loose") && !rows.some((r) => r.label === "SM_OB_EST" && !r.key.includes("/grp/")), "a model in a container is not listed again under the epoch; a loose one is");
+  ok(L.includes("        Survey_2015_egm2008"), "the 2015 tileset (not a member) stays under 2015");
+  eq(rows.find((r) => r.label === "SM_OB_EST" && r.key.includes("ep:XX"))?.epochAt, "XX", "a row says the epoch it is listed under (the drag moves from it)");
+  ok(!rows.find((r) => r.label === "Survey2015")?.warn, "no reference (no own epoch, no tileset member): nothing out of step (s3Dgraphy)");
+  // the container with an epoch of its own (2015): the meshes in XX sec are out of step
+  d2.graph.edges.push(E2("Y15", "S15", "has_representation_model"));
+  const rows2 = O.flattenOutliner({ sources: src3, opts: { ...O.DEFAULT_OPTS, dims: ["models"], firstOpen: "models" }, texts: t3, toggled: open });
+  const c2 = rows2.filter((r) => r.label === "Survey2015");
+  eq(c2.length, 1, "with an epoch of its own the container is placed there only");
+  eq(c2[0].warn, "2 fuori passo: XX sec / 2015", "…and says its members out of step");
+  ok(rows2.some((r) => r.label === "SM_OB_EST" && r.note === "⟂ XX sec"), "…the members in XX sec under it, their epoch said");
+  // the Space's tree: versions under a model, the 3D extractors under their document, the sketches at the bottom
+  d2.graph.edges.pop();
+  const rows3 = O.flattenOutliner({ sources: src3, opts: { ...O.DEFAULT_OPTS, space: true }, texts: t3,
+    toggled: new Set(["s2|sp/XX/grp/S15", "s2|sp/XX/grp/S15/m/M1"]) });
+  const L3 = labels(rows3); if (process.env.DUMP) console.log(L3.join("\n"));
+  ok(rows3.some((r) => r.kind === "version" && r.label === "LOD1" && r.version?.drawn && r.version.rm === "M1"), "a model's versions under it (the one drawn said)");
+  const xr = rows3.find((r) => r.label === "D.01.61");
+  ok(!!xr && xr.skey === "x3d:X1" && xr.ghost === true, "a 3D extractor under its document where the document publishes, a ghost when not lit");
+  ok(L3.includes("      Estrattori 3D (1)") && L3.includes("        D.01"), "…in «Estrattori 3D», nested under the document");
+  ok(L3.at(-2)?.trim().startsWith("Abbozzi") && rows3.at(-1).skey === "sketch:k1", "the sketches out of the epochs, at the bottom");
+  ok(!rows3.some((r) => r.label === "D.01.61" && r.key.includes("sp/Y15")), "no extractor where its document publishes nothing");
 }
 console.log(`check-outliner-tree: ${checks} checks OK`);

@@ -47,6 +47,37 @@ export interface UnifiedDeps {
   selectedKeys?: () => ReadonlySet<string>;
   pickKey?: (row: URow, e: MouseEvent, order: string[]) => void;
   keyMenu?: (row: URow, anchor: HTMLElement, at: { x: number; y: number }) => void;
+  /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · a row dropped on an epoch: MOVE (a plain
+   *  drop) or EXTEND (with Alt); `dropLabel` says which, while dragging */
+  epochDrop?: (row: URow, epoch: string, extend: boolean) => void;
+  dropLabel?: (row: URow, epoch: string, extend: boolean) => string | null;
+  /** p.1 · the ⚠ of a container out of step: its menu («allinea…») */
+  warnMenu?: (row: URow, at: { x: number; y: number }) => void;
+  /** p.4 · the Space's controls on a row that has something in the scene */
+  space?: SpaceRowDeps;
+}
+
+/** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · what the old Outliner of the scene did on
+ *  a row, now on the one Outliner's rows in the Space: the arrow (selectable),
+ *  the level's chip and its menu, a container's alternative, the mark of a
+ *  load that failed, Isolate, Frame; a version's dot draws it. Local
+ *  preferences per person (`emstudio.space3d`), never in the em.json. */
+export interface SpaceRowDeps {
+  lockOpen: (key: string) => boolean;
+  toggleLock: (key: string) => void;
+  chip: (row: URow) => string | null;
+  chipMenu: (row: URow, at: { x: number; y: number }) => void;
+  alt: (row: URow) => string | null;
+  altMenu: (row: URow, at: { x: number; y: number }) => void;
+  failed: (row: URow) => string | null;
+  failMenu: (row: URow, at: { x: number; y: number }) => void;
+  isolated: () => string | null;
+  isolate: (row: URow) => void;
+  frame: (row: URow) => void;
+  chooseVersion: (row: URow) => void;
+  /** an extractor whose document is not lit, its eye forced on */
+  forced: (key: string) => boolean;
+  words: { arrow: string; isolate: string; frame: string; ghost: string };
 }
 
 export interface UnifiedApi {
@@ -114,8 +145,82 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       lab.append(" ", ds);
     }
     el.appendChild(lab);
+    if (r.version) {
+      el.classList.add("uo-version-row");
+      if (r.version.drawn) el.classList.add("uo-drawn");
+      const u = [r.version.level, ...(r.version.uses ?? [])].filter(Boolean).join(" · ");
+      if (u) { const x = document.createElement("span"); x.className = "uo-uses"; x.textContent = u; el.appendChild(x); }
+      if (r.version.auto) { const a = document.createElement("span"); a.className = "uo-auto"; a.textContent = "A"; el.appendChild(a); }
+    }
+    if (r.alt) el.classList.add("uo-alt");
+    if (r.ghost) el.classList.add("uo-ghost");
+    if (r.note) {
+      // MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 · a member living in another epoch: where
+      const n = document.createElement("span");
+      n.className = "uo-note";
+      n.dataset.note = "1";
+      n.textContent = r.note;
+      if (r.noteTitle) n.title = r.noteTitle;
+      el.appendChild(n);
+    }
+    if (r.warn) {
+      const w = document.createElement("button");
+      w.type = "button";
+      w.className = "uo-warn";
+      w.dataset.warn = "1";
+      w.textContent = "⚠";
+      w.title = r.warn;
+      el.appendChild(w);
+    }
+    const S = d.space;
+    if (S && (r.skey || r.kind === "node")) {
+      const failed = r.skey ? S.failed(r) : null;
+      if (failed) {
+        const f = document.createElement("button");
+        f.type = "button";
+        f.className = "uo-fail";
+        f.dataset.sp = "fail";
+        f.textContent = "⚠";
+        f.title = failed;
+        el.appendChild(f);
+      }
+      const chip = S.chip(r);
+      if (chip) {
+        const c = document.createElement("button");
+        c.type = "button";
+        c.className = "uo-chip";
+        c.dataset.sp = "lod";
+        c.textContent = `${chip} ▾`;
+        el.appendChild(c);
+      }
+      const alt = S.alt(r);
+      if (alt) {
+        const c = document.createElement("button");
+        c.type = "button";
+        c.className = "uo-chip uo-altchip";
+        c.dataset.sp = "alt";
+        c.textContent = `${alt} ▾`;
+        el.appendChild(c);
+      }
+      if (r.skey && !r.skey.startsWith("x3d:")) {
+        const iso = document.createElement("button");
+        iso.type = "button";
+        iso.className = "uo-mini" + (S.isolated() === r.skey ? " on" : "");
+        iso.dataset.sp = "isolate";
+        iso.textContent = "◎";
+        iso.title = S.words.isolate;
+        const fr = document.createElement("button");
+        fr.type = "button";
+        fr.className = "uo-mini";
+        fr.dataset.sp = "frame";
+        fr.textContent = "⤢";
+        fr.title = S.words.frame;
+        el.append(iso, fr);
+      }
+    }
     const tip = r.desc ? `${r.label} — ${r.desc}` : r.label;
     el.title = r.absent ? `${tip} — ${d.word("absent")}` : r.title ? `${tip} — ${r.title}` : tip;
+    if (r.ghost && S) el.title = `${tip} — ${S.words.ghost}`;
     if (r.color) el.style.setProperty("--src-color", r.color);
     if (r.badge) {
       // MICRO-PIU-FONTI · ONE active source, changed explicitly: the badge says
@@ -135,8 +240,18 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       c.textContent = r.count;
       el.appendChild(c);
     }
+    if (S && r.skey && !r.ghost) {
+      const lk = S.lockOpen(r.skey);
+      const a = document.createElement("button");
+      a.type = "button";
+      a.className = "uo-arrow" + (lk ? "" : " uo-arrow-off");
+      a.dataset.sp = "arrow";
+      a.textContent = "↖";
+      a.title = S.words.arrow;
+      el.appendChild(a);
+    }
     if (r.eye || r.gis) {
-      const on = r.eye ? d.eyeOpen(r.eye) : d.gisOpen(r.gis!);
+      const on = r.ghost && S ? S.forced(r.eye!) : r.eye ? d.eyeOpen(r.eye) : d.gisOpen(r.gis!);
       const b = document.createElement("button");
       b.type = "button";
       b.className = "uo-eye" + (on ? "" : " uo-eye-off");
@@ -203,12 +318,112 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     }
     const m = t.closest<HTMLElement>("[data-menu]");
     if (m) { e.stopPropagation(); d.menu(r, m); return; }
+    const box = (x: HTMLElement) => { const b = x.getBoundingClientRect(); return { x: b.left, y: b.bottom + 2 }; };
+    const w = t.closest<HTMLElement>("[data-warn]");
+    if (w) { e.stopPropagation(); d.warnMenu?.(r, box(w)); return; }
+    const sp = t.closest<HTMLElement>("[data-sp]");
+    if (sp && d.space) {
+      e.stopPropagation();
+      const S = d.space;
+      const what = sp.dataset.sp;
+      if (what === "arrow" && r.skey) S.toggleLock(r.skey);
+      else if (what === "lod") S.chipMenu(r, box(sp));
+      else if (what === "alt") S.altMenu(r, box(sp));
+      else if (what === "fail") S.failMenu(r, box(sp));
+      else if (what === "isolate") S.isolate(r);
+      else if (what === "frame") S.frame(r);
+      paint(true);
+      return;
+    }
+    if (r.version && d.space) { d.space.chooseVersion(r); paint(true); return; }
     const badge = t.closest<HTMLElement>("[data-badge]");
     if (badge) { e.stopPropagation(); if (r.badge === "activate") d.activate?.(r); return; }
     if (r.skey && d.pickKey) { d.pickKey(r, e, rows.filter((x) => x.skey).map((x) => x.skey!)); paint(true); return; }
     if (r.id || r.kind === "graph" || r.kind === "source") { d.pick(r, e); paint(true); return; }
     if (r.parent) toggleOpen(r);
   });
+  // MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · a row dragged onto an epoch: a plain
+  // drop MOVES it, with Alt it EXTENDS it there. With the pointer, not HTML5
+  // drag and drop (the desktop shell keeps that for the Finder's files — the
+  // lesson of the Assets, MICRO-SPAZIO-CONTAINER A1). A line under the epoch
+  // and a label by the pointer say which of the two will happen; Esc cancels.
+  let dragEnded = 0;
+  layer.addEventListener("pointerdown", (e0) => {
+    if (e0.button !== 0 || !d.epochDrop) return;
+    const r = rowOf(e0.target);
+    if (!r || r.epochAt === undefined || !r.id || r.version || (e0.target as HTMLElement).closest("button,[data-tw]")) return;
+    const x0 = e0.clientX, y0 = e0.clientY;
+    let on = false;
+    let target: { el: HTMLElement; epoch: string } | null = null;
+    let alt = e0.altKey;
+    let tag: HTMLElement | null = null;
+    let lx = x0, ly = y0;
+    let auto = 0;
+    const clear = () => { target?.el.classList.remove("uo-drop", "uo-drop-extend"); target = null; };
+    const say = () => {
+      if (!tag) return;
+      const txt = target ? d.dropLabel?.(r, target.epoch, alt) ?? null : null;
+      tag.textContent = txt ?? r.label;
+      tag.classList.toggle("uo-dragtag-none", !txt);
+      tag.classList.toggle("uo-dragtag-extend", !!txt && alt);
+      tag.style.left = `${lx + 14}px`;
+      tag.style.top = `${ly + 10}px`;
+      if (target) { target.el.classList.add("uo-drop"); target.el.classList.toggle("uo-drop-extend", alt); }
+    };
+    const find = () => {
+      const under = document.elementFromPoint(lx, ly)?.closest<HTMLElement>(".uo-row");
+      const tr = under && layer.contains(under) ? rows[Number(under.dataset.i ?? -1)] : null;
+      const ep = tr && tr.id && tr.glyph === "EpochNode" ? tr.id : null;
+      if (target && (!under || target.el !== under || target.epoch !== ep)) clear();
+      if (ep && under && !target && (alt || ep !== r.epochAt) && d.dropLabel?.(r, ep, alt)) target = { el: under, epoch: ep };
+      say();
+    };
+    const move = (e: PointerEvent) => {
+      lx = e.clientX; ly = e.clientY; alt = e.altKey;
+      if (!on) {
+        if (Math.hypot(lx - x0, ly - y0) < 6) return;
+        on = true;
+        tag = document.createElement("div");
+        tag.className = "uo-dragtag";
+        tag.dataset.uoDrag = "1";
+        document.body.appendChild(tag);
+        root.classList.add("uo-dragging");
+        window.getSelection()?.removeAllRanges();
+      }
+      e.preventDefault();
+      const b = scroll.getBoundingClientRect();
+      cancelAnimationFrame(auto);
+      const edge = ly < b.top + 24 ? -1 : ly > b.bottom - 24 ? 1 : 0;
+      if (edge) {
+        const step = () => { scroll.scrollTop += edge * 12; paint(); find(); auto = requestAnimationFrame(step); };
+        auto = requestAnimationFrame(step);
+      }
+      find();
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(false); return; }
+      if (e.key === "Alt" && on) { alt = e.type === "keydown"; clear(); find(); }
+    };
+    const end = (drop: boolean) => {
+      document.removeEventListener("pointermove", move, true);
+      document.removeEventListener("pointerup", up, true);
+      document.removeEventListener("keydown", key, true);
+      document.removeEventListener("keyup", key, true);
+      cancelAnimationFrame(auto);
+      root.classList.remove("uo-dragging");
+      tag?.remove();
+      const t2 = target;
+      clear();
+      if (on) dragEnded = Date.now();
+      if (drop && on && t2) d.epochDrop!(r, t2.epoch, alt);
+    };
+    const up = (e: PointerEvent) => { alt = e.altKey; end(true); };
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("pointerup", up, true);
+    document.addEventListener("keydown", key, true);
+    document.addEventListener("keyup", key, true);
+  });
+  layer.addEventListener("click", (e) => { if (Date.now() - dragEnded < 300) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
   layer.addEventListener("dblclick", (e) => {
     const r = rowOf(e.target);
     if (!r || (e.target as HTMLElement).closest("[data-tw],[data-eye],[data-menu]")) return;

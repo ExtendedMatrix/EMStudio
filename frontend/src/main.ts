@@ -208,8 +208,13 @@ import {
 import { buildNodeList, rowMark, type NodeListCallbacks } from "./nodelist";
 // MICRO-OUTLINER-UNICO · the one Outliner (sources → graphs → every dimension)
 import { emptyFacts, type Dim, type OutlinerOpts, type OutlinerSourceIn, type ThreeFacts, type URow } from "./outliner-tree";
-import { mountUnifiedOutliner, outlinerSelector, readOpts } from "./unified-outliner";
+import { buildOutline } from "./outline";
+import { epochKind, epochsOf as epochsOfNode, planDoes, planEpochs, type EpochPlan, type EpochVerb } from "./epoch-moves";
+import { mountUnifiedOutliner, outlinerSelector, readOpts, type SpaceRowDeps } from "./unified-outliner";
 import { helpGlyph } from "./help-glyph";
+import { installHelpTips } from "./help-tip";
+// MICRO-OUTLINER-EPOCHE-TOOLTIP p.3 · every «?» of the app opens beside itself
+installHelpTips();
 import { gisLayersOf, surfacesOf } from "./gis-scene";
 import { issues as computeIssues, unitOfIssue, type Issue, type IssueFixers, type IssueSources } from "./issues";
 import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
@@ -2584,6 +2589,10 @@ window.__EM_SCENE__ = () => {
   /** the warnings' table (the status bar's ⚠ → «Apri la tabella degli avvisi») */
   openIssuesTable: () => openIssuesTable(),
   uoRows: (winId?: string) => [...unifiedApis.entries()].filter(([k]) => !winId || k === winId).flatMap(([, a]) => a.rows()),
+  /** MICRO-OUTLINER-EPOCHE-TOOLTIP · the plan of a move / extend / remove (nothing written), the gesture, a sketch at the 3D cursor */
+  epochPlan: (id: string, verb: EpochVerb, epoch: string, from?: string) => (store ? planEpochs(store.doc, id, verb, epoch, from ?? null) : null),
+  epochGesture: (id: string, verb: EpochVerb, epoch: string, from?: string) => epochGesture(id, verb, epoch, from ?? null),
+  uoAddSketch: (shapeId: string) => { const w = windowsOf().find((x) => x.type === "scene"); if (w) addShapeIn(w, shapeId); return !!w; },
   /** MICRO-MEMORIA-SESSIONE · a line in the Log (p.3), the session's copy written now (p.2) */
   logLine: (m: string) => logInfo(m),
   sessionCopy: () => writeSessionCopy(),
@@ -4237,6 +4246,7 @@ function renderInspectorInto(host: HTMLElement): void {
       },
       continuity: (id) => continuityAction(id),
       endOfUnit: (id) => renderBrSection(id),
+      epochMoves: (id) => renderEpochMoves(id),
       epochInstances: (id) => renderInstancesSection(id),
       onAddPhase: (epochId) => {
         const ph = store!.addPhase(epochId, (n) => t("l.phaseDefault", { n }));
@@ -11882,7 +11892,8 @@ function unifiedFacts(): ThreeFacts {
   if (!st) return emptyFacts();
   const sp = currentSpace();
   const m = unifiedFactsMemo;
-  if (m && m.store === st && m.rev === st.rev && m.sp === sp) return m.v;
+  // the sketches are the session's, not the graph's: read live, memo or not
+  if (m && m.store === st && m.rev === st.rev && m.sp === sp) { m.v.sketches = sp ? listSketches().map((x) => ({ id: x.id, name: x.name })) : []; return m.v; }
   const doc = st.doc;
   const v = emptyFacts();
   for (const id of unitsWithout3d(doc).with) v.proxies.add(id);
@@ -11902,8 +11913,241 @@ function unifiedFacts(): ThreeFacts {
     if (e.edge_type === "has_representation_model") { const l = v.rmEpochs.get(e.target); if (l) l.push(e.source); else v.rmEpochs.set(e.target, [e.source]); }
   for (const s of surfacesOf(doc as Parameters<typeof surfacesOf>[0])) v.gis.push({ id: s.id, name: s.name, kind: "surface" });
   for (const l of gisLayersOf(doc as Parameters<typeof gisLayersOf>[0])) v.gis.push({ id: l.id, name: l.name, kind: l.format === "geotiff" ? "raster" : "layer" });
+  // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the rows of the old Outliner of the
+  // scene: a model's versions, the extractors anchored in 3D under their
+  // document, the documents lit, the sketches (read live, below)
+  if (sp) {
+    v.versions = (rmId) => {
+      const r = currentSpace()?.rms.find((x) => x.id === rmId);
+      if (!r || (r.versions?.length ?? 0) < 2) return [];
+      const h = [...sceneHandles.values()][0];
+      return spaceRmVersions(r, h?.drawnUrl(`rm:${r.id}`) ?? "");
+    };
+    v.x3d = extractors3d(doc);
+    v.docLit = (docId, epochId) => docLitIn(docId, epochId);
+  }
   unifiedFactsMemo = { store: st, rev: st.rev, sp, v };
+  v.sketches = sp ? listSketches().map((x) => ({ id: x.id, name: x.name })) : [];
   return v;
+}
+
+// ── MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · an object (or a whole container) in more
+// epochs: MOVE or EXTEND (E.D., 13 Nov 2026) ─────────────────────────────────
+//
+// The rule is `epoch-moves.ts` (the edges s3Dgraphy reads: a unit's
+// `has_first_epoch` / `survive_in_epoch`, an RM's `epoch → has_representation_model`,
+// a container's members with it); here the gesture: a container's preview
+// (how many, which, from where to where) and ONE step of undo.
+
+const epochNameOf = (st: DocumentStore, xs: string[]): string => xs.map((x) => String(st.node(x)?.name ?? x)).join(", ") || "—";
+
+/** the words of a plan: the members without an epoch, the documents, the alternative split */
+function epochPlanNotes(st: DocumentStore, plan: EpochPlan): string[] {
+  const out: string[] = [];
+  if (plan.following.length) out.push(tn("ep.following", plan.following.length));
+  if (plan.documents.length) out.push(t("ep.documentsStay", { docs: epochNameOf(st, plan.documents) }));
+  for (const w of plan.warnings) if (w.code === "alternative-split") out.push(t("ep.altSplit", { group: String(st.node(w.group)?.name ?? w.group) }));
+  return out;
+}
+
+async function epochGesture(id: string, verb: EpochVerb, epoch: string, from: string | null = null): Promise<boolean> {
+  const st = store;
+  if (!st || refuseReadOnly()) return false;
+  const plan = planEpochs(st.doc, id, verb, epoch, from);
+  const name = String(st.node(id)?.name ?? id);
+  const ep = String(st.node(epoch)?.name ?? epoch);
+  if (!planDoes(plan)) {
+    const why = plan.refused.find((r) => r.id === id) ?? plan.refused[0];
+    toast(t(`ep.refused.${why?.why ?? "already"}`, { name, epoch: ep }));
+    return false;
+  }
+  const notes = epochPlanNotes(st, plan);
+  if (plan.container) {
+    // a container: the preview (how many, which, from where to where), asked
+    const lines = plan.items.slice(0, 12).map((x) => `• ${x.name}: ${epochNameOf(st, x.before)} → ${epochNameOf(st, x.after)}`);
+    if (plan.items.length > 12) lines.push(t("al.removeMore", { n: String(plan.items.length - 12) }));
+    const ask = `${t(`ep.ask.${verb}`, { name, epoch: ep, n: String(plan.items.length) })}\n\n${lines.join("\n")}${notes.length ? `\n\n${notes.join("\n")}` : ""}`;
+    if (!(await askConfirm(ask, { kind: "epoch-plan" }))) return false;
+  }
+  st.batch(() => {
+    for (const e of plan.remove) st.deleteEdge(e);
+    for (const e of plan.add) if (!st.hasEdge(e.source, e.target, String(e.edge_type))) st.addEdge(e.source, e.target, String(e.edge_type), undefined, e.id);
+  });
+  const msg = [t(`ep.done.${verb}`, { name, epoch: ep, n: String(plan.items.length) }), ...notes.filter((_, i) => i >= (plan.following.length ? 1 : 0))].join(" · ");
+  logInfo(msg, [id, epoch]);
+  toastUndo(msg, st);
+  refreshInspector();
+  return true;
+}
+
+/** the words of a drop while dragging (null: nothing would happen there) */
+let epochDropMemo: { key: string; label: string | null } | null = null;
+function epochDropLabel(id: string, epoch: string, extend: boolean, from: string | null): string | null {
+  const st = store;
+  if (!st) return null;
+  const key = `${st.rev}|${id}|${epoch}|${extend}|${from}`;
+  if (epochDropMemo?.key === key) return epochDropMemo.label;
+  const plan = planEpochs(st.doc, id, extend ? "extend" : "move", epoch, from);
+  const ep = String(st.node(epoch)?.name ?? epoch);
+  const label = !planDoes(plan) ? null
+    : `${t(extend ? "ep.dropExtend" : "ep.dropMove", { epoch: ep })}${plan.container ? ` · ${tn("ep.dropMembers", plan.items.filter((x) => x.member).length)}` : ""}`;
+  epochDropMemo = { key, label };
+  return label;
+}
+
+/** The Inspector's «Epoche»: every epoch of the graph (the phases under their
+ *  epoch), where the object is said, and beside each the two clear buttons —
+ *  «Sposta qui», «Estendi anche qui» — or «Togli da qui» on an epoch it was
+ *  extended to. A container: the same for all its members (with the preview). */
+function renderEpochMoves(id: string): HTMLElement | null {
+  const st = store;
+  const n = st?.node(id);
+  if (!st || !n) return null;
+  const kind = epochKind(n);
+  if (!kind) return null;
+  const outline = buildOutline(st.doc, st.liveNodes(), () => false);
+  if (!outline.epochs.length) return null;
+  // what the object is in: a unit's / an RM's own epochs; a container's, its members' and its own
+  let mine: string[];
+  let first: string | null = null;
+  if (kind === "group") {
+    const set = new Set(epochsOfNode(st.doc, id));
+    for (const e of st.doc.graph.edges) if (e.edge_type === "is_in_representation_model_group" && e.target === id)
+      for (const x of epochsOfNode(st.doc, e.source)) set.add(x);
+    mine = [...set];
+  } else {
+    mine = epochsOfNode(st.doc, id);
+    if (kind === "unit") first = st.doc.graph.edges.find((e) => e.source === id && e.edge_type === "has_first_epoch")?.target ?? null;
+  }
+  const sec = document.createElement("div");
+  sec.className = "insp-epochs";
+  sec.dataset.epochMoves = id;
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("ep.sect");
+  h.append(" ", helpGlyph(t(kind === "group" ? "ep.helpGroup" : kind === "rm" ? "ep.helpRm" : "ep.helpUnit"), "epoch-moves"));
+  sec.appendChild(h);
+  const list = document.createElement("div");
+  list.className = "insp-ep-list";
+  for (const e of outline.epochs) {
+    const row = document.createElement("div");
+    row.className = "insp-ep-row";
+    row.dataset.epoch = e.node.id;
+    row.style.paddingLeft = `${e.depth * 12}px`;
+    const here = mine.includes(e.node.id);
+    const lab = document.createElement("span");
+    lab.className = "insp-ep-name" + (here ? " here" : "");
+    lab.textContent = `${here ? "✓ " : ""}${String(e.node.name ?? e.node.id)}`;
+    row.appendChild(lab);
+    if (here) {
+      const st0 = document.createElement("span");
+      st0.className = "insp-ep-state";
+      st0.textContent = kind === "unit" ? t(e.node.id === first ? "ep.first" : "ep.extended") : t("ep.isHere");
+      row.appendChild(st0);
+    }
+    const btn = (verb: EpochVerb, label: string) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "insp-btn insp-ep-btn";
+      b.dataset.epochVerb = verb;
+      b.textContent = label;
+      b.title = t(`ep.title.${verb}`, { epoch: String(e.node.name ?? e.node.id) });
+      b.addEventListener("click", () => { void epochGesture(id, verb, e.node.id); });
+      row.appendChild(b);
+    };
+    if (!here) { btn("move", t("ep.moveHere")); btn("extend", t("ep.extendHere")); }
+    else if (kind === "unit" ? e.node.id !== first : mine.length > 1) btn("remove", t("ep.removeHere"));
+    list.appendChild(row);
+  }
+  sec.appendChild(list);
+  return sec;
+}
+
+/** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the extractors with a valence in 3D: an
+ *  extractor `extracted_from` an `annotation_region` whose kind is a 3D one
+ *  (point, line, polyline) with its vertices in `data.coords` (node datamodel
+ *  1.6.15), `is_on_resource` the document it reads — by that document. On
+ *  Templu Mare v9: 1 of 302 (D.01.61, a spot height on D.01). */
+function extractors3d(doc: EmDocument): Map<string, Array<{ id: string; name: string; vertices: [number, number, number][]; kind: string }>> {
+  const out = new Map<string, Array<{ id: string; name: string; vertices: [number, number, number][]; kind: string }>>();
+  const byId = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  const regions = new Map<string, EmNode>();
+  for (const n of doc.graph.nodes) if (n.node_type === "annotation_region" && !isRemoved(n)) regions.set(n.id, n);
+  if (!regions.size) return out;
+  const onDoc = new Map<string, string>();
+  for (const e of doc.graph.edges) if (e.edge_type === "is_on_resource" && regions.has(e.source) && byId.get(e.target)?.node_type === "document") onDoc.set(e.source, e.target);
+  for (const e of doc.graph.edges) {
+    if (e.edge_type !== "extracted_from" || !regions.has(e.target)) continue;
+    const x = byId.get(e.source);
+    if (!x || isRemoved(x) || x.node_type !== "extractor") continue;
+    const r = regions.get(e.target)!;
+    const g = chain.geometryOfRegion(doc, r);
+    const vs = readingVertices(g);
+    const d0 = onDoc.get(r.id) ?? String(((r.data ?? {}) as Record<string, unknown>).resource_id ?? "");
+    if (!vs?.length || !byId.has(d0)) continue;
+    const l = out.get(d0) ?? out.set(d0, []).get(d0)!;
+    l.push({ id: x.id, name: String(x.name ?? x.id), vertices: vs, kind: g.kind });
+  }
+  return out;
+}
+
+/** is the document of this extractor lit in the scene's epoch now? */
+function extractorLitNow(xid: string): boolean {
+  const st = store;
+  const sp = currentSpace();
+  if (!st || !sp) return false;
+  const cur = spaceEpochOf(sp);
+  if (!cur) return false;
+  for (const [docId, xs] of extractors3d(st.doc)) if (xs.some((x) => x.id === xid)) return docLitIn(docId, cur);
+  return false;
+}
+
+/** …a document lit in an epoch of the Space: a model it publishes (an RM, an
+ *  RMDoc, a container's member or its alternative) is drawn there, its eye on */
+function docLitIn(docId: string, epochId: string): boolean {
+  const sp = currentSpace();
+  const st = store;
+  if (!sp || !st) return false;
+  const pub = new Set<string>();
+  for (const e of st.doc.graph.edges)
+    if (e.source === docId && (e.edge_type === "has_representation_model" || e.edge_type === "has_representation_model_doc")) pub.add(e.target);
+  if (!pub.size) return false;
+  const hidden = new Set(space3dPrefs().hidden);
+  return (sp.summary(epochId)?.rms ?? []).some((r) => (pub.has(r.id) || (!!r.group && pub.has(r.group)) || (!!r.altOf && pub.has(r.altOf)))
+    && !hidden.has(`rm:${r.id}`));
+}
+
+/** …and their marks in the scene: an extractor shows where its document is lit
+ *  and its eye is on; one whose document is not lit only when its eye is
+ *  FORCED, as a ghost (a dashed mark, «its document is not lit»). The anchor
+ *  is in the document's model frame (the scene's, Y up, as the Viewer draws
+ *  the same readings): the model moved, its extractors move with it. */
+let x3dMarksMemo: { key: string; marks: SceneMark[] } | null = null;
+function extractorMarks(winId?: string): SceneMark[] {
+  const st = store;
+  const sp = currentSpace();
+  if (!st || !sp) return [];
+  const p = space3dPrefs();
+  const cur = spaceEpochOf(sp) ?? "";
+  const key = `${st.rev}|${spaceVersion}|${cur}|${p.hidden.length}:${p.hidden.join(",").length}|${(p.forced ?? []).join(",")}|${selectedId ?? ""}`;
+  if (x3dMarksMemo?.key === key) return x3dMarksMemo.marks;
+  const hidden = new Set(p.hidden);
+  const forced = new Set(p.forced ?? []);
+  const marks: SceneMark[] = [];
+  for (const [docId, xs] of extractors3d(st.doc)) {
+    const lit = !!cur && docLitIn(docId, cur);
+    for (const x of xs) {
+      const k = `x3d:${x.id}`;
+      const shown = lit ? !hidden.has(k) : forced.has(k);
+      if (!shown) continue;
+      const res = chain.resultOf(st.doc, x.id);
+      marks.push({ id: k, kind: x.kind === "point" ? "point" : x.kind === "line" ? "line" : "polyline", vertices: x.vertices.map((q) => [q[0], q[1], q[2]] as V3),
+        label: `${x.name}${res ? ` · ${res}` : ""}${lit ? "" : ` · ${t("uo.x3dGhostShort")}`}`, selected: selectedId === x.id, ...(lit ? {} : { ghost: true }) });
+    }
+  }
+  void winId;
+  x3dMarksMemo = { key, marks };
+  return marks;
 }
 
 /** the sources: the open files with their graphs, then the graphs with no file */
@@ -12292,7 +12536,10 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     sources: unifiedSources,
     texts: () => ({ dim: uoDimWords(), noEpoch: t("uo.noEpoch"), typeLabel: unitTypeLabel, sourceNone: t("uo.noFile"), empty: t("uo.empty"),
                     noSources: t("uo.noSources"),
-                    space: { proxies: t("uo.sp.proxies"), models: t("uo.sp.models"), rmdoc: t("uo.sp.rmdoc"), rmsf: t("uo.sp.rmsf"), gis: t("uo.sp.gis") } }),
+                    space: { proxies: t("uo.sp.proxies"), models: t("uo.sp.models"), rmdoc: t("uo.sp.rmdoc"), rmsf: t("uo.sp.rmsf"), gis: t("uo.sp.gis"),
+                             x3d: t("uo.sp.x3d"), sketches: t("s3.sketches"), x3dOff: t("uo.x3dGhost") },
+                    container: { alternative: t("uo.c.alternative"), livesIn: (e) => t("uo.c.livesIn", { epochs: e }),
+                                 outOfStep: (n, theirs, ref) => t("al.epochsOut", { n: String(n), theirs, ref }), follows: t("uo.c.follows") } }),
     opts: () => unifiedOptsOf(win),
     toggled: () => new Set((winCurrent(win, "outliner.toggled") as string[] | null) ?? []),
     setToggled: (s) => setWinCurrent(win, "outliner.toggled", s.size ? [...s] : null),
@@ -12308,6 +12555,14 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     eyeOpen: (k) => !space3dPrefs().hidden.includes(k),
     toggleEye: (k) => {
       const p = space3dPrefs();
+      // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · an extractor whose document is not lit:
+      // its eye is FORCED (a ghost in the scene), not hidden / shown
+      if (k.startsWith("x3d:") && !extractorLitNow(k.slice(4))) {
+        const f = new Set(p.forced ?? []);
+        if (f.has(k)) f.delete(k); else f.add(k);
+        setSpace3dPrefs({ ...p, forced: [...f] });
+        return;
+      }
       const h = new Set(p.hidden);
       if (h.has(k)) h.delete(k); else h.add(k);
       setSpace3dPrefs({ ...p, hidden: [...h] });
@@ -12333,6 +12588,18 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     word: (k) => t(k === "eye" ? "uo.eye" : k === "menu" ? "uo.menu" : k === "active" ? "src.badgeActive"
       : k === "activate" ? "src.badgeActivate" : "uo.absent"),
     activate: (r) => { if (r.kind === "source") activateSource(r.source ?? ""); },
+    // MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · a row dropped on an epoch: moved (or, with Alt, extended)
+    epochDrop: (r: URow, epoch: string, extend: boolean) => { if (r.id) void epochGesture(r.id, extend ? "extend" : "move", epoch, r.epochAt || null); },
+    dropLabel: (r: URow, epoch: string, extend: boolean) => (r.id && r.slot === emtree.activeId ? epochDropLabel(r.id, epoch, extend, r.epochAt || null) : null),
+    // p.1 · a container out of step: «Allinea le epoche dei membri…» (MICRO-SPAZIO-CONTAINER's)
+    warnMenu: (r: URow, at: { x: number; y: number }) => {
+      if (!r.id) return;
+      const c = { id: r.id, name: r.label };
+      spaceMenu(at.x, at.y, r.label, [
+        { label: t("al.alignShort"), act: "al-align", run: () => { void alignContainerEpochs(c); } },
+        { label: t("uo.c.inspect"), act: "inspect", run: () => { select(r.id!); refreshInspector(); } },
+      ]);
+    },
     // MICRO-SPAZIO-CONTAINER p.6 (E.D., 13 Nov 2026: a click on a proxy jumped to its
     // unit) · in the Space a row of the 3D selects the OBJECT and stays there:
     // the Space's one selection (⌘/Ctrl adds, ⇧ a range); the unit is reached
@@ -12345,7 +12612,57 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
         setSpaceSel(clickOutliner(spaceSel(), r.skey, { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }, order));
       },
       keyMenu: (r: URow, _anchor: HTMLElement, at: { x: number; y: number }) => outlinerKeyMenu(r, at),
+      space: spaceRowDeps(),
     } : {}),
+  };
+}
+
+/** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the controls of the old Outliner of the
+ *  scene on the one Outliner's rows, in the Space: the same functions, the same
+ *  local preferences (`emstudio.space3d`) */
+function spaceRowDeps(): SpaceRowDeps {
+  const rmOf = (r: URow) => (r.skey?.startsWith("rm:") ? currentSpace()?.rms.find((x) => x.id === r.skey!.slice(3)) ?? null : null);
+  const groupOfRow = (r: URow): string | null => {
+    const sp = currentSpace();
+    if (!sp || !r.id) return null;
+    return sp.rmGroups.has(r.id) && sp.rms.some((x) => x.altOf === r.id) ? r.id : null;
+  };
+  const membersOfRow = (gid: string) => (currentSpace()?.rms ?? []).filter((x) => x.group === gid && !x.resource?.tiles).map((x) => x.id);
+  return {
+    lockOpen: (k) => !space3dPrefs().locked.includes(k),
+    toggleLock: (k) => {
+      const p = space3dPrefs();
+      const s2 = new Set(p.locked);
+      if (s2.has(k)) s2.delete(k); else s2.add(k);
+      setSpace3dPrefs({ ...p, locked: [...s2] });
+    },
+    chip: (r) => {
+      const rm = rmOf(r);
+      if (rm) return spaceRmChip(rm, currentSpace());
+      return groupOfRow(r) || (r.glyph === "RepresentationModelNodeGroup" && r.id && membersOfRow(r.id).length) ? "LOD" : null;
+    },
+    chipMenu: (r, at) => {
+      const rm = rmOf(r);
+      const ids = rm ? [rm.id] : r.id ? membersOfRow(r.id) : [];
+      spaceMenu(at.x, at.y, rm ? r.label : `${r.label} · ${t("lod.nModels", { n: String(ids.length) })}`,
+        [...(rm ? [] : wholeMenuEntries({ kind: "rmgroup", id: r.id ?? "" })), ...lodMenuEntries(ids)]);
+    },
+    alt: (r) => { const g = groupOfRow(r); return g ? altWord(g, altModeOf(g)) : null; },
+    altMenu: (r, at) => { const g = groupOfRow(r); if (g) spaceMenu(at.x, at.y, r.label, altMenuEntries(g)); },
+    failed: (r) => (r.skey ? modelFailureOf(r.skey) ?? null : null),
+    failMenu: (r, at) => spaceMenu(at.x, at.y, r.label, failMenuEntries({ failed: r.skey ? modelFailureOf(r.skey) : undefined })),
+    isolated: () => spaceIsolated,
+    isolate: (r) => { if (!r.skey) return; spaceIsolated = spaceIsolated === r.skey ? null : r.skey; refreshSurfaces("scene"); refreshSurfaces("outliner"); },
+    frame: (r) => { if (!r.skey) return; let ok = false; for (const h of sceneHandles.values()) ok = h.frameKeys([r.skey]) || ok; if (!ok) toast(t("uo.sp.notDrawn")); },
+    chooseVersion: (r) => {
+      if (!r.version) return;
+      const rm = currentSpace()?.rms.find((x) => x.id === r.version!.rm);
+      const v = rm?.versions?.find((x) => x.id === r.version!.id);
+      if (!rm || !drawableVersions(rm).some((x) => x.id === r.version!.id)) { toast(rm && v ? levelWhyNot(rm, v) : t("ver.notDrawable")); return; }
+      void chooseLevels([[rm.id, r.version.id]]);
+    },
+    forced: (k) => (space3dPrefs().forced ?? []).includes(k),
+    words: { arrow: t("s3.arrow"), isolate: t("s3.isolate"), frame: t("s3.frame"), ghost: t("uo.x3dGhost") },
   };
 }
 
@@ -12355,6 +12672,21 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
 function outlinerKeyMenu(r: URow, at: { x: number; y: number }): void {
   const sp = currentSpace();
   const key = r.skey!;
+  // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · a sketch: the scene's own menu (associate
+  // to a unit…, create a unit, frame, isolate, discard); an extractor: its chain
+  if (key.startsWith("sketch:")) {
+    const ent = [...sceneHandles.entries()].find(([wid]) => winById(wid));
+    const w = ent ? winById(ent[0]) : undefined;
+    if (ent && w) sceneMenu(w, ent[1], { kind: "sketch", id: key.slice(7), x: at.x, y: at.y, point: null });
+    return;
+  }
+  if (key.startsWith("x3d:")) {
+    const xid = key.slice(4);
+    spaceMenu(at.x, at.y, r.label, [
+      { label: t("uo.x3dChain"), act: "chain", run: () => { select(xid); refreshInspector(); } },
+    ]);
+    return;
+  }
   const keys = spaceSel(sp).keys.includes(key) ? spaceSel(sp).keys : [key];
   const proxies = keys.filter((k) => k.startsWith("proxy:")).map((k) => k.slice(6));
   const id = key.slice(key.indexOf(":") + 1);
@@ -29468,6 +29800,7 @@ let spaceQuery = "";
 /** the last pointer over a scene, where Shift+A opens its menu */
 let spacePointer: { x: number; y: number } | null = null;
 onSketches(() => {
+  refreshSurfaces("outliner");   // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the sketches are rows of the one Outliner
   for (const h of sceneHandles.values()) h.syncSketches();
   if (spaceSketchSel && !sketchById(spaceSketchSel)) spaceSketchSel = null;
   for (const id of [...spaceSketchSet]) if (!sketchById(id)) spaceSketchSet.delete(id);
@@ -32548,6 +32881,37 @@ function renderOutlinerAndLayers(el: HTMLElement, win: Win, ...rest: [Parameters
   renderOutliner(el, ...rest);
   const sec = spaceLayerSections.get(win.id)?.();
   if (sec) el.querySelector(".sol-head")?.after(sec);
+  // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the one Outliner does what this panel did
+  // (the scene's view): it stays behind T for one more version, and says so
+  if (unifiedOutlinerOnScreen()) {
+    const r = document.createElement("div");
+    r.className = "sol-retiring";
+    r.dataset.solRetiring = "1";
+    r.textContent = t("s3.retiring");
+    el.querySelector(".sol-head")?.before(r);
+  }
+}
+/** MICRO-PROVA-DEV47 p.3b · the level and the mode of a model, its chip
+ *  («LOD2 · uso», «auto · LOD0»); null: no level to say */
+function spaceRmChip(r: SpaceRM, sp: Space | null): string | null {
+  const nm = rmShown(r.id, sp);
+  if (!nm?.level) return null;
+  return (r.versions?.length ?? 0) > 1
+    ? (versionModeOf(r.id).mode === "auto" ? `${modeWord("auto")} · ${((dv) => dv ? autoLevelName(r, dv) : nm.level)(drawnVersionOf(r))}` : `${nm.level} · ${modeWord(versionModeOf(r.id).mode)}`)
+    : nm.level;
+}
+/** p.10 · a model's versions: the one drawn (by its url in the scene), the one
+ *  chosen, its uses and its level from the chain; «A» on the one the distance drew */
+function spaceRmVersions(r: SpaceRM, drawnUrl: string): Array<{ id: string; name: string; drawn: boolean; chosen: boolean; uses: string[]; level?: string; auto?: boolean }> {
+  const tail = (u: string) => paths.leafName(u);
+  return (r.versions ?? []).map((v) => {
+    const dv = drawableVersions(r).find((x) => x.id === v.id);
+    const isDrawn = !!drawnUrl && ((!!v.url && tail(drawnUrl) === tail(v.url)) || (!!dv && tail(drawnUrl) === tail(dv.fetch)));
+    const mode = versionModeOf(r.id).mode;
+    return { id: v.id, name: v.name + (v.master ? ` · ${t("s3.master")}` : ""),
+      drawn: isDrawn, chosen: mode === "manual" ? versionModeOf(r.id).versionId === v.id : r.choice?.entry?.id === v.id,
+      uses: v.uses ?? [], ...(v.master ? {} : { level: levelShortOf(r, v.id) }), ...(isDrawn && mode === "auto" ? { auto: true } : {}) };
+  });
 }
 function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void {
   const prefs = space3dPrefs();
@@ -32558,7 +32922,6 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     epochs: sp.epochs.map((e) => ({ id: e.id, name: e.name, current: e.id === cur })),
     rms: (ep) => (sp.summary(ep)?.rms ?? []).map((r) => {
       const drawnUrl = h?.drawnUrl(`rm:${r.id}`) ?? "";
-      const tail = (u: string) => paths.leafName(u);
       const grp = r.group ? sp.rmGroups.get(r.group) : r.altOf ? sp.rmGroups.get(r.altOf) : undefined;
       // MICRO-PROVA-DEV47 p.4 · a container with its alternative: Modelli / Tileset / Automatico on its row
       const hasAlt = !!grp && sp.rms.some((x) => x.altOf === grp.id);
@@ -32570,24 +32933,14 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
         ...(failed ? { failed } : {}),
         // MICRO-PROVA-DEV47 p.3b · the level and the mode («LOD2 · uso», «intero · fisso»), a small menu
         // MICRO-PROVA-DEV48 p.3 · in auto the label says what the distance drew: «auto · LOD0», «auto · derivata lod4»
-        ...(nm?.level ? { chip: (r.versions?.length ?? 0) > 1
-          ? (versionModeOf(r.id).mode === "auto" ? `${modeWord("auto")} · ${((dv) => dv ? autoLevelName(r, dv) : nm.level)(drawnVersionOf(r))}` : `${nm.level} · ${modeWord(versionModeOf(r.id).mode)}`)
-          : nm.level } : {}),
+        ...(nm?.level ? { chip: spaceRmChip(r, sp)! } : {}),
         glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
         tileset: !!r.resource?.tiles,
         group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined,
           ...(hasAlt ? { alt: altWord(grp.id, altModeOf(grp.id)) } : {}) } : null,
         // MICRO-VERSIONE-CONTENITORE · the container's whole version, a level of it: first, in words
         ...(r.altOf && !r.resource?.tiles ? { whole: true } : {}),
-        versions: (r.versions ?? []).map((v) => {
-          const dv = drawableVersions(r).find((x) => x.id === v.id);
-          const isDrawn = !!drawnUrl && ((!!v.url && tail(drawnUrl) === tail(v.url)) || (!!dv && tail(drawnUrl) === tail(dv.fetch)));
-          const mode = versionModeOf(r.id).mode;
-          // p.10 · its uses and its level computed from the chain, small; «A» on the one the distance drew
-          return { id: v.id, name: v.name + (v.master ? ` · ${t("s3.master")}` : ""),
-            drawn: isDrawn, chosen: mode === "manual" ? versionModeOf(r.id).versionId === v.id : r.choice?.entry?.id === v.id,
-            uses: v.uses ?? [], ...(v.master ? {} : { level: levelShortOf(r, v.id) }), ...(isDrawn && mode === "auto" ? { auto: true } : {}) };
-        }) };
+        versions: spaceRmVersions(r, drawnUrl) };
     }),
     proxies: (ep) => (sp.summary(ep)?.withProxy ?? []).filter((u) => sp.proxies.has(u))
       .map((u) => { const failed = modelFailureOf(`proxy:${u}`);
@@ -32960,8 +33313,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
-    marks: () => [...instanceMarks(win.id), ...(EXPERIMENTAL ? siteMarks(win.id) : [])],   // EXPERIMENTAL: the site's footprint
-    onMark: (id) => { if (EXPERIMENTAL && onSiteMark(id)) return; if (id.startsWith("inst:")) goToInstance(id.slice(5)); },
+    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(EXPERIMENTAL ? siteMarks(win.id) : [])],   // EXPERIMENTAL: the site's footprint
+    onMark: (id) => {
+      if (EXPERIMENTAL && onSiteMark(id)) return;
+      if (id.startsWith("inst:")) goToInstance(id.slice(5));
+      // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · an extractor's mark: the chain source → extractor → property
+      else if (id.startsWith("x3d:")) { select(id.slice(4)); refreshInspector(); }
+    },
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
       if (a === "outliner") { const p = space3dPrefs();
@@ -46065,7 +46423,6 @@ function assetListView(win: Win): HTMLElement {
     q.textContent = "?";
     q.title = t("al.tilesFullTitle");
     q.setAttribute("aria-label", q.title);
-    q.addEventListener("click", (e) => { e.stopPropagation(); toast(q.title); });
     bar.append(all, q);
   }
   bar.append(again);
@@ -53798,9 +54155,10 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(dd);
   }
 
-  /** MICRO-PULIZIA · a «?» that explains, as a tooltip: reached by Tab, read by
-   *  a screen reader, and a click (or Enter) says it in a toast for whoever has
-   *  no pointer to hover with */
+  /** MICRO-PULIZIA · a «?» that explains: reached by Tab, read by a screen
+   *  reader; MICRO-OUTLINER-EPOCHE-TOOLTIP p.3 · its text opens BESIDE it (the
+   *  one popover of `help-tip.ts`: hover, a click pins it, Esc), no more a
+   *  toast at the bottom of the window */
   const helpMark = (text: string): HTMLElement => {
     const q = document.createElement("button");
     q.type = "button";
@@ -53808,7 +54166,6 @@ function buildAreaHeader(win: Win): DocumentFragment {
     q.textContent = "?";
     q.title = text;
     q.setAttribute("aria-label", text);
-    q.addEventListener("click", (e) => { e.stopPropagation(); toast(text); });
     return q;
   };
   // ── the window ACTIONS: one-click verbs on THIS window ────────────────────

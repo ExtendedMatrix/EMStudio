@@ -7,6 +7,27 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **The Outliner by epoch, an object in more epochs, the «?» readable**
+  (MICRO-OUTLINER-EPOCHE-TOOLTIP, E.D., 13 November 2026). By epoch, a
+  container is a branch (epoch → container → its alternative, marked, and its
+  members); a model in a container is not listed again under the epoch; a
+  member living in another epoch says where (a chip and its tooltip); a
+  container out of step with its reference (s3Dgraphy's `container_epoch_check`)
+  shows ⚠ with «Align the members' epochs…». A row dragged onto an epoch MOVES
+  it, with Alt EXTENDS it (a line under the epoch and a label say which; with
+  the pointer, not HTML5 drag and drop); the Inspector's «Epochs» has «Move
+  here», «Extend here too», «Remove from here». A container acts on all its
+  members, with a preview and one step of undo. The edges are s3Dgraphy's
+  (`epoch-moves.ts`: a unit's has_first_epoch / survive_in_epoch, a model's
+  epoch → has_representation_model). One «?» for the whole app (`help-tip.ts`):
+  the text opens beside the glyph at a reading width, stays while the mouse is
+  on it or on the text (1.6 s after it leaves), a click pins it until a click
+  elsewhere or Esc. In the Space the one Outliner is the scene's view: arrow,
+  level chip and menu, the container's alternative, the failed mark, Isolate,
+  Frame, the versions under a model, the 3D extractors under their document
+  (a ghost, eye forced, when the document is not lit; their marks in the
+  scene), the sketches at the bottom with their menu; the old panel behind T
+  says it is retiring. `check-epoch-moves` (new), `check-outliner-tree`.
 - **The Narrative's menus, inside the screen and in order** (MICRO-NARRATIVE-MENU,
   E.D., 13 November 2026). The menu component every «Add»/«Insert» uses
   (`add-menu-ui.ts`): a submenu is measured and opens on the side where it

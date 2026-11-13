@@ -254,7 +254,6 @@ export function renderGeorefSection(host: HTMLElement, store: DocumentStore, dep
   q.title = t("georef.datumOpHint");
   q.setAttribute("aria-label", t("georef.datumOpHint"));
   q.dataset.georef = "datum-help";
-  q.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); deps.say(t("georef.datumOpHint")); });
   di.parentElement?.querySelector(".insp-field-label")?.appendChild(q);
   // the vertical reference
   const vl = el("label", "georef-f");

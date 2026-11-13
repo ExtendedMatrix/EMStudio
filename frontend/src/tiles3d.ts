@@ -954,7 +954,6 @@ export function tilesBar(layer: TilesLayer, texts: TilesBarTexts): TilesBarHandl
   err.append(errLab, errRange, errVal, errQ);
   for (const x of [errLab, errBox, errRange, errQ]) x.addEventListener("click", (e) => e.stopPropagation());
   for (const x of [errRange, errBox]) x.addEventListener("pointerdown", (e) => e.stopPropagation());
-  errQ.addEventListener("click", () => { note = texts.errHelp; refresh(); });
   errBox.addEventListener("change", () => {
     // unticked: «Manuale» from the error shown now
     layer.setErrorChoice(errBox.checked ? "auto" : Math.round(layer.status().error.px));

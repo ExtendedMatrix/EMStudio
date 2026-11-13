@@ -212,6 +212,9 @@ export interface Space3dPrefs {
   altModes?: Record<string, "models" | "tileset" | "auto" | "use">;
   /** MICRO-OUTLINER-UNICO · this Outliner shown (T) beside the one Outliner window */
   tWithOutliner?: boolean;
+  /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the extractors whose document is not lit,
+   *  their eye FORCED on (shown as ghosts) */
+  forced?: string[];
 }
 
 export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [], versionModes: {} };
@@ -257,6 +260,7 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
         .map(([k, v]) => [k, { mode: (v as { mode: "manual" | "use" | "auto" | "light" }).mode, ...(typeof (v as { versionId?: unknown }).versionId === "string" ? { versionId: (v as { versionId: string }).versionId } : {}) }])) : {},
       ...(typeof p.deviceUse === "string" ? { deviceUse: p.deviceUse } : {}),
       ...(p.tWithOutliner === true ? { tWithOutliner: true } : {}),
+      ...(Array.isArray(p.forced) ? { forced: list(p.forced) } : {}),
       ...(p.altModes && typeof p.altModes === "object" ? { altModes: Object.fromEntries(Object.entries(p.altModes as Record<string, unknown>)
         .filter(([, v]) => v === "models" || v === "tileset" || v === "auto" || v === "use")) as Record<string, "models" | "tileset" | "auto" | "use"> } : {}),
     };

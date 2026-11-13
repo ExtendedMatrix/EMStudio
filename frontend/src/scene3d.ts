@@ -351,6 +351,9 @@ export interface SceneMark {
   selected?: boolean;
   /** the trace in progress (dashed, no label click) */
   draft?: boolean;
+  /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · an extractor shown though its document
+   *  is not lit (its eye forced): faint and dashed */
+  ghost?: boolean;
 }
 
 /** MICRO-VIEWER-SPAZIO-EMTREE p.4 · what the renderer drew in its last frame */
@@ -2670,14 +2673,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (!(v.z < 1)) return null;
           return { x: ((v.x + 1) / 2) * W, y: ((1 - v.y) / 2) * H };
         };
-        const sig = ms.map((m) => `${m.id}:${m.vertices.length}:${m.selected ? 1 : 0}:${m.draft ? 1 : 0}:${m.label}`).join("|");
+        const sig = ms.map((m) => `${m.id}:${m.vertices.length}:${m.selected ? 1 : 0}:${m.draft ? 1 : 0}:${m.ghost ? 1 : 0}:${m.label}`).join("|");
         if (sig !== marksSig) {
           marksSig = sig;
           marksEl.textContent = "";
           markLabels.textContent = "";
           for (const m of ms) {
             const g = document.createElementNS(MARKNS, "g");
-            g.setAttribute("class", `scn-mark k-${m.kind}${m.selected ? " sel" : ""}${m.draft ? " draft" : ""}`);
+            g.setAttribute("class", `scn-mark k-${m.kind}${m.selected ? " sel" : ""}${m.draft ? " draft" : ""}${m.ghost ? " ghost" : ""}`);
             g.dataset.mark = m.id;
             if (m.vertices.length > 1) {
               const pl = document.createElementNS(MARKNS, m.kind === "plane" ? "polygon" : "polyline");
@@ -2692,7 +2695,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             if (!m.draft && m.label) {
               const l = document.createElement("button");
               l.type = "button";
-              l.className = `scn-mark-label${m.selected ? " sel" : ""}`;
+              l.className = `scn-mark-label${m.selected ? " sel" : ""}${m.ghost ? " ghost" : ""}`;
               l.dataset.mark = m.id;
               l.textContent = m.label;
               l.addEventListener("pointerdown", (e) => e.stopPropagation());

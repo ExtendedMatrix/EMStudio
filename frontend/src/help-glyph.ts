@@ -4,9 +4,9 @@
  * line.
  *
  * The «?» of a panel (the window bar has its own, `helpMark` in main.ts, with
- * the same look): the text is its tooltip and what a screen reader hears; a
- * click (or Enter) opens it under the glyph, for whoever has no pointer to
- * hover with, and a second click closes it. A leaf: no import, so the panels
+ * the same look): the text is what a screen reader hears and what the one
+ * popover of the app (`help-tip.ts`) shows beside the glyph — on hover, pinned
+ * by a click, closed by Esc or a click elsewhere. A leaf: no import, so the panels
  * that are not main.ts (the Inspector, the GIS, the transform form) use it too.
  */
 export function helpGlyph(text: string, probe?: string): HTMLElement {
@@ -17,17 +17,8 @@ export function helpGlyph(text: string, probe?: string): HTMLElement {
   q.title = text;
   q.setAttribute("aria-label", text);
   if (probe) q.dataset.help = probe;
-  q.addEventListener("click", (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const was = q.nextElementSibling;
-    if (was?.classList.contains("help-pop")) { was.remove(); return; }
-    const pop = document.createElement("div");
-    pop.className = "help-pop";
-    pop.textContent = text;
-    pop.addEventListener("click", (ev) => { ev.stopPropagation(); pop.remove(); });
-    q.after(pop);
-  });
+  // MICRO-OUTLINER-EPOCHE-TOOLTIP p.3 · hover, click (pinned) and Esc are
+  // the one «?» of the app (`help-tip.ts`): the text opens beside the glyph
   return q;
 }
 
