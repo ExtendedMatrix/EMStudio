@@ -322,6 +322,10 @@ def prepare():
     for k in ("ratio", "max_texture", "draco"):
         if k in A:
             kw[k] = A[k]
+    # MICRO-ASSETS-LIVELLI · the threshold of triangles, when this EM Tools takes it
+    names = {p.identifier for p in bpy.ops.em.asset_prepare_for_use.get_rna_type().properties}
+    if "min_triangles" in names and A.get("min_triangles"):
+        kw["min_triangles"] = int(A["min_triangles"])
     r = bpy.ops.em.asset_prepare_for_use(**kw)
     if r != {"FINISHED"}:
         raise RuntimeError("Prepare for a use… answered %s" % sorted(r))

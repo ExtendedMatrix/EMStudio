@@ -3030,6 +3030,14 @@ window.__EM_SCENE__ = () => {
    *  says the operation once it resumed */
   // MICRO-CODA-VISTA-2 · Archive's view by its tab (the Mode), for the checks
   archiveView: (k: string) => { const w = windowsOf().find((x) => x.type === "storage"); if (w) setArchiveView(w, k as "files"); },
+  // MICRO-ASSETS-LIVELLI · the window magnified (none expected on Asset), the view's state
+  maximized: () => maximizedWin(),
+  assetState: () => ({ level: assetUi.level, sideHidden: assetUi.sideHidden, verSel: [...assetUi.verSel], minTri: assetUi.minTri,
+    sel: [...assetUi.sel], target: assetUi.target, grouping: assetUi.grouping }),
+  assetAnswer: () => assetUi.ans,
+  /** the Space's alternatives: per model its container, its side and the mode (altModeOf), and what is not drawn */
+  openSpace: () => { if (!windowsOf().some((w) => w.type === "scene")) setWorkspace("space"); },
+  spaceAlt: () => ({ info: [...spaceAltInfo].map(([id, x]) => ({ id, ...x, modeNow: altModeOf(x.group) })), substituted: [...spaceSubstituted.keys()] }),
   queueItems: () => assetQueue.map((x) => ({ ...x })),
   /** MICRO-VERSIONI-PER-USO · the second round for a target on the selection as
    *  «Applica» would see it (the proposal applied to a copy of the plan) */
@@ -15751,7 +15759,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 65;   // 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 66;   // 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -31212,7 +31220,16 @@ function spaceAlternatives(sp: Space | null = currentSpace()): TilesetAlternativ
 }
 /** MICRO-TILESET-CONTENITORE p.1 · the person's choice for a container (per
  *  person, by the container's id); without one, «Automatico» — every viewer */
-function altModeOf(groupId: string): AltMode { return space3dPrefs().altModes?.[groupId] ?? "auto"; }
+function altModeOf(groupId: string): AltMode {
+  const mine = space3dPrefs().altModes?.[groupId];
+  if (mine) return mine;
+  // MICRO-ASSETS-LIVELLI p.3 · the choice kept in the graph (Archive › Assets
+  // writes it: `data.active_alternative`, by target or «*»): the Space is a
+  // desktop viewer — its «desk», else every use
+  const ch = (store?.node(groupId) as { data?: Record<string, unknown> } | undefined)?.data?.active_alternative as Record<string, string> | undefined;
+  const w = ch?.desk ?? ch?.realtime ?? ch?.["*"];
+  return w === "container" ? "tileset" : w === "members" ? "models" : "auto";
+}
 /** …and what it means now: «Per uso» is the tileset when it declares the
  *  device's use (`deviceUse`), else the models — a choice of the menu, never the default */
 function altEffectiveMode(groupId: string, sp: Space | null = currentSpace()): Exclude<AltMode, "use"> {
@@ -38884,64 +38901,62 @@ function useVersionsView(folder: string): HTMLElement {
 
 /** MICRO-ARCHIVE-ASSET-2 · «Versioni su disco» in an asset's detail (E.D.:
  *  the whole folder with boxes of no apparent sense): only the versions of
- *  THIS asset, each with its place in the graph, the boxes to «Elimina le
- *  selezionate» (a confirmation first, the files and the graph's nodes said).
- *  The whole folder stays in Ottimizza out of Archive › Asset. */
+ *  THIS asset, each with its place in the graph. MICRO-ASSETS-LIVELLI p.1
+ *  (E.D., 13 Nov 2026): the list starts from the GRAPH's versions of the
+ *  asset, wherever their files are (a `versions/` folder, the project's RM
+ *  folder…), each with where its file is on this computer; «Rimuovi N
+ *  versioni…» is the same as the level view's (the preview of files, MB,
+ *  nodes, the uses left, the textures). `folder` is kept for its callers. */
 function assetDiskVersions(folder: string, a: AL.AssetRow): HTMLElement {
+  void folder;
   const box = document.createElement("div");
   box.className = "files-use-versions al-disk-versions";
   box.dataset.alDiskVersions = a.id;
-  const v = useState.versions.get(folder);
   const hh = document.createElement("div");
   hh.className = "files-sec-h";
   const hb = document.createElement("b");
   hb.textContent = t("al.diskVersions", { name: a.name });
   hh.appendChild(hb);
-  const rl = document.createElement("button");
-  rl.type = "button";
-  rl.className = "ghost";
-  rl.dataset.action = "use-versions";
-  rl.textContent = t("files.useReload");
-  rl.onclick = () => { void loadUseVersions(folder); };
-  hh.append(" ", rl);
   box.appendChild(hh);
-  if (!v) { void loadUseVersions(folder); box.appendChild(tabLead(t("files.useLoading"), "files-hint")); return box; }
-  const mine = AL.diskVersionsOf(v.rows, a, (id) => fileStateOf(id)?.path ?? "");
-  if (!mine.length) { box.appendChild(tabLead(t("al.diskVersionsNone", { folder: projectRelative(v.folder) }), "files-hint")); return box; }
+  const mine = a.versions.filter((v) => !v.master);
+  if (!mine.length) { box.appendChild(tabLead(t("al.diskVersionsNoneGraph"), "files-hint")); return box; }
   const tbl = document.createElement("table");
   tbl.className = "files-use-objects";
   const head = tbl.insertRow();
-  for (const k of ["al.diskPick", "files.useVersion", "al.diskInGraph", "files.useTris", "files.useSize", "files.useStamp"])
+  for (const k of ["al.diskPick", "files.useVersion", "al.diskInGraph", "files.useTris", "files.useSize", "al.levelWhere"])
     head.insertCell().textContent = t(k);
-  for (const { row: r, version: gv } of mine) {
+  for (const gv of mine) {
     const tr = tbl.insertRow();
-    tr.dataset.alDiskVersion = r.name;
+    tr.dataset.alDiskVersion = gv.id;
     const c0 = tr.insertCell();
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = useState.gone.has(r.name);
-    cb.dataset.version = r.name;
+    cb.checked = assetUi.verSel.has(gv.id);
+    cb.dataset.version = gv.id;
     cb.title = t("al.diskPickTitle");
-    cb.onchange = () => { if (cb.checked) useState.gone.add(r.name); else useState.gone.delete(r.name); renderStorage(); };
+    cb.onchange = () => { if (cb.checked) assetUi.verSel.add(gv.id); else assetUi.verSel.delete(gv.id); renderStorage(); };
     c0.appendChild(cb);
+    const path = fileStateOf(gv.id)?.path ?? "";
     const gvSay = AL.levelSay(gv, t("al.tilesetStreaming"), t("al.chainLod"));
-    const inGraph = `${gvSay}${gv.loaded_by.length ? ` · ${t("al.loadedBy", { targets: gv.loaded_by.map((k) => t(`al.t.${k}`)).join(", ") })}` : ""}`;
-    for (const val of [r.name, inGraph, r.triangles?.toLocaleString() ?? "—", useMb(r.bytes), r.stamp ? "✓" : "—"]) {
+    const inGraph = gvSay + (gv.loaded_by.length ? " · " + t("al.loadedBy", { targets: gv.loaded_by.map((k) => t("al.t." + k)).join(", ") }) : "");
+    for (const [val, title] of [[path ? paths.basename(path) : gv.name, path || gv.url], [inGraph, inGraph],
+      [gv.triangles?.toLocaleString() ?? "—", ""], [useMb(gv.size_bytes ?? 0), ""],
+      [path ? projectRelative(paths.dirname(path)) : t("al.levelNotHere"), path]]) {
       const td = tr.insertCell();
       td.textContent = val;
-      td.title = val;
+      td.title = title || val;
     }
   }
   box.appendChild(tbl);
-  const gone = mine.filter((x) => useState.gone.has(x.row.name)).map((x) => x.row.name);
+  const gone = mine.filter((v) => assetUi.verSel.has(v.id)).map((v) => v.id);
   const del = document.createElement("button");
   del.type = "button";
   del.className = "danger";
   del.dataset.action = "al-disk-remove";
-  del.textContent = t("al.diskRemove", { n: String(gone.length) });
-  del.title = t("al.diskRemoveTitle");
-  del.disabled = !gone.length;
-  del.onclick = () => { void removeUseVersions(v.folder, gone).then(() => askAssetList()); };
+  del.textContent = t("al.removeVersions", { n: String(gone.length) });
+  del.title = t("al.removeVersionsTitle");
+  del.disabled = !gone.length || !assetUi.ans;
+  del.onclick = () => { if (assetUi.ans) void removeVersionsAsked(assetUi.ans, gone); };
   box.appendChild(del);
   return box;
 }
@@ -40038,7 +40053,10 @@ function filesBlenderSection(win: Win, chosen: FsEntry[], models: FsEntry[]): HT
           us.onchange = () => { setFilesPref(win, ukey, us.value); renderStorage(); };
           ul.appendChild(us);
           pw.appendChild(ul);
-          const body = { op: "prepare", blend: blend.path, object: ob.name, use: [use], level: "lod3" };
+          // MICRO-ASSETS-LIVELLI p.5 · the threshold of Archive › Assets: EM Tools'
+          // operator does not reduce a mesh under it (min_triangles)
+          const body = { op: "prepare", blend: blend.path, object: ob.name, use: [use], level: "lod3",
+                         ...(assetUi.minTri ? { min_triangles: assetUi.minTri } : {}) };
           pw.appendChild(blenderPlanSlot(body, (pl, slot) =>
             blenderPlanTable(pl, slot, { label: t("files.blGoPrepare"), action: "blender-prepare",
               run: () => { void runBlender(win, { ...body, doc: store?.doc }, blend.path, "prepare"); } })));
@@ -40821,6 +40839,13 @@ document.addEventListener("keydown", (e) => {
   const el = e.target as HTMLElement | null;
   if (el?.closest?.("input, textarea, select, [contenteditable], .app-dialog")) return;
   const win = activeWin();
+  // MICRO-ASSETS-LIVELLI p.6 · in Archive › Assets, N hides and shows the
+  // panel of the row's information, as in the Space
+  if (win.type === "storage" && winModeOf(win) === "assets" && e.key.toLowerCase() === "n") {
+    e.preventDefault();
+    toggleAssetSide();
+    return;
+  }
   if (win.type !== "storage" || winModeOf(win) !== "filesystem") return;
   e.preventDefault();
   toggleFilesRegion(win, e.key.toLowerCase() === "t" ? "places" : "panel");
@@ -45016,6 +45041,10 @@ const assetUi = {
   openShapes: new Set<string>(),
   progress: null as { phase: string; n: number; total: number; name?: string } | null,
   scroll: { top: 0, left: 0 }, sideScroll: 0,
+  /** MICRO-ASSETS-LIVELLI · the filter «Livello» ("" = every level), the
+   *  versions ticked in it, the side panel hidden (the arrow, N), the
+   *  threshold of triangles under which a mesh is not reduced */
+  level: "", verSel: new Set<string>(), sideHidden: false, minTri: AL.MIN_TRIANGLES_DEFAULT as number,
 };
 /** MICRO-ARCHIVE-ASSET-2 · the forms repeated of the answer, once per answer */
 let alShapes: { ans: AL.AssetListAnswer | null; refused: number; list: AL.Shape[]; index: Map<string, AL.Shape> } = { ans: null, refused: 0, list: [], index: new Map() };
@@ -45034,7 +45063,10 @@ let answeredAt = 0;
 (() => {
   try {
     const v = JSON.parse(localStorage.getItem(ASSET_UI_KEY) ?? "{}") as Partial<{ target: AL.TargetKey; compare: boolean;
-      on: AL.TargetKey[]; grouping: AL.Grouping; filter: AL.Filter; sort: AL.SortKey; desc: boolean }>;
+      on: AL.TargetKey[]; grouping: AL.Grouping; filter: AL.Filter; sort: AL.SortKey; desc: boolean;
+      sideHidden: boolean; minTri: number }>;
+    if (typeof v.sideHidden === "boolean") assetUi.sideHidden = v.sideHidden;
+    if (typeof v.minTri === "number" && v.minTri >= 0) assetUi.minTri = v.minTri;
     if (v.target && AL.TARGET_KEYS.includes(v.target)) assetUi.target = v.target;
     if (typeof v.compare === "boolean") assetUi.compare = v.compare;
     if (Array.isArray(v.on)) assetUi.on = new Set(v.on.filter((k) => AL.TARGET_KEYS.includes(k)));
@@ -45047,7 +45079,8 @@ let answeredAt = 0;
 function saveAssetUi(): void {
   try {
     localStorage.setItem(ASSET_UI_KEY, JSON.stringify({ target: assetUi.target, compare: assetUi.compare, on: [...assetUi.on],
-      grouping: assetUi.grouping, filter: assetUi.filter, sort: assetUi.sort, desc: assetUi.desc }));
+      grouping: assetUi.grouping, filter: assetUi.filter, sort: assetUi.sort, desc: assetUi.desc,
+      sideHidden: assetUi.sideHidden, minTri: assetUi.minTri }));
   } catch { /* storage off */ }
 }
 
@@ -45183,15 +45216,16 @@ function queueSwitchWords(): string {
 }
 
 /** Archive's view (MICRO-CODA-VISTA-2 p.4: its own tabs are the ONE way —
- *  the Mode of the window; «files» is the disk): Asset and Coda take the
- *  whole working area (the window magnified), the others give it back. */
+ *  the Mode of the window; «files» is the disk). MICRO-ASSETS-LIVELLI p.7
+ *  (E.D., 13 Nov 2026): opening Asset or Coda no longer magnifies the window
+ *  (it took the whole working area: a surprise, not a choice); a window
+ *  magnified BY that rule before is given back, a magnification of the
+ *  person's stays. */
 function setArchiveView(win: Win, k: "files" | "assets" | "queue" | (typeof STORAGE_MODES)[number]): void {
   const mode = k === "files" ? "filesystem" : k;
-  const wide = mode === "assets" || mode === "queue";
   setWinModeOf(win, mode);
-  const max = maximizedWin();
-  if (wide && max !== win.id && windowsOf().length > 1) { toggleMaximize(win.id); setWinCurrent(win, "al.max", true); }
-  if (!wide && max === win.id && winCurrent(win, "al.max") === true) { toggleMaximize(win.id); setWinCurrent(win, "al.max", null); }
+  if (maximizedWin() === win.id && winCurrent(win, "al.max") === true) toggleMaximize(win.id);
+  if (winCurrent(win, "al.max") != null) setWinCurrent(win, "al.max", null);
   surfaceOf(win.id)?.refresh();
   renderTiles();
   renderStorage();
@@ -45355,6 +45389,24 @@ function assetListView(win: Win): HTMLElement {
   const grp = mk("group", AL.GROUPINGS, assetUi.grouping, "al.g", (v) => { assetUi.grouping = v as AL.Grouping; });
   grp.title = t("al.groupTitle");
   const flt = mk("filter", AL.FILTERS, assetUi.filter, "al.f", (v) => { assetUi.filter = v as AL.Filter; });
+  // MICRO-ASSETS-LIVELLI p.2 · «Livello»: only the rows of one level, on every asset
+  const lvl = document.createElement("select");
+  lvl.dataset.al = "level";
+  lvl.title = t("al.levelTitle");
+  {
+    const o = document.createElement("option");
+    o.value = "";
+    o.textContent = t("al.levelAll");
+    lvl.appendChild(o);
+    for (const x of AL.levelsOf(ans.assets)) {
+      const e = document.createElement("option");
+      e.value = x.key;
+      e.textContent = `${t("al.levelIs", { level: x.key === "tileset" ? t("al.tilesetShort") : x.key })} (${x.n})`;
+      lvl.appendChild(e);
+    }
+  }
+  lvl.value = AL.levelsOf(ans.assets).some((x) => x.key === assetUi.level) ? assetUi.level : "";
+  lvl.onchange = () => { assetUi.level = lvl.value; assetUi.verSel.clear(); renderStorage(); };
   const vseg = document.createElement("span");
   vseg.className = "files-seg";
   for (const v of ["assets", "textures"] as const) {
@@ -45373,14 +45425,24 @@ function assetListView(win: Win): HTMLElement {
   exp.checked = assetUi.expandAll;
   exp.onchange = () => { assetUi.expandAll = exp.checked; paintList(); };
   expL.append(exp, " " + t("al.expandAll"));
-  tools.append(q, grp, flt, vseg, expL);
+  // MICRO-ASSETS-LIVELLI p.6 · the panel of the row's information: the arrow (and N)
+  const sideTog = document.createElement("button");
+  sideTog.type = "button";
+  sideTog.className = "ghost al-side-toggle";
+  sideTog.dataset.action = "al-side-toggle";
+  sideTog.textContent = assetUi.sideHidden ? "◂" : "▸";
+  sideTog.title = t(assetUi.sideHidden ? "al.sideShow" : "al.sideHide");
+  sideTog.setAttribute("aria-pressed", String(!assetUi.sideHidden));
+  sideTog.onclick = () => toggleAssetSide();
+  tools.append(q, grp, flt, lvl, vseg, expL, sideTog);
   host.appendChild(tools);
   const sheet = document.createElement("div");
   sheet.className = "al-tools al-sheet";
   host.appendChild(sheet);
 
   const main = document.createElement("div");
-  main.className = "al-main";
+  main.className = `al-main${assetUi.sideHidden ? " al-side-off" : ""}`;
+  main.dataset.alMain = "";
   const tw = document.createElement("div");
   tw.className = "al-table-wrap";
   const side = document.createElement("aside");
@@ -45391,6 +45453,7 @@ function assetListView(win: Win): HTMLElement {
   const assets = (): AL.AssetRow[] => AL.visibleAssets(ans.assets, { query: assetUi.query, filter: assetUi.filter, targets, bands });
   const paintSheet = (): void => {
     sheet.textContent = "";
+    if (assetUi.level && assetUi.view === "assets") { levelSheet(sheet, ans, assets(), () => { paintList(); paintSheet(); }); return; }
     const n = assetUi.sel.size;
     const info = document.createElement("span");
     info.className = "files-hint";
@@ -45437,8 +45500,13 @@ function assetListView(win: Win): HTMLElement {
     prop.title = t("al.applyEnqueueTitle");
     prop.disabled = !n;
     prop.onclick = () => {
-      AL.applyProposal(assetUi.plan, ans.assets, assetUi.sel, targets, { shapes: shapesOf(ans).list, bands });
-      const items = AL.selectionItems(ans.assets, shapesOf(ans).list, assetUi.sel, targets, assetUi.plan, bands, { shape: shapeLabel, one: oneLabel });
+      // MICRO-ASSETS-LIVELLI p.5 · under the threshold a mesh is not reduced:
+      // its uses point to the lightest version it has, no file is made
+      const split = AL.splitByThreshold(ans.assets, assetUi.sel, assetUi.minTri);
+      if (split.point.length) pointUsesBelow(split.point, targets, ans);
+      if (!split.reduce.size) { assetUi.sel.clear(); renderStorage(); return; }
+      AL.applyProposal(assetUi.plan, ans.assets, split.reduce, targets, { shapes: shapesOf(ans).list, bands });
+      const items = AL.selectionItems(ans.assets, shapesOf(ans).list, split.reduce, targets, assetUi.plan, bands, { shape: shapeLabel, one: oneLabel });
       // MICRO-VERSIONI-PER-USO p.4 · every object in its band but the scene
       // not: the second round proposed (row by row) before anything is queued
       void secondRoundAsked(ans, targets, items).then((more) => {
@@ -45490,7 +45558,24 @@ function assetListView(win: Win): HTMLElement {
     go.title = t("al.enqueueTitle");
     go.disabled = !pending.length;
     go.onclick = () => void toQueue(AL.planItems(ans.assets, shapesOf(ans).list, targets, assetUi.plan, bands, assetQueue, { shape: shapeLabel, one: oneLabel }));
-    sheet.append(info, prop, or, tri, tex, kL, tool, set, go);
+    // MICRO-ASSETS-LIVELLI p.5 · the threshold: under it, not reduced
+    const thL = document.createElement("label");
+    thL.className = "al-threshold";
+    thL.title = t("al.thresholdTitle");
+    const th = triField(assetUi.minTri || null, t("al.threshold"));
+    th.dataset.al = "threshold";
+    th.onchange = () => { const v = triValue(th); assetUi.minTri = v ?? 0; saveAssetUi(); paintSheet(); };
+    const under = n ? AL.splitByThreshold(ans.assets, assetUi.sel, assetUi.minTri).point.length : 0;
+    thL.append(t("al.thresholdLabel") + " ", th);
+    if (under) { const u = document.createElement("small"); u.dataset.alUnder = String(under); u.textContent = ` ${tn("al.underThreshold", under)}`; thL.appendChild(u); }
+    // MICRO-ASSETS-LIVELLI p.9 · a container from the selection
+    const mkc = document.createElement("button");
+    mkc.type = "button";
+    mkc.dataset.action = "al-new-container";
+    mkc.textContent = t("al.newContainer");
+    mkc.title = t("al.containerFilesStay");
+    mkc.onclick = () => void newContainerAsked(ans.assets.filter((a) => assetUi.sel.has(a.id) && a.kind === "rm").map((a) => a.id));
+    sheet.append(info, prop, thL, or, tri, tex, kL, tool, set, go, mkc);
     // MICRO-GIA-FATTI · the selection's rows «già fatto prima», resolved together
     const selB4 = n ? selectedBefore(ans, targets) : [];
     if (selB4.length) {
@@ -45524,6 +45609,7 @@ function assetListView(win: Win): HTMLElement {
   const paintList = (): void => {
     tw.textContent = "";
     if (assetUi.view === "textures") { tw.appendChild(texturesTable(ans)); keepScroll(); return; }
+    if (assetUi.level) { tw.appendChild(levelTable(ans, assets(), () => { paintList(); paintSheet(); })); keepScroll(); return; }
     const table = document.createElement("table");
     table.className = "al-table";
     table.dataset.alTable = "";
@@ -45563,6 +45649,17 @@ function assetListView(win: Win): HTMLElement {
     const ncol = 1 + AL.SORT_KEYS.length - 1 + targets.length;
     const sorted = AL.sortAssets(vis, assetUi.sort, assetUi.desc, assetUi.target);
     const groups = AL.groupAssets(sorted, assetUi.grouping, assetUi.target);
+    // MICRO-ASSETS-LIVELLI p.9 · a container with no row yet (just made, or
+    // emptied) is still a place to drop rows on: its group, empty
+    if (assetUi.grouping === "container" && store && !assetUi.query && assetUi.filter === "all") {
+      const have = new Set(groups.map((g) => g.key));
+      for (const n of store.doc.graph.nodes)
+        if (n.node_type === "RepresentationModelNodeGroup" && n.name && !have.has(n.name)) {
+          groups.splice(groups.findIndex((g) => g.key === "") < 0 ? groups.length : groups.findIndex((g) => g.key === ""), 0,
+            { key: n.name, assets: [], triangles: 0, gpu_bytes: 0, todo: 0 });
+          have.add(n.name);
+        }
+    }
     const shared = AL.sharedCounts(ans.textures);
     const b0 = bands[assetUi.target];
     for (const g of groups) {
@@ -45609,8 +45706,61 @@ function assetListView(win: Win): HTMLElement {
         rest.colSpan = ncol - 6;
         tr.append(td, tn2, ttri, tmb, tgpu, rest);
         tb.appendChild(tr);
+        // MICRO-ASSETS-LIVELLI p.8/p.9 · a container's header: a place to drop
+        // rows on, its menu (rename, empty, remove), its alternative lit
+        const cont = assetUi.grouping === "container" ? groupContainer(g) : null;
+        if (cont) {
+          tr.dataset.alDrop = cont.id;
+          tr.title = t("al.dropHere", { group: cont.name });
+          tr.addEventListener("dragover", (e) => { if (alDrag) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = e.altKey ? "copy" : "move"; tr.classList.add("al-drop-on"); } });
+          tr.addEventListener("dragleave", () => tr.classList.remove("al-drop-on"));
+          tr.addEventListener("drop", (e) => {
+            e.preventDefault();
+            tr.classList.remove("al-drop-on");
+            const d = alDrag;
+            alDrag = null;
+            if (d) void dropOnContainer(d.ids, d.from, cont, e.altKey);
+          });
+          const menu = document.createElement("button");
+          menu.type = "button";
+          menu.className = "ghost al-cont-menu";
+          menu.dataset.action = "al-container-menu";
+          menu.textContent = "⋯";
+          menu.title = t("al.containerMenu");
+          menu.onclick = (e) => { e.stopPropagation(); void containerMenu(cont, g.assets.filter((a) => a.id !== cont.id).length); };
+          tn2.append(" ", menu);
+          const own = g.assets.find((a) => a.id === cont.id && a.kind === "container");
+          const now = own ? AL.activeAlternative(own, assetUi.target) : null;
+          if (own && now) rest.appendChild(altSwitch(cont, now, assetUi.target));
+        }
       }
       if (closed) continue;
+      // MICRO-ASSETS-LIVELLI p.3 · inside a container its elements by kind,
+      // «Mesh (n)» and «Tileset (n)», alternatives of each other
+      const parts = assetUi.grouping === "container" && g.key ? AL.containerParts(g.assets) : null;
+      const byKind = parts && parts.tilesets.length && parts.meshes.length ? parts : null;
+      const order = byKind ? [...byKind.meshes, ...byKind.tilesets] : g.assets;
+      const kindRow = (key: "meshes" | "tilesets", n: number): void => {
+        const r = document.createElement("tr");
+        r.className = "al-kind";
+        r.dataset.alKind = key;
+        const c0 = document.createElement("td");
+        const c1 = document.createElement("td");
+        c1.colSpan = ncol - 1;
+        const cont = groupContainer(g);
+        const own = cont ? g.assets.find((a) => a.id === cont.id) : undefined;
+        const lit = own ? AL.activeAlternative(own, assetUi.target) : null;
+        const on = lit ? (lit.active === "container") === (key === "tilesets") : false;
+        c1.textContent = `${t(key === "meshes" ? "al.kindMeshes" : "al.kindTilesets", { n: String(n) })}`;
+        if (lit) {
+          const s2 = document.createElement("small");
+          s2.className = on ? "al-lit" : "al-unlit";
+          s2.textContent = ` · ${t(on ? "al.altLit" : "al.altUnlit", { target: t(`al.t.${assetUi.target}`) })}`;
+          c1.appendChild(s2);
+        }
+        r.append(c0, c1);
+        tb.appendChild(r);
+      };
       // MICRO-ARCHIVE-ASSET-2 · the forms repeated of this group: ONE row
       // «forma ripetuta ×N» at the place of its first copy, its copies under it
       const { index } = shapesOf(ans);
@@ -45619,7 +45769,9 @@ function assetListView(win: Win): HTMLElement {
       for (const [k, v] of inGroup) inGroup.set(k, [...v].sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true })));
       const drawn = new Set<string>();
       const repaint = (): void => { paintList(); paintSheet(); };
-      for (const a of g.assets) {
+      for (const a of order) {
+        if (byKind && a === byKind.meshes[0]) kindRow("meshes", byKind.meshes.length);
+        if (byKind && a === byKind.tilesets[0]) kindRow("tilesets", byKind.tilesets.length);
         const sh = index.get(a.id);
         const mine = sh ? inGroup.get(sh.key) ?? [] : [];
         if (sh && mine.length > 1) {
@@ -46040,6 +46192,17 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
   stampTd.title = [stampTd.textContent, st.say].filter(Boolean).join("\n");
   for (const k of targets) tr.appendChild(rebuildable(() => targetCell(a, k, repaint)));
   tr.onclick = () => { if (alPick) alPick(a.id); else { assetUi.detail = assetUi.detail === a.id ? "" : a.id; renderStorage(); } };
+  // MICRO-ASSETS-LIVELLI p.8 · dragged onto a container (the selection, when
+  // the row is in it); Alt at the drop adds it there too, without it moves
+  tr.draggable = true;
+  tr.addEventListener("dragstart", (e) => {
+    const ids = assetUi.sel.has(a.id) ? [...assetUi.sel] : [a.id];
+    alDrag = { ids, from: assetUi.grouping === "container" ? (a.containers.find((c) => c.id !== a.id)?.id ?? "") : "" };
+    const grp = tr.closest("tbody")?.querySelectorAll("tr.al-grp");
+    void grp;
+    if (e.dataTransfer) { e.dataTransfer.effectAllowed = "copyMove"; e.dataTransfer.setData("text/plain", ids.join("\n")); }
+  });
+  tr.addEventListener("dragend", () => { setTimeout(() => { alDrag = null; }, 0); });
   tb.appendChild(tr);
   if (!open) return;
   for (const x of a.versions) {
@@ -46153,6 +46316,391 @@ function tilesTitle(v: AL.VersionRow): string {
   return t("al.tilesTitle", { n: fmtN(x.tiles), read: fmtN(x.read), tri: fmtN(x.max_triangles), px: String(x.max_texture_side ?? "—") });
 }
 
+// ── MICRO-ASSETS-LIVELLI (E.D., 12–13 Nov 2026) ──────────────────────────────
+// The versions by level, where the graph cites them; meshes and tileset as
+// alternatives in a container, the choice written in the graph; the textures
+// a removal takes or leaves; a threshold under which a mesh is not reduced;
+// the panel of the row hidden with its arrow and N; the containers by hand
+// (a row dragged onto one, a new one from a selection). Every gesture on the
+// graph is s3Dgraphy's, through the bridge, applied in ONE undo step.
+
+/** the panel of the row's information, hidden and shown (the arrow, N); remembered */
+function toggleAssetSide(): void {
+  assetUi.sideHidden = !assetUi.sideHidden;
+  saveAssetUi();
+  for (const m of document.querySelectorAll<HTMLElement>("[data-al-main]")) m.classList.toggle("al-side-off", assetUi.sideHidden);
+  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-action='al-side-toggle']")) {
+    b.textContent = assetUi.sideHidden ? "◂" : "▸";
+    b.title = t(assetUi.sideHidden ? "al.sideShow" : "al.sideHide");
+    b.setAttribute("aria-pressed", String(!assetUi.sideHidden));
+  }
+}
+
+/** The rows of ONE level on every asset shown: each version, its asset, its
+ *  numbers, where its file is; a box each. */
+function levelTable(ans: AL.AssetListAnswer, shown: AL.AssetRow[], repaint: () => void): HTMLElement {
+  const rows = AL.levelRows(shown, assetUi.level);
+  const table = document.createElement("table");
+  table.className = "al-table al-level-table";
+  table.dataset.alLevelTable = assetUi.level;
+  table.dataset.noTableTools = "";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  const th0 = document.createElement("th");
+  const all = document.createElement("input");
+  all.type = "checkbox";
+  all.dataset.al = "level-all";
+  all.checked = rows.length > 0 && rows.every((r) => assetUi.verSel.has(r.version.id));
+  all.onchange = () => { for (const r of rows) { if (all.checked) assetUi.verSel.add(r.version.id); else assetUi.verSel.delete(r.version.id); } repaint(); };
+  th0.appendChild(all);
+  hr.appendChild(th0);
+  for (const k of ["al.col.name", "al.col.level", "al.col.tri", "al.col.mb", "al.col.gpu", "al.col.texMax", "al.col.ntex", "al.levelUses", "al.levelWhere"]) {
+    const th = document.createElement("th");
+    th.textContent = t(k);
+    hr.appendChild(th);
+  }
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tb = document.createElement("tbody");
+  const c = (text: string, cls = "", title = ""): HTMLTableCellElement => {
+    const td = document.createElement("td");
+    td.textContent = text;
+    td.className = cls;
+    td.title = title || text;
+    return td;
+  };
+  for (const { asset: a, version: v } of rows) {
+    const tr = document.createElement("tr");
+    tr.className = `al-asset al-level-row${assetUi.verSel.has(v.id) ? " sel" : ""}`;
+    tr.dataset.alLevelRow = v.id;
+    const td0 = document.createElement("td");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.alVerCheck = v.id;
+    cb.checked = assetUi.verSel.has(v.id);
+    cb.disabled = v.master;
+    cb.title = v.master ? t("al.levelMasterStays") : "";
+    cb.onchange = () => { if (cb.checked) assetUi.verSel.add(v.id); else assetUi.verSel.delete(v.id); repaint(); };
+    td0.appendChild(cb);
+    const path = fileStateOf(v.id)?.path ?? "";
+    tr.append(td0, c(a.name, "", `${a.name}\n${v.name}`), c(AL.levelSay(v, t("al.tilesetStreaming"), t("al.chainLod"))),
+      c(fmtN(v.triangles), "n"), c(fmtMB(v.size_bytes)), c(fmtMB(v.gpu_bytes), "n"),
+      c(v.texture_side ? String(v.texture_side) : "—", "n"), c(String(v.textures.length || v.texture_count || 0), "n"),
+      c(v.loaded_by.map((k) => t(`al.t.${k}`)).join(", ") || "—"),
+      c(path ? projectRelative(paths.dirname(path)) : t("al.levelNotHere"), "al-where", path || v.url));
+    tr.onclick = () => { if (!v.master) { if (assetUi.verSel.has(v.id)) assetUi.verSel.delete(v.id); else assetUi.verSel.add(v.id); repaint(); } };
+    tb.appendChild(tr);
+  }
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = c(t("files.nothingWithFilter"), "files-hint");
+    td.colSpan = 10;
+    tr.appendChild(td);
+    tb.appendChild(tr);
+  }
+  table.appendChild(tb);
+  void ans;
+  return table;
+}
+
+/** The sheet of the level view: how many ticked, «Seleziona le visibili»,
+ *  «Rimuovi N versioni…». */
+function levelSheet(sheet: HTMLElement, ans: AL.AssetListAnswer, shown: AL.AssetRow[], repaint: () => void): void {
+  const rows = AL.levelRows(shown, assetUi.level).filter((r) => !r.version.master);
+  const n = rows.filter((r) => assetUi.verSel.has(r.version.id)).length;
+  const info = document.createElement("span");
+  info.className = "files-hint";
+  info.dataset.alVerSel = String(n);
+  info.textContent = tn("al.versionsSelected", n);
+  const vis = document.createElement("button");
+  vis.type = "button";
+  vis.dataset.action = "al-select-visible";
+  vis.textContent = t("al.selectVisible", { n: String(rows.length) });
+  vis.disabled = !rows.length;
+  vis.onclick = () => { for (const r of rows) assetUi.verSel.add(r.version.id); repaint(); };
+  const none = document.createElement("button");
+  none.type = "button";
+  none.className = "ghost";
+  none.dataset.action = "al-select-none";
+  none.textContent = t("al.selectNone");
+  none.disabled = !n;
+  none.onclick = () => { assetUi.verSel.clear(); repaint(); };
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "danger";
+  del.dataset.action = "al-remove-versions";
+  del.textContent = t("al.removeVersions", { n: String(n) });
+  del.title = t("al.removeVersionsTitle");
+  del.disabled = !n;
+  del.onclick = () => void removeVersionsAsked(ans, rows.filter((r) => assetUi.verSel.has(r.version.id)).map((r) => r.version.id));
+  sheet.append(info, vis, none, del);
+}
+
+interface VersionRemovalPlan { id: string; name: string; where: string; files: string[]; bytes: number;
+  kept: { path: string; shared: boolean }[]; nodes: { id: string; name: string }[]; note?: string; done?: boolean }
+
+/** «Rimuovi N versioni…»: the preview of always (files, MB, the graph's
+ *  nodes), what each use falls back on, the textures that go and those that
+ *  stay because another geometry uses them; then the confirmation. The
+ *  files go on disk (no undo), the nodes in one step of the graph. */
+async function removeVersionsAsked(ans: AL.AssetListAnswer, ids: string[]): Promise<void> {
+  if (!store || !ids.length || refuseReadOnly()) return;
+  const set = new Set(ids);
+  const fate = AL.textureFate(ans.textures, set);
+  const keep = AL.keptTextureShas(ans.textures, set);
+  const body = { doc: store.doc, doc_path: currentFilePath ?? "", ids, keep_sha: keep, states: statesOf(fileStates()) };
+  const dry = await postGraph<{ plan: VersionRemovalPlan[] }>("/assets/versions/remove", { ...body, dry_run: true });
+  if (!dry.ok) { toast(t("files.optFailed", { why: String(dry.error ?? "") })); return; }
+  const plan = dry.plan;
+  const files = plan.reduce((x, p) => x + p.files.length, 0);
+  const bytes = plan.reduce((x, p) => x + p.bytes, 0);
+  const nodes = plan.reduce((x, p) => x + p.nodes.length, 0);
+  const lines: string[] = [t("al.removeSum", { n: String(plan.length), files: String(files), mb: fmtMB(bytes), nodes: String(nodes) })];
+  for (const p of plan.slice(0, 12))
+    lines.push(`• ${p.name} — ${p.files.length ? `${tn("al.removeFiles", p.files.length)}, ${fmtMB(p.bytes)} MB` : t("al.levelNotHere")} · ${tn("al.removeNodes", p.nodes.length)}`);
+  if (plan.length > 12) lines.push(t("al.removeMore", { n: String(plan.length - 12) }));
+  const fx = AL.removalEffects(ans.assets, set);
+  if (fx.length) {
+    lines.push("", t("al.removeUses"));
+    for (const e of fx.slice(0, 10))
+      lines.push(`• ${e.name} · ${t(`al.t.${e.target}`)}: ${e.lost} → ${e.then ? (e.master ? t("al.removeThenMaster") : e.then) : t("al.removeThenNone")}`);
+    if (fx.length > 10) lines.push(t("al.removeMore", { n: String(fx.length - 10) }));
+  }
+  if (fate.orphan.length) lines.push("", tn("al.removeTexOrphan", fate.orphan.length) + ` ${fate.orphan.slice(0, 6).map((x) => x.name).join(", ")}`);
+  if (fate.shared.length) {
+    lines.push("", tn("al.removeTexShared", fate.shared.length));
+    for (const x of fate.shared.slice(0, 6)) lines.push(`• ${x.texture.name} — ${t("al.removeTexUsedBy", { by: x.others.slice(0, 3).join(", ") + (x.others.length > 3 ? ` +${x.others.length - 3}` : "") })}`);
+  }
+  const separate = plan.some((p) => p.files.some((f) => /\.(png|jpe?g|ktx2|webp|basis|tga|tiff?|exr)$/i.test(f)));
+  const a = await openDialog({ kind: "al-remove-versions", title: t("al.removeVersions", { n: String(plan.length) }),
+    message: `${lines.join("\n")}\n\n${t("files.useRemoveNoUndo")}`, danger: true, ok: t("al.removeGo"),
+    ...(separate ? { choices: [{ key: "keep-tex", label: t("al.removeKeepTextures"), title: t("al.removeKeepTexturesTitle") }] } : {}) });
+  if (!a.ok) return;
+  const done = await postGraph<{ plan: VersionRemovalPlan[]; deleted: string[]; failed: { path: string; error: string }[] }>(
+    "/assets/versions/remove", { ...body, keep_textures: a.choice === "keep-tex" });
+  if (!done.ok) { toast(t("files.optFailed", { why: String(done.error ?? "") })); return; }
+  const st = store;
+  // only the versions whose files went leave the graph (a file refused or
+  // locked keeps its node: said in the log)
+  const gone = [...new Set(done.plan.filter((p) => p.done !== false).flatMap((p) => p.nodes.map((x) => x.id)))].filter((id) => st.node(id));
+  st.batch(() => { for (const id of gone) st.deleteNode(id); });
+  const m = t("al.removed", { n: String(done.plan.length), files: String(done.deleted.length), nodes: String(gone.length) });
+  logInfo(m);
+  for (const f of done.failed) logWarn(`${f.path}: ${f.error}`);
+  toastUndo(m, st);
+  assetUi.verSel.clear();
+  await askAssetList();
+}
+
+/** MICRO-ASSETS-LIVELLI p.4 · «Elimina…» a texture: first the geometries it
+ *  leaves without it, by name; then its files (a texture inside a .glb is
+ *  not taken out from here: said). */
+async function removeTextureAsked(ans: AL.AssetListAnswer, tx: AL.StudyTexture): Promise<void> {
+  if (!store || refuseReadOnly()) return;
+  const loss = AL.textureLoss(tx);
+  const listed = loss.slice(0, 20).map((x) => "• " + x);
+  if (loss.length > 20) listed.push(t("al.removeMore", { n: String(loss.length - 20) }));
+  const ask = [t("al.texRemoveAsk", { name: tx.name, n: String(loss.length) }), listed.join("\n"), t("files.useRemoveNoUndo")].join("\n\n");
+  const ok = await askConfirm(ask, { danger: true, kind: "al-remove-texture", ok: t("al.removeGo") });
+  if (!ok) return;
+  const ids = [...new Set(tx.uses.map((u) => u.version_id))];
+  const j = await postGraph<{ deleted: string[]; embedded: string[]; failed: { path: string; error: string }[] }>("/assets/textures/remove",
+    { doc: store.doc, doc_path: currentFilePath ?? "", ids, sha256: tx.sha256, states: statesOf(fileStates()) });
+  if (!j.ok) { toast(t("files.optFailed", { why: String(j.error ?? "") })); return; }
+  const m = t("al.texRemoved", { name: tx.name, n: String(j.deleted.length) }) + (j.embedded.length ? ` · ${tn("al.texEmbedded", j.embedded.length)}` : "");
+  toast(m);
+  logInfo(m);
+  for (const f of j.failed) logWarn(`${f.path}: ${f.error}`);
+  void ans;
+  await askAssetList();
+}
+
+/** MICRO-ASSETS-LIVELLI p.5 · the meshes under the threshold: each use of the
+ *  targets written on the lightest version the asset has (no new file); one
+ *  step of undo. Those with no version keep the master and are said. */
+function pointUsesBelow(list: AL.AssetRow[], targets: AL.TargetKey[], ans: AL.AssetListAnswer): void {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  const uses = [...new Set(targets.flatMap((k) => ans.targets[k]?.uses ?? []))];
+  let pointed = 0;
+  const bare: string[] = [];
+  st.batch(() => {
+    for (const a of list) {
+      const v = AL.pointTarget(a);
+      const node = v ? st.node(v.id) as { data?: Record<string, unknown> } | undefined : undefined;
+      if (!v || !node) { bare.push(a.name); continue; }
+      const cur = Array.isArray(node.data?.use) ? (node.data!.use as string[]) : [];
+      const next = [...new Set([...cur, ...uses])].sort();
+      if (next.length !== cur.length) st.updateNode(v.id, { data: { ...(node.data ?? {}), use: next } } as Parameters<typeof st.updateNode>[1]);
+      pointed++;
+    }
+  });
+  const m = t("al.pointed", { n: String(pointed), min: fmtN(assetUi.minTri) }) + (bare.length ? ` · ${tn("al.pointedBare", bare.length)}` : "");
+  logInfo(bare.length ? `${m} — ${bare.join(", ")}` : m);
+  toastUndo(m, st);
+}
+
+interface ContainerDelta extends GraphDelta { edges_removed?: string[]; nodes_removed?: string[]; nodes_renamed?: { id: string; name: string }[] }
+
+/** A gesture on the containers (s3Dgraphy's, through the bridge), applied as
+ *  ONE step of undo; the list asked again. */
+async function containerOp(op: string, body: Record<string, unknown>, say: string): Promise<boolean> {
+  const st = store;
+  if (!st || refuseReadOnly()) return false;
+  const j = await postGraph<{ delta: ContainerDelta; warnings: string[]; got: unknown }>("/graph/containers", { doc: st.doc, op, ...body });
+  if (!j.ok) { toast(String(j.error ?? j.status)); return false; }
+  const d = j.delta;
+  st.batch(() => {
+    for (const id of d.edges_removed ?? []) { const e = st.doc.graph.edges.find((x) => x.id === id); if (e) st.deleteEdge(e); }
+    for (const id of d.nodes_removed ?? []) if (st.node(id)) st.deleteNode(id);
+    for (const n of d.nodes_added ?? []) if (!st.node(n.id)) st.addNode(JSON.parse(JSON.stringify(n)));
+    for (const n of d.nodes_changed ?? []) { const cur = st.node(n.id) as { data?: Record<string, unknown> } | undefined; if (cur) st.updateNode(n.id, { data: { ...(n.data ?? {}) } } as Parameters<typeof st.updateNode>[1]); }
+    for (const n of d.nodes_renamed ?? []) if (st.node(n.id)) st.updateNode(n.id, { name: n.name } as Parameters<typeof st.updateNode>[1]);
+    for (const e of d.edges_added ?? []) if (!st.doc.graph.edges.some((x) => x.id === e.id) && st.node(e.source) && st.node(e.target)) st.addEdge(e.source, e.target, e.edge_type, e.attributes, e.id);
+  });
+  logInfo(say);
+  for (const w of j.warnings ?? []) logWarn(w);
+  toastUndo(say, st);
+  await askAssetList();
+  return true;
+}
+
+/** The container an Assets group stands for (grouping by container): its id
+ *  and name, from the rows (a member's container, or the container itself). */
+function groupContainer(g: AL.Group): { id: string; name: string } | null {
+  if (!g.key) return null;
+  for (const a of g.assets) {
+    if (a.kind === "container" && a.name === g.key) return { id: a.id, name: a.name };
+    const c = a.containers.find((x) => x.name === g.key);
+    if (c) return c;
+  }
+  // an empty container: the graph's node of that name
+  const n = store?.doc.graph.nodes.find((x) => x.node_type === "RepresentationModelNodeGroup" && x.name === g.key);
+  return n ? { id: n.id, name: n.name ?? n.id } : null;
+}
+
+/** MICRO-ASSETS-LIVELLI p.3 · which alternative a container lights for the
+ *  target shown — written in the graph; the Space follows it (the person's
+ *  own choice there is given back to the graph's). */
+async function setActiveAlternative(cid: string, cname: string, which: "container" | "members" | null, target: AL.TargetKey): Promise<void> {
+  const say = which ? t("al.altSet", { group: cname, which: t(`al.alt.${which}`), target: t(`al.t.${target}`) }) : t("al.altAuto", { group: cname, target: t(`al.t.${target}`) });
+  if (await containerOp("active", { group: cid, which, use: target }, say)) {
+    const p = space3dPrefs();
+    if (p.altModes?.[cid]) { const m = { ...p.altModes }; delete m[cid]; setSpace3dPrefs({ ...p, altModes: m }); }
+  }
+}
+
+/** MICRO-ASSETS-LIVELLI p.8 · rows dropped on a container: ONE question, with
+ *  its «?»: a piece of the group (member) or it replaces the whole group
+ *  (alternative); member by default for a mesh, alternative for a tileset.
+ *  With Alt «add here too» (m:n), without it a move. */
+async function dropOnContainer(ids: string[], from: string, to: { id: string; name: string }, alt: boolean): Promise<void> {
+  const ans = assetUi.ans;
+  const rows = (ans?.assets ?? []).filter((a) => ids.includes(a.id) && a.id !== to.id);
+  if (!rows.length) return;
+  const def = AL.dropDefault(rows);
+  const help = document.createElement("p");
+  help.className = "files-hint al-drop-help";
+  help.textContent = t("al.dropHelp");
+  const a = await openDialog({ kind: "al-drop", title: t("al.dropTitle", { n: String(rows.length), group: to.name }),
+    message: [rows.slice(0, 8).map((x) => "• " + x.name).join("\n") + (rows.length > 8 ? "\n" + t("al.removeMore", { n: String(rows.length - 8) }) : ""),
+              t(alt ? "al.dropAdd" : "al.dropMove")].join("\n\n"),
+    body: help,
+    ok: t(def === "alternative" ? "al.dropAlternative" : "al.dropMember"),
+    choices: [{ key: def === "alternative" ? "member" : "alternative", label: t(def === "alternative" ? "al.dropMember" : "al.dropAlternative"),
+                title: t(def === "alternative" ? "al.dropMemberTitle" : "al.dropAlternativeTitle") }] });
+  if (!a.ok) return;
+  const kind: AL.DropKind = (a.choice as AL.DropKind | undefined) ?? def;
+  const say = t(kind === "alternative" ? "al.droppedAlternative" : alt ? "al.droppedAdded" : "al.droppedMoved",
+    { n: String(rows.length), group: to.name });
+  await containerOp(kind, { ids: rows.map((x) => x.id), group: to.id, ...(kind === "member" && !alt && from && from !== to.id ? { move_from: from } : {}) }, say);
+}
+
+/** MICRO-ASSETS-LIVELLI p.9 · a new container (from the rows selected, or
+ *  empty): its name, its epoch, the Document that publishes it (optional).
+ *  The files on disk do not move: the graph changes, not the folders. */
+async function newContainerAsked(ids: string[]): Promise<void> {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  const epochs = st.doc.graph.nodes.filter((n) => n.node_type === "EpochNode");
+  const docs = st.doc.graph.nodes.filter((n) => n.node_type === "document");
+  const box = document.createElement("div");
+  box.className = "al-new-container";
+  const mkSel = (label: string, key: string, list: { id: string; name?: string }[], none: string): HTMLSelectElement => {
+    const l = document.createElement("label");
+    l.textContent = label + " ";
+    const s2 = document.createElement("select");
+    s2.dataset.al = key;
+    const o = document.createElement("option"); o.value = ""; o.textContent = none; s2.appendChild(o);
+    for (const n of list) { const e = document.createElement("option"); e.value = n.id; e.textContent = n.name || n.id; s2.appendChild(e); }
+    l.appendChild(s2);
+    box.appendChild(l);
+    return s2;
+  };
+  const ep = mkSel(t("al.containerEpoch"), "new-container-epoch", epochs, t("al.containerNoEpoch"));
+  const dc = mkSel(t("al.containerDocument"), "new-container-document", docs, t("al.containerNoDocument"));
+  const hint = document.createElement("p");
+  hint.className = "files-hint";
+  hint.textContent = t("al.containerFilesStay");
+  box.appendChild(hint);
+  const a = await openDialog({ kind: "al-new-container", title: t("al.newContainer"),
+    message: ids.length ? tn("al.newContainerFrom", ids.length) : t("al.newContainerEmpty"),
+    input: { value: "", label: t("al.containerName"), placeholder: t("al.containerName") }, body: box, ok: t("al.create"),
+    validate: (v) => (v.trim() ? null : t("al.containerNeedsName")) });
+  if (!a.ok) return;
+  await containerOp("create", { label: a.value.trim(), epoch: ep.value, document: dc.value, ids },
+    t("al.containerCreated", { name: a.value.trim(), n: String(ids.length) }));
+}
+
+/** A container's own menu (its header «⋯»): rename, empty, remove when empty. */
+async function containerMenu(c: { id: string; name: string }, members: number): Promise<void> {
+  const a = await openDialog({ kind: "al-container-menu", title: c.name, message: t("al.containerFilesStay"),
+    choices: [{ key: "rename", label: t("al.containerRename") }, { key: "empty", label: t("al.containerEmpty") },
+              ...(members ? [] : [{ key: "remove", label: t("al.containerRemove") }])], ok: t("al.containerClose") });
+  if (!a.ok || !a.choice) return;
+  if (a.choice === "rename") {
+    const v = await askText(t("al.containerName"), c.name, { kind: "al-container-rename" });
+    if (v && v.trim() && v.trim() !== c.name) await containerOp("rename", { group: c.id, label: v.trim() }, t("al.containerRenamed", { old: c.name, name: v.trim() }));
+  } else if (a.choice === "empty") {
+    if (await askConfirm(t("al.containerEmptyAsk", { name: c.name, n: String(members) }), { kind: "al-container-empty" }))
+      await containerOp("empty", { group: c.id }, t("al.containerEmptied", { name: c.name }));
+  } else if (a.choice === "remove") {
+    if (await askConfirm(t("al.containerRemoveAsk", { name: c.name }), { danger: true, kind: "al-container-remove" }))
+      await containerOp("remove", { group: c.id }, t("al.containerRemoved", { name: c.name }));
+  }
+}
+
+/** MICRO-ASSETS-LIVELLI p.3 · the alternative a container lights for the
+ *  target shown: «Tileset | Mesh | Regola» — the first two written in the
+ *  graph (`data.active_alternative`), the third gives the choice back to the
+ *  rule (the tileset where it fits its band). */
+function altSwitch(c: { id: string; name: string }, now: { active: "container" | "members"; chosen: boolean }, k: AL.TargetKey): HTMLElement {
+  const seg = document.createElement("span");
+  seg.className = "files-seg al-alt-switch";
+  seg.dataset.alAlt = c.id;
+  seg.dataset.alAltActive = now.active;
+  seg.dataset.alAltChosen = String(now.chosen);
+  seg.title = t("al.altTitle", { target: t(`al.t.${k}`) });
+  const lab = document.createElement("small");
+  lab.textContent = `${t("al.altLabel", { target: t(`al.t.${k}`) })} `;
+  seg.appendChild(lab);
+  for (const which of ["container", "members", null] as const) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.action = `al-alt-${which ?? "rule"}`;
+    b.textContent = t(`al.alt.${which ?? "rule"}`);
+    const pressed = which === null ? !now.chosen : now.chosen && now.active === which;
+    b.setAttribute("aria-pressed", String(pressed));
+    if (which && !now.chosen && now.active === which) b.classList.add("al-alt-auto");
+    b.onclick = (e) => { e.stopPropagation(); if (!pressed) void setActiveAlternative(c.id, c.name, which, k); };
+    seg.appendChild(b);
+  }
+  return seg;
+}
+
+/** the rows dragged, between dragstart and drop */
+let alDrag: { ids: string[]; from: string } | null = null;
+
 /** The state of an asset for a target, and its proposal — editable here. */
 function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLTableCellElement {
   const td = document.createElement("td");
@@ -46264,7 +46812,7 @@ function texturesTable(ans: AL.AssetListAnswer): HTMLElement {
   table.dataset.alTextures = "";
   table.dataset.noTableTools = "";
   const hr = document.createElement("tr");
-  for (const [k, key] of [["name", "al.col.name"], ["side", "al.tex.side"], ["", "al.tex.format"], ["", "al.tex.kb"], ["gpu", "al.col.gpu"], ["uses", "al.tex.uses"], ["", "al.tex.where"]] as const) {
+  for (const [k, key] of [["name", "al.col.name"], ["side", "al.tex.side"], ["", "al.tex.format"], ["", "al.tex.kb"], ["gpu", "al.col.gpu"], ["uses", "al.tex.uses"], ["", "al.tex.where"], ["", "al.tex.act"]] as const) {
     const th = document.createElement("th");
     th.textContent = t(key) + (k && assetUi.texSort === k ? " ▾" : "");
     if (k) th.onclick = () => { assetUi.texSort = k as AL.TexSort; renderStorage(); };
@@ -46283,6 +46831,17 @@ function texturesTable(ans: AL.AssetListAnswer): HTMLElement {
     w.title = x.uses.map((u) => `${u.asset} · ${u.level}`).join("\n");
     tr.append(c(x.names.join(" · ")), c(`${x.width}×${x.height}`, "n"), c(x.format), c(x.bytes != null ? fmtN(x.bytes / 1024) : "—", "n"),
       c(fmtMB(x.gpu_bytes), "n"), c(x.count > 1 ? t("al.shared", { n: String(x.count) }) : "1", x.count > 1 ? "al-shared" : ""), w);
+    // MICRO-ASSETS-LIVELLI p.4 · «Elimina…»: the geometries left without it, first
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "ghost danger al-tex-remove";
+    rm.dataset.action = "al-remove-texture";
+    rm.textContent = t("al.texRemove");
+    rm.title = t("al.texRemoveTitle", { n: String(AL.textureLoss(x).length) });
+    rm.onclick = () => void removeTextureAsked(ans, x);
+    const tdr = document.createElement("td");
+    tdr.appendChild(rm);
+    tr.appendChild(tdr);
     tb.appendChild(tr);
   }
   table.appendChild(tb);

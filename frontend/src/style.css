@@ -11607,3 +11607,22 @@ td.al-cloud { color: var(--accent-ink); }
 .cp-check[data-ok="1"] { border-color: #2b8a3e; background: rgba(43, 138, 62, 0.08); }
 .cp-foot { display: flex; gap: 8px; justify-content: flex-end; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border); }
 .cp-foot select { max-width: 280px; }
+
+/* MICRO-ASSETS-LIVELLI · the row's panel hidden (the arrow, N), the level
+   view, the kinds inside a container, its alternative lit, a drop on it */
+.al-main.al-side-off { grid-template-columns: minmax(0, 1fr) 0; }
+.al-main.al-side-off > .al-side { display: none; }
+.al-side-toggle { margin-left: auto; min-width: 28px; }
+.al-threshold { display: inline-flex; align-items: center; gap: 4px; }
+.al-threshold input { width: 64px; }
+.al-level-table td.al-where { color: var(--fg-dim, #999); max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+tr.al-kind td { font-size: 0.86em; font-weight: 600; color: var(--fg-dim, #aaa); padding-left: 22px; border-top: 1px dashed var(--line, #444); }
+tr.al-kind .al-lit { color: var(--ok, #5c5); font-weight: 400; }
+tr.al-kind .al-unlit { color: var(--fg-dim, #888); font-weight: 400; }
+.al-alt-switch { display: inline-flex; align-items: center; gap: 2px; }
+.al-alt-switch button.al-alt-auto { outline: 1px dashed var(--accent, #d9a400); }
+tr.al-grp.al-drop-on td { background: color-mix(in srgb, var(--accent, #d9a400) 22%, transparent); outline: 1px dashed var(--accent, #d9a400); }
+tr.al-asset[draggable="true"] { cursor: grab; }
+.al-cont-menu { padding: 0 6px; }
+.al-new-container { display: grid; gap: 6px; margin-top: 6px; }
+.al-tex-remove { padding: 0 6px; }

@@ -2556,7 +2556,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: sample by level (and the largest of each level), the rest estimated
 #: (``estimated``), ``{tiles_full: true}`` reads all; one measure per (path,
 #: size, mtime) at a time, kept on disk, stopped when no page waits for it.
-BRIDGE_LEVEL = 65   # 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 66   # 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -4022,7 +4022,8 @@ def make_handler(api):
                 status, out = self._gis_post(route, body if isinstance(body, dict) else {})
                 self._json(out, status)
             elif route in ("/consolidate", "/graph/compose-plan", "/graph/before-after", "/graph/tileset-whole",
-                           "/graph/register-new-version", "/graph/tileset-master", "/assets/list"):
+                           "/graph/register-new-version", "/graph/tileset-master", "/assets/list",
+                           "/graph/containers", "/assets/versions/remove", "/assets/textures/remove"):
                 # MICRO-BLEND-OFFICINA-3 · s3Dgraphy's consolidate and
                 # graph_compose: «Consolida per…», «Componi un .blend dal
                 # grafo», the before/after of the check, the tileset «Intero»
@@ -4049,7 +4050,10 @@ def make_handler(api):
                       "/graph/tileset-whole": self._tileset_whole,
                       "/graph/register-new-version": self._register_new_version,
                       "/graph/tileset-master": self._tileset_master,
-                      "/assets/list": self._asset_list}[route]
+                      "/assets/list": self._asset_list,
+                      "/graph/containers": self._containers,
+                      "/assets/versions/remove": self._asset_versions_remove,
+                      "/assets/textures/remove": self._asset_texture_remove}[route]
                 try:
                     status, out = fn(body)
                 except ValueError as exc:
@@ -5253,6 +5257,177 @@ def make_handler(api):
                          "counts": {k: sum(1 for r in rows if r["state"] == k)
                                     for k in ("aligned", "newer", "revised", "modified", "unknown")}}
 
+        def _containers(self, body):
+            """MICRO-ASSETS-LIVELLI · ``POST /graph/containers {doc, op, …}`` —
+            the containers by hand in Archive › Assets, each gesture one of
+            s3Dgraphy's (``resources.alternatives``), answered as a delta the
+            page applies in one undo step: ``member {ids, group, move_from?}``
+            (a piece of the group: m:n, a move with ``move_from``),
+            ``alternative {ids, group}`` (it replaces the whole group:
+            ``declare_alternative``), ``create {label, epoch?, document?,
+            ids?}``, ``rename {group, label}``, ``empty {group}``, ``remove
+            {group}`` (an empty one), ``active {group, which, use}`` (the
+            alternative lit, kept in the graph). The files never move."""
+            from s3dgraphy.resources import alternatives as ALT
+            graph, _f = self._graph_of(body)
+            op = str(body.get("op") or "")
+            ids = [str(x) for x in body.get("ids") or [] if x]
+            group = str(body.get("group") or "")
+            fns = {
+                "member": lambda: [ALT.put_in_container(graph, i, group, move_from=str(body.get("move_from") or "") or None)
+                                   for i in ids],
+                "alternative": lambda: [ALT.declare_alternative(graph, i, group) for i in ids],
+                "create": lambda: ALT.create_container(graph, str(body.get("label") or ""),
+                                                       epoch_id=str(body.get("epoch") or "") or None,
+                                                       document_id=str(body.get("document") or "") or None,
+                                                       members=ids),
+                "rename": lambda: ALT.rename_container(graph, group, str(body.get("label") or "")),
+                "empty": lambda: ALT.empty_container(graph, group),
+                "remove": lambda: ALT.remove_container(graph, group),
+                "active": lambda: ALT.set_active_alternative(graph, group, body.get("which") or None,
+                                                             use=str(body.get("use") or "*")),
+            }
+            if op not in fns:
+                return 400, {"ok": False, "error": f"unknown container gesture {op!r}"}
+            names = {n.node_id: n.name for n in graph.nodes}
+            got, delta = self._gis_delta(graph, fns[op])
+            delta["nodes_renamed"] = [{"id": n.node_id, "name": n.name} for n in graph.nodes
+                                      if n.node_id in names and names[n.node_id] != n.name]
+            warnings = [w for x in (got if isinstance(got, list) else [got]) if isinstance(x, dict)
+                        for w in x.get("warnings") or []]
+            return 200, {"ok": True, "op": op, "got": got, "warnings": warnings, "delta": delta}
+
+        def _asset_versions_remove(self, body):
+            """MICRO-ASSETS-LIVELLI · ``POST /assets/versions/remove {doc,
+            doc_path?, ids, keep_sha?, keep_textures?, dry_run}`` — versions
+            removed WHERE THE GRAPH CITES THEM (not only in a ``versions/``
+            folder): each id resolved on this computer, its files
+            (s3Dgraphy's ``use_profiles.version_files``: the glb, or the
+            glTF with its .bin and textures, the stamp and hints) and the
+            nodes of the graph that go with it (the version, its
+            ``resource_file`` nodes). A texture file whose sha256 is in
+            ``keep_sha`` (another geometry uses it) stays, and is said; with
+            ``keep_textures`` no image goes. Without ``dry_run`` the files
+            are deleted (inside the bridge's folders only); the page removes
+            the nodes from its document in one step."""
+            from s3dgraphy.resources import use_profiles as UP
+            graph, em_folder = self._graph_of(body)
+            ids = [str(x) for x in body.get("ids") or [] if x]
+            if not ids:
+                return 400, {"ok": False, "error": "no version to remove"}
+            keep_sha = {str(x).replace("sha256:", "") for x in body.get("keep_sha") or [] if x}
+            keep_tex = bool(body.get("keep_textures"))
+            found = {str(r.get("id")): r for r in self._disk_resolved(graph, body, em_folder, ids=ids)}
+            import em_blender as BL
+            plan = []
+            for vid in ids:
+                node = graph.find_node_by_id(vid)
+                name = str(getattr(node, "name", "") or vid)
+                r = found.get(vid) or {}
+                path = str(r.get("path") or "")
+                nodes = [{"id": vid, "name": name}] if node is not None else []
+                for e in graph.edges:
+                    if e.edge_source == vid and e.edge_type == "has_file":
+                        f = graph.find_node_by_id(e.edge_target)
+                        if f is not None and not any(x["id"] == f.node_id for x in nodes):
+                            nodes.append({"id": f.node_id, "name": str(getattr(f, "name", "") or f.node_id)})
+                if not path or not os.path.exists(path):
+                    plan.append({"id": vid, "name": name, "files": [], "bytes": 0, "kept": [], "nodes": nodes,
+                                 "where": "", "note": "not on this computer: only the graph's nodes go"})
+                    continue
+                vf = UP.version_files(path)
+                kept = []
+                files = list(vf["files"])
+                for img in vf["images"]:
+                    sha = ""
+                    if keep_sha and not keep_tex:
+                        try:
+                            sha = BL._sha256(img)
+                        except OSError:
+                            sha = ""
+                    if keep_tex or (sha and sha in keep_sha):
+                        files.remove(img)
+                        kept.append({"path": img, "shared": not keep_tex})
+                plan.append({"id": vid, "name": name, "where": vf["path"], "files": files,
+                             "bytes": sum(os.path.getsize(f) for f in files if os.path.isfile(f)),
+                             "kept": kept, "nodes": nodes})
+            if body.get("dry_run"):
+                return 200, {"ok": True, "dry_run": True, "plan": plan}
+            deleted, failed = [], []
+            for p in plan:
+                bad = 0
+                for f in p["files"]:
+                    # the roots are real paths (/private/tmp on macOS): so is the file
+                    if not _fs_inside_roots(os.path.realpath(f)):
+                        failed.append({"path": f, "error": "outside the bridge's folders"})
+                        bad += 1
+                        continue
+                    try:
+                        if os.path.isfile(f):
+                            os.remove(f)
+                            deleted.append(f)
+                    except OSError as exc:
+                        failed.append({"path": f, "error": str(exc)})
+                        bad += 1
+                # the page takes the version out of the graph only when its files went
+                p["done"] = bad == 0
+                where = p.get("where") or ""
+                if where and os.path.isdir(where) and not p["kept"]:
+                    # a glTF folder emptied of its files goes too (empty folders only)
+                    for root, dirs, fs in sorted(os.walk(where), key=lambda x: -len(x[0])):
+                        if not fs and not os.listdir(root):
+                            try:
+                                os.rmdir(root)
+                            except OSError:
+                                pass
+            return 200, {"ok": True, "plan": plan, "deleted": deleted, "failed": failed}
+
+        def _asset_texture_remove(self, body):
+            """MICRO-ASSETS-LIVELLI · ``POST /assets/textures/remove {doc,
+            doc_path?, ids, sha256, dry_run?}`` — a texture deleted: among the
+            files of the versions ``ids`` (those that use it), the image files
+            whose sha256 is ``sha256``. A texture INSIDE a .glb cannot be taken
+            out from here: its version is named in ``embedded``. The page has
+            already said which geometries are left without it."""
+            from s3dgraphy.resources import use_profiles as UP
+            import em_blender as BL
+            graph, em_folder = self._graph_of(body)
+            ids = [str(x) for x in body.get("ids") or [] if x]
+            want = str(body.get("sha256") or "").replace("sha256:", "")
+            if not ids or not want:
+                return 400, {"ok": False, "error": "which texture, used by which versions?"}
+            found = {str(r.get("id")): r for r in self._disk_resolved(graph, body, em_folder, ids=ids)}
+            hits, embedded = [], []
+            for vid in ids:
+                path = str((found.get(vid) or {}).get("path") or "")
+                if not path or not os.path.exists(path):
+                    continue
+                vf = UP.version_files(path)
+                mine = []
+                for img in vf["images"]:
+                    try:
+                        if BL._sha256(img) == want:
+                            mine.append(img)
+                    except OSError:
+                        pass
+                if mine:
+                    hits += [m for m in mine if m not in hits]
+                elif path.lower().endswith(".glb"):
+                    embedded.append(vid)
+            if body.get("dry_run"):
+                return 200, {"ok": True, "dry_run": True, "files": hits, "embedded": embedded}
+            deleted, failed = [], []
+            for f in hits:
+                if not _fs_inside_roots(os.path.realpath(f)):
+                    failed.append({"path": f, "error": "outside the bridge's folders"})
+                    continue
+                try:
+                    os.remove(f)
+                    deleted.append(f)
+                except OSError as exc:
+                    failed.append({"path": f, "error": str(exc)})
+            return 200, {"ok": True, "deleted": deleted, "embedded": embedded, "failed": failed}
+
         def _delta_of(self, graph, fn):
             """Run ``fn`` on the graph (a copy of the page's) and answer what
             changed as a DELTA the page applies in one undo step."""
@@ -5513,7 +5688,8 @@ def make_handler(api):
                                  "size": int(body.get("size") or 4096)})
                 else:
                     args.update({"em_json": em_json, "use": body.get("use") or ["realtime"]})
-                    for k in ("ratio", "max_texture", "draco"):
+                    # MICRO-ASSETS-LIVELLI · min_triangles: under it EM Tools does not reduce
+                    for k in ("ratio", "max_texture", "draco", "min_triangles"):
                         if k in body:
                             args[k] = body[k]
                 if body.get("options"):

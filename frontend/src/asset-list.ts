@@ -69,6 +69,9 @@ export interface TargetCell {
   /** MICRO-BLENDER-SIDECAR p.4a · its tiles are out of the band and cannot
    *  be remade here: the master is missing (`retileWithoutMaster`) */
   retile?: "no_master";
+  /** MICRO-ASSETS-LIVELLI · a container's tileset switched off for this
+   *  target by the choice kept in the graph (its meshes are lit) */
+  off_by_choice?: boolean;
 }
 export interface AssetRow {
   id: string; name: string; kind: "rm" | "container"; description?: string;
@@ -79,6 +82,9 @@ export interface AssetRow {
   tileset_master?: { declared: boolean; sources: { id: string; name: string }[]; unavailable: string; say_it: string } | null;
   audit: { versions: number; stamped: number; files_missing: string[]; files_in_cloud?: string[]; unchecked: number; modified_after_stamp: string[];
            master_declared: boolean | null | undefined };
+  /** MICRO-ASSETS-LIVELLI · a container with a tileset: the alternative lit
+   *  per target, and whether the graph chose it (s3Dgraphy ≥ this MICRO) */
+  alternative?: Partial<Record<TargetKey, { active: string; chosen: boolean }>>;
 }
 export interface StudyTexture {
   sha256: string; name: string; names: string[]; width: number; height: number; format: string; bytes: number | null;
@@ -1516,4 +1522,150 @@ export function queueEta(q: readonly QueueItem[], d: Durations, now: number, slo
 export function clockOf(ms: number): string {
   const t = new Date(ms);
   return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+}
+
+// ── MICRO-ASSETS-LIVELLI (E.D., 12–13 Nov 2026) · levels, alternatives, textures, threshold ──
+// The versions where the GRAPH cites them (not only a `versions/` folder),
+// shown and removed by level across every asset; meshes and tileset of a
+// container as alternatives; the textures a removal leaves or takes; the
+// meshes under a threshold not reduced. No DOM, no rule of s3Dgraphy's.
+
+/** A version's level for the filter «Livello»: `master`, `tileset`, the rung
+ *  of its chain (`lod0`, `lod1`… — `lod0-aton-heriverse` is `lod0`), else
+ *  its level as it is (a version by use). */
+export function levelKeyOf(v: Pick<VersionRow, "master" | "tileset" | "level" | "lod_level">): string {
+  if (v.master) return "master";
+  if (v.tileset) return "tileset";
+  const lv = String(v.level || v.lod_level || "");
+  return /^lod\d+/i.exec(lv)?.[0].toLowerCase() ?? (lv || "—");
+}
+
+/** The levels present, with how many versions: master, lod0, lod1…, then the
+ *  others by name, tileset last. */
+export function levelsOf(assets: readonly AssetRow[]): { key: string; n: number }[] {
+  const by = new Map<string, number>();
+  for (const a of assets) for (const v of a.versions) { const k = levelKeyOf(v); by.set(k, (by.get(k) ?? 0) + 1); }
+  const rank = (k: string): number => (k === "master" ? 0 : /^lod\d+$/.test(k) ? 1 : k === "tileset" ? 3 : 2);
+  return [...by].map(([key, n]) => ({ key, n }))
+    .sort((x, y) => rank(x.key) - rank(y.key) || x.key.localeCompare(y.key, undefined, { numeric: true }));
+}
+
+/** The rows of a level on every asset (those shown): each version with its asset. */
+export function levelRows(assets: readonly AssetRow[], level: string): { asset: AssetRow; version: VersionRow }[] {
+  const out: { asset: AssetRow; version: VersionRow }[] = [];
+  for (const a of assets) for (const v of a.versions) if (levelKeyOf(v) === level) out.push({ asset: a, version: v });
+  return out;
+}
+
+/** What a removal does to the uses: each asset that loses the version a
+ *  target loads, and what the viewer will load instead — the lightest
+ *  version left (never the master nor a tileset), else the master, else
+ *  nothing. A master is never removed here. */
+export interface RemovalEffect { asset_id: string; name: string; target: TargetKey; lost: string; then: string | null; master: boolean }
+export function removalEffects(assets: readonly AssetRow[], ids: ReadonlySet<string>): RemovalEffect[] {
+  const out: RemovalEffect[] = [];
+  for (const a of assets) {
+    if (!a.versions.some((v) => ids.has(v.id))) continue;
+    const left = { ...a, versions: a.versions.filter((v) => !ids.has(v.id)) };
+    const lv = lightestVersion(left);
+    const master = left.versions.find((v) => v.master) ?? null;
+    for (const k of TARGET_KEYS) {
+      const id = a.targets[k]?.loads;
+      if (!id || !ids.has(id)) continue;
+      const lost = a.versions.find((v) => v.id === id);
+      out.push({ asset_id: a.id, name: a.name, target: k, lost: lost ? levelKeyOf(lost) : id,
+                 then: lv ? levelKeyOf(lv) : master ? "master" : null, master: !lv && !!master });
+    }
+  }
+  return out;
+}
+
+/** The textures a removal touches, by sha256: those NO other geometry uses
+ *  (they go with it, if the person agrees) and the shared ones that stay,
+ *  each with the geometries that keep it. */
+export function textureFate(textures: readonly StudyTexture[], ids: ReadonlySet<string>):
+  { orphan: StudyTexture[]; shared: { texture: StudyTexture; others: string[] }[] } {
+  const orphan: StudyTexture[] = [];
+  const shared: { texture: StudyTexture; others: string[] }[] = [];
+  for (const tx of textures) {
+    if (!tx.sha256 || !tx.uses.some((u) => ids.has(u.version_id))) continue;
+    const rest = tx.uses.filter((u) => !ids.has(u.version_id));
+    if (!rest.length) orphan.push(tx);
+    else shared.push({ texture: tx, others: [...new Set(rest.map((u) => `${u.asset} · ${u.level || "master"}`))] });
+  }
+  return { orphan, shared };
+}
+
+/** The sha256 every geometry left still uses: what a removal must keep. */
+export function keptTextureShas(textures: readonly StudyTexture[], ids: ReadonlySet<string>): string[] {
+  return textures.filter((tx) => tx.sha256 && tx.uses.some((u) => !ids.has(u.version_id))).map((tx) => tx.sha256);
+}
+
+/** The geometries left WITHOUT a texture if it is deleted: every version that uses it. */
+export function textureLoss(tx: StudyTexture): string[] {
+  return [...new Set(tx.uses.map((u) => `${u.asset} · ${u.level || "master"}`))];
+}
+
+/** MICRO-ASSETS-LIVELLI p.5 · the triangles a reduction would start from:
+ *  the heaviest version that is not a tileset (the master's when it is the
+ *  only one measured). */
+export function sourceTriangles(a: AssetRow): number | null {
+  const vs = a.versions.filter((v) => !v.tileset && v.triangles != null);
+  if (!vs.length) return null;
+  return Math.max(...vs.map((v) => v.triangles ?? 0));
+}
+
+/** Under the threshold: a mesh not reduced — its level points to the lightest
+ *  version there is, no new file. Default 5.000 triangles (E.D.'s case: 30
+ *  of 87 meshes of Reconstruction II AC under 5.000, Ingresso_3 12 → 6 → 2). */
+export const MIN_TRIANGLES_DEFAULT = 5000;
+export function underThreshold(a: AssetRow, min: number | null | undefined): boolean {
+  if (!min || min <= 0) return false;
+  const tri = sourceTriangles(a);
+  return tri != null && tri < min;
+}
+
+/** The selection split by the threshold: the assets to reduce and those that
+ *  only point their use to a version there is (or keep the master). */
+export function splitByThreshold(assets: readonly AssetRow[], sel: ReadonlySet<string>, min: number | null | undefined):
+  { reduce: Set<string>; point: AssetRow[] } {
+  const reduce = new Set<string>();
+  const point: AssetRow[] = [];
+  for (const a of assets) {
+    if (!sel.has(a.id)) continue;
+    if (underThreshold(a, min)) point.push(a); else reduce.add(a.id);
+  }
+  return { reduce, point };
+}
+
+/** The version a mesh under the threshold points its use to: the lightest
+ *  existing (never a tileset), else none (the master stays the source). */
+export function pointTarget(a: AssetRow): VersionRow | null {
+  return lightestVersion(a);
+}
+
+/** MICRO-ASSETS-LIVELLI p.3 · inside a container, its elements by kind: the
+ *  meshes («Mesh (n)») and the tilesets («Tileset (n)») — the container's own
+ *  alternative and any tileset model put in it. */
+export function isTilesetAsset(a: Pick<AssetRow, "kind" | "versions">): boolean {
+  return a.kind === "container" || a.versions.some((v) => v.tileset);
+}
+export function containerParts(list: readonly AssetRow[]): { meshes: AssetRow[]; tilesets: AssetRow[] } {
+  return { meshes: list.filter((a) => !isTilesetAsset(a)), tilesets: list.filter((a) => isTilesetAsset(a)) };
+}
+
+/** The alternative a container lights for a target, as s3Dgraphy said it
+ *  (`alternative`, s3dgraphy ≥ this MICRO): `container` (the tileset) or
+ *  `members`; whether it is the graph's choice. */
+export function activeAlternative(c: AssetRow, k: TargetKey): { active: "container" | "members"; chosen: boolean } | null {
+  const x = c.alternative?.[k];
+  return x ? { active: x.active === "members" ? "members" : "container", chosen: !!x.chosen } : null;
+}
+
+/** MICRO-ASSETS-LIVELLI p.8 · a row dropped on a container: the default
+ *  answer to «è un pezzo del gruppo o sostituisce tutto il gruppo?» — member
+ *  for a mesh, alternative for a tileset. */
+export type DropKind = "member" | "alternative";
+export function dropDefault(rows: readonly Pick<AssetRow, "kind" | "versions">[]): DropKind {
+  return rows.length && rows.every((a) => isTilesetAsset(a)) ? "alternative" : "member";
 }

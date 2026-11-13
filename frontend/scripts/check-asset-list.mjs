@@ -453,6 +453,49 @@ ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk o
   ok(A.queueEta(q5, d, t0, 1, "pause").end === null, "in Pausa: no end");
 }
 
+// ── MICRO-ASSETS-LIVELLI (E.D., 13 Nov 2026) · levels, textures, threshold, alternatives ──
+{
+  const tx = (sha, uses) => ({ sha256: sha, name: `T_${sha}`, names: [`T_${sha}`], width: 1024, height: 1024, format: "jpeg", bytes: 1, gpu_bytes: 1,
+    count: uses.length, assets: new Set(uses.map((u) => u[0])).size, uses: uses.map(([a, v, l]) => ({ asset_id: a, asset: a, version_id: v, level: l })) });
+  const lv = (id, level, tris) => ver(id, { level, lod_level: level.split("-")[0], triangles: tris });
+  const I = asset("Ingresso_3", {}, [M("I.m"), lv("I.l0", "lod0-aton-heriverse", 12), lv("I.l1", "lod1", 6), lv("I.l2", "lod2", 2)],
+                  { web: cell("ok", "I.l0"), mobile: cell("ok", "I.l2") });
+  const T = asset("Tetto", {}, [M("T.m"), lv("T.l0", "lod0", 15216), lv("T.l1", "lod1", 7608), lv("T.l2", "lod2", 3804)],
+                  { web: cell("ok", "T.l0"), mobile: cell("ok", "T.l2") });
+  ok(A.levelKeyOf(I.versions[1]) === "lod0" && A.levelKeyOf(I.versions[0]) === "master" && A.levelKeyOf(ver("x", { tileset: true })) === "tileset",
+     "levels: lod0-aton-heriverse is lod0, the master and a tileset by name");
+  ok(JSON.stringify(A.levelsOf([I, T]).map((x) => `${x.key}:${x.n}`)) === JSON.stringify(["master:2", "lod0:2", "lod1:2", "lod2:2"]),
+     "levels: master, lod0, lod1, lod2 with their counts");
+  const rows = A.levelRows([I, T], "lod2");
+  ok(rows.length === 2 && rows.every((r) => r.version.lod_level === "lod2"), "level lod2: one row per asset");
+  const gone = new Set(rows.map((r) => r.version.id));
+  const fx = A.removalEffects([I, T], gone);
+  ok(fx.length === 2 && fx.every((e) => e.target === "mobile" && e.lost === "lod2" && e.then === "lod1"),
+     `removing lod2: mobile falls back on the lightest left, lod1 (${fx.map((e) => `${e.name}:${e.then}`)})`);
+  const all = new Set(["I.l0", "I.l1", "I.l2"]);
+  const fx2 = A.removalEffects([I], all);
+  ok(fx2.length === 3 && fx2.every((e) => e.then === "master" && e.master), "every version of an asset removed: its uses fall back on the master");
+  const texs = [tx("aa", [["Tetto", "T.l2", "lod2"]]), tx("bb", [["Tetto", "T.l2", "lod2"], ["Porta", "P.l0", "lod0"]]), tx("cc", [["Porta", "P.l0", "lod0"]])];
+  const fate = A.textureFate(texs, gone);
+  ok(fate.orphan.map((x) => x.sha256).join() === "aa" && fate.shared.length === 1 && fate.shared[0].others[0] === "Porta · lod0",
+     "textures: the one no other geometry uses goes, the shared one stays and names who keeps it");
+  ok(A.keptTextureShas(texs, gone).sort().join() === "bb,cc", "textures kept by sha256: those another geometry uses");
+  ok(A.textureLoss(texs[1]).length === 2, "deleting a texture names the geometries left without it");
+  ok(A.MIN_TRIANGLES_DEFAULT === 5000 && A.underThreshold(I, 5000) && !A.underThreshold(T, 5000) && !A.underThreshold(I, 0),
+     "threshold 5.000: Ingresso_3 (12) is not reduced, Tetto (15.216) is; 0 reduces everything");
+  const sp = A.splitByThreshold([I, T], new Set(["Ingresso_3", "Tetto"]), 5000);
+  ok([...sp.reduce].join() === "Tetto" && sp.point.map((a) => a.id).join() === "Ingresso_3" && A.pointTarget(I).id === "I.l2",
+     "the selection split: Tetto reduced, Ingresso_3 points to its lightest version (lod2)");
+  const surv = { ...asset("Survey2015", {}, [M("S.m"), ver("S.t", { tileset: true, level: "", lod_level: "" })]), kind: "container",
+                 alternative: { web: { active: "container", chosen: false }, mobile: { active: "members", chosen: true } } };
+  const parts = A.containerParts([I, T, surv]);
+  ok(parts.meshes.length === 2 && parts.tilesets.length === 1, "inside a container: Mesh (2) and Tileset (1)");
+  ok(A.activeAlternative(surv, "web").active === "container" && A.activeAlternative(surv, "mobile").chosen && A.activeAlternative(I, "web") === null,
+     "the alternative lit per target, and whether the graph chose it");
+  ok(A.dropDefault([surv]) === "alternative" && A.dropDefault([I]) === "member" && A.dropDefault([I, surv]) === "member",
+     "a drop on a container: alternative for a tileset, member for a mesh (or a mix)");
+}
+
 // ── the bridge ──────────────────────────────────────────────────────────────
 if (!existsSync(PY)) {
   console.log(`asset-list: ${checks} page checks; no s3Dgraphy venv — bridge SKIPPED`);
