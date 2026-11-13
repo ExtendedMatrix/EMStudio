@@ -143,16 +143,49 @@ export function notebookCell(viewType: string | undefined, ref: string): string 
 // the datamodel does not declare is never offered.
 
 const SCOPE_TYPES = ["GraphNode", "graph", "EpochNode", "epoch", "ActivityNodeGroup"];
+const EPOCH_TYPES = ["EpochNode", "epoch"];
+/** EM16-RMNG · the RM container (s3Dgraphy `RepresentationModelNodeGroup`) */
+const RM_GROUP_TYPE = "RepresentationModelNodeGroup";
 
+/** MICRO-NARRATIVE-MODULI p.12 · a document that PUBLISHES models: it reaches a
+ *  representation model or a container by `has_representation_model` (D.01 →
+ *  ten models of the survey, D.09 → the 87 of the reconstruction). */
+export function publishesModels(doc: EmDocument | null, id: string): boolean {
+  const byId = new Map((doc?.graph?.nodes ?? []).map((n) => [n.id, n]));
+  return (doc?.graph?.edges ?? []).some((e) => e.source === id && e.edge_type === "has_representation_model"
+    && (String(byId.get(e.target)?.node_type ?? "").startsWith("representation_model")
+        || byId.get(e.target)?.node_type === RM_GROUP_TYPE));
+}
+
+/**
+ * MICRO-NARRATIVE-MODULI p.12 · p.19 (E.D., 13 Nov 2026) · TWO FAMILIES.
+ *
+ *  · **Document** shows the thing: its image, its PDF, its text, its models.
+ *  · **3D scene** is space and time: a CONTAINER (`RepresentationModelNodeGroup`),
+ *    a document that PUBLISHES models, an EPOCH (the view computed from what
+ *    the graph says is present in it, the Space's rule), or the whole graph.
+ *    A single model (RM, a resource) is not offered — it stays reachable by
+ *    searching, and an old story that points at one still opens.
+ *
+ * The graph views (matrix, table, timeline, map, paradata) stay where they
+ * mean something. `source` and `us` are kept for READING (an old story opens
+ * the same), and offered only where they differ from the two families: a
+ * source's USE in this graph, a unit's certainty.
+ */
 export function viewTypesFor(node: EmNode | undefined, isStrat: (t: string) => boolean,
-                             is3dDoc: (n: EmNode) => boolean = () => false): string[] {
+                             is3dDoc: (n: EmNode) => boolean = () => false,
+                             doc: EmDocument | null = null): string[] {
   const t = String(node?.node_type ?? "");
   let out: string[];
-  if (t === "graph" || t === "GraphNode") out = ["map", "scene3d", "matrix", "timeline", "table"];
-  else if (SCOPE_TYPES.includes(t)) out = ["matrix", "timeline", "table"];
+  if (t === "graph" || t === "GraphNode") out = ["scene3d", "matrix", "table", "timeline", "map"];
+  else if (EPOCH_TYPES.includes(t)) out = ["scene3d", "matrix", "table", "timeline"];
+  else if (SCOPE_TYPES.includes(t)) out = ["matrix", "table", "timeline"];
+  else if (t === RM_GROUP_TYPE) out = ["scene3d"];
   else if (t === "geo_position") out = ["map"];
-  else if (t === "document") out = node && is3dDoc(node) ? ["scene3d", "rm", "document", "source", "paradata"]
-    : ["document", "source", "paradata"];
+  else if (t === "document") {
+    const models = !!node && (is3dDoc(node) || publishesModels(doc, node.id));
+    out = models ? ["document", "scene3d", "source", "paradata"] : ["document", "source", "paradata"];
+  }
   else if (t === "property" || t === "extractor" || t === "combiner") out = ["paradata"];
   else if (t.startsWith("representation_model")) out = ["rm", "scene3d"];
   // a unit is not a scope a table queries (the table reads a graph, an epoch,
@@ -168,9 +201,23 @@ export function refsForViewType(viewType: string, doc: EmDocument | null,
                                 isStrat: (t: string) => boolean,
                                 is3dDoc: (n: EmNode) => boolean = () => false): EmNode[] {
   const nodes = doc?.graph?.nodes ?? [];
-  const hits = nodes.filter((n) => viewTypesFor(n, isStrat, is3dDoc).includes(viewType));
+  const hits = nodes.filter((n) => viewTypesFor(n, isStrat, is3dDoc, doc).includes(viewType));
   const isGraph = (n: EmNode): boolean => n.node_type === "graph" || n.node_type === "GraphNode";
   return [...hits.filter(isGraph), ...hits.filter((n) => !isGraph(n))];
+}
+
+/** p.12 · what a 3D scene is PROPOSED on, in this order: the whole graph, the
+ *  epochs, the containers, the documents that publish models. A single model
+ *  is not proposed (`scene3dRefKind` = "model"): searching still finds it. */
+export type SceneRefKind = "graph" | "epoch" | "group" | "document" | "model";
+export function scene3dRefKind(node: EmNode | undefined): SceneRefKind | null {
+  const t = String(node?.node_type ?? "");
+  if (t === "graph" || t === "GraphNode") return "graph";
+  if (EPOCH_TYPES.includes(t)) return "epoch";
+  if (t === RM_GROUP_TYPE) return "group";
+  if (t === "document") return "document";
+  if (t.startsWith("representation_model")) return "model";
+  return null;
 }
 
 // ── the two previews, as data (the page draws them; the check reads them) ────

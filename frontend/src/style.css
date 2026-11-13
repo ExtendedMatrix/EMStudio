@@ -11626,3 +11626,47 @@ tr.al-asset[draggable="true"] { cursor: grab; }
 .al-cont-menu { padding: 0 6px; }
 .al-new-container { display: grid; gap: 6px; margin-top: 6px; }
 .al-tex-remove { padding: 0 6px; }
+
+/* ── MICRO-NARRATIVE-MODULI (13 Nov 2026) ─────────────────────────────────── */
+/* p.7 · a unit in an epoch's lane by survival or reuse (its first epoch in the tooltip) */
+.nv-chip.nv-chip-reused { border-style: dashed; }
+/* p.12 · the 3D scene of a scope: its content, its framing, the stage on demand */
+.nv-scene-what { font-variant-numeric: tabular-nums; }
+.nv-scene-host { position: relative; height: 340px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-sunken); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.nv-scene-load { font-size: 13px; }
+.nv-scene-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* p.13 · p.19 · the document shows the thing */
+.nv-doc-stage { margin: 6px 0; }
+.nv-doc-image { display: block; max-width: 100%; max-height: 420px; border-radius: var(--radius); border: 1px solid var(--border-faint); }
+.nv-doc-pdf { display: block; width: 100%; height: 460px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-sunken); }
+.nv-doc-page { display: inline-flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+.nv-doc-page input { width: 5em; font: inherit; }
+.nv-doc-text { white-space: pre-wrap; font-size: 13px; max-height: 260px; overflow: auto; padding: 6px 8px; background: var(--bg-sunken); border-radius: var(--radius); }
+.nv-doc-cite { font-size: 13px; margin-top: 4px; }
+.nv-src-sum { font-size: 13px; margin: 4px 0; font-variant-numeric: tabular-nums; }
+.nv-src-list { margin: 4px 0 2px 18px; padding: 0; font-size: 12px; }
+/* p.10 · a chapter taken by its title: the grip, the line where it falls */
+.nv-ch-grip { cursor: grab; color: var(--text-dim); margin-right: 4px; user-select: none; opacity: 0.4; }
+.nv-chapter-head:hover .nv-ch-grip { opacity: 1; }
+.nv-chapter.nv-ch-dragging { opacity: 0.5; }
+.nv-chapter.nv-ch-drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
+.nv-chapter.nv-ch-drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+.nidx-ch li.nidx-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.nidx-ch li.nidx-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+.nidx-ch li.nidx-dragging { opacity: 0.5; }
+/* p.9 · the coverage: closed by default, a count per line, the chips one level further */
+details.nidx-cov > summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+details.nidx-covrow > summary { cursor: pointer; list-style: none; }
+details.nidx-covrow > summary::-webkit-details-marker { display: none; }
+details.nidx-covrow > summary::before { content: "▸"; margin-right: 4px; color: var(--text-dim); }
+details.nidx-covrow[open] > summary::before { content: "▾"; }
+/* p.17 · verify the chapter, in its bar */
+.nv-verify-chapter { font: inherit; font-size: 12px; border: 1px solid var(--accent); background: var(--bg); color: var(--accent-ink, var(--accent)); border-radius: 10px; padding: 1px 8px; cursor: pointer; margin-left: 6px; }
+.nv-prov-again { color: var(--warn-ink, #8a5a00); }
+/* p.13 · «Shown as»: a choice and the line of what it changes */
+.ninsp-vt { display: flex; flex-direction: column; gap: 2px; }
+.ninsp-vt-row { display: flex; gap: 6px; align-items: flex-start; padding: 3px 4px; border-radius: var(--radius); cursor: pointer; }
+.ninsp-vt-row.on { background: var(--bg-accent-soft); }
+.ninsp-vt-txt { display: flex; flex-direction: column; }
+.ninsp-vt-what { font-size: 11px; color: var(--text-muted); }
+.ninsp-inline { display: flex; gap: 6px; align-items: center; }

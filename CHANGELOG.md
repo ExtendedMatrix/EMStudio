@@ -7,6 +7,34 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **The Narrative's modules, tried one by one and corrected** (MICRO-NARRATIVE-MODULI,
+  E.D., 13 November 2026). Two families first in the «+» (decision of E.D.):
+  **Document** shows the thing — its image (IIIF or the file through the
+  bridge), its PDF at the page chosen, its text, its 3D models — with the
+  citation under it; **3D scene** is space and time, proposed on a container
+  (`RepresentationModelNodeGroup`), a document that publishes models, an epoch
+  or the whole graph (never the hundred models one by one), computed from the
+  graph by the Space's rule (models, the container's active alternative, the
+  units' proxies), loaded on demand, paused off screen, its framing (camera and
+  a still for print) saved in the block. **Source** is the use of a document in
+  this graph (extractors, what they yield, the criticism), no longer a copy of
+  Document. The **Matrix of an epoch** has ONE lane: a unit there by survival or
+  reuse is marked ↺ with its first epoch (Templu Mare v9, «Post antiquity» no
+  longer opens «II A.D.»). The **Table** has a scope (an epoch, an activity, the
+  units cited in the chapter or above it), filters, columns and an order, and
+  prints as filtered. Chapters are born where one writes («Nuovo capitolo qui»
+  in the «+», on a title's right click, in «Narrative ▾»), with their title being
+  typed, and are dragged in the page and in the Index. The Index is the list
+  with its search, ONE «+ Aggiungi…» and the coverage closed (a count per line,
+  the chips one level further); ▲▼ keep its scroll and the chapter selected.
+  «Narrates the lane» groups the activities under their epoch. The story has a
+  language (`data.lang`, read from its prose when undeclared) the AI drafts are
+  asked in; «✓ Ho verificato» on an AI paragraph's badge and «✓ Verifica il
+  capitolo (n)» in its bar; an AI paragraph changed after its signature is to
+  verify again. The mention has its entry in the «+» and in the right click.
+  Exports: the table, the scene's still and the document's picture are figures
+  (the document still cited). New check `check-narrative-moduli.mjs`.
+
 - **Several sources open, one active, «Copia in…»** (MICRO-PIU-FONTI, giro B;
   decided by E.D. on 7 November 2026). A local em.json (Save on disk), a room
   (live: no Save) and a room READ from a node (`GET /v1/rooms/<id>/document`,

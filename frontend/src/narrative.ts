@@ -27,10 +27,11 @@ import { blockStatus, bylineOf, narrativeAuthors } from "./narrative-authorship"
 import type { AuthorRef, BlockStatus } from "./narrative-authorship";
 import { canonicalViewType } from "./narrative-edit";
 import { chainCard, isChainNode } from "./hdto-card";
-import { notebookCells, printItems, type ProjChapter } from "./narrative-projection";
+import { mentionsIn, notebookCells, printItems, scene3dRefKind, type ProjChapter, type SceneRefKind } from "./narrative-projection";
 import {
-  certaintyLadder, documentEmbed, existenceCertainty, isRmDoc, matrixEmbed,
-  paradataEmbed, rmDocEmbed, tableEmbed, timelineEmbed, unSceneEmbed,
+  certaintyLadder, citationLine, documentEmbed, existenceCertainty, isRmDoc, matrixEmbed,
+  paradataEmbed, rmDocEmbed, sceneContent, sceneContentLine, sourceUseEmbed, tableEmbed,
+  timelineEmbed, unSceneEmbed, type TableContext,
 } from "./narrative-embeds";
 import { iiifBase } from "./settings";
 import {
@@ -214,18 +215,68 @@ function renderProse(text: string): HTMLElement {
 
 function unresolved(ref: string): HTMLElement {
   const box = el("div", "nv-embed nv-unresolved");
-  box.appendChild(el("div", "nv-embed-kind", "reference"));
-  box.appendChild(
-    el("div", "nv-embed-title", `unresolved reference: ${ref}`),
-  );
-  box.appendChild(
-    el(
-      "div",
-      "nv-embed-note",
-      "the graph has no node with this id — it may have been removed, or the " +
-        "narrative may come from another graph",
-    ),
-  );
+  box.appendChild(el("div", "nv-embed-kind", t("nv.refKind")));
+  box.appendChild(el("div", "nv-embed-title", t("nv.unresolvedRef", { id: ref })));
+  box.appendChild(el("div", "nv-embed-note", t("nv.unresolvedWhy")));
+  return box;
+}
+
+/**
+ * MICRO-NARRATIVE-MODULI p.12 · p.13 · p.19 · the two families' STAGES are the
+ * editor's: it knows where a file is read (the bridge, a room's store), how a
+ * PDF is opened, how the Space draws a scene. The served reader and the checks
+ * have none — the card then says what is there, in words, and where it opens.
+ */
+export interface DocumentContentSpec {
+  node: EmNode;
+  /** the block's `options` (a PDF's page, a saved framing) */
+  options: Record<string, unknown>;
+  key: string;
+  reading: boolean;
+  /** writes the block's options (a page turned, a framing saved): one undo step */
+  onSave?(patch: Record<string, unknown>): void;
+}
+export type DocumentContentFactory = (host: HTMLElement, spec: DocumentContentSpec) => boolean;
+export interface SceneSpec extends DocumentContentSpec { kind: SceneRefKind }
+export type SceneFactory = (host: HTMLElement, spec: SceneSpec) => void;
+let documentContent: DocumentContentFactory | null = null;
+let sceneFactory: SceneFactory | null = null;
+export function setDocumentContent(fn: DocumentContentFactory | null): void { documentContent = fn; }
+export function setSceneFactory(fn: SceneFactory | null): void { sceneFactory = fn; }
+
+/** p.19 · DOCUMENT shows the thing, whatever it is on: an image (IIIF or the
+ *  file), a PDF (the page chosen, turned in Leggi), a text, a 3D model (the
+ *  scene of its models); the citation under it. Without the editor's stage: the
+ *  IIIF picture when there is one, else one line saying where it is seen. */
+function documentCard(node: EmNode, doc: EmDocument | null, block: NarrativeBlock,
+                      key: string, reading: boolean, onSave?: (patch: Record<string, unknown>) => void): HTMLElement {
+  const box = el("div", "nv-embed nv-document");
+  box.appendChild(el("div", "nv-embed-kind", t("vt.document", undefined, "document")));
+  const stage = el("div", "nv-doc-stage");
+  box.appendChild(stage);
+  const shown = documentContent?.(stage, { node, options: block.options ?? {}, key, reading, onSave }) ?? false;
+  if (!shown) {
+    const figure = documentEmbed(node, iiifBase(), doc);
+    const models = sceneContent(node, doc);
+    if (figure) stage.appendChild(figure);
+    else if (models && (models.models.length || models.groups.length))
+      stage.appendChild(el("div", "nv-embed-note nv-implied",
+        `${sceneContentLine(models, doc)} — ${t("nv.sc.inStudio")}`));
+    else stage.appendChild(el("div", "nv-embed-note nv-implied", t("nv.doc.noContent")));
+  }
+  box.appendChild(citationLine(node));
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const url = typeof data.url === "string" ? data.url : undefined;
+  if (url) {
+    const a = document.createElement("a");
+    a.className = "nv-embed-link";
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noreferrer noopener";
+    a.textContent = url.split(/[\\/]/).pop() || url;
+    a.title = url;
+    box.appendChild(a);
+  }
   return box;
 }
 
@@ -361,7 +412,7 @@ function mapCard(node: EmNode, options: Record<string, unknown>,
       // fire ten requests on open.
       const { anchor } = geo;
       const pending = el("div", "nv-embed-note",
-        `EPSG:${anchor.epsg} — riproiezione in corso…`);
+        `EPSG:${anchor.epsg} — ${t("nv.reprojecting")}`);
       box.appendChild(
         el("div", "nv-embed-title",
           `${anchor.x.toFixed(3)}, ${anchor.y.toFixed(3)} (EPSG:${anchor.epsg})`),
@@ -385,7 +436,7 @@ function mapCard(node: EmNode, options: Record<string, unknown>,
           drawMap(box, node, options, key, {
             ok: true, lat: out.lat, lon: out.lon, epsg: anchor.epsg,
             rotation: anchor.rotation,
-            note: `riproiettato da EPSG:${anchor.epsg} (pyproj)`,
+            note: t("nv.reprojectedFrom", { epsg: String(anchor.epsg) }),
           }, doc);
         })();
       });
@@ -444,7 +495,7 @@ function drawMap(box: HTMLElement, node: EmNode,
       if (!placed) return;
       if ("error" in placed) {
         const why = el("span", "nv-embed-note nv-geo-unavailable",
-          `impronta non disponibile: ${placed.error}`);
+          t("nv.footprintUnavailable", { why: placed.error }));
         caption.appendChild(why);
         return;
       }
@@ -485,7 +536,7 @@ function drawMap(box: HTMLElement, node: EmNode,
   // a georeferenced narrative should be able to see which they are looking at.
   if (geo.rotation)
     caption.appendChild(
-      el("span", "nv-embed-note", `azimut ${geo.rotation}°`));
+      el("span", "nv-embed-note", t("nv.azimuth", { deg: String(geo.rotation) })));
   box.appendChild(caption);
 }
 
@@ -560,10 +611,62 @@ function notYetRendered(viewType: string, node: EmNode | null,
     el("div", "nv-embed-title", node ? String(node.name || node.id) : ref),
   );
   box.appendChild(
-    el("div", "nv-embed-note",
-      `the “${viewType}” view is not rendered yet — the reference is valid and ` +
-      `will show as soon as it is`),
+    el("div", "nv-embed-note", t("nv.notRenderedYet", { vt: viewType })),
   );
+  return box;
+}
+
+/** p.18 · the ids a chapter cites (its embeds' refs and its mentions), all of
+ *  them and the ones ABOVE block `at`, in reading order. */
+export function citedContext(blocks: NarrativeBlock[], at: number): TableContext {
+  const all: string[] = [], above: string[] = [];
+  blocks.forEach((b, i) => {
+    const ids = b.block_type === "prose" ? mentionsIn(b.text) : b.ref ? [b.ref] : [];
+    for (const id of ids) {
+      if (!all.includes(id)) all.push(id);
+      if (i < at && !above.includes(id)) above.push(id);
+    }
+  });
+  return { chapter: all, above };
+}
+
+/** p.12 · the scopes a scene is a VIEW of (not a model): graph, epoch,
+ *  container, a document that publishes models. */
+function isSceneScope(node: EmNode): boolean {
+  const k = scene3dRefKind(node);
+  return k === "graph" || k === "epoch" || k === "group" || k === "document";
+}
+
+/** p.12 · the 3D scene of a scope: what it shows (from the graph, now), the
+ *  framing saved in the block, and the stage — the editor's (`SceneFactory`). */
+function sceneScopeCard(node: EmNode, doc: EmDocument | null, block: NarrativeBlock, key: string,
+                        reading: boolean, onSave?: (patch: Record<string, unknown>) => void): HTMLElement {
+  const box = el("div", "nv-embed nv-3d nv-scene");
+  box.appendChild(el("div", "nv-embed-kind", t("vt.scene3d", undefined, "scene3d")));
+  box.appendChild(el("div", "nv-embed-title", String(node.name || node.id)));
+  const kind = scene3dRefKind(node)!;
+  const content = sceneContent(node, doc);
+  const what = el("div", "nv-embed-note nv-scene-what",
+    `${t(`nv.sc.of.${kind}`)} · ${content ? sceneContentLine(content, doc) : ""}`);
+  what.dataset.models = String(content?.models.length ?? 0);
+  what.dataset.proxies = String(content?.proxies.length ?? 0);
+  box.appendChild(what);
+  const empty = !content || (!content.models.length && !content.proxies.length && !content.alternatives.length);
+  if (empty) {
+    box.appendChild(el("div", "nv-embed-note nv-empty", t("nv.sc.empty")));
+    return box;
+  }
+  const opts = block.options ?? {};
+  const framing = el("div", "nv-embed-note nv-scene-framing",
+    opts.camera ? t("nv.sc.framingSaved") : t("nv.sc.framingAll"));
+  box.appendChild(framing);
+  if (sceneFactory) {
+    const stage = el("div", "nv-3d-stage nv-scene-stage");
+    box.appendChild(stage);
+    sceneFactory(stage, { node, options: opts, key, reading, onSave, kind });
+  } else {
+    box.appendChild(el("div", "nv-embed-note nv-implied", t("nv.sc.inStudio")));
+  }
   return box;
 }
 
@@ -577,6 +680,10 @@ function renderEmbed(
   key: string,
   onReveal?: (nodeId: string) => void,
   viewer?: ViewerFactory,
+  /** p.12 · writes the block's options (a framing, a page): the editor's */
+  onSave?: (patch: Record<string, unknown>) => void,
+  /** p.18 · what the chapter cites (a table scoped to it) */
+  tableCtx?: TableContext,
 ): HTMLElement {
   const ref = block.ref ?? "";
   const node = index.get(ref) ?? null;
@@ -587,6 +694,11 @@ function renderEmbed(
   let box: HTMLElement;
   if (!node) {
     box = unresolved(ref);
+  } else if (viewType === "document" && node.node_type === "document") {
+    box = documentCard(node, doc, block, key, !!onReveal, onSave);
+  } else if (viewType === "source" && node.node_type === "document") {
+    // p.13 · the USE of the source in this graph, not the thing again
+    box = sourceUseEmbed(node, doc);
   } else if (viewType === "source" || viewType === "document") {
     box = sourceCard(node, viewType, doc);
   } else if (viewType === "us") {
@@ -596,7 +708,7 @@ function renderEmbed(
   } else if (viewType === "timeline") {
     box = timelineEmbed(node, doc);
   } else if (viewType === "table") {
-    box = tableEmbed(node, doc, block.options ?? {});
+    box = tableEmbed(node, doc, block.options ?? {}, tableCtx);
   } else if (viewType === "paradata") {
     box = paradataEmbed(node, doc);
   } else if (viewType === "un_scene") {
@@ -611,6 +723,8 @@ function renderEmbed(
     // 3D stage showed an empty viewer for a photograph, which is the wrong
     // answer twice: nothing to see, and a claim that there was.
     box = rmDocEmbed(node, doc, iiifBase());
+  } else if (viewType === "scene3d" && isSceneScope(node)) {
+    box = sceneScopeCard(node, doc, block, key, !!onReveal, onSave);
   } else if (viewType === "scene3d" || viewType === "rm") {
     // `rm` renders through the same ATON embed (G2): a representation model IS a
     // 3D asset, and there is one way this app shows 3D.
@@ -627,7 +741,7 @@ function renderEmbed(
     // a map or orbiting a scene would jump to the canvas and close the story.
     // Those get an explicit way in instead — same gesture, stated.
     if (viewType === "map" || viewType === "scene3d"
-        || viewType === "rm") {
+        || viewType === "rm" || viewType === "document") {
       const go = el("button", "nv-goto", t("nv.goToNode")) as HTMLButtonElement;
       go.title = t("nv.goToNodeTitle", { name: String(node.name || node.id) });
       go.addEventListener("click", (e) => {
@@ -701,6 +815,14 @@ function provenanceStrip(
   badge.style.color = style.textColor;
   strip.appendChild(badge);
 
+  // p.17 · changed after a person signed it: to be verified again, and why
+  const before = (block.options ?? {})["signed_before"];
+  if (status === "ai_draft" && typeof before === "string" && before) {
+    const who = index.get(before);
+    const again = el("span", "nv-prov-dim nv-prov-again",
+      t("nv.editedAfterSign", { who: who ? String(who.name || who.id) : before }));
+    strip.appendChild(again);
+  }
   const model = index.get(block.authored_by ?? "");
   if (block.authored_by) {
     const who = el("span", "nv-prov-who",
@@ -755,7 +877,8 @@ function provenanceStrip(
     // Never disabled for lack of a signer. A disabled button with an
     // explanation of where the missing control lives makes the user hunt; this
     // one always acts — it signs, or it brings the picker to them.
-    const b = el("button", "nv-endorse", t("nv.endorse")) as HTMLButtonElement;
+    const b = el("button", "nv-endorse", `✓ ${t("nv.iChecked")}`) as HTMLButtonElement;
+    b.dataset.nvEndorse = "1";
     b.title = signer
       ? t("nv.endorseTitle", { who: signer.label })
       : t("nv.pickSigner");
@@ -790,6 +913,8 @@ export interface NarrativeEditor {
   setProse(chapter: number, block: number, text: string): void;
   addEmbed(chapter: number, ref: string, at?: number): void;
   setViewType(chapter: number, block: number, viewType: string): void;
+  /** p.12 · a block's options merged (a framing saved, a PDF's page) */
+  setBlockOptions?(chapter: number, block: number, patch: Record<string, unknown>): void;
   moveBlock(chapter: number, block: number, delta: number): void;
   deleteBlock(chapter: number, block: number): void;
   /** Lanes a chapter may be anchored to: epochs and activities. */
@@ -888,7 +1013,16 @@ export interface PageHooks {
   /** MICRO-RIFINITURE p.4 (E.D., 6 Nov 2026) · «Fai entrare un asset»: the
    *  ingress card of the Archive, opened from the page being written */
   onIngress?(): void;
+  /** MICRO-NARRATIVE-MODULI p.6 · p.8 · the right click on a chapter's title
+   *  (`block` null) or on a block: «Nuovo capitolo dopo questo», «Menziona…» */
+  onContextMenu?(chapter: number, block: number | null, x: number, y: number): void;
+  /** p.10 · a chapter dragged by its title onto another place (`to` = the
+   *  index it goes before; the number of chapters = the end) */
+  onMoveChapter?(from: number, to: number): void;
 }
+
+/** p.10 · what a dragged chapter carries (its index), apart from a node */
+export const CHAPTER_MIME = "application/x-em-chapter";
 
 /** COLLEGARE · «Posiziona il sito…» for a map with no site: installed by the
  *  editor (it opens the site picker), absent in the served reader. */
@@ -1293,6 +1427,20 @@ export function renderNarrativeView(
       ai.addEventListener("click", (e) => { e.stopPropagation(); editor!.generate(ci); });
       h.appendChild(ai);
     }
+    // p.17 · «✓ Verifica il capitolo (n)» in the chapter's bar while AI
+    // paragraphs wait for a person: one act per paragraph, signed by the header
+    if (writing) {
+      const pending = editor!.pendingIn?.(ci) ?? 0;
+      if (pending > 0) {
+        const va = el("button", "nv-verify-chapter") as HTMLButtonElement;
+        va.type = "button";
+        va.textContent = `✓ ${t("ninsp.verifyChapter", { n: String(pending) })}`;
+        va.title = t("nv.verifyChapterTitle");
+        va.dataset.nvVerifyChapter = String(ci);
+        va.addEventListener("click", (e) => { e.stopPropagation(); editor!.endorseChapter(ci); });
+        h.appendChild(va);
+      }
+    }
     // NARRATIVE-DESK · the chapter's head is a way to its Inspector in every
     // reading of the page, not only while writing
     if (page.onSelectPart) {
@@ -1315,6 +1463,29 @@ export function renderNarrativeView(
           title.blur();
         }
       });
+    }
+    // p.6 · p.8 · the right click on the title: the chapter's own gestures
+    if (writing && page.onContextMenu)
+      h.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        page.onContextMenu!(ci, null, e.clientX, e.clientY);
+      });
+    // p.10 · the chapter is taken by its title: a grip before it (the title
+    // itself is text being written), the whole head while reading
+    if (writing && page.onMoveChapter) {
+      const grip = el("span", "nv-ch-grip", "⠿");
+      grip.draggable = true;
+      grip.title = t("nv.dragChapter");
+      grip.dataset.chGrip = String(ci);
+      grip.addEventListener("dragstart", (e) => {
+        e.stopPropagation();
+        e.dataTransfer?.setData(CHAPTER_MIME, String(ci));
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+        section.classList.add("nv-ch-dragging");
+      });
+      grip.addEventListener("dragend", () => section.classList.remove("nv-ch-dragging"));
+      h.insertBefore(grip, h.firstChild);
     }
     section.appendChild(h);
     // RIFINITURE · in Leggi a click on the chapter (not on a link, a button, an
@@ -1345,7 +1516,10 @@ export function renderNarrativeView(
           `${current.id}:${ci}:${bi}:${block.ref ?? ""}`,
           // writing: a click on an embed SELECTS it (the Inspector has «vai al
           // nodo»); reading: it goes to the node, as it always has
-          writing ? undefined : onReveal, viewer);
+          writing ? undefined : onReveal, viewer,
+          writing && editor!.setBlockOptions
+            ? (patch) => editor!.setBlockOptions!(ci, bi, patch) : undefined,
+          citedContext(blocks, bi));
       }
       // (AUDIT C · the VIEW-TYPE drop on an embed went: nothing has dragged a
       // view type since the palette was removed; «mostrato come» is the
@@ -1353,8 +1527,14 @@ export function renderNarrativeView(
       // Provenance rides with the paragraph in BOTH readings: knowing a machine
       // wrote this is not an authoring convenience, it is what the reader needs.
       // Its buttons (Valida, Ritira) are in the Inspector now.
+      // MICRO-NARRATIVE-MODULI p.17 (E.D., 13 Nov 2026: the signature was not
+      // found) · while writing, «✓ Ho verificato» is ON the AI badge, as a node
+      // is verified where it is drawn; the signer is the identity of the header
       const strip = block.block_type === "prose"
-        ? provenanceStrip(block, index, onReveal) : null;
+        ? provenanceStrip(block, index, onReveal,
+            writing && typeof (editor as Partial<NarrativeEditor>).endorse === "function" ? () => editor!.endorse(ci, bi) : undefined,
+            writing && typeof (editor as Partial<NarrativeEditor>).retract === "function" ? () => editor!.retract(ci, bi) : undefined,
+            writing ? editor!.signer?.() ?? null : null) : null;
       if (strip) {
         const wrap = el("div", `nv-prose-wrap nv-${blockStatus(block)}`);
         wrap.appendChild(body);
@@ -1385,6 +1565,14 @@ export function renderNarrativeView(
         row.classList.add("nv-selectable");
         if (sel && sel.chapter === ci && sel.block === bi) row.classList.add("nv-sel");
         row.addEventListener("click", () => pick({ chapter: ci, block: bi }));
+        if (page.onContextMenu)
+          row.addEventListener("contextmenu", (e) => {
+            // a right click inside a paragraph keeps the browser's own menu
+            // (spelling) unless it is on the row's margin
+            if ((e.target as Element | null)?.closest?.(".nv-prose-edit") && !e.altKey) return;
+            e.preventDefault();
+            page.onContextMenu!(ci, bi, e.clientX, e.clientY);
+          });
       }
       section.appendChild(row);
     });
@@ -1394,6 +1582,31 @@ export function renderNarrativeView(
       // Drag-to-embed. The drop target is the whole chapter, so the gesture is
       // "put this in that chapter" rather than a hunt for a 4-pixel line. A
       // FILE (fase 4) goes to the page's hook: a document first, then the block.
+      // p.10 · a chapter dragged over another: a line where it falls (before
+      // this chapter, or after it when the pointer is in its lower half)
+      const chapterTarget = (e: DragEvent): number => {
+        const r = section.getBoundingClientRect();
+        return e.clientY > r.top + r.height / 2 ? ci + 1 : ci;
+      };
+      section.addEventListener("dragover", (e) => {
+        if ((e.dataTransfer?.types ?? []).includes(CHAPTER_MIME) && page.onMoveChapter) {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+          const after = chapterTarget(e) > ci;
+          section.classList.toggle("nv-ch-drop-before", !after);
+          section.classList.toggle("nv-ch-drop-after", after);
+        }
+      });
+      section.addEventListener("dragleave", () =>
+        section.classList.remove("nv-ch-drop-before", "nv-ch-drop-after"));
+      section.addEventListener("drop", (e) => {
+        const raw = e.dataTransfer?.getData(CHAPTER_MIME);
+        section.classList.remove("nv-ch-drop-before", "nv-ch-drop-after");
+        if (!raw || !page.onMoveChapter) return;
+        e.preventDefault();
+        e.stopPropagation();
+        page.onMoveChapter(Number(raw), chapterTarget(e));
+      });
       section.addEventListener("dragover", (e) => {
         const types = e.dataTransfer?.types ?? [];
         const file = types.includes("Files") && !!page.onFileDrop;

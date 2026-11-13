@@ -295,11 +295,16 @@ eq(SC.missingStandardBlocks(s4, "N"), ["research_history", "heritage", "bibliogr
 eq(JSON.stringify(s4.node("N").data), nBefore, "…and is not touched by asking");
 const ih = document.createElement("div");
 let added = null;
-IDX.renderNarrativeIndex(ih, s4.doc, { narrativeId: "N", current: 0, onPick: () => {}, onAddChapter: () => {},
-  standardMissing: () => SC.missingStandardBlocks(s4, "N"), onAddStandard: () => { added = SC.addStandardBlocks(s4, "N"); } });
-const btn = ih.querySelector('[data-nidxact="standard"]');
-ok(btn, "the Index offers «Aggiungi i blocchi standard»");
+// MICRO-NARRATIVE-MODULI p.9 · the Index has ONE «+ Aggiungi…»; the standard
+// blocks are an entry of its menu (drawn by main.ts, `openIndexAddMenu`), which
+// runs `addStandardBlocks` — the gesture checked here
+let menuAsked = false;
+IDX.renderNarrativeIndex(ih, s4.doc, { narrativeId: "N", current: 0, onPick: () => {},
+  onAddMenu: () => { menuAsked = true; added = SC.addStandardBlocks(s4, "N"); } });
+const btn = ih.querySelector('[data-nidxact="add"]');
+ok(btn && !ih.querySelector('[data-nidxact="standard"]'), "the Index offers ONE «+ Aggiungi…» (the standard blocks are in its menu)");
 btn.click();
+ok(menuAsked, "…which opens the menu");
 eq(added, ["research_history", "heritage", "bibliography"], "…which adds the three");
 eq(SC.missingStandardBlocks(s4, "N"), [], "…and then none is missing");
 s4.undo();

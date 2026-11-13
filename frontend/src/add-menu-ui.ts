@@ -64,6 +64,9 @@ export interface AddMenuModel {
   };
   /** actions after the categories (Matrix «Nuova epoca…», «Riordina tutto») */
   extra: AddMenuEntry[];
+  /** MICRO-NARRATIVE-MODULI p.6 · draw `extra` BEFORE the existing nodes (the
+   *  Narrative's «Menziona un nodo», «Nuovo capitolo qui» must be found) */
+  extraFirst?: boolean;
   /** called once when the menu closes WITHOUT a pick (Esc, a click outside) */
   onDismiss?: () => void;
   /** the flat list the search runs over — built by the caller, one per entry */
@@ -332,6 +335,10 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
       }
       if (model.newHeader && model.categories.length) group(model.newHeader);
       for (const c of model.categories) categoryRow(c);
+      if (model.extraFirst && model.extra.length) {
+        sep();
+        for (const e of model.extra) push(e);
+      }
       if (model.existing) {
         const ex = model.existing;
         if (model.categories.length || model.linked.length) sep();
@@ -347,7 +354,7 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
           if (g.entries.length > ex.perGroup) note(ex.more(g.entries.length - ex.perGroup));
         }
       }
-      if (model.extra.length) {
+      if (model.extra.length && !model.extraFirst) {
         sep();
         for (const e of model.extra) push(e);
       }

@@ -239,7 +239,7 @@ export function scopeOf(node: EmNode, doc: EmDocument | null): Scope {
       if (e.target === node.id) near.add(e.source);
     }
     const units = [...near].map((id) => index.get(id)).filter(isStrat) as EmNode[];
-    return { units, what: `«${nameOf(node)}» e i suoi rapporti`, epochs };
+    return { units, what: t("nv.scopeUnitNear", { name: nameOf(node) }), epochs };
   }
 
   return { units: [], what: `«${nameOf(node)}»`, epochs };
@@ -342,9 +342,26 @@ export function matrixEmbed(node: EmNode, doc: EmDocument | null): HTMLElement {
 
   const index = indexOf(doc);
   // lanes, newest on top (invariant 4)
+  //
+  // MICRO-NARRATIVE-MODULI p.7 (E.D., 13 Nov 2026: «Post antiquity» drew TWO
+  // lanes, Post antiquity and II A.D.) · ONE rule for an epoch: its units are
+  // the ones the canvas draws in its band (`scopeOf`), and they are drawn in
+  // ITS lane — or in one of its phases' (`has_sub_epoch`). A unit whose first
+  // epoch is another one (a reused find born in the II century, alive in Post
+  // antiquity) stays in this lane, marked «↺» with its first epoch in the
+  // tooltip; it never opens a lane of another epoch. The matrix of the whole
+  // graph (or of an activity) keeps a lane per first epoch, as the canvas.
+  const isEpochRef = String(node.node_type ?? "") === "EpochNode"
+    || String(node.node_type ?? "") === "epoch";
+  const own = isEpochRef ? new Set([node.id, ...subEpochsOf(doc, node.id)]) : null;
   const lanes = new Map<string, EmNode[]>();
+  const elsewhere = new Map<string, string>();
   for (const u of scope.units) {
-    const key = epochOf(u, doc) ?? "";
+    let key = epochOf(u, doc) ?? "";
+    if (own && !own.has(key)) {
+      if (key) elsewhere.set(u.id, key);
+      key = node.id;
+    }
     (lanes.get(key) ?? lanes.set(key, []).get(key)!).push(u);
   }
   const ordered = [...lanes.keys()].sort((a, b2) => {
@@ -366,7 +383,17 @@ export function matrixEmbed(node: EmNode, doc: EmDocument | null): HTMLElement {
     }
     lane.appendChild(label);
     const row = el("div", "nv-matrix-row");
-    for (const u of lanes.get(key)!) row.appendChild(unitChip(u));
+    for (const u of lanes.get(key)!) {
+      const chip = unitChip(u);
+      const first = elsewhere.get(u.id);
+      if (first) {
+        chip.classList.add("nv-chip-reused");
+        chip.dataset.firstEpoch = first;
+        chip.textContent = `↺ ${nameOf(u)}`;
+        chip.title = `${t("nv.firstEpochElsewhere", { epoch: nameOf(index.get(first)) || first })}\n${chip.title}`;
+      }
+      row.appendChild(chip);
+    }
     lane.appendChild(row);
     grid.appendChild(lane);
   }
@@ -472,7 +499,7 @@ export function existenceCertainty(node: EmNode,
 /** The ladder as a row of rungs, the current one lit. */
 export function certaintyLadder(c: Certainty): HTMLElement {
   const wrap = el("div", "nv-certainty");
-  wrap.appendChild(el("span", "nv-certainty-label", "certezza d'esistenza"));
+  wrap.appendChild(el("span", "nv-certainty-label", t("nv.existenceCertainty")));
   const row = el("span", "nv-certainty-rungs");
   for (const rung of LADDER) {
     const dot = el("span", "nv-rung", rung.replace("_", " "));
@@ -627,34 +654,117 @@ const COLUMNS: { key: string; labelKey: string;
       const c = existenceCertainty(u, doc);
       if (!c) return "—";
       return c.source === "implied"
-        ? `${c.rung.replace("_", " ")} (implicita)`
+        ? `${c.rung.replace("_", " ")} (${t("nv.implied")})`
         : c.rung.replace("_", " ");
     },
   },
 ];
 
+/**
+ * MICRO-NARRATIVE-MODULI p.18 (E.D., 13 Nov 2026: «Graph · live query · the
+ * whole graph», twenty rows and no way to narrow them) · the table's QUESTION,
+ * in its block's `options`, still a live reference (computed at every paint):
+ *
+ *   · `scope` — absent: what the ref is about (`scopeOf`); an epoch or activity
+ *     id: that one (an epoch with its phases); `"chapter"`: the units cited in
+ *     the chapter (embeds and mentions); `"above"`: those cited in the text
+ *     above the table; `"selection"`: the ids in `options.ids`;
+ *   · `types` (node types), `certainty` (rungs), `epochs` (first epochs): filters;
+ *   · `columns`: the columns shown, in order; `sort`: `{ key, dir }`.
+ *
+ * `tableRows` is the one computation behind the embed, its exported figure and
+ * the check.
+ */
+export interface TableContext {
+  /** the units cited in the chapter, and in its text above this block */
+  chapter?: string[];
+  above?: string[];
+}
+export const TABLE_SORTS = ["graph", "name", "type", "epoch", "certainty"] as const;
+
+export interface TableRows {
+  what: string;
+  units: EmNode[];
+  cols: typeof COLUMNS;
+  /** the filters in words («USVn, USVs · asserted»), "" when none */
+  filters: string;
+}
+
+export function tableRows(node: EmNode, doc: EmDocument | null,
+                          options: Record<string, unknown>, ctx: TableContext = {}): TableRows {
+  const index = indexOf(doc);
+  const scopeOpt = typeof options["scope"] === "string" ? String(options["scope"]) : "";
+  let what: string;
+  let units: EmNode[];
+  const ofIds = (ids: string[]) => ids.map((id) => index.get(id)).filter(isStrat) as EmNode[];
+  if (scopeOpt === "chapter") { units = ofIds(ctx.chapter ?? []); what = t("nv.tbl.scope.chapter"); }
+  else if (scopeOpt === "above") { units = ofIds(ctx.above ?? []); what = t("nv.tbl.scope.above"); }
+  else if (scopeOpt === "selection") {
+    units = ofIds(Array.isArray(options["ids"]) ? (options["ids"] as unknown[]).map(String) : []);
+    what = t("nv.tbl.scope.selection");
+  } else if (scopeOpt && index.get(scopeOpt)) {
+    const sc = scopeOf(index.get(scopeOpt)!, doc);
+    units = sc.units; what = sc.what;
+  } else {
+    const sc = scopeOf(node, doc);
+    units = sc.units; what = sc.what;
+  }
+  const list = (k: string): string[] | null =>
+    Array.isArray(options[k]) && (options[k] as unknown[]).length ? (options[k] as unknown[]).map(String) : null;
+  const types = list("types"), rungs = list("certainty"), eps = list("epochs");
+  if (types) units = units.filter((u) => types.includes(String(u.node_type ?? "")));
+  if (rungs) units = units.filter((u) => rungs.includes(existenceCertainty(u, doc)?.rung ?? ""));
+  if (eps) units = units.filter((u) => eps.includes(epochOf(u, doc) ?? ""));
+  const sort = (options["sort"] ?? {}) as { key?: string; dir?: string };
+  const key = String(sort.key ?? "graph");
+  if (key !== "graph") {
+    const col = COLUMNS.find((c) => c.key === (key === "chronology" ? "dating" : key));
+    const val = (u: EmNode): string | number => {
+      if (key === "epoch" || key === "chronology") {
+        const e = epochOf(u, doc);
+        const n = e ? index.get(e) : undefined;
+        return n ? epochStart(n) : Number.POSITIVE_INFINITY;
+      }
+      if (key === "certainty") return ["reality_based", "observable", "asserted", "symbolic"]
+        .indexOf(existenceCertainty(u, doc)?.rung ?? "");
+      return col ? col.read(u, doc) : nameOf(u);
+    };
+    units = [...units].sort((a, b) => {
+      const x = val(a), y = val(b);
+      const c = typeof x === "number" && typeof y === "number" ? x - y
+        : String(x).localeCompare(String(y), undefined, { numeric: true });
+      return sort.dir === "desc" ? -c : c;
+    });
+  }
+  const wanted = list("columns");
+  const cols = wanted ? wanted.map((k) => COLUMNS.find((c) => c.key === k)).filter(Boolean) as typeof COLUMNS : COLUMNS;
+  const filters = [types?.join(", "), rungs?.map((r) => r.replace("_", " ")).join(", "),
+    eps?.map((e) => nameOf(index.get(e)) || e).join(", ")].filter(Boolean).join(" · ");
+  return { what, units, cols: cols.length ? cols : COLUMNS, filters };
+}
+
+/** p.18 · the columns a table can show (key and label), for its Inspector */
+export function tableColumns(): { key: string; label: string }[] {
+  return COLUMNS.map((c) => ({ key: c.key, label: t(c.labelKey) }));
+}
+
 export function tableEmbed(node: EmNode, doc: EmDocument | null,
-                           options: Record<string, unknown>): HTMLElement {
-  const b = box("table", nameOf(node), "nv-table");
-  const scope = scopeOf(node, doc);
+                           options: Record<string, unknown>, ctx: TableContext = {}): HTMLElement {
+  const rows = tableRows(node, doc, options, ctx);
+  const b = box("table", rows.what, "nv-table");
   b.appendChild(el("div", "nv-embed-note",
-                    t("nv.capLiveQuery", { what: scope.what })));
-  if (!scope.units.length) {
+                    t("nv.capLiveQuery", { what: rows.what })
+                    + (rows.filters ? ` · ${rows.filters}` : "")));
+  if (!rows.units.length) {
     return nothingYet(b, t("nv.queryFindsNothing"));
   }
-
-  const wanted = Array.isArray(options["columns"])
-    ? new Set((options["columns"] as unknown[]).map(String))
-    : null;
-  const cols = wanted ? COLUMNS.filter((c) => wanted.has(c.key)) : COLUMNS;
-
   const table = el("table", "nv-table-grid");
   const head = el("tr");
-  for (const c of cols) head.appendChild(el("th", undefined, t(c.labelKey)));
+  for (const c of rows.cols) head.appendChild(el("th", undefined, t(c.labelKey)));
   table.appendChild(head);
-  for (const u of scope.units) {
+  for (const u of rows.units) {
     const tr = el("tr");
-    for (const c of cols) {
+    for (const c of rows.cols) {
       const td = el("td", undefined, c.read(u, doc));
       if (c.key === "name") {
         const style = nodeStyle(String(u.node_type ?? ""));
@@ -666,7 +776,7 @@ export function tableEmbed(node: EmNode, doc: EmDocument | null,
   }
   b.appendChild(table);
   b.appendChild(el("div", "nv-embed-note",
-    `${plural(scope.units.length, "nv.rowComputed", "nv.rowsComputed")} `
+    `${plural(rows.units.length, "nv.rowComputed", "nv.rowsComputed")} `
     + t("nv.fromMemory")));
   return b;
 }
@@ -967,7 +1077,7 @@ export function openImage(node: EmNode, base: string,
       link.href = url;
       link.target = "_blank";
       link.rel = "noreferrer noopener";
-      link.textContent = "vedi il ritaglio";
+      link.textContent = t("nv.seeCrop");
       line.appendChild(link);
     }
     caption.appendChild(line);
@@ -977,7 +1087,7 @@ export function openImage(node: EmNode, base: string,
       t("nv.noRegions")));
 
   const dismiss = el("button", "nv-lightbox-close", "✕") as HTMLButtonElement;
-  dismiss.title = "Chiudi (Esc)";
+  dismiss.title = t("nv.closeEsc");
   dismiss.addEventListener("click", close);
 
   frame.appendChild(caption);
@@ -1065,7 +1175,7 @@ export function spatialisationRungs(): string[] {
 
 export function rmDocEmbed(node: EmNode, doc: EmDocument | null,
                            base: string): HTMLElement {
-  const b = box("rm · documento spazializzato", nameOf(node), "nv-rmdoc");
+  const b = box(`rm · ${t("nv.rmDocKind")}`, nameOf(node), "nv-rmdoc");
   if (node.description)
     b.appendChild(el("div", "nv-embed-note", String(node.description)));
 
@@ -1108,5 +1218,225 @@ export function rmDocEmbed(node: EmNode, doc: EmDocument | null,
     b.appendChild(el("div", "nv-embed-note",
       t("nv.recordedPov", { pov: JSON.stringify(pov) })));
   }
+  return b;
+}
+
+// ── 9 · the 3D scene of a container, a document, an epoch, the graph ─────────
+
+/**
+ * MICRO-NARRATIVE-MODULI p.12 (E.D., 13 Nov 2026) · WHAT A SCENE SHOWS, read
+ * from the graph now — the module is a VIEW computed from the graph, never a
+ * resource: an epoch cannot CARRY geometry (`has_linked_resource` admits no
+ * EpochNode), but what the graph says is present in it can be shown, by the
+ * Space's own rule (`space.ts buildSpace` / `summary`):
+ *
+ *   · a CONTAINER (`RepresentationModelNodeGroup`) → its members, and its own
+ *     alternative (a tileset of the whole, `has_linked_resource` on the
+ *     container) with the choice the graph keeps (`data.active_alternative`);
+ *   · a DOCUMENT that publishes models → the models and containers it reaches
+ *     by `has_representation_model`;
+ *   · an EPOCH → the models attached to it or to its phases
+ *     (`has_representation_model` from the epoch, `has_first_epoch` /
+ *     `survive_in_epoch` of the model) and the PROXIES of its units;
+ *   · the GRAPH → every model and every proxy.
+ *
+ * The counts here are the card's words in every reading (the reader, the
+ * tests); the interactive stage is the editor's (`SceneFactory`, main.ts).
+ */
+export interface SceneContent {
+  kind: "graph" | "epoch" | "group" | "document" | "model";
+  /** representation models (RM, RMSF, RMDoc) in the scene */
+  models: string[];
+  /** the containers they are in, and containers named directly */
+  groups: string[];
+  /** the units whose proxy the scene draws */
+  proxies: string[];
+  /** a container's own alternative (its tileset), and the choice kept */
+  alternatives: { group: string; resource: string; active: string }[];
+}
+
+const RM_FAMILY = /^representation_model/;
+const RM_GROUP = "RepresentationModelNodeGroup";
+const RM_GROUP_EDGE = "is_in_representation_model_group";
+
+/** Does this unit have a proxy — a geometry property with a semantic shape? */
+function hasProxy(doc: EmDocument | null, unitId: string, index: Map<string, EmNode>): boolean {
+  return outgoing(doc, unitId, ["has_property"]).some((pid) => {
+    const p = index.get(pid);
+    if (!p || String(((p.data ?? {}) as Record<string, unknown>)["property_type"] ?? "") !== "geometry") return false;
+    return outgoing(doc, pid, ["has_semantic_shape"]).length > 0;
+  });
+}
+
+export function sceneContent(node: EmNode, doc: EmDocument | null): SceneContent | null {
+  const index = indexOf(doc);
+  const type = String(node.node_type ?? "");
+  const isRm = (id: string) => RM_FAMILY.test(String(index.get(id)?.node_type ?? ""));
+  const isGroup = (id: string) => index.get(id)?.node_type === RM_GROUP;
+  const members = (g: string) => incoming(doc, g, [RM_GROUP_EDGE]).filter(isRm);
+  const groupOf = (rm: string) => outgoing(doc, rm, [RM_GROUP_EDGE]).find(isGroup);
+  const out: SceneContent = { kind: "model", models: [], groups: [], proxies: [], alternatives: [] };
+  const addRm = (id: string) => { if (!out.models.includes(id)) out.models.push(id); };
+  const addGroup = (g: string) => {
+    if (!out.groups.includes(g)) out.groups.push(g);
+  };
+  if (type === "graph" || type === "GraphNode") {
+    out.kind = "graph";
+    for (const n of nodesOf(doc)) if (RM_FAMILY.test(String(n.node_type ?? ""))) addRm(n.id);
+    for (const n of nodesOf(doc)) if (isStrat(n) && hasProxy(doc, n.id, index)) out.proxies.push(n.id);
+  } else if (type === "EpochNode" || type === "epoch") {
+    out.kind = "epoch";
+    const lanes = new Set([node.id, ...subEpochsOf(doc, node.id)]);
+    for (const lane of lanes) {
+      for (const id of outgoing(doc, lane, ["has_representation_model"])) {
+        if (isRm(id)) addRm(id);
+        else if (isGroup(id)) { addGroup(id); members(id).forEach(addRm); }
+      }
+      for (const id of incoming(doc, lane, ["has_first_epoch", "survive_in_epoch"])) if (isRm(id)) addRm(id);
+    }
+    for (const u of scopeOf(node, doc).units) if (hasProxy(doc, u.id, index)) out.proxies.push(u.id);
+  } else if (type === RM_GROUP) {
+    out.kind = "group";
+    addGroup(node.id);
+    members(node.id).forEach(addRm);
+  } else if (type === "document") {
+    out.kind = "document";
+    for (const id of outgoing(doc, node.id, ["has_representation_model"])) {
+      if (isRm(id)) addRm(id);
+      else if (isGroup(id)) { addGroup(id); members(id).forEach(addRm); }
+    }
+  } else if (RM_FAMILY.test(type)) {
+    addRm(node.id);
+  } else return null;
+  for (const rm of out.models) { const g = groupOf(rm); if (g) addGroup(g); }
+  for (const g of out.groups) {
+    const res = outgoing(doc, g, ["has_linked_resource"]).find((r) => index.get(r)?.node_type === "resource");
+    if (!res) continue;
+    // s3Dgraphy `resources.alternatives` (MICRO-ASSETS-LIVELLI): a map from a
+    // use or a target (`web`, `desk`, `mobile`, `*`) to `container` (the
+    // tileset) or `members` (the models); a scene of the story is read on the
+    // web — its choice, else the general one
+    const raw = ((index.get(g)?.data ?? {}) as Record<string, unknown>)["active_alternative"];
+    const pickOf = (v: unknown): string => {
+      if (typeof v === "string") return v;
+      if (v && typeof v === "object") {
+        const m = v as Record<string, unknown>;
+        return String(m["web"] ?? m["desk"] ?? m["*"] ?? "");
+      }
+      return "";
+    };
+    const p = pickOf(raw);
+    const active = p === "container" ? "tileset" : p === "members" ? "models" : p;
+    out.alternatives.push({ group: g, resource: res, active });
+  }
+  return out;
+}
+
+/** The scene's content in one line: «10 modelli · 1 contenitore (Survey2015,
+ *  alternativa: tileset TempluMare) · 32 proxy». */
+export function sceneContentLine(c: SceneContent, doc: EmDocument | null): string {
+  const index = indexOf(doc);
+  const bits: string[] = [];
+  bits.push(plural(c.models.length, "nv.sc.model", "nv.sc.models"));
+  if (c.groups.length)
+    bits.push(`${plural(c.groups.length, "nv.sc.group", "nv.sc.groups")} (${c.groups.map((g) => nameOf(index.get(g)) || g).join(", ")})`);
+  for (const a of c.alternatives)
+    bits.push(t("nv.sc.alt", { group: nameOf(index.get(a.group)) || a.group, name: nameOf(index.get(a.resource)) || a.resource,
+      active: a.active ? t(`nv.sc.active.${a.active}`, undefined, a.active) : t("nv.sc.active.auto") }));
+  if (c.kind === "epoch" || c.kind === "graph") bits.push(plural(c.proxies.length, "nv.sc.proxy", "nv.sc.proxies"));
+  return bits.join(" · ");
+}
+
+// ── 10 · the document as the THING, and the source as its USE ───────────────
+
+/**
+ * MICRO-NARRATIVE-MODULI p.13 (E.D., 13 Nov 2026: D.01 as Document and as
+ * Source gave the same box, «non sense») · THREE different questions:
+ *
+ *   · **Document** — the thing itself: what it shows (the editor draws the
+ *     image, the PDF page, the text, the models — `DocumentContent`), with the
+ *     citation under it;
+ *   · **Source** — its USE in this graph: which extractors read it, what they
+ *     yield (property → unit), and the critique of the source the graph keeps;
+ *   · **Paradata** — the full chain for one node (`paradataEmbed`).
+ *
+ * `sourceUse` is the second question, as data (the check reads it).
+ */
+export interface SourceUse {
+  extractors: { id: string; name: string; yields: { property: string; unit: string | null }[] }[];
+  units: string[];
+  properties: number;
+  critique: string[];
+}
+
+export function sourceUse(node: EmNode, doc: EmDocument | null): SourceUse {
+  const index = indexOf(doc);
+  const out: SourceUse = { extractors: [], units: [], properties: 0, critique: [] };
+  for (const xid of incoming(doc, node.id, SOURCE_LINKS)) {
+    const x = index.get(xid);
+    if (!x) continue;
+    const yields: { property: string; unit: string | null }[] = [];
+    for (const pid of incoming(doc, xid, PROV_LINKS)) {
+      const p = index.get(pid);
+      if (!p) continue;
+      const unit = incoming(doc, pid, PROP_LINKS)[0] ?? null;
+      yields.push({ property: pid, unit });
+      out.properties++;
+      if (unit && !out.units.includes(unit)) out.units.push(unit);
+    }
+    out.extractors.push({ id: xid, name: nameOf(x), yields });
+  }
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  for (const k of ["reliability", "affidabilita", "source_critique", "critique", "notes", "note"]) {
+    const v = data[k];
+    if (typeof v === "string" && v.trim()) out.critique.push(`${k}: ${v.trim()}`);
+  }
+  for (const k of ["geometry", "certainty_class"]) {
+    const v = data[k];
+    if (typeof v === "string" && v.trim()) { out.critique.push(`${k}: ${v.trim()}`); break; }
+  }
+  return out;
+}
+
+/** The citation line under a document: its name, the description (the
+ *  bibliographic entry as the graph has it) and its file. */
+export function citationLine(node: EmNode): HTMLElement {
+  const c = el("div", "nv-doc-cite");
+  c.appendChild(el("b", undefined, nameOf(node)));
+  if (node.description) c.appendChild(document.createTextNode(` — ${String(node.description)}`));
+  return c;
+}
+
+export function sourceUseEmbed(node: EmNode, doc: EmDocument | null): HTMLElement {
+  const b = box("source", nameOf(node), "nv-source nv-source-use");
+  const use = sourceUse(node, doc);
+  const index = indexOf(doc);
+  b.appendChild(el("div", "nv-embed-note", t("nv.src.cap")));
+  if (!use.extractors.length) {
+    nothingYet(b, t("nv.src.unused"));
+  } else {
+    b.appendChild(el("div", "nv-src-sum", t("nv.src.sum", {
+      x: plural(use.extractors.length, "nv.src.extractor", "nv.src.extractors"),
+      p: plural(use.properties, "nv.src.property", "nv.src.properties"),
+      u: plural(use.units.length, "nv.unit", "nv.units") })));
+    const row = el("div", "nv-matrix-row");
+    for (const u of use.units.slice(0, 24)) { const n = index.get(u); if (n) row.appendChild(unitChip(n)); }
+    if (use.units.length > 24) row.appendChild(el("span", "nv-embed-note", `+${use.units.length - 24}`));
+    if (use.units.length) b.appendChild(row);
+    const lines = el("ul", "nv-src-list");
+    for (const x of use.extractors.slice(0, 6)) {
+      const what = x.yields.map((y) => {
+        const p = index.get(y.property);
+        const u = y.unit ? index.get(y.unit) : undefined;
+        return `${nameOf(p)}${u ? ` → ${nameOf(u)}` : ""}`;
+      });
+      lines.appendChild(el("li", undefined, `${x.name}: ${what.length ? what.join(", ") : t("nv.src.yieldsNothing")}`));
+    }
+    if (use.extractors.length > 6)
+      lines.appendChild(el("li", "nv-embed-note", t("nv.src.more", { n: String(use.extractors.length - 6) })));
+    b.appendChild(lines);
+  }
+  b.appendChild(el("div", "nv-embed-note" + (use.critique.length ? "" : " nv-implied"),
+    use.critique.length ? `${t("nv.src.critique")}: ${use.critique.join(" · ")}` : t("nv.src.noCritique")));
   return b;
 }

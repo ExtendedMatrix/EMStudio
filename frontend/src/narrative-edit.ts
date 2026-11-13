@@ -182,6 +182,43 @@ export function moveChapter(store: DocumentStore, narrativeId: string,
   editChapters(store, narrativeId, (cs) => move(cs, index, delta));
 }
 
+/**
+ * MICRO-NARRATIVE-MODULI p.8 · p.11 · a chapter born WHERE it is asked for.
+ *
+ * `at` is a place between the blocks of chapter `after`: the new chapter's
+ * title goes there, so the blocks that follow it are its own (a heading put
+ * between two paragraphs splits the chapter, as in any word processor); at the
+ * end of a chapter it is simply the next chapter, empty. One undo step.
+ * Returns the new chapter's index.
+ */
+export function insertChapterAt(store: DocumentStore, narrativeId: string,
+                                after: number, at?: number,
+                                title = t("narr.newChapter")): number {
+  let made = -1;
+  editChapters(store, narrativeId, (cs) => {
+    const here = cs[after];
+    const tail = here && at !== undefined && at < (here.blocks ?? []).length
+      ? (here.blocks ?? []).splice(Math.max(0, at)) : [];
+    const pos = Math.max(0, Math.min(cs.length, after + 1));
+    cs.splice(pos, 0, { title, canonical: false, blocks: tail });
+    made = pos;
+  });
+  return made;
+}
+
+/** p.10 · a chapter dragged: from `from` to the place `to` (before the chapter
+ *  that is there now; `cs.length` = the end). One undo step. */
+export function moveChapterTo(store: DocumentStore, narrativeId: string,
+                              from: number, to: number): void {
+  editChapters(store, narrativeId, (cs) => {
+    if (from < 0 || from >= cs.length) return;
+    const dest = Math.max(0, Math.min(cs.length, to));
+    if (dest === from || dest === from + 1) return;
+    const [ch] = cs.splice(from, 1);
+    cs.splice(dest > from ? dest - 1 : dest, 0, ch);
+  });
+}
+
 // ── blocks ────────────────────────────────────────────────────────────────────
 
 export function addProse(store: DocumentStore, narrativeId: string,
@@ -197,9 +234,63 @@ export function setProse(store: DocumentStore, narrativeId: string,
                          chapterIndex: number, blockIndex: number,
                          text: string): void {
   editChapters(store, narrativeId, (cs) => {
-    const b = cs[chapterIndex]?.blocks?.[blockIndex];
-    if (b && b.block_type === "prose") b.text = text;
+    const b = cs[chapterIndex]?.blocks?.[blockIndex] as
+      (EditableBlock & { ai_generated?: boolean; validated_by?: string | null }) | undefined;
+    if (!b || b.block_type !== "prose") return;
+    // MICRO-NARRATIVE-MODULI p.17 · a paragraph of AI origin changed AFTER a
+    // person signed it is to be verified again: the signature was for the
+    // other words. The origin stays (`ai_generated`), and so does who had
+    // signed it (`options.signed_before`), as the trace of the act.
+    if (b.ai_generated && b.validated_by && (b.text ?? "") !== text) {
+      b.options = { ...(b.options ?? {}), signed_before: b.validated_by };
+      delete b.validated_by;
+    }
+    b.text = text;
   });
+}
+
+/** p.16 · the language of the story (`data.lang`), set at its birth and
+ *  changeable: the AI's drafts are asked in it. */
+export function setNarrativeLang(store: DocumentStore, narrativeId: string, lang: string): void {
+  const node = store.node(narrativeId);
+  if (!node) return;
+  const data = { ...((node.data ?? {}) as Record<string, unknown>) };
+  if ((data.lang ?? "") === lang) return;
+  if (lang) data.lang = lang; else delete data.lang;
+  store.updateNode(narrativeId, { data });
+}
+
+/** p.16 · the language the written prose is IN, when the story does not say
+ *  (a count of the commonest words, enough to tell the languages EM is
+ *  written in apart); "" when there is too little text to tell. */
+const LANG_WORDS: Record<string, string[]> = {
+  en: ["the", "and", "of", "is", "was", "with", "which", "this", "that", "have"],
+  it: ["il", "di", "che", "della", "delle", "nel", "sono", "una", "con", "dei"],  // ALLOW-IT: words to recognise, not shown
+  fr: ["le", "les", "des", "est", "une", "dans", "avec", "qui", "pour", "sur"],
+  de: ["der", "die", "und", "das", "ist", "mit", "den", "von", "ein", "eine"],
+  es: ["el", "los", "las", "del", "que", "una", "con", "por", "para", "es"],
+  ro: ["și", "în", "care", "din", "este", "pentru", "una", "cu", "fost", "sunt"],
+};
+export function detectProseLang(texts: string[]): string {
+  const words = texts.join(" ").toLowerCase().match(/\p{L}+/gu) ?? [];
+  if (words.length < 20) return "";
+  let best = "", score = 0;
+  for (const [lang, list] of Object.entries(LANG_WORDS)) {
+    const set = new Set(list);
+    const n = words.filter((w) => set.has(w)).length;
+    if (n > score) { best = lang; score = n; }
+  }
+  return score >= 3 ? best : "";
+}
+
+/** The story's language: declared, else the one its prose is written in. */
+export function narrativeLang(data: Record<string, unknown> | undefined,
+                              chapters: EditableChapter[]): { lang: string; declared: boolean } {
+  const declared = typeof data?.lang === "string" ? String(data.lang) : "";
+  if (declared) return { lang: declared, declared: true };
+  const texts = chapters.flatMap((c) => (c.blocks ?? []).filter((b) => b.block_type === "prose")
+    .map((b) => String(b.text ?? "").replace(/\[\[[^\]]*\]\]/g, " ")));
+  return { lang: detectProseLang(texts), declared: false };
 }
 
 /** Insert an embed. `at` places it (drop position); omitted means append. */

@@ -54,7 +54,8 @@ const scene = readFileSync(`${SRC}scene3d.ts`, "utf8");
 eq((scene.match(/memGate\(key, item,/g) ?? []).length, 3, "scene3d: the guard before a model's file, a flow's first version and a new tileset");
 eq(/memoryMB \?\? opts\.tilesMemoryMB/.test(scene), true, "a tileset's ceiling is what is left of the scene's, when smaller");
 const main = readFileSync(`${SRC}main.ts`, "utf8");
-eq((main.match(/memory: sceneMemory, onMemoryGate,/g) ?? []).length, 2, "main: the Space and the Viewer both mount the guard");
+// MICRO-NARRATIVE-MODULI · …and a story's 3D scene (the stage of a module) mounts it too
+eq((main.match(/memory: sceneMemory, onMemoryGate,/g) ?? []).length, 3, "main: the Space, the Viewer and a story's scene all mount the guard");
 eq(/\/machine\/memory/.test(readFileSync(new URL("../../tools/em_bridge.py", import.meta.url), "utf8")), true, "the bridge answers /machine/memory");
 
 // MICRO-PIU-FONTI · every source open is counted: a document ~4× its JSON, an

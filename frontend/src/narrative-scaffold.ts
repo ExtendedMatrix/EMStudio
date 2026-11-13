@@ -11,7 +11,7 @@
 
 import type { DocumentStore } from "./model";
 import { narrativesIn } from "./narrative";
-import { t } from "./i18n";
+import { getLocale, t } from "./i18n";
 import { roleNode } from "./hdto";
 import {
   addChapter,
@@ -72,7 +72,9 @@ export function scaffoldNarrativeFromGraph(store: DocumentStore): string | null 
       name: `${siteName(store)} — narrative`,
       node_type: "narrative",
       description: "",
-      data: { chapters: [], template_id: "ts_scaffold" },
+      // MICRO-NARRATIVE-MODULI p.16 · the story's language is set at its
+      // birth (the language its first words are written in) and can be changed
+      data: { chapters: [], template_id: "ts_scaffold", lang: getLocale().slice(0, 2) },
     });
     // 0 · intro, marked canonical (settled) so a future regeneration leaves it.
     //

@@ -261,11 +261,12 @@ import {
 import { descriptionFromFile, mediumOfFile, openNewDocumentForm, type NewDocumentValues } from "./doc-form";
 import type { Arrangement, STORAGE_MODES } from "./workspace";
 import { renderNarrativeIndex } from "./narrative-index";
-import { renderCiteSection, renderNarrativeInspector } from "./narrative-inspector";
+import { langName, renderCiteSection, renderNarrativeInspector } from "./narrative-inspector";
 import { linkGroupOf, throughExtractor } from "./add-menu";
-import { refsForViewType, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
+import { refsForViewType, scene3dRefKind, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
 import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
-import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
+import { citedContext, setDocumentContent, setSceneFactory, setSitePicker, type NarrativeSelection, type Reading, type SceneFactory } from "./narrative";
+import { documentEmbed as documentEmbedRaw, epochStart, sceneContent, sceneContentLine, tableRows, type TableContext } from "./narrative-embeds";
 import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
 import { carriedPropertyEdges, compactableUnits, compactProperties, dissolveGroups, drawnEdgeKey,
@@ -2971,6 +2972,12 @@ window.__EM_SCENE__ = () => {
              }) };
   },
   setSpaceEpoch: (id: string) => { spaceEpochId = id; refreshSurfaces("scene"); },
+  /** MICRO-NARRATIVE-MODULI · an export of the story, as the Export menu makes it */
+  exportNarrative: (format: string, force = false) => exportNarrative(format, { force }),
+  /** …the figures this process renders for it, by key */
+  narrativeFigureKeys: async (id: string) => Object.keys(await narrativeFigures(id)),
+  /** MICRO-NARRATIVE-MODULI · what a story's 3D scene of this node draws */
+  narrativeSceneItems: (id: string) => { const n = store?.node(id); return n ? narrativeSceneItems(n).map((i) => ({ kind: i.kind, id: i.id, state: i.state, url: i.url ?? null })) : null; },
   setBands: (bands: Bands, winId?: string) => { const w = winById(winId ?? activeWin().id); if (w) setBandsOf(w, bands); },
   setBandsPeriodization: (id: string, winId?: string) => { const w = winById(winId ?? activeWin().id); if (w) setBandsPerOf(w, id); },
   setBandsGraph: (graphId: string, on: boolean, winId?: string) => { const w = winById(winId ?? activeWin().id); if (w) setBandsGraphOf(w, graphId, on); },
@@ -15922,7 +15929,52 @@ const NARRATIVE_FORMATS: Record<string, { mime: string; ext: string; label: stri
  * `scene3d` stays a link on purpose: 3D is navigated, not printed. Anything
  * else is declared here rather than silently skipped (see `FIGURABLE`).
  */
-const FIGURABLE = new Set(["matrix", "map", "timeline"]);
+/** p.18 · the table as the export prints it: an SVG of the SAME rows (the
+ *  filters and the order of the block), so DOCX and LaTeX get what the page
+ *  shows, as a figure. */
+function tableToSvg(node: EmNode, doc: EmDocument | null,
+                           options: Record<string, unknown>, ctx: TableContext = {}): string | null {
+  const rows = tableRows(node, doc, options, ctx);
+  if (!rows.units.length) return null;
+  const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const widths = rows.cols.map((c) => Math.max(t(c.labelKey).length,
+    ...rows.units.map((u) => c.read(u, doc).length)) * 7 + 16);
+  const W = widths.reduce((a, b) => a + b, 0), H = (rows.units.length + 2) * 20 + 8;
+  const out: string[] = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" font-family="Helvetica, Arial, sans-serif" font-size="11">`,
+    `<rect width="${W}" height="${H}" fill="#fff"/>`,
+    `<text x="4" y="14" font-weight="bold">${esc(rows.what + (rows.filters ? ` · ${rows.filters}` : ""))}</text>`];
+  let x = 0;
+  rows.cols.forEach((c, i) => { out.push(`<text x="${x + 4}" y="34" font-weight="bold">${esc(t(c.labelKey))}</text>`); x += widths[i]; });
+  out.push(`<line x1="0" y1="38" x2="${W}" y2="38" stroke="#888"/>`);
+  rows.units.forEach((u, r) => {
+    let cx = 0;
+    rows.cols.forEach((c, i) => { out.push(`<text x="${cx + 4}" y="${54 + r * 20}">${esc(c.read(u, doc))}</text>`); cx += widths[i]; });
+  });
+  out.push("</svg>");
+  return out.join("");
+}
+
+/** p.19 · a document's image as a figure (an SVG holding the picture), or
+ *  null when the document is not an image or its file cannot be read. */
+async function documentFigureSvg(node: EmNode): Promise<string | null> {
+  if (!store) return null;
+  const target = viewerTargetOf({ nodes: store.doc.graph.nodes, edges: store.doc.graph.edges }, node.id);
+  const part = target?.parts.find((x) => x.medium === "image" && (x.via === "own" || x.via === "linked"));
+  if (!part) return null;
+  const url = await narrativePartUrl(part).catch(() => null);
+  if (!url) return null;
+  const blob = await (await fetch(url)).blob();
+  const data = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(blob); });
+  const size = await new Promise<{ w: number; h: number }>((res) => {
+    const im = new Image();
+    im.onload = () => res({ w: im.naturalWidth || 800, h: im.naturalHeight || 600 });
+    im.onerror = () => res({ w: 800, h: 600 });
+    im.src = data;
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${size.w}" height="${size.h}"><image width="${size.w}" height="${size.h}" xlink:href="${data}"/></svg>`;
+}
+
+const FIGURABLE = new Set(["matrix", "map", "timeline", "table", "scene3d", "document"]);
 
 async function narrativeFigures(
   narrativeId: string,
@@ -15935,21 +15987,25 @@ async function narrativeFigures(
 
   // what is asked for, once, before anything is drawn: the placement below is a
   // bridge round-trip and it is worth making only if a map is actually embedded
-  const wanted: Array<{ view: string; ref: string }> = [];
+  const wanted: Array<{ view: string; ref: string; options: Record<string, unknown>; ctx: TableContext }> = [];
   const seen = new Set<string>();
   for (const chapter of narrative.chapters as Array<{
-    blocks?: Array<{ block_type?: string; ref?: string; view_type?: string }>;
+    blocks?: Array<{ block_type?: string; ref?: string; view_type?: string; options?: Record<string, unknown> }>;
   }>) {
-    for (const block of chapter.blocks ?? []) {
-      if (block.block_type !== "embed") continue;
+    (chapter.blocks ?? []).forEach((block, bi) => {
+      if (block.block_type !== "embed" || nq.queryOf(block as never)) return;
       const view = String(block.view_type ?? "");
       const ref = String(block.ref ?? "");
-      if (!ref || !FIGURABLE.has(view)) continue;
+      if (!ref || !FIGURABLE.has(view)) return;
+      // MICRO-NARRATIVE-MODULI p.12 · p.19 · a scene, a document's models: the
+      // still of the framing saved in the block (none saved: the placeholder
+      // and the link, as before)
+      if (view === "scene3d" && typeof block.options?.still !== "string") return;
       const key = `${view}:${ref}`;
-      if (seen.has(key)) continue;            // one plate per (view, subject)
+      if (seen.has(key)) return;            // one plate per (view, subject)
       seen.add(key);
-      wanted.push({ view, ref });
-    }
+      wanted.push({ view, ref, options: block.options ?? {}, ctx: citedContext((chapter.blocks ?? []) as never, bi) });
+    });
   }
   if (!wanted.length) return out;
 
@@ -15968,7 +16024,7 @@ async function narrativeFigures(
     else placed = answer;
   }
 
-  for (const { view, ref } of wanted) {
+  for (const { view, ref, options, ctx } of wanted) {
     const key = `${view}:${ref}`;
     const node = store.node(ref) ?? null;
     try {
@@ -15984,6 +16040,18 @@ async function narrativeFigures(
         svg = timelineToSvg(node, doc);
       } else if (view === "map") {
         svg = node ? await mapFigure(node, placed) : null;
+      } else if (view === "table") {
+        // p.18 · the table AS FILTERED in its block, the same rows the page shows
+        svg = node ? tableToSvg(node, doc, options, ctx) : null;
+      } else if (view === "document" && typeof options.still !== "string") {
+        // p.19 · a document SHOWS the thing in print too: its image, read here
+        // (where the file is reachable), goes with its citation
+        svg = node ? await documentFigureSvg(node) : null;
+      } else if (view === "scene3d" || view === "document") {
+        const still = String(options.still ?? "");
+        const m = /^data:image\/(png|jpeg);base64,/.exec(still);
+        const w = Number(options.still_w ?? 960), h = Number(options.still_h ?? 540);
+        svg = m ? `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}"><image width="${w}" height="${h}" xlink:href="${still}"/></svg>` : null;
       }
       if (!svg) continue;                      // degrades to the placeholder
       out[key] = svg;
@@ -23447,6 +23515,19 @@ async function resumeAiPending(run: (() => void) | null): Promise<void> {
   run();
 }
 
+/** MICRO-NARRATIVE-MODULI p.16 · the language of one draft request, when the
+ *  author chose another than the story's (per chapter; not saved). */
+const draftLangChoice = new Map<string, string>();
+function storyLangOf(narrativeId: string): { lang: string; declared: boolean } {
+  const n = store?.node(narrativeId);
+  const data = (n?.data ?? {}) as Record<string, unknown>;
+  return nedit.narrativeLang(data, (data.chapters ?? []) as nedit.EditableChapter[]);
+}
+function draftLangOf(narrativeId: string, chapterIndex: number): string {
+  return draftLangChoice.get(`${narrativeId}:${chapterIndex}`) || storyLangOf(narrativeId).lang
+    || getLocale().slice(0, 2);
+}
+
 async function generateChapterDraft(narrativeId: string,
                                     chapterIndex: number): Promise<void> {
   if (!store || generating.has(chapterIndex)) return;
@@ -23473,7 +23554,7 @@ async function generateChapterDraft(narrativeId: string,
   refreshNarrativeView();
   refreshAiKeyStateIfOpen();   // Settings may be open: lock the key controls
   toast(t("ai.generatingToast",
-          { title: chapter?.title ?? activityId }));
+          { title: chapter?.title ?? activityId }) + ` · ${langName(draftLangOf(narrativeId, chapterIndex))}`);
   // …AND IN THE CHAPTER ITSELF. A model takes seconds; a toast that has faded
   // leaves somebody staring at an unchanged paragraph wondering whether they
   // actually clicked. The mark sits where the prose will appear, and it is
@@ -23489,6 +23570,10 @@ async function generateChapterDraft(narrativeId: string,
         narrative_id: narrativeId,
         provider: ai.provider,
         model: ai.model,
+        // p.16 (E.D., 13 Nov 2026: the draft came in Italian, unasked) · the
+        // language is the story's (or this request's), said as the author's
+        // instruction: it is recorded in the prompt node with the rest
+        instruction: `Write the chapter in ${new Intl.DisplayNames(["en"], { type: "language" }).of(draftLangOf(narrativeId, chapterIndex)) ?? draftLangOf(narrativeId, chapterIndex)} (${draftLangOf(narrativeId, chapterIndex)}), whatever the language of the briefing.`,
         // when it was written, recorded with the block: a provenance note
         // without a date answers "who" but not "when this was still current"
         date: new Date().toISOString().slice(0, 10),
@@ -23567,15 +23652,12 @@ function narrativeEditor(narrativeId: string): NarrativeEditor {
       nedit.addEmbed(s, narrativeId, c, ref,
                      nedit.defaultViewType(s.node(ref)), at),
     setViewType: (c, b, vt) => nedit.setEmbedViewType(s, narrativeId, c, b, vt),
+    setBlockOptions: (c, b, patch) => nedit.setBlockOptions(s, narrativeId, c, b, patch),
     moveBlock: (c, b, d) => nedit.moveBlock(s, narrativeId, c, b, d),
     deleteBlock: (c, b) => nedit.deleteBlock(s, narrativeId, c, b),
     // A chapter is anchored to a LANE: an epoch or an activity. Offering every
     // node would make the control useless — most of them are not lanes.
-    lanes: () =>
-      (s.doc.graph.nodes ?? [])
-        .filter((n) => n.node_type === "EpochNode"
-                    || n.node_type === "ActivityNodeGroup")
-        .map((n) => ({ id: n.id, label: String(n.name || n.id) })),
+    lanes: () => narrativeLanes(s.doc).map((l) => ({ id: l.id, label: l.long })),
 
     // — N6 —
     authors: () => nauth.authorsIn(s.doc),
@@ -23837,56 +23919,50 @@ function renderCoverageInto(host: HTMLElement, narrativeId: string): void {
   via.title = lib ? t("nidx.viaBridgeTitle") : t("nidx.viaClientTitle");
   eyebrow.appendChild(via);
   host.appendChild(eyebrow);
-  for (const e of cov.epochs) {
-    const box = document.createElement("div");
-    box.className = "nidx-covrow";
-    box.dataset.epoch = e.id;
-    const head = document.createElement("div");
+  // MICRO-NARRATIVE-MODULI p.9 · a count per line; the chips of a line only
+  // when THAT line is opened (the list of 87 reconstructions is not on the
+  // page until somebody asks for it)
+  const row = (probe: Record<string, string>, label: string, num: string, numTitle: string,
+               ids: string[], cls = ""): HTMLElement => {
+    const box = document.createElement(ids.length ? "details" : "div");
+    box.className = `nidx-covrow ${cls}`.trim();
+    for (const [k, v] of Object.entries(probe)) box.dataset[k] = v;
+    const head = document.createElement(ids.length ? "summary" : "div");
     head.className = "nidx-covh";
-    const n = lib?.epochs.get(e.id) ?? e.narratives;
-    head.innerHTML = `<span>${escapeHtml(e.name)}</span><span class="nidx-grow"></span>`
-      + `<span class="nidx-num" title="${escapeHtml(t("nidx.narrativesTitle", { n: String(n) }))}">${e.cited.length}/${e.units.length}</span>`;
+    head.innerHTML = `<span>${escapeHtml(label)}</span><span class="nidx-grow"></span>`
+      + `<span class="nidx-num" title="${escapeHtml(numTitle)}">${escapeHtml(num)}</span>`;
     box.appendChild(head);
+    if (ids.length) {
+      const fill = (): void => {
+        if (box.querySelector(".nidx-out")) return;
+        const out = document.createElement("div");
+        out.className = "nidx-out";
+        for (const u of ids) out.appendChild(chip(u));
+        box.appendChild(out);
+      };
+      box.addEventListener("toggle", () => { if ((box as HTMLDetailsElement).open) fill(); });
+    }
+    host.appendChild(box);
+    return box;
+  };
+  for (const e of cov.epochs) {
+    const n = lib?.epochs.get(e.id) ?? e.narratives;
+    const missing = e.units.filter((u) => !e.cited.includes(u));
+    const box = row({ epoch: e.id }, e.name, `${e.cited.length}/${e.units.length}`,
+      t("nidx.narrativesTitle", { n: String(n) }), missing);
     const bar = document.createElement("div");
     bar.className = "nidx-bar";
     const fill = document.createElement("i");
     fill.style.width = `${e.units.length ? Math.round((e.cited.length / e.units.length) * 100) : 0}%`;
     bar.appendChild(fill);
-    box.appendChild(bar);
-    const missing = e.units.filter((u) => !e.cited.includes(u));
-    if (missing.length) {
-      const out = document.createElement("div");
-      out.className = "nidx-out";
-      out.appendChild(Object.assign(document.createElement("span"), { className: "nidx-dim", textContent: `${t("nidx.notYet")}: ` }));
-      for (const u of missing.slice(0, 12)) out.appendChild(chip(u));
-      if (missing.length > 12) out.appendChild(document.createTextNode(` +${missing.length - 12}`));
-      box.appendChild(out);
-    }
-    host.appendChild(box);
+    box.querySelector(".nidx-covh")!.after(bar);
+    if (missing.length) box.title = `${t("nidx.notYet")}: ${missing.length}`;
   }
-  const docs = document.createElement("div");
-  docs.className = "nidx-covrow";
-  docs.dataset.row = "sources";
-  docs.innerHTML = `<div class="nidx-covh"><span>${escapeHtml(t("nidx.sourcesCited"))}</span><span class="nidx-grow"></span><span class="nidx-num">${cov.docsCited.length}/${cov.docs.length}</span></div>`;
   const uncited = cov.docs.filter((d) => !cov.docsCited.includes(d));
-  if (uncited.length) {
-    const out = document.createElement("div");
-    out.className = "nidx-out";
-    for (const d of uncited.slice(0, 12)) out.appendChild(chip(d));
-    docs.appendChild(out);
-  }
-  host.appendChild(docs);
+  row({ row: "sources" }, t("nidx.sourcesCited"), `${cov.docsCited.length}/${cov.docs.length}`, t("nidx.sourcesTitle"), uncited);
   const recon = lib ? lib.unexplained : cov.unexplained;
-  const rc = document.createElement("div");
-  rc.className = "nidx-covrow " + (recon.length ? "warn" : "ok");
-  rc.innerHTML = `<div class="nidx-covh"><span>${escapeHtml(recon.length ? `▲ ${t("nidx.unexplained")}` : `✓ ${t("nidx.allExplained")}`)}</span></div>`;
-  if (recon.length) {
-    const out = document.createElement("div");
-    out.className = "nidx-out";
-    for (const r of recon) out.appendChild(chip(r.id));
-    rc.appendChild(out);
-  }
-  host.appendChild(rc);
+  row({ row: "recon" }, recon.length ? `▲ ${t("nidx.unexplained")}` : `✓ ${t("nidx.allExplained")}`,
+    recon.length ? String(recon.length) : "", t("nidx.unexplainedTitle"), recon.map((r) => r.id), recon.length ? "warn" : "ok");
 }
 
 // ── COLLEGARE · who signs: the IDENTITY of the header ──────────────────────
@@ -24365,11 +24441,9 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
   }
   renderNarrativeInspector(host, {
     doc: st.doc, narrativeId, chapter, block,
-    lanes: (st.doc.graph.nodes ?? [])
-      .filter((n) => n.node_type === "EpochNode" || n.node_type === "ActivityNodeGroup")
-      .map((n) => ({ id: n.id, label: String(n.name || n.id) })),
+    lanes: narrativeLanes(st.doc),
     identity: identityRef(),
-    viewTypesFor: (n) => viewTypesFor(n, isStratigraphicType, is3dDocument),
+    viewTypesFor: (n) => viewTypesFor(n, isStratigraphicType, is3dDocument, st.doc),
     viewTypeLabel,
     onRename: (title) => nedit.renameChapter(st, narrativeId, chapter, title),
     onRenameNarrative: (name) => nedit.renameNarrative(st, narrativeId, name),
@@ -24387,7 +24461,9 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
       if (block == null) {
         nedit.moveChapter(st, narrativeId, chapter, d);
         const to = Math.max(0, Math.min(chapters.length - 1, chapter + d));
-        nvSel = { narrativeId, chapter: to, block: null };
+        // MICRO-NARRATIVE-MODULI p.9 · the chapter moved stays the one selected
+        // and current — in the page, in the Index (which keeps its scroll)
+        setNarrativeSelection(narrativeId, { chapter: to, block: null });
       } else {
         nedit.moveBlock(st, narrativeId, chapter, block, d);
         const to = Math.max(0, Math.min((ch?.blocks ?? []).length - 1, block + d));
@@ -24414,6 +24490,11 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
     onSetViewType: (vt) => block != null && nedit.setEmbedViewType(st, narrativeId, chapter, block, vt),
     onSetCaption: (cap) => block != null && nedit.setEmbedCaption(st, narrativeId, chapter, block, cap),
     mapSection: (h, node) => renderMapEmbedSection(h, node),
+    storyLang: () => storyLangOf(narrativeId),
+    onSetStoryLang: (lang) => nedit.setNarrativeLang(st, narrativeId, lang),
+    draftLang: () => draftLangOf(narrativeId, chapter),
+    onSetDraftLang: (lang) => { draftLangChoice.set(`${narrativeId}:${chapter}`, lang); refreshInspector(); },
+    hasDraft: () => (ch?.blocks ?? []).some((b) => !!(b as { ai_generated?: boolean }).ai_generated),
   });
 }
 
@@ -24429,7 +24510,6 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
 /** The map embed's place section (below, with the site picker). */
 let renderMapEmbedSection: (host: HTMLElement, node: EmNode) => void = () => {};
 
-const BLOCK_MEDIA = ["map", "scene3d", "document", "matrix", "paradata", "us", "timeline", "table"];
 
 function insertEmbedAt(narrativeId: string, c: number, at: number, ref: string, vt: string, replace: boolean): void {
   if (!store) return;
@@ -24468,6 +24548,13 @@ function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTML
   const st = store;
   const r = anchor.getBoundingClientRect();
   const x = r.left + 20, y = r.bottom + 4;
+  const media = (vt: string): AddMenuEntry => ({
+    key: `b|${vt}`, label: viewTypeLabel(vt), detail: t(`nv.blk.${vt}Hint`),
+    run: () => pickRefFor(narrativeId, c, at, vt, replace, x, y),
+  });
+  // MICRO-NARRATIVE-MODULI p.19 (E.D., 13 Nov 2026) · TWO FAMILIES first:
+  // Document (it shows the thing) and 3D scene (space and time); then the
+  // graph's views, the standard blocks, and the gestures of writing
   const blockEntries: AddMenuEntry[] = [
     { key: "b|prose", label: t("nv.blk.prose"), detail: t("nv.blk.proseHint"), run: () => {
         if (replace) return; // «/» on an empty paragraph asked for something else
@@ -24477,20 +24564,28 @@ function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTML
         window.setTimeout(() => activeNarrativeHost()
           ?.querySelector<HTMLElement>(`.nv-block-row[data-block="${c}:${at}"] .nv-prose-edit`)?.focus(), 60);
       } },
+    ...["document", "scene3d"].filter((vt) => nedit.VIEW_TYPES.includes(vt)).map(media),
+  ];
+  const graphViews: AddMenuEntry[] = ["matrix", "table", "timeline", "map", "paradata"]
+    .filter((vt) => nedit.VIEW_TYPES.includes(vt)).map(media);
+  // NARRATIVA-BLOCCHI p.2 · the blocks that ask the graph: no second step,
+  // the question points at the graph and its parameters are the Inspector's
+  const standard: AddMenuEntry[] = nq.QUERY_KINDS.map((kind): AddMenuEntry => ({
+    key: `b|q|${kind}`, label: t(`nq.title.${kind}`), detail: t(`nq.what.${kind}`),
+    run: () => insertQueryAt(narrativeId, c, at, kind, replace),
+  }));
+  const gestures: AddMenuEntry[] = [
+    // p.6 · the mention is a module too, and it has to be FOUND: here, and
+    // «[[» in a paragraph (the entry says so)
+    { key: "b|mention", label: t("nv.blk.mention"), detail: t("nv.blk.mentionHint"),
+      run: () => mentionAt(narrativeId, c, at, anchor) },
     { key: "b|ai", label: t("nv.blk.ai"), detail: t("nv.blk.aiHint"), run: () => {
         if (replace) nedit.deleteBlock(st, narrativeId, c, at);
         void generateChapterDraft(narrativeId, c);
       } },
-    // NARRATIVA-BLOCCHI p.2 · the blocks that ask the graph: no second step,
-    // the question points at the graph and its parameters are the Inspector's
-    ...nq.QUERY_KINDS.map((kind): AddMenuEntry => ({
-      key: `b|q|${kind}`, label: t(`nq.title.${kind}`), detail: t(`nq.what.${kind}`),
-      run: () => insertQueryAt(narrativeId, c, at, kind, replace),
-    })),
-    ...BLOCK_MEDIA.filter((vt) => nedit.VIEW_TYPES.includes(vt)).map((vt): AddMenuEntry => ({
-      key: `b|${vt}`, label: viewTypeLabel(vt), detail: t(`nv.blk.${vt}Hint`),
-      run: () => pickRefFor(narrativeId, c, at, vt, replace, x, y),
-    })),
+    // p.8 · a chapter is created where one writes: its title goes HERE
+    { key: "b|chapter", label: t("nv.blk.chapterHere"), detail: t("nv.blk.chapterHereHint"),
+      run: () => newChapterHere(narrativeId, c, at) },
   ];
   const nodes = st.liveNodes().filter((n) => LINK_GROUP_ORDER.includes(linkGroupOf(n.node_type) as never));
   const cite = nodes.map((n): AddMenuEntry => ({
@@ -24502,21 +24597,75 @@ function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTML
   const chapter = (narrativesIn(st.doc).find((n) => n.id === narrativeId)?.chapters ?? [])[c];
   showAddMenu({
     title: t("nv.insertTitle"), context: `${chapter?.title ?? ""} · ${at + 1}`, placeholder: t("link.q"),
-    linkedHeader: t("nv.blocks"), linked: blockEntries, recent: [], categories: [],
+    linkedHeader: t("nv.blocks"), linked: blockEntries, recent: [],
+    categories: [
+      { label: t("nv.graphViews"), entries: graphViews },
+      ...(standard.length ? [{ label: t("nv.standardBlocks"), entries: standard }] : []),
+    ],
     existing: {
       header: t("nv.orCite"),
       groups: LINK_GROUP_ORDER.map((g) => ({ label: t(`link.g.${g}`),
         entries: cite.filter((_, i) => linkGroupOf(nodes[i].node_type) === g) })),
       perGroup: EXISTING_PER_GROUP, more: (n) => t("link.more", { n }), none: t("link.none"),
     },
-    extra: [],
-    searchable: [...blockEntries, ...cite],
+    extra: replace ? gestures.filter((e) => e.key !== "b|chapter") : gestures, extraFirst: true,
+    searchable: [...blockEntries, ...graphViews, ...standard, ...gestures, ...cite],
     matches: (e, q) => e.key.startsWith("c|") ? existingMatches(e, q)
       : `${e.label} ${e.detail ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()),
     onDismiss: () => { if (replace) activeNarrativeHost()
       ?.querySelector<HTMLElement>(`.nv-block-row[data-block="${c}:${at}"] .nv-prose-edit`)?.focus(); },
     count: t("link.count", { n: cite.length }), noResults: t("add.noResults"), keysHint: t("add.keys"),
   }, x, y);
+}
+
+/** p.6 · «Menziona un nodo» from the «+»: the node's name goes in the text —
+ *  at the end of the paragraph just above, or in a new paragraph here. One
+ *  undo step; the menu is the «[[» one. */
+function mentionAt(narrativeId: string, c: number, at: number, anchor: HTMLElement): void {
+  if (!store) return;
+  const st = store;
+  openMentionMenu(anchor, (id) => {
+    const blocks = ((narrativesIn(st.doc).find((n) => n.id === narrativeId)?.chapters ?? [])[c]?.blocks ?? []) as nedit.EditableBlock[];
+    const above = at > 0 ? blocks[at - 1] : undefined;
+    let where = at;
+    if (above && above.block_type === "prose") {
+      where = at - 1;
+      nedit.setProse(st, narrativeId, c, where, `${String(above.text ?? "").trimEnd()} [[${id}]]`);
+    } else {
+      nedit.editChapters(st, narrativeId, (cs) => cs[c]?.blocks?.splice(at, 0, { block_type: "prose", text: `[[${id}]] ` }));
+    }
+    logInfo(t("nv.mentioned", { name: String(st.node(id)?.name ?? id) }), [narrativeId, id]);
+    setNarrativeSelection(narrativeId, { chapter: c, block: where });
+  }, () => {});
+}
+
+/** p.8 · p.11 · «Nuovo capitolo qui»: born at that point (the blocks after it
+ *  are its own), opened with its title being written — no Inspector. */
+function newChapterHere(narrativeId: string, after: number, at?: number): void {
+  if (!store) return;
+  const made = nedit.insertChapterAt(store, narrativeId, after, at);
+  if (made < 0) return;
+  setNarrativeSelection(narrativeId, { chapter: made, block: null });
+  focusChapterTitle(made);
+}
+
+/** The chapter's title in the page, being written (all of it selected). */
+function focusChapterTitle(ci: number): void {
+  const go = (tries: number): void => {
+    const h = activeNarrativeHost()?.querySelector<HTMLElement>(`.nv-chapter[data-chapter="${ci}"] .nv-chapter-title`);
+    if (!h || h.getAttribute("contenteditable") !== "true") {
+      if (tries > 0) window.setTimeout(() => go(tries - 1), 60);
+      return;
+    }
+    h.scrollIntoView({ block: "center" });
+    h.focus();
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(h);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  };
+  window.setTimeout(() => go(40), 40);
 }
 
 /** The second step: what the block shows. */
@@ -24560,19 +24709,31 @@ function pickRefFor(narrativeId: string, c: number, at: number, vt: string, repl
       run: () => insertEmbedAt(narrativeId, c, at, st.ensureGraphRootId(), vt, replace),
     });
   const graphNodes = refs.filter((n) => n.node_type === "graph");
+  const isGraphEntry = (e: AddMenuEntry) => e.key === "r|graph" || graphNodes.some((n) => e.key === `r|${n.id}`);
+  // MICRO-NARRATIVE-MODULI p.12 (E.D., 13 Nov 2026) · a 3D scene is proposed on
+  // the graph, an EPOCH, a CONTAINER, a DOCUMENT that publishes models — never
+  // on the hundred models one by one (they stay reachable by searching)
+  const kindOfEntry = (e: AddMenuEntry) => scene3dRefKind(st.node(e.key.slice(2)));
+  const groups = vt === "scene3d" ? [
+    { label: t("nv.theGraph"), entries: entries.filter(isGraphEntry) },
+    { label: t("nv.sc.g.epochs"), entries: entries.filter((e) => kindOfEntry(e) === "epoch") },
+    { label: t("nv.sc.g.groups"), entries: entries.filter((e) => kindOfEntry(e) === "group") },
+    { label: t("nv.sc.g.documents"), entries: entries.filter((e) => kindOfEntry(e) === "document") },
+  ] : [
+    { label: t("nv.theGraph"), entries: entries.filter(isGraphEntry) },
+    { label: viewTypeLabel(vt), entries: entries.filter((e) => !isGraphEntry(e)) },
+  ];
   showAddMenu({
     title: viewTypeLabel(vt), context: t("nv.whatItShows"), placeholder: t("link.q"),
     linkedHeader: news.length ? t("link.new") : undefined, linked: news, recent: [], categories: [],
     existing: {
       header: t("nv.pick"),
-      groups: [
-        { label: t("nv.theGraph"), entries: entries.filter((e) => e.key === "r|graph" || graphNodes.some((n) => e.key === `r|${n.id}`)) },
-        { label: viewTypeLabel(vt), entries: entries.filter((e) => e.key !== "r|graph" && !graphNodes.some((n) => e.key === `r|${n.id}`)) },
-      ],
+      groups,
       perGroup: EXISTING_PER_GROUP, more: (n) => t("link.more", { n }), none: t("nv.noRefs"),
     },
     extra: [], searchable: [...news, ...entries], matches: (e, q) => existingMatches(e, q),
     count: t("link.count", { n: entries.length }), noResults: t("add.noResults"), keysHint: t("add.keys"),
+    ...(vt === "scene3d" ? { footNote: t("nv.sc.footNote") } : {}),
   }, x, y);
 }
 
@@ -24619,6 +24780,334 @@ function openSitePickerOnGraph(proposed?: { lat: number; lon: number }): void {
   }, proposed);
 }
 setSitePicker(() => openSitePickerOnGraph());
+
+// ── MICRO-NARRATIVE-MODULI p.12 · p.19 · the two families' stages ─────────
+//
+// DOCUMENT shows the thing (`viewerTargetOf`, the Viewer's own reading of what a
+// node holds: images, PDFs, texts, models), the 3D SCENE shows a scope (a
+// container, a document that publishes models, an epoch, the graph) with the
+// Space's rule. Both are drawn here because only here is it known where a file
+// is read (the bridge, a room's store) and how the Space draws.
+
+/** A part's address, resolved: the room's store by checksum, the bridge's
+ *  `/fs` for a file beside the em.json (an image or a PDF as a blob: the gate
+ *  refuses an `<img>`/`<object>` without Origin), a web url as it is. */
+async function narrativePartUrl(part: ViewerPart): Promise<string | null> {
+  const n = store?.node(part.id);
+  const base = assetStoreBase();
+  if (base && n) {
+    const at = storeAddress((n.data ?? null) as Record<string, unknown> | null, base, sync.room);
+    if (at) return ownedByNode(at) ? nodeBlobUrl(at) : at;
+  }
+  const src = part.locator;
+  if (viewerIsFetchable(src)) return src;
+  const u = await fsUrlFor(studyLocalPath(src) ?? src);
+  return part.medium === "image" || part.medium === "pdf" ? bridgeBlobUrl(u) : u;
+}
+
+/** Live scenes of the story, by block key: a repaint of the page (every
+ *  keystroke) hands the SAME stage back instead of opening a WebGL context per
+ *  paint; a stage no paint took back is disposed. */
+const narrativeScenes = new Map<string, { host: HTMLElement; handle: SpaceSceneHandle | null; sig: string }>();
+function sweepNarrativeScenes(): void {
+  window.setTimeout(() => {
+    for (const [k, v] of narrativeScenes)
+      if (!v.host.isConnected) { v.handle?.dispose(); narrativeScenes.delete(k); }
+  }, 0);
+}
+
+/** The scene's items, as the Space draws them: the models (the version by the
+ *  scene's rule, a container's alternative by the choice the graph keeps) and
+ *  the units' proxies. */
+function narrativeSceneItems(node: EmNode): SceneItem[] {
+  const sp = currentSpace();
+  const st = store;
+  if (!sp || !st) return [];
+  const c = sceneContent(node, st.doc);
+  if (!c) return [];
+  const items: SceneItem[] = [];
+  const alts = spaceAlternatives(sp).filter((a) => c.groups.includes(a.group));
+  const altOf = new Map<string, { group: string; role: "tileset" | "models"; mode: Exclude<AltMode, "use"> }>();
+  for (const a of alts) {
+    const mode = altEffectiveMode(a.group, sp);
+    altOf.set(a.tileset, { group: a.group, role: "tileset", mode });
+    for (const m of a.covered) altOf.set(m, { group: a.group, role: "models", mode });
+  }
+  const want = new Set([...c.models, ...alts.map((a) => a.tileset)]);
+  for (const r of sp.rms.filter((x) => want.has(x.id))) {
+    const alt = altOf.get(r.id);
+    if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) continue;
+    const isTiles = !!r.resource?.tiles;
+    // the Space's own rule (its `refresh`): the version the plan draws, and ITS
+    // state — the scene's first resource may be a master the disk does not serve
+    const plan = isTiles ? {} : rmVersionPlan(r);
+    const pv = plan.versionId ? r.versions?.find((v) => v.id === plan.versionId) : undefined;
+    items.push({ kind: "rm", id: r.id, label: r.name, state: pv?.resource?.state ?? r.resource?.state ?? "missing",
+      url: plan.url ?? spaceFileUrl(r.resource), resourceId: pv?.resource?.id ?? r.resource?.id, ...(plan.obj ? { obj: plan.obj } : {}),
+      ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}),
+      ...(alt ? { alt: { group: alt.group, role: alt.role, err: 10, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group } } : {}),
+      tiles: r.resource?.tiles || undefined, edge: placementColour(r.genre) ?? undefined,
+      pose: isTiles ? undefined : poseOfNode(r.id), tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined,
+      ...(isTiles ? { tilesStart: { mode: "auto" as const } } : {}),
+      bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
+      tris: pv ? hardwareTris(pv) : null, textureSide: pv ? textureSideOf(pv) : null,
+      ...(isTiles ? {} : { lighter: memoryAlternatives(r, plan.versionId) }) });
+  }
+  for (const u of c.proxies) {
+    const px = sp.proxies.get(u);
+    if (!px) continue;
+    const type = st.node(u)?.node_type;
+    const common = { kind: "proxy" as const, id: u, label: String(st.node(u)?.name ?? u),
+      rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined, threed: nodeThreedStyle(type),
+      edge: nodeStyle(type).border, pose: poseOfNode(px.instanceOf ? px.xfNode ?? px.shapeId : px.shapeId) };
+    if (px.resource) items.push({ ...common, state: px.resource.state, url: spaceFileUrl(px.resource), resourceId: px.resource.id });
+    else items.push({ ...common, state: "json", convexshapes: px.convexshapes, spheres: px.spheres });
+  }
+  return items;
+}
+
+/** «Apri nello Spazio»: the Space on the scene's epoch (or its first model's),
+ *  with the framing the block saved. */
+function openNarrativeSceneInSpace(node: EmNode, camera: unknown): void {
+  const sp = currentSpace();
+  if (!sp || !store) return;
+  const c = sceneContent(node, store.doc);
+  if (node.node_type === "EpochNode") spaceEpochId = node.id;
+  else if (c?.models[0]) { const ep = sp.rms.find((r) => r.id === c.models[0])?.exactEpochs?.[0]; if (ep) spaceEpochId = ep; }
+  const id = spaceWindowForDoor();
+  if (!id) return;
+  refreshSurfaces("scene");
+  const t0 = Date.now();
+  const tryIt = () => {
+    const h = sceneHandles.get(id);
+    if (h && camera) { h.setCamera(camera as never); return; }
+    if (h && c && h.frameKeys([...c.models.map((m) => `rm:${m}`), ...c.proxies.map((u) => `proxy:${u}`)])) return;
+    if (Date.now() - t0 < 15000) setTimeout(tryIt, 300);
+  };
+  setTimeout(tryIt, 300);
+}
+
+const narrativeSceneFactory: SceneFactory = (stage, spec) => {
+  const kept = narrativeScenes.get(spec.key);
+  const bar = document.createElement("div");
+  bar.className = "nv-scene-bar";
+  const btn = (label: string, probe: string, title: string, run: () => void): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "nv-mini";
+    b.textContent = label;
+    b.title = title;
+    b.dataset.nvScene = probe;
+    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    bar.appendChild(b);
+    return b;
+  };
+  const mount = (host: HTMLElement): SpaceSceneHandle => {
+    // a story's scene draws only while it is on screen: a chapter with three
+    // scenes scrolled away costs nothing
+    let seen = true;
+    const io = typeof IntersectionObserver === "function"
+      ? new IntersectionObserver((es) => { seen = es.some((e) => e.isIntersecting); }) : null;
+    io?.observe(host);
+    const handle = mountSpaceScene(host, {
+      paused: () => !seen || !host.isConnected,
+      texts: {
+        loading: t("space.loading"), noEngine: t("em3d.noEngine"),
+        referenceOnly: (name, rid) => refOnlyWords(name, rid),
+        missing: (name) => t("space.fileMissing", { x: name }),
+        refused: (name) => t("space.fileRefused", { x: name }),
+        overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
+        openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
+        lodNote: (n) => t("lod.note", { n: String(n) }),
+        viewName, centreEmpty: t("s3.centreEmpty"), stats: sceneStatsWords,
+      },
+      glyph: (k) => typeIconElement(k),
+      nav: () => {
+        const v = getSettings().viewer;
+        return { emulate3: v.emulate3Button, emulateNumpad: v.emulateNumpad, autoPerspective: v.autoPerspective,
+          middleSeen: middleSeen(), leftSelects: false, leftPans: v.leftDrag === "pan", invertTrackpadOrbit: !!v.invertTrackpadOrbit };
+      },
+      plainPicks: false,
+      limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },
+      memory: sceneMemory, onMemoryGate,
+      tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
+      tilesError: () => { const p = tilesErrorPrefs(); return { hardware: p.hardware, choice: p.errorChoice }; },
+      isFocused: () => false,
+      overlay: (k) => (k === "s3_labels_proxy" || k === "s3_labels_sketch" || k === "s3_labels_rm" ? false : space3dShown(k)),
+      overlayValue: (k) => overlayValue(overlaysOf("space"), k),
+      sketchVisible: () => false,
+      onLoadOutcome: (key, label, url, error) => noteModelLoad(key, label, url, error),
+      onTileError: (key, label, _url, e) => noteTileError(key, label, e),
+      onMeasured: () => {
+        const k = narrativeScenes.get(spec.key);
+        if (!k || k.sig === "framed") return;
+        k.sig = "framed";
+        const cam = spec.options.camera;
+        if (cam) handle.setCamera(cam as never); else handle.frame();
+      },
+    });
+    return handle;
+  };
+  if (kept?.handle) {
+    stage.appendChild(kept.host);
+  } else {
+    const host = document.createElement("div");
+    host.className = "nv-scene-host scn-host";
+    host.dataset.nvSceneHost = spec.key;
+    const load = document.createElement("button");
+    load.type = "button";
+    load.className = "insp-btn nv-scene-load";
+    load.dataset.nvScene = "load";
+    const n = sceneContent(spec.node, store?.doc ?? null);
+    load.textContent = t("nv.sc.load", { n: String((n?.models.length ?? 0) + (n?.proxies.length ?? 0)) });
+    load.title = t("nv.sc.loadTitle");
+    load.addEventListener("click", (e) => {
+      e.stopPropagation();
+      load.remove();
+      const entry = { host, handle: null as SpaceSceneHandle | null, sig: "" };
+      narrativeScenes.set(spec.key, entry);
+      entry.handle = mount(host);
+      // the files are read through the bridge: its address first (it arrives
+      // after the page; a model asked without it is counted «not found»)
+      void (bridgeBaseNow || !currentFilePath ? Promise.resolve(bridgeBaseNow) : bridgeUrl()).then((b) => {
+        if (b && !bridgeBaseNow) bridgeBaseNow = b;
+        entry.handle?.update(narrativeSceneItems(spec.node));
+      });
+      sweepNarrativeScenes();
+    });
+    host.appendChild(load);
+    stage.appendChild(host);
+  }
+  btn(`⤢ ${t("nv.sc.frame")}`, "frame", t("nv.sc.frameTitle"), () => {
+    const h = narrativeScenes.get(spec.key)?.handle;
+    if (!h) return;
+    if (spec.options.camera) h.setCamera(spec.options.camera as never); else h.frame();
+  });
+  if (spec.onSave)
+    btn(t("nv.sc.saveFraming"), "save", t("nv.sc.saveFramingTitle"), () => {
+      const h = narrativeScenes.get(spec.key)?.handle;
+      const cam = h?.camera();
+      if (!cam) { toast(t("nv.sc.loadFirst")); return; }
+      // the still of this framing, for the export's figure (a small JPEG in
+      // the block: the picture of a VIEW, as a printed plate is; the scene
+      // stays the graph's). Taken in the frame after the scene's own render,
+      // while the drawing buffer still holds it; a blank one is not kept.
+      const canvas = narrativeScenes.get(spec.key)?.host.querySelector<HTMLCanvasElement>("canvas.scn-canvas");
+      const save = (still: string | null, w: number, h: number) => {
+        spec.onSave!(still ? { camera: cam, still, still_w: w, still_h: h } : { camera: cam, still: null });
+        toast(t(still ? "nv.sc.framingWritten" : "nv.sc.framingWrittenNoStill"));
+      };
+      if (!canvas) { save(null, 0, 0); return; }
+      requestAnimationFrame(() => {
+        try {
+          const w = Math.min(960, canvas.width), h = Math.round(w * canvas.height / Math.max(1, canvas.width));
+          const c2 = document.createElement("canvas");
+          c2.width = w; c2.height = h;
+          const g = c2.getContext("2d")!;
+          g.fillStyle = "#ffffff";
+          g.fillRect(0, 0, w, h);
+          g.drawImage(canvas, 0, 0, w, h);
+          const px = g.getImageData(0, 0, w, h).data;
+          let ink = 0;
+          for (let i = 0; i < px.length; i += 4 * 97) if (px[i] < 250 || px[i + 1] < 250 || px[i + 2] < 250) ink++;
+          save(ink > 20 ? c2.toDataURL("image/jpeg", 0.72) : null, w, h);
+        } catch { save(null, 0, 0); }
+      });
+    });
+  btn(`↗ ${t("nv.sc.openSpace")}`, "space", t("nv.sc.openSpaceTitle"), () => openNarrativeSceneInSpace(spec.node, spec.options.camera));
+  stage.appendChild(bar);
+  sweepNarrativeScenes();
+};
+setSceneFactory(narrativeSceneFactory);
+
+setDocumentContent((host, spec) => {
+  const st = store;
+  if (!st) return false;
+  const target = viewerTargetOf({ nodes: st.doc.graph.nodes, edges: st.doc.graph.edges }, spec.node.id);
+  if (!target) return false;
+  const parts = target.parts.filter((p) => p.via === "own" || p.via === "linked");
+  const part = parts.find((p) => p.medium === "image") ?? parts.find((p) => p.medium === "pdf")
+    ?? parts.find((p) => p.medium === "text") ?? null;
+  const line = (cls: string, text: string): HTMLElement => {
+    const d = document.createElement("div");
+    d.className = cls;
+    d.textContent = text;
+    host.appendChild(d);
+    return d;
+  };
+  if (part?.medium === "image") {
+    const svc = iiifImageService(st.node(part.id) ?? spec.node, iiifBase());
+    if (svc) {
+      const fig = documentEmbedRaw(st.node(part.id) ?? spec.node, iiifBase(), st.doc);
+      if (fig) { host.appendChild(fig); return true; }
+    }
+    const img = document.createElement("img");
+    img.className = "nv-doc-image";
+    img.alt = String(spec.node.name ?? "");
+    img.loading = "lazy";
+    img.dataset.nvDoc = "image";
+    host.appendChild(img);
+    const wait = line("nv-embed-note", t("storage.loading"));
+    void narrativePartUrl(part).then((u) => {
+      if (!u) { wait.textContent = t("nv.doc.unreachable", { file: part.locator }); return; }
+      img.src = u;
+      wait.remove();
+    }).catch(() => { wait.textContent = t("nv.doc.unreachable", { file: part.locator }); });
+    img.addEventListener("error", () => { wait.textContent = t("nv.doc.unreachable", { file: part.locator }); if (!wait.isConnected) host.appendChild(wait); });
+    return true;
+  }
+  if (part?.medium === "pdf") {
+    const page = Math.max(1, Number(spec.options.page ?? 1) || 1);
+    const obj = document.createElement("object");
+    obj.className = "nv-doc-pdf";
+    obj.type = "application/pdf";
+    obj.dataset.nvDoc = "pdf";
+    obj.dataset.page = String(page);
+    host.appendChild(obj);
+    const wait = line("nv-embed-note", t("storage.loading"));
+    void narrativePartUrl(part).then((u) => {
+      if (!u) { wait.textContent = t("nv.doc.unreachable", { file: part.locator }); return; }
+      // the page chosen; the reader turns the others in the PDF's own frame
+      obj.data = `${u}#page=${page}`;
+      wait.remove();
+    }).catch(() => { wait.textContent = t("nv.doc.unreachable", { file: part.locator }); });
+    if (spec.onSave) {
+      const row = document.createElement("label");
+      row.className = "nv-doc-page";
+      row.textContent = `${t("nv.doc.page")} `;
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.min = "1";
+      inp.value = String(page);
+      inp.dataset.nvDoc = "page";
+      inp.addEventListener("click", (e) => e.stopPropagation());
+      inp.addEventListener("keydown", (e) => e.stopPropagation());
+      inp.addEventListener("change", () => spec.onSave!({ page: Math.max(1, Number(inp.value) || 1) }));
+      row.appendChild(inp);
+      host.appendChild(row);
+    }
+    return true;
+  }
+  if (part?.medium === "text") {
+    const pre = line("nv-doc-text", t("storage.loading"));
+    pre.dataset.nvDoc = "text";
+    void docText(spec.node).then((txt) => { pre.textContent = txt ? (txt.length > 1200 ? `${txt.slice(0, 1200)}…` : txt) : t("nv.doc.noText"); });
+    return true;
+  }
+  // a 3D model: the scene of the models the document publishes
+  if (target.models.length || target.groups.length) {
+    const box = document.createElement("div");
+    box.className = "nv-doc-scene";
+    host.appendChild(box);
+    line("nv-embed-note", sceneContentLine(sceneContent(spec.node, st.doc)!, st.doc));
+    const stage = document.createElement("div");
+    stage.className = "nv-3d-stage nv-scene-stage";
+    host.appendChild(stage);
+    narrativeSceneFactory(stage, { ...spec, kind: "document" });
+    return true;
+  }
+  return false;
+});
 // NARRATIVA-BLOCCHI p.2 · a query block reads the graphs of the story's file
 // (the story's own graph first), and an entry of another graph brings that
 // graph in front and jumps to the node — as a cross-graph rapporto does
@@ -24785,6 +25274,8 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
       onInsert: (c, at, anchor, replace) => { if (current) openBlocksMenu(current.id, c, at, anchor, !!replace); },
       onFileDrop: (c, f, x, y) => { if (current) dropFileOnChapter(current.id, c, f, x, y); },
       onIngress: () => { void ingressFromNarrative(); },
+      onContextMenu: (c, b, x, y) => { if (current) openNarrativeContextMenu(current.id, c, b, x, y); },
+      onMoveChapter: (from, to) => { if (current) moveChapterKeepingView(current.id, from, to); },
       onScaffold: () => {
         if (!store) return;
         const nid = scaffoldNarrativeFromGraph(store);   // one batch: one undo step
@@ -24799,6 +25290,58 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
   renderResourcePanels(); // the story changed: its blocks panel repaints
   // the Index's find survives a repaint of the page
   if (narrativeQuery) highlightNarrative(narrativeQuery);
+  sweepNarrativeScenes();
+}
+
+/** p.10 · a chapter moved by dragging (the page or the Index): one undo step,
+ *  the chapter stays the one selected, and the page and the Index stay where
+ *  they were scrolled. */
+function moveChapterKeepingView(narrativeId: string, from: number, to: number): void {
+  if (!store || to === from || to === from + 1) return;
+  nedit.moveChapterTo(store, narrativeId, from, to);
+  const now = to > from ? to - 1 : to;
+  setNarrativeSelection(narrativeId, { chapter: now, block: null });
+  logInfo(t("nv.chapterMoved", { n: String(now + 1) }), [narrativeId]);
+}
+
+/** p.6 · p.8 · the page's right click: on a chapter's title, its gestures; on
+ *  a block, the ones that make sense between blocks. */
+function openNarrativeContextMenu(narrativeId: string, c: number, b: number | null, x: number, y: number): void {
+  hideContextMenu();
+  if (!store) return;
+  const st = store;
+  const chapters = narrativesIn(st.doc).find((n) => n.id === narrativeId)?.chapters ?? [];
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu nv-ctx";
+  menu.style.left = Math.min(x, innerWidth - 230) + "px";
+  menu.style.top = y + "px";
+  const head = document.createElement("div");
+  head.className = "ctx-header";
+  head.textContent = b == null ? String(chapters[c]?.title ?? "") : `${String(chapters[c]?.title ?? "")} · ${b + 1}`;
+  menu.appendChild(head);
+  const item = (label: string, probe: string, run: () => void, disabled = false): void => {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.dataset.nvCtx = probe;
+    btn.disabled = disabled;
+    btn.onclick = () => { hideContextMenu(); run(); };
+    menu.appendChild(btn);
+  };
+  const anchor = (): HTMLElement => activeNarrativeHost()?.querySelector<HTMLElement>(
+    b == null ? `.nv-chapter[data-chapter="${c}"] .nv-chapter-head` : `.nv-block-row[data-block="${c}:${b}"]`) ?? document.body;
+  if (b == null) {
+    item(t("nv.ctx.chapterAfter"), "chapter-after", () => newChapterHere(narrativeId, c));
+    item(t("nv.ctx.chapterBefore"), "chapter-before", () => newChapterHere(narrativeId, c - 1));
+    item(t("nv.ctx.moveUp"), "up", () => moveChapterKeepingView(narrativeId, c, c - 1), c === 0);
+    item(t("nv.ctx.moveDown"), "down", () => moveChapterKeepingView(narrativeId, c, c + 2), c >= chapters.length - 1);
+    item(t("nv.ctx.insert"), "insert", () => openBlocksMenu(narrativeId, c, 0, anchor(), false));
+  } else {
+    item(t("nv.ctx.insertHere"), "insert", () => openBlocksMenu(narrativeId, c, b, anchor(), false));
+    item(t("nv.ctx.mention"), "mention", () => mentionAt(narrativeId, c, b + 1, anchor()));
+    item(t("nv.ctx.chapterHere"), "chapter-here", () => newChapterHere(narrativeId, c, b), b === 0);
+  }
+  document.body.appendChild(menu);
+  ctxMenuEl = menu;
 }
 
 // NARR-BUTTONS · `setNarrativeOpen()` is GONE. It was the WIN1 back-compat
@@ -33088,9 +33631,81 @@ function renderInspectorChronology(host: HTMLElement): void {
   if (head) head.after(sec); else host.prepend(sec);
 }
 
+/** p.9 · the Index's coverage section, open or closed (closed by default) */
+let nidxCoverageOpen = false;
+
+/**
+ * MICRO-NARRATIVE-MODULI p.15 (E.D., 13 Nov 2026) · the lanes a chapter may
+ * narrate, GROUPED BY EPOCH: an epoch, then its activities under it (an
+ * activity is in the epoch it `has_first_epoch`), then the activities with no
+ * epoch. `label` is the long form («II A.D. › VAct.03 Lintel of the
+ * colonnade») the Index uses.
+ */
+function narrativeLanes(doc: EmDocument): { id: string; label: string; group: string; long: string }[] {
+  const nodes = (doc.graph.nodes ?? []).filter((n) => !((n.data ?? {}) as Record<string, unknown>).removed);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const epochs = nodes.filter((n) => n.node_type === "EpochNode")
+    .sort((a, b) => epochStart(b) - epochStart(a));
+  const acts = nodes.filter((n) => n.node_type === "ActivityNodeGroup");
+  const epochOfAct = (id: string): string | null => {
+    const e = (doc.graph.edges ?? []).find((x) => x.source === id && x.edge_type === "has_first_epoch"
+      && byId.get(x.target)?.node_type === "EpochNode");
+    return e ? e.target : null;
+  };
+  const name = (n: EmNode) => String(n.name || n.id);
+  const out: { id: string; label: string; group: string; long: string }[] = [];
+  for (const e of epochs) {
+    out.push({ id: e.id, label: name(e), group: name(e), long: name(e) });
+    for (const a of acts.filter((x) => epochOfAct(x.id) === e.id).sort((x, y) => name(x).localeCompare(name(y))))
+      out.push({ id: a.id, label: name(a), group: name(e), long: `${name(e)} › ${name(a)}` });
+  }
+  for (const a of acts.filter((x) => !epochOfAct(x.id)))
+    out.push({ id: a.id, label: name(a), group: t("ninsp.laneNoEpoch"), long: name(a) });
+  return out;
+}
+
+/** p.9 · «+ Aggiungi…» of the Index: a chapter (after the current one), the
+ *  standard blocks the story lacks, a chapter for each epoch not told yet. */
+function openIndexAddMenu(narrId: string, anchor: HTMLElement): void {
+  if (!store) return;
+  const s = store;
+  const story = windowsOf().find((w) => w.type === "narrative");
+  const cur = story ? currentChapterIndex(story) : null;
+  const n = narrativesIn(s.doc).find((x) => x.id === narrId)?.chapters.length ?? 0;
+  const r = anchor.getBoundingClientRect();
+  const missing = missingStandardBlocks(s, narrId);
+  const entries: AddMenuEntry[] = [
+    { key: "i|chapter", label: t("nidx.add.chapter"), detail: cur != null ? t("nidx.add.afterCurrent", { n: String(cur + 1) }) : t("nidx.add.atEnd"),
+      run: () => newChapterHere(narrId, cur ?? n - 1) },
+    { key: "i|chapter-end", label: t("nidx.add.chapterEnd"), detail: t("nidx.add.atEnd"), run: () => newChapterHere(narrId, n - 1) },
+    ...(missing.length ? [{ key: "i|standard", label: t("nidx.standard"),
+      detail: missing.map((k) => t(`nq.title.${k}`)).join(", "),
+      run: () => {
+        const added = addStandardBlocks(s, narrId);
+        if (added.length) logInfo(t("nidx.standardAdded", { list: added.map((k) => t(`nq.title.${k}`)).join(", ") }), [narrId]);
+      } }] : []),
+  ];
+  const epochs = undescribedEpochs(s, narrId).map((ep): AddMenuEntry => ({
+    key: `i|epoch|${ep.id}`, label: t("nidx.add.epochChapter", { name: ep.name }), detail: t("nidx.add.epochHint"),
+    run: () => addEpochChapter(s, narrId, ep.id),
+  }));
+  showAddMenu({
+    title: t("nidx.addMenu"), context: "", placeholder: t("link.q"),
+    linked: entries, recent: [], categories: epochs.length ? [{ label: t("nidx.add.untold"), entries: epochs }] : [],
+    extra: [], searchable: [...entries, ...epochs],
+    matches: (e, q) => `${e.label} ${e.detail ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()),
+    count: "", noResults: t("add.noResults"), keysHint: t("add.keys"),
+  }, r.left, r.bottom + 4);
+}
+
 function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
   const hadFind = document.activeElement instanceof HTMLInputElement
     && document.activeElement.classList.contains("nidx-search") && body.contains(document.activeElement);
+  // p.9 (E.D., 13 Nov 2026: ▲▼ made the list jump to the bottom) · the Index
+  // keeps its scroll through a repaint, and the chapter selected stays in view
+  const scroller = (body.closest(".win-body") as HTMLElement | null) ?? body;
+  const keptTop = scroller.scrollTop;
+  const keptOwn = body.scrollTop;
   const story = activeWin().type === "narrative" ? activeWin() : windowsOf().find((w) => w.type === "narrative");
   const narrId = (story && (winCurrent(story, "narrative") as string | null)) ?? selectedNarrativeId
     ?? narrativesIn(store?.doc ?? null)[0]?.id ?? null;
@@ -33133,7 +33748,21 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
       narrativeQuery = q;
       highlightNarrative(q);
     },
+    ...(s && narrId ? {
+      onMoveChapter: (from: number, to: number) => moveChapterKeepingView(narrId, from, to),
+      onAddMenu: (anchor: HTMLElement) => openIndexAddMenu(narrId, anchor),
+    } : {}),
+    laneLabel: (id) => (s ? narrativeLanes(s.doc).find((l) => l.id === id)?.long : undefined) ?? id,
+    coverageOpen: nidxCoverageOpen,
+    onCoverageToggle: (open) => { nidxCoverageOpen = open; },
   });
+  scroller.scrollTop = keptTop;
+  body.scrollTop = keptOwn;
+  const on = body.querySelector<HTMLElement>(".nidx-row.on");
+  if (on) {
+    const r = on.getBoundingClientRect(), v = scroller.getBoundingClientRect();
+    if (r.top < v.top || r.bottom > v.bottom) on.scrollIntoView({ block: "nearest" });
+  }
   if (hadFind) {
     const find = body.querySelector<HTMLInputElement>(".nidx-search");
     find?.focus();
@@ -52557,6 +53186,26 @@ function buildAreaHeader(win: Win): DocumentFragment {
       });
       typeMenu.appendChild(c);
     }
+  }
+  // MICRO-NARRATIVE-MODULI p.8 · «Nuovo capitolo» where the story is: after
+  // the chapter being worked on (at the end when none), its title being written
+  if (type === "narrative" && store) {
+    const sep = document.createElement("div");
+    sep.className = "dd-sep";
+    typeMenu.appendChild(sep);
+    const nc = document.createElement("button");
+    nc.dataset.nvMenu = "new-chapter";
+    nc.textContent = t("nv.menu.newChapter");
+    nc.title = t("nv.menu.newChapterTitle");
+    nc.addEventListener("click", () => {
+      const nr = narrativesIn(store?.doc ?? null).find((n) => n.id === ((winCurrent(win, "narrative") as string | null) ?? selectedNarrativeId))
+        ?? narrativesIn(store?.doc ?? null)[0];
+      if (!nr) return;
+      if (readingOf(win) !== "write") setReading(win, "write");
+      const cur = currentChapterIndex(win);
+      newChapterHere(nr.id, cur ?? nr.chapters.length - 1);
+    });
+    typeMenu.appendChild(nc);
   }
   // CLOSE is the last item of the type menu, after a rule — the × chip is gone
   // with the other four, and a window is also closed by dragging a divider all

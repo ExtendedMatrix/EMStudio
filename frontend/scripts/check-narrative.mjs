@@ -316,7 +316,8 @@ eq(doc.graph.nodes.filter(
   ok(N.isRmDoc(rmdoc) && !N.isRmDoc(rm), "rm · and is recognised as its own case");
 
   const card = N.rmDocEmbed(rmdoc, doc, "");
-  has(card, "documento spazializzato", "rmdoc · says what it is");
+  // MICRO-NARRATIVE-MODULI · the kind is chrome now (t(): EN here, IT in Italian)
+  has(card, "spatialised document", "rmdoc · says what it is");
   has(card, "authority of the placement", "rmdoc · grades the PLACEMENT");
   has(card, "not the existence", "rmdoc · …and says it is not the existence");
   eq(all(card, ".nv-rung-on"), ["observable"], "rmdoc · the declared rung is lit");

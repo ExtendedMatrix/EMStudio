@@ -358,6 +358,9 @@ export interface SceneStats { triangles: number; vertices: number; objects: numb
 
 export interface SpaceSceneOptions {
   texts: SceneTexts;
+  /** MICRO-NARRATIVE-MODULI p.12 · true while nobody can see the scene (a
+   *  story's scene scrolled away): no frame is drawn, the loop keeps turning */
+  paused?: () => boolean;
   /** MICRO-VIEWER-UNICO p.4 · a plain left click (or a double click) with a
    *  tool armed: the surface under it — or null — goes to the caller FIRST;
    *  true = the click was the tool's (nothing is picked, no zoom) */
@@ -2731,6 +2734,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (disposed) return;
         rafWin = frameWin();
         raf = rafWin.requestAnimationFrame(tick);
+        if (opts.paused?.()) return;
         stepAnim(performance.now());
         // MICRO-GEOGLOBO · the globe moves the camera in its mode (its hands, a flight)
         if (geo) geo.update();
