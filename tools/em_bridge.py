@@ -2556,7 +2556,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: sample by level (and the largest of each level), the rest estimated
 #: (``estimated``), ``{tiles_full: true}`` reads all; one measure per (path,
 #: size, mtime) at a time, kept on disk, stopped when no page waits for it.
-BRIDGE_LEVEL = 66   # 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 67   # 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -5269,6 +5269,22 @@ def make_handler(api):
             {group}`` (an empty one), ``active {group, which, use}`` (the
             alternative lit, kept in the graph). The files never move."""
             from s3dgraphy.resources import alternatives as ALT
+
+            def _publish(graph, group, body):
+                nd = body.get("new_document") if isinstance(body.get("new_document"), dict) else None
+                epoch = str(body.get("epoch") or "") or None
+                did = ALT.new_document(graph, str(nd.get("name") or ""), description=str(nd.get("description") or ""),
+                                       date=nd.get("date"), author_id=nd.get("author") or None,
+                                       epoch_id=epoch) if nd else str(body.get("document") or "")
+                if did and graph.find_node_by_id(did) is None:
+                    raise ValueError(f"{did!r} is not a node of this graph")
+                if not did and not epoch:
+                    raise ValueError("no document nor epoch to give the container")
+                # the edges create_container writes: Document → container, Epoch → container
+                for src in (did, epoch):
+                    if src and not any(e.edge_type == "has_representation_model" and e.edge_source == src and e.edge_target == group for e in graph.edges):
+                        graph.add_edge(f"{src}_has_representation_model_{group}", src, group, "has_representation_model")
+                return {"group": group, "document": did, "born": bool(nd)}
             graph, _f = self._graph_of(body)
             op = str(body.get("op") or "")
             ids = [str(x) for x in body.get("ids") or [] if x]
@@ -5280,7 +5296,12 @@ def make_handler(api):
                 "create": lambda: ALT.create_container(graph, str(body.get("label") or ""),
                                                        epoch_id=str(body.get("epoch") or "") or None,
                                                        document_id=str(body.get("document") or "") or None,
-                                                       members=ids),
+                                                       members=ids,
+                                                       **({"document": body["new_document"]} if isinstance(body.get("new_document"), dict) else {})),
+                # MICRO-SPAZIO-CONTAINER · a Document born for a container already there,
+                # publishing it (Document → container), and the members' epochs aligned
+                "document": lambda: _publish(graph, group, body),
+                "align": lambda: ALT.align_member_epochs(graph, group, dry_run=bool(body.get("dry_run"))),
                 "rename": lambda: ALT.rename_container(graph, group, str(body.get("label") or "")),
                 "empty": lambda: ALT.empty_container(graph, group),
                 "remove": lambda: ALT.remove_container(graph, group),

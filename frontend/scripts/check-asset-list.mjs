@@ -494,6 +494,10 @@ ok(dv.length === 1 && dv[0].version.id === "Column1.v0", "the versions on disk o
      "the alternative lit per target, and whether the graph chose it");
   ok(A.dropDefault([surv]) === "alternative" && A.dropDefault([I]) === "member" && A.dropDefault([I, surv]) === "member",
      "a drop on a container: alternative for a tileset, member for a mesh (or a mix)");
+  // MICRO-SPAZIO-CONTAINER p.1 · a container with no member and no alternative of its own is empty
+  const cRows = [{ id: "M1", kind: "rm", containers: [{ id: "G1", name: "A" }] }, { id: "G2", kind: "container", containers: [{ id: "G2", name: "B" }] }];
+  ok(A.containerIsEmpty(cRows, "G3") && !A.containerIsEmpty(cRows, "G1") && !A.containerIsEmpty(cRows, "G2"),
+     "an empty container (no member, no alternative of its own): what is dropped on it enters as a member");
 }
 
 // ── the bridge ──────────────────────────────────────────────────────────────

@@ -11851,13 +11851,25 @@ function unifiedOptsOf(win: Win): OutlinerOpts {
   const saved = winCurrent(win, "outliner.opts");
   // in the Space the Outliner starts synced with the 3D: it replaces the
   // scene's own (a choice of the person after that, kept)
-  const o = saved ? readOpts(saved) : { ...readOpts(null), sync3d: win.id.startsWith("space:") };
+  // MICRO-SPAZIO-CONTAINER p.7 · the sync with the 3D is remembered per
+  // workspace too: a window born again there (a layout reset, an Outliner
+  // brought back) starts as the person left the workspace's last one
+  const wsSync = uoWorkspaceSync()[uoWorkspaceOf(win)];
+  const o = saved ? readOpts(saved) : { ...readOpts(null), sync3d: typeof wsSync === "boolean" ? wsSync : win.id.startsWith("space:") };
   // in Fonti the Outliner took the place of the Documents sheet: its documents open first
-  return { ...o, query: unifiedQuery.get(win.id) ?? "", ...(win.id.startsWith("provenance:") ? { firstOpen: "documents" as Dim } : {}) };
+  return { ...o, query: unifiedQuery.get(win.id) ?? "", ...(win.id.startsWith("provenance:") ? { firstOpen: "documents" as Dim } : {}),
+    // MICRO-SPAZIO-CONTAINER p.8 · in the Space the dimensions are the 3D's, the epoch above them
+    ...(win.id.startsWith("space:") ? { space: true } : {}) };
+}
+const UO_SYNC_KEY = "emstudio.outlinerSync";
+function uoWorkspaceOf(win: Win): string { return win.id.split(":")[0] || win.id; }
+function uoWorkspaceSync(): Record<string, boolean> {
+  try { const v = JSON.parse(localStorage.getItem(UO_SYNC_KEY) ?? "{}"); return v && typeof v === "object" ? v : {}; } catch { return {}; }
 }
 function setUnifiedOpts(win: Win, o: OutlinerOpts): void {
-  const { query, ...keep } = o;
-  void query;
+  const { query, space, ...keep } = o;
+  void query; void space;
+  try { localStorage.setItem(UO_SYNC_KEY, JSON.stringify({ ...uoWorkspaceSync(), [uoWorkspaceOf(win)]: !!o.sync3d })); } catch { /* full */ }
   setWinCurrent(win, "outliner.opts", keep);
   unifiedApis.get(win.id)?.refresh();
   renderAreaHeaders();
@@ -11883,6 +11895,7 @@ function unifiedFacts(): ThreeFacts {
   for (const r of sp?.rms ?? []) {
     if (r.resource?.tiles) v.tilesets.add(r.id);
     v.rmEpochs.set(r.id, r.exactEpochs ?? r.epochs);
+    if (r.group) (v.rmGroup ??= new Map()).set(r.id, r.group);
   }
   // no Space (no epochs): a model's epochs as the graph says them
   if (!sp) for (const e of doc.graph.edges)
@@ -12278,7 +12291,8 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
   return {
     sources: unifiedSources,
     texts: () => ({ dim: uoDimWords(), noEpoch: t("uo.noEpoch"), typeLabel: unitTypeLabel, sourceNone: t("uo.noFile"), empty: t("uo.empty"),
-                    noSources: t("uo.noSources") }),
+                    noSources: t("uo.noSources"),
+                    space: { proxies: t("uo.sp.proxies"), models: t("uo.sp.models"), rmdoc: t("uo.sp.rmdoc"), rmsf: t("uo.sp.rmsf"), gis: t("uo.sp.gis") } }),
     opts: () => unifiedOptsOf(win),
     toggled: () => new Set((winCurrent(win, "outliner.toggled") as string[] | null) ?? []),
     setToggled: (s) => setWinCurrent(win, "outliner.toggled", s.size ? [...s] : null),
@@ -12319,7 +12333,48 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     word: (k) => t(k === "eye" ? "uo.eye" : k === "menu" ? "uo.menu" : k === "active" ? "src.badgeActive"
       : k === "activate" ? "src.badgeActivate" : "uo.absent"),
     activate: (r) => { if (r.kind === "source") activateSource(r.source ?? ""); },
+    // MICRO-SPAZIO-CONTAINER p.6 (E.D., 13 Nov 2026: a click on a proxy jumped to its
+    // unit) · in the Space a row of the 3D selects the OBJECT and stays there:
+    // the Space's one selection (⌘/Ctrl adds, ⇧ a range); the unit is reached
+    // with «Vai all'unità» in its menu
+    ...(win.id.startsWith("space:") ? {
+      selectedKeys: () => new Set(spaceSel().keys),
+      pickKey: (r: URow, e: MouseEvent, order: string[]) => {
+        if (!r.skey) return;
+        if (r.slot && r.slot !== emtree.activeId) activateSlot(r.slot);
+        setSpaceSel(clickOutliner(spaceSel(), r.skey, { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }, order));
+      },
+      keyMenu: (r: URow, _anchor: HTMLElement, at: { x: number; y: number }) => outlinerKeyMenu(r, at),
+    } : {}),
   };
+}
+
+/** MICRO-SPAZIO-CONTAINER p.6 · the menu of the Space's selection, from the
+ *  Outliner: go to the unit (or the model) in the graph, hide, isolate, frame,
+ *  delete the proxies (asked). On the whole selection when the row is in it. */
+function outlinerKeyMenu(r: URow, at: { x: number; y: number }): void {
+  const sp = currentSpace();
+  const key = r.skey!;
+  const keys = spaceSel(sp).keys.includes(key) ? spaceSel(sp).keys : [key];
+  const proxies = keys.filter((k) => k.startsWith("proxy:")).map((k) => k.slice(6));
+  const id = key.slice(key.indexOf(":") + 1);
+  const isProxy = key.startsWith("proxy:");
+  spaceMenu(at.x, at.y, keys.length > 1 ? tn("uo.sp.selected", keys.length) : r.label, [
+    { label: t(isProxy ? "uo.sp.goUnit" : "uo.sp.goModel"), act: "go", run: () => unifiedReveal(id) },
+    { label: t("s3.frame"), act: "frame", run: () => { for (const h of sceneHandles.values()) h.frameKeys(keys); } },
+    "sep",
+    { label: tn("uo.sp.hide", keys.length), act: "hide", run: () => {
+      const p = space3dPrefs();
+      setSpace3dPrefs({ ...p, hidden: [...new Set([...p.hidden, ...keys])] });
+      setSpaceSel(withoutKeys(spaceSel(), (k) => keys.includes(k)));
+    } },
+    { label: t(keys.length > 1 ? "uo.sp.isolateMany" : "s3.isolate"), act: "isolate", run: () => {
+      if (keys.length === 1) { spaceIsolated = spaceIsolated === key ? null : key; refreshSurfaces("scene"); return; }
+      // several: what is not selected and drawn now is hidden (Shift+H, as Blender)
+      spaceHide("unselected");
+    } },
+    ...(proxies.length ? ["sep" as const, { label: tn("uo.sp.deleteProxies", proxies.length), act: "delete-proxy", run: () => { void deleteProxies(proxies); } }] : []),
+  ]);
 }
 
 /** A row picked: a graph becomes the active one; a node is selected in its
@@ -15766,7 +15821,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 66;   // 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 67;   // 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -32769,6 +32824,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   npanelRenderers.set(win.id, drawNPanel);
   /** the selection before the last click's pick (a slow double click restores it) */
   let selBeforePick: SpaceSel | null = null;
+  /** MICRO-SPAZIO-CONTAINER p.9 · the late reading of an empty scene of tilesets */
+  let whyTimer = 0;
   const handle = mountSpaceScene(host, {
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
@@ -33045,7 +33102,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   bar.addEventListener("click", onBar);
   // p.3 · the epochs' menu: a choice is the click on that epoch's button
   bar.addEventListener("change", (e) => {
-    const pick = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-epoch-pick],[data-sub-epoch-pick]");
+    const pick = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-epoch-pick]");
     if (!pick?.value) return;
     e.stopPropagation();
     spaceEpochId = pick.value;
@@ -33100,37 +33157,48 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const epochsHere = sp?.epochs ?? [];
     // MICRO-RIFINITURE p.8 · the top epoch of the scene's (itself, or a sub-epoch's)
     const topId = sp && epochId ? sp.topOf(epochId) ?? epochId : epochId;
+    // MICRO-SPAZIO-CONTAINER p.9 (E.D., 13 Nov 2026: «XX sec» and «└ 2015» in two
+    // menus read badly) · ONE menu, a tree: each epoch and, under it, its phases
+    // (`has_sub_epoch`); ← → walk the list in its order
+    const flat: { id: string; label: string; title: string }[] = [];
+    for (const e of epochsHere) {
+      flat.push({ id: e.id, label: e.name, title: e.name });
+      for (const s of sp?.subEpochs(e.id) ?? [])
+        flat.push({ id: s.id, label: `${"\u2003".repeat(Math.max(1, s.depth ?? 1))}› ${s.name}`, title: `${e.name} › ${s.name}` });
+    }
+    const hasSubs = flat.length > epochsHere.length;
     const asMenu = (): void => {
       seg.textContent = "";
       seg.classList.add("scn-seg-menu");
-      const i = epochsHere.findIndex((e) => e.id === topId);
+      const at = flat.findIndex((x) => x.id === epochId);
+      const i = at >= 0 ? at : flat.findIndex((x) => x.id === topId);
       const arrow = (dir: -1 | 1): HTMLButtonElement => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "scn-ep-step";
         b.textContent = dir < 0 ? "←" : "→";
-        const to = epochsHere[i + dir];
+        const to = flat[i + dir];
         b.disabled = !to;
         if (to) b.dataset.epoch = to.id;
-        b.title = to ? t(dir < 0 ? "space.epochPrev" : "space.epochNext", { name: to.name }) : "";
-        b.setAttribute("aria-label", t(dir < 0 ? "space.epochPrev" : "space.epochNext", { name: to?.name ?? "—" }));
+        b.title = to ? t(dir < 0 ? "space.epochPrev" : "space.epochNext", { name: to.title }) : "";
+        b.setAttribute("aria-label", t(dir < 0 ? "space.epochPrev" : "space.epochNext", { name: to?.title ?? "—" }));
         return b;
       };
       const pick = document.createElement("select");
       pick.className = "scn-ep-pick";
       pick.dataset.epochPick = "1";
       pick.setAttribute("aria-label", t("space.epoch"));
-      for (const e of epochsHere) {
+      for (const e of flat) {
         const o = document.createElement("option");
         o.value = e.id;
-        o.textContent = e.name;
-        o.selected = e.id === topId;
+        o.textContent = e.label;
+        o.selected = flat[i]?.id === e.id;
         pick.appendChild(o);
       }
-      pick.title = epochsHere[i]?.name ?? "";
+      pick.title = flat[i]?.title ?? "";
       seg.append(arrow(-1), pick, arrow(1));
     };
-    if (epochsHere.length > SPACE_EPOCH_BUTTONS) asMenu();
+    if (epochsHere.length > SPACE_EPOCH_BUTTONS || hasSubs) asMenu();
     else for (const e of epochsHere) {
       const b = document.createElement("button");
       b.type = "button";
@@ -33138,29 +33206,6 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       b.textContent = e.name;
       b.setAttribute("aria-pressed", String(e.id === topId));
       seg.appendChild(b);
-    }
-    // MICRO-RIFINITURE p.8 (E.D., 6 Nov 2026) · the sub-epochs of the epoch shown,
-    // as the Matrix's sub-bands: «all» = every sub-epoch's models (the epoch),
-    // one = its models only (and its own sub-epochs')
-    const subsHere = sp && topId ? sp.subEpochs(topId) : [];
-    const subPick = subsHere.length ? document.createElement("select") : null;
-    if (subPick && topId) {
-      subPick.className = "scn-ep-pick scn-sub-pick";
-      subPick.dataset.subEpochPick = "1";
-      subPick.setAttribute("aria-label", t("space.subEpoch"));
-      subPick.title = t("space.subEpochTitle");
-      const all = document.createElement("option");
-      all.value = topId;
-      all.textContent = t("space.subEpochAll", { n: String(subsHere.length) });
-      all.selected = epochId === topId;
-      subPick.appendChild(all);
-      for (const e of subsHere) {
-        const o = document.createElement("option");
-        o.value = e.id;
-        o.textContent = `${"  ".repeat(Math.max(0, (e.depth ?? 1) - 1))}↳ ${e.name}`;
-        o.selected = e.id === epochId;
-        subPick.appendChild(o);
-      }
     }
     const tog = (which: "rm" | "px", key: string) => {
       const b = document.createElement("button");
@@ -33197,7 +33242,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     more.title = t("lay.moreTitle");
     seg.classList.toggle("scn-seg-hz", hzOn);
     // EXPERIMENTAL · Epochs ⇄ Horizons and the site's marks («Funzioni sperimentali» on)
-    bar.append(back, ...(EXPERIMENTAL ? [bands] : []), lab, seg, ...(subPick ? [subPick] : []), ...geoSpace.barButtons(),
+    bar.append(back, ...(EXPERIMENTAL ? [bands] : []), lab, seg, ...geoSpace.barButtons(),
       ...(EXPERIMENTAL ? spaceButtons(win.id) : []), hwb, more);
     gisSpace.refresh();
     placeBar();
@@ -33350,12 +33395,17 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const hidden = new Set(prefs.hidden);
     const shown = (key: string) => !hidden.has(key) && (!spaceIsolated || spaceIsolated === key);
     const items: SceneItem[] = [];
+    // MICRO-SPAZIO-CONTAINER p.9 · why a model is not drawn, for the line of an empty scene
+    const notDrawn: string[] = [];
     for (const r of sum.rms) {
       const isTiles = !!r.resource?.tiles;
-      if (!space3dShown(rmLayerOf(r), win.id) || !shown(`rm:${r.id}`)) continue;
+      if (!space3dShown(rmLayerOf(r), win.id)) { notDrawn.push(t("space.why.layerOff", { name: r.name })); continue; }
+      if (!shown(`rm:${r.id}`)) { notDrawn.push(t(spaceIsolated ? "space.why.isolated" : "space.why.hidden", { name: r.name })); continue; }
       // p.12 · one of the two drawn: the other is «sostituito da» (manual modes), or the scene decides (auto)
       const alt = altOfRm.get(r.id);
-      if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) continue;
+      if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) { notDrawn.push(t("space.why.replaced", { name: r.name })); continue; }
+      if (!r.resource || r.resource.state === "missing" || r.resource.state === "refused")
+        notDrawn.push(t("space.why.noFile", { name: r.name, st: t(`space.st.${r.resource?.state ?? "none"}`) }));
       const nmS = rmShown(r.id, sp);
       // MICRO-SPAZIO-3D-3 p.10 · the version by its mode (manual, by use, the distance)
       const plan = isTiles ? {} : rmVersionPlan(r);
@@ -33403,8 +33453,49 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         else items.push({ ...common, state: "json", convexshapes: px.convexshapes, spheres: px.spheres });
       }
     if (previewItem) items.unshift(previewItem);
+    // MICRO-SPAZIO-CONTAINER p.4 (E.D., 13 Nov 2026: the epoch 2015 empty, «0 ▲») · an
+    // epoch whose only content is tilesets frames them when their root arrives:
+    // the camera kept from another epoch (or framed before the tileset was
+    // relocated into the study's frame, y ≈ 490 m) does not see them, and the
+    // renderer never asks a tile it does not see — the scene stayed empty for ever
+    // (measured on the bench: the 2015 survey shown at its first frame, 0 B after
+    // the camera had moved). Once per layer (`framedOnArrival`), as a dropped tileset
+    if (items.length && items.every((x) => x.kind === "rm" && !!x.tiles))
+      for (const x of items) x.frameOnArrival = true;
+    // MICRO-SPAZIO-CONTAINER p.9 (E.D., 13 Nov 2026: «2015 · 1 models · proxies 0 of 4»
+    // and nothing in the scene) · an empty scene says why, in one line
+    const drawable = items.filter((x) => x.kind === "proxy" || (x.state !== "missing" && x.state !== "refused" && !!x.url));
+    if (!drawable.length && (sum.rms.length || sum.units.length)) {
+      const why = [...notDrawn];
+      if (sum.units.length && !sum.withProxy.length) why.push(tn("space.why.noProxies", sum.units.length));
+      else if (sum.withProxy.length && !space3dShown("s3_proxies", win.id)) why.push(t("space.why.proxiesOff"));
+      const line = document.createElement("div");
+      line.className = "scn-why-empty miss";
+      line.dataset.sum = "why-empty";
+      line.textContent = `${t("space.why.title")}: ${why.length ? why.join(" · ") : t("space.why.unknown")}`;
+      overlay.appendChild(line);
+      if (folded) overlay.title = `${overlay.title}\n${line.textContent}`;
+    }
     handle.update(items);
     handle.syncSketches();
+    // …and a scene of tilesets only whose roots have not arrived says it too,
+    // once they had their time (the scene's own reading of its layers)
+    clearTimeout(whyTimer);
+    const tilesOnly = items.length > 0 && items.every((x) => x.kind === "rm" && !!x.tiles);
+    if (tilesOnly) whyTimer = window.setTimeout(() => {
+      const probe = (host as unknown as { __spaceTiles?: () => { id: string; status: { loaded: number; failed: unknown; tileError: unknown } }[] }).__spaceTiles;
+      const layers = probe?.() ?? [];
+      const bad = items.filter((x) => { const l = layers.find((y) => y.id === x.id); return !l || !l.status.loaded || !!l.status.failed || !!l.status.tileError; });
+      if (bad.length < items.length || overlay.querySelector("[data-sum='why-empty']")) return;
+      const line = document.createElement("div");
+      line.className = "scn-why-empty miss";
+      line.dataset.sum = "why-empty";
+      line.textContent = `${t("space.why.title")}: ${bad.map((x) => {
+        const l = layers.find((y) => y.id === x.id);
+        return t(l?.status.failed || l?.status.tileError ? "space.why.tilesFailed" : "space.why.tilesNone", { name: x.label, err: String(l?.status.failed ?? l?.status.tileError ?? "") });
+      }).join(" · ")}`;
+      overlay.appendChild(line);
+    }, 12000);
   };
   refresh();
   return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); spaceLayerSections.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
@@ -46340,16 +46431,8 @@ function assetListView(win: Win): HTMLElement {
         const cont = assetUi.grouping === "container" ? groupContainer(g) : null;
         if (cont) {
           tr.dataset.alDrop = cont.id;
+          tr.dataset.alDropName = cont.name;
           tr.title = t("al.dropHere", { group: cont.name });
-          tr.addEventListener("dragover", (e) => { if (alDrag) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = e.altKey ? "copy" : "move"; tr.classList.add("al-drop-on"); } });
-          tr.addEventListener("dragleave", () => tr.classList.remove("al-drop-on"));
-          tr.addEventListener("drop", (e) => {
-            e.preventDefault();
-            tr.classList.remove("al-drop-on");
-            const d = alDrag;
-            alDrag = null;
-            if (d) void dropOnContainer(d.ids, d.from, cont, e.altKey);
-          });
           const menu = document.createElement("button");
           menu.type = "button";
           menu.className = "ghost al-cont-menu";
@@ -46361,6 +46444,38 @@ function assetListView(win: Win): HTMLElement {
           const own = g.assets.find((a) => a.id === cont.id && a.kind === "container");
           const now = own ? AL.activeAlternative(own, assetUi.target) : null;
           if (own && now) rest.appendChild(altSwitch(cont, now, assetUi.target));
+          // MICRO-SPAZIO-CONTAINER p.2/p.3 · one line each: in no epoch (with the
+          // way to give it a document), members out of step (with «Allinea…»)
+          const chk = (assetUi.ans?.containers ?? []).find((x) => x.group === cont.id);
+          const nmE = (ids: string[]) => ids.map((id) => String(store?.node(id)?.name ?? id)).join(", ");
+          const warn = (key: string, text: string, act: string, label: string, run: () => void): void => {
+            const w = document.createElement("tr");
+            w.className = "al-cont-warn";
+            w.dataset.alWarn = key;
+            w.dataset.alGroup = g.key;
+            const c0 = document.createElement("td");
+            const c1 = document.createElement("td");
+            c1.colSpan = ncol - 1;
+            c1.textContent = `⚠ ${text} `;
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "ghost";
+            b.dataset.action = act;
+            b.textContent = label;
+            b.onclick = (e) => { e.stopPropagation(); run(); };
+            c1.appendChild(b);
+            w.append(c0, c1);
+            tb.appendChild(w);
+          };
+          if (chk?.no_epoch) warn("no-epoch", t("al.noEpoch"), "al-container-document", t("al.docGiveShort"), () => void giveContainerADocument(cont));
+          else if (chk && !chk.documents.length && !chk.own.length && !g.assets.some((a) => a.id !== cont.id && a.epochs.length))
+            warn("no-epoch", t("al.noEpoch"), "al-container-document", t("al.docGiveShort"), () => void giveContainerADocument(cont));
+          if (chk?.mismatched.length) {
+            const out = chk.members.filter((m) => !m.ok);
+            const theirs = [...new Set(out.flatMap((m) => m.epochs))];
+            warn("epochs", t("al.epochsOut", { n: String(out.length), theirs: nmE(theirs), ref: nmE(chk.reference) }), "al-align", t("al.alignShort"),
+              () => void alignContainerEpochs(cont));
+          }
         }
       }
       if (closed) continue;
@@ -46822,16 +46937,18 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
   for (const k of targets) tr.appendChild(rebuildable(() => targetCell(a, k, repaint)));
   tr.onclick = () => { if (alPick) alPick(a.id); else { assetUi.detail = assetUi.detail === a.id ? "" : a.id; renderStorage(); } };
   // MICRO-ASSETS-LIVELLI p.8 · dragged onto a container (the selection, when
-  // the row is in it); Alt at the drop adds it there too, without it moves
-  tr.draggable = true;
-  tr.addEventListener("dragstart", (e) => {
+  // the row is in it); Alt at the drop adds it there too, without it moves.
+  // MICRO-SPAZIO-CONTAINER p.1 (E.D., 13 Nov 2026, dev.118 desktop: the 2013 tileset
+  // never entered «Survey2013») · with the POINTER, not HTML5's drag and drop:
+  // the same gesture in Chromium and in WebKit opened the question and wrote the
+  // container (measured), in the desktop shell nothing arrived — the shell owns
+  // the system's drag and drop (`dragDropEnabled`, for the Finder's files). A
+  // pointer drag is the page's own, whatever the shell does with HTML5's.
+  tr.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("input,button,select,a,textarea")) return;
     const ids = assetUi.sel.has(a.id) ? [...assetUi.sel] : [a.id];
-    alDrag = { ids, from: assetUi.grouping === "container" ? (a.containers.find((c) => c.id !== a.id)?.id ?? "") : "" };
-    const grp = tr.closest("tbody")?.querySelectorAll("tr.al-grp");
-    void grp;
-    if (e.dataTransfer) { e.dataTransfer.effectAllowed = "copyMove"; e.dataTransfer.setData("text/plain", ids.join("\n")); }
+    alPointerDrag(e, ids, assetUi.grouping === "container" ? (a.containers.find((c) => c.id !== a.id)?.id ?? "") : "", a.name);
   });
-  tr.addEventListener("dragend", () => { setTimeout(() => { alDrag = null; }, 0); });
   tb.appendChild(tr);
   if (!open) return;
   for (const x of a.versions) {
@@ -47227,16 +47344,21 @@ async function dropOnContainer(ids: string[], from: string, to: { id: string; na
   const ans = assetUi.ans;
   const rows = (ans?.assets ?? []).filter((a) => ids.includes(a.id) && a.id !== to.id);
   if (!rows.length) return;
-  const def = AL.dropDefault(rows);
+  // MICRO-SPAZIO-CONTAINER p.1 (E.D., 13 Nov 2026: the 2013 tileset did not enter the
+  // new, empty «Survey2013») · an alternative of an EMPTY container replaces
+  // nothing, and its RM (with its epoch) would be dropped: on an empty container
+  // what is dropped enters as a MEMBER, and the dialog says so
+  const empty = AL.containerIsEmpty(ans?.assets ?? [], to.id);
+  const def = empty ? "member" : AL.dropDefault(rows);
   const help = document.createElement("p");
   help.className = "files-hint al-drop-help";
   help.textContent = t("al.dropHelp");
   const a = await openDialog({ kind: "al-drop", title: t("al.dropTitle", { n: String(rows.length), group: to.name }),
     message: [rows.slice(0, 8).map((x) => "• " + x.name).join("\n") + (rows.length > 8 ? "\n" + t("al.removeMore", { n: String(rows.length - 8) }) : ""),
-              t(alt ? "al.dropAdd" : "al.dropMove")].join("\n\n"),
+              t(empty ? "al.dropEmpty" : alt ? "al.dropAdd" : "al.dropMove")].join("\n\n"),
     body: help,
     ok: t(def === "alternative" ? "al.dropAlternative" : "al.dropMember"),
-    choices: [{ key: def === "alternative" ? "member" : "alternative", label: t(def === "alternative" ? "al.dropMember" : "al.dropAlternative"),
+    choices: empty ? [] : [{ key: def === "alternative" ? "member" : "alternative", label: t(def === "alternative" ? "al.dropMember" : "al.dropAlternative"),
                 title: t(def === "alternative" ? "al.dropMemberTitle" : "al.dropAlternativeTitle") }] });
   if (!a.ok) return;
   const kind: AL.DropKind = (a.choice as AL.DropKind | undefined) ?? def;
@@ -47267,7 +47389,7 @@ async function newContainerAsked(ids: string[]): Promise<void> {
     return s2;
   };
   const ep = mkSel(t("al.containerEpoch"), "new-container-epoch", epochs, t("al.containerNoEpoch"));
-  const dc = mkSel(t("al.containerDocument"), "new-container-document", docs, t("al.containerNoDocument"));
+  const nd = documentFields(box, st, docs);
   const hint = document.createElement("p");
   hint.className = "files-hint";
   hint.textContent = t("al.containerFilesStay");
@@ -47277,8 +47399,107 @@ async function newContainerAsked(ids: string[]): Promise<void> {
     input: { value: "", label: t("al.containerName"), placeholder: t("al.containerName") }, body: box, ok: t("al.create"),
     validate: (v) => (v.trim() ? null : t("al.containerNeedsName")) });
   if (!a.ok) return;
-  await containerOp("create", { label: a.value.trim(), epoch: ep.value, document: dc.value, ids },
-    t("al.containerCreated", { name: a.value.trim(), n: String(ids.length) }));
+  const d = nd.value(a.value.trim());
+  await containerOp("create", { label: a.value.trim(), epoch: ep.value, ids, ...(d.new ? { new_document: d.new } : { document: d.id }) },
+    t("al.containerCreated", { name: a.value.trim(), n: String(ids.length) }) + (d.new ? ` · ${t("al.docBorn", { doc: d.new.name })}` : ""));
+}
+
+/** MICRO-SPAZIO-CONTAINER p.2 (E.D., 13 Nov 2026: «tutti gli asset 3D da rilievo
+ *  dovrebbero ricadere in un documento per avere una maniglia seria») · the
+ *  Document that publishes a container: one that exists, or a NEW one (its
+ *  D.nn, what it documents, its date, its author) — the way proposed, not
+ *  obliged. The epoch chosen beside it is the new document's first epoch. */
+function documentFields(box: HTMLElement, st: DocumentStore, docs: EmNode[]): { value: (label: string) => { id: string; new?: { name: string; description: string; date: string; author: string } } } {
+  const NEW = "__new";
+  const l = document.createElement("label");
+  l.textContent = t("al.containerDocument") + " ";
+  const sel = document.createElement("select");
+  sel.dataset.al = "new-container-document";
+  const add = (v: string, txt: string) => { const o = document.createElement("option"); o.value = v; o.textContent = txt; sel.appendChild(o); };
+  add(NEW, t("al.docNew"));
+  add("", t("al.containerNoDocument"));
+  for (const n of docs) add(n.id, `${n.name || n.id}${n.description ? ` — ${String(n.description).slice(0, 50)}` : ""}`);
+  sel.value = NEW;
+  l.appendChild(sel);
+  box.appendChild(l);
+  const fs = document.createElement("fieldset");
+  fs.className = "al-new-doc";
+  fs.dataset.alNewDoc = "1";
+  const field = (key: string, label: string, value: string, ph = ""): HTMLInputElement => {
+    const fl = document.createElement("label");
+    fl.textContent = label + " ";
+    const i = document.createElement("input");
+    i.dataset.alDoc = key;
+    i.value = value;
+    i.placeholder = ph;
+    fl.appendChild(i);
+    fs.appendChild(fl);
+    return i;
+  };
+  const name = field("name", t("doc.name"), initialName(st.doc, "document") ?? nextFreeName(st.doc, "document") ?? "D.01");
+  const what = field("description", t("al.docWhat"), "", t("al.docWhatPh"));
+  const date = field("date", t("al.docDate"), "", "2013");
+  const al = document.createElement("label");
+  al.textContent = t("al.docAuthor") + " ";
+  const au = document.createElement("select");
+  au.dataset.alDoc = "author";
+  const o0 = document.createElement("option"); o0.value = ""; o0.textContent = t("al.containerNoDocument"); au.appendChild(o0);
+  for (const n of st.doc.graph.nodes.filter((x) => x.node_type === "author" && !isRemoved(x))) {
+    const o = document.createElement("option"); o.value = n.id; o.textContent = String(n.name || n.id); au.appendChild(o);
+  }
+  al.appendChild(au);
+  fs.appendChild(al);
+  box.appendChild(fs);
+  sel.onchange = () => fs.classList.toggle("hidden", sel.value !== NEW);
+  return {
+    value: (label) => sel.value !== NEW ? { id: sel.value } : { id: "", new: { name: name.value.trim() || name.placeholder, description: what.value.trim() || label,
+      date: date.value.trim(), author: au.value } },
+  };
+}
+
+/** MICRO-SPAZIO-CONTAINER p.2 · a container in no epoch: a Document (new or
+ *  existing) to publish it and the epoch, one gesture */
+async function giveContainerADocument(c: { id: string; name: string }): Promise<void> {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  const box = document.createElement("div");
+  box.className = "al-new-container";
+  const l = document.createElement("label");
+  l.textContent = t("al.containerEpoch") + " ";
+  const ep = document.createElement("select");
+  ep.dataset.al = "doc-epoch";
+  const o0 = document.createElement("option"); o0.value = ""; o0.textContent = t("al.containerNoEpoch"); ep.appendChild(o0);
+  for (const n of st.doc.graph.nodes.filter((x) => x.node_type === "EpochNode" && !isRemoved(x))) {
+    const o = document.createElement("option"); o.value = n.id; o.textContent = String(n.name || n.id); ep.appendChild(o);
+  }
+  l.appendChild(ep);
+  box.appendChild(l);
+  const nd = documentFields(box, st, st.doc.graph.nodes.filter((n) => n.node_type === "document" && !isRemoved(n)));
+  const a = await openDialog({ kind: "al-container-document", title: t("al.docGive", { name: c.name }), message: t("al.noEpochWhy"), body: box, ok: t("al.docGiveOk") });
+  if (!a.ok) return;
+  const d = nd.value(c.name);
+  if (!d.id && !d.new && !ep.value) return;
+  if (d.id || d.new) await containerOp("document", { group: c.id, epoch: ep.value, ...(d.new ? { new_document: d.new } : { document: d.id }) },
+    t("al.docGiven", { name: c.name, doc: d.new?.name ?? String(st.node(d.id)?.name ?? d.id) }));
+  else await containerOp("document", { group: c.id, epoch: ep.value }, t("al.epochGiven", { name: c.name }));
+}
+
+/** MICRO-SPAZIO-CONTAINER p.3 · «allinea le epoche dei membri a quella del
+ *  container»: the preview (s3Dgraphy's plan, nothing written), then the
+ *  confirmation, then one step of undo */
+async function alignContainerEpochs(c: { id: string; name: string }): Promise<void> {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  const j = await postGraph<{ got: { changes: { id: string; name: string; removed: string[]; added: string[] }[]; reference: string[] } }>(
+    "/graph/containers", { doc: st.doc, op: "align", group: c.id, dry_run: true });
+  if (!j.ok) { toast(String(j.error ?? j.status)); return; }
+  const nm = (id: string) => String(st.node(id)?.name ?? id);
+  const ch = j.got.changes;
+  if (!ch.length) { toast(t("al.alignNothing", { name: c.name })); return; }
+  const lines = ch.slice(0, 12).map((x) => `• ${x.name}: ${x.removed.map(nm).join(", ") || "—"} → ${x.added.map(nm).join(", ")}`);
+  if (ch.length > 12) lines.push(t("al.removeMore", { n: String(ch.length - 12) }));
+  if (!(await askConfirm(`${t("al.alignAsk", { name: c.name, n: String(ch.length), epochs: j.got.reference.map(nm).join(", ") })}\n\n${lines.join("\n")}`, { kind: "al-align" }))) return;
+  await containerOp("align", { group: c.id }, t("al.aligned", { name: c.name, n: String(ch.length) }));
 }
 
 /** A container's own menu (its header «⋯»): rename, empty, remove when empty. */
@@ -47327,8 +47548,84 @@ function altSwitch(c: { id: string; name: string }, now: { active: "container" |
   return seg;
 }
 
-/** the rows dragged, between dragstart and drop */
-let alDrag: { ids: string[]; from: string } | null = null;
+/** MICRO-SPAZIO-CONTAINER p.1 · the drag of asset rows with the pointer: past 6 px
+ *  a label follows it, a container's header under it is lit, the release on one
+ *  asks the question (`dropOnContainer`); Esc or a release elsewhere, nothing.
+ *  A click (no move) stays a click. */
+function alPointerDrag(e0: PointerEvent, ids: string[], from: string, name: string): void {
+  let ghost: HTMLElement | null = null;
+  let over: HTMLElement | null = null;
+  // the list scrolls under the pointer near its top or bottom edge (a container's
+  // header far from the row: Reconstruction's 87 rows between them)
+  let pane: HTMLElement | null = e0.target instanceof HTMLElement ? e0.target.parentElement : null;
+  while (pane && !(pane.scrollHeight > pane.clientHeight + 2 && /(auto|scroll)/.test(getComputedStyle(pane).overflowY))) pane = pane.parentElement;
+  let last = { x: e0.clientX, y: e0.clientY };
+  let raf = 0;
+  const auto = (): void => {
+    raf = 0;
+    if (!ghost || !pane) return;
+    const r = pane.getBoundingClientRect();
+    const edge = 36;
+    const dy = last.y < r.top + edge ? -Math.ceil((r.top + edge - last.y) / 3) : last.y > r.bottom - edge ? Math.ceil((last.y - r.bottom + edge) / 3) : 0;
+    if (!dy) return;
+    pane.scrollTop += dy;
+    light(at(last.x, last.y));
+    raf = requestAnimationFrame(auto);
+  };
+  const at = (x: number, y: number): HTMLElement | null => {
+    if (ghost) ghost.style.display = "none";
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (ghost) ghost.style.display = "";
+    return el?.closest<HTMLElement>("tr[data-al-drop]") ?? null;
+  };
+  const light = (el: HTMLElement | null) => {
+    if (over === el) return;
+    over?.classList.remove("al-drop-on");
+    over = el;
+    over?.classList.add("al-drop-on");
+  };
+  const move = (e: PointerEvent): void => {
+    if (!ghost) {
+      if (Math.hypot(e.clientX - e0.clientX, e.clientY - e0.clientY) < 6) return;
+      ghost = document.createElement("div");
+      ghost.className = "al-drag-ghost";
+      ghost.dataset.alDragGhost = "1";
+      ghost.textContent = ids.length > 1 ? tn("al.dragMany", ids.length) : name;
+      document.body.appendChild(ghost);
+      document.body.classList.add("al-dragging");
+    }
+    ghost.style.left = `${e.clientX + 12}px`;
+    ghost.style.top = `${e.clientY + 8}px`;
+    last = { x: e.clientX, y: e.clientY };
+    light(at(e.clientX, e.clientY));
+    if (!raf) raf = requestAnimationFrame(auto);
+    e.preventDefault();
+  };
+  const end = (e: PointerEvent | null): void => {
+    window.removeEventListener("pointermove", move, true);
+    window.removeEventListener("pointerup", up, true);
+    window.removeEventListener("keydown", key, true);
+    cancelAnimationFrame(raf);
+    const target = e && ghost ? at(e.clientX, e.clientY) : null;
+    light(null);
+    ghost?.remove();
+    document.body.classList.remove("al-dragging");
+    const was = !!ghost;
+    ghost = null;
+    if (was) {
+      // the click that follows a drag is not a click on the row
+      const swallow = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+    }
+    if (target && e) void dropOnContainer(ids, from, { id: target.dataset.alDrop!, name: target.dataset.alDropName ?? target.dataset.alDrop! }, e.altKey);
+  };
+  const up = (e: PointerEvent): void => end(e);
+  const key = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.stopPropagation(); end(null); } };
+  window.addEventListener("pointermove", move, true);
+  window.addEventListener("pointerup", up, true);
+  window.addEventListener("keydown", key, true);
+}
 
 /** The state of an asset for a target, and its proposal — editable here. */
 function targetCell(a: AL.AssetRow, k: AL.TargetKey, repaint: () => void): HTMLTableCellElement {

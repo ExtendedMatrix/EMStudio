@@ -102,6 +102,24 @@ export interface AssetListAnswer {
   counts: { assets: number; rms: number; containers: number; versions: number; textures: number; shared_textures: number;
             measured: number; estimated: number; in_cloud?: number; by_target: Record<TargetKey, Record<TargetState, number>> };
   say_it: string; resolved_here?: boolean;
+  /** MICRO-SPAZIO-CONTAINER · each container's check (s3Dgraphy `container_checks`) */
+  containers?: ContainerCheck[];
+}
+
+/** MICRO-SPAZIO-CONTAINER p.2/p.3 · what s3Dgraphy says of a container: the
+ *  documents that publish it, its own epochs, the reference (its own and its
+ *  tilesets'), the members out of step, and «in no epoch». */
+export interface ContainerCheck {
+  group: string; name: string; documents: string[]; own: string[]; reference: string[]; tilesets: string[];
+  members: { id: string; name: string; epochs: string[]; ok: boolean }[];
+  mismatched: string[]; no_epoch: boolean;
+}
+
+/** MICRO-SPAZIO-CONTAINER p.1 · a container with no member and no alternative of
+ *  its own: what is dropped on it enters as a MEMBER (an alternative of nothing
+ *  replaces nothing; a tileset keeps its RM and its epoch). */
+export function containerIsEmpty(assets: readonly Pick<AssetRow, "id" | "kind" | "containers">[], groupId: string): boolean {
+  return !assets.some((a) => a.id === groupId ? a.kind === "container" : a.containers.some((c) => c.id === groupId));
 }
 
 // ── what a row shows ────────────────────────────────────────────────────────

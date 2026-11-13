@@ -11559,7 +11559,7 @@ td.al-cloud { color: var(--accent-ink); }
 .uo-eye-off { opacity: 0.35; }
 .uo-eye:hover, .uo-menu:hover { opacity: 1; }
 .uo-head { display: inline-flex; align-items: center; }
-.uo-search { flex: 1 1 80px; min-width: 60px; max-width: 220px; height: 22px; font-size: 12px; padding: 0 6px; margin: 0 4px;
+.uo-search { flex: 1 1 96px; min-width: 88px; max-width: 220px; height: 22px; font-size: 12px; padding: 0 6px; margin: 0 4px;
   border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: inherit; }
 .uo-pop { position: fixed; z-index: 2000; min-width: 220px; max-height: 70vh; overflow: auto; padding: 4px 0;
   background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
@@ -11574,6 +11574,7 @@ td.al-cloud { color: var(--accent-ink); }
 .help-pop { font-size: 11.5px; line-height: 1.4; padding: 6px 8px; margin: 4px 0; border-radius: var(--radius-sm);
   background: var(--bg-elevated); border: 1px solid var(--border); white-space: normal; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .uo-desc { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+/* MICRO-SPAZIO-CONTAINER p.9 · «Searc»: the field never narrower than its word */
 .uo-search { width: 120px; }
 .uo-sel-btn { white-space: nowrap; width: auto !important; padding: 0 6px !important; }
 
@@ -11670,3 +11671,23 @@ details.nidx-covrow[open] > summary::before { content: "▾"; }
 .ninsp-vt-txt { display: flex; flex-direction: column; }
 .ninsp-vt-what { font-size: 11px; color: var(--text-muted); }
 .ninsp-inline { display: flex; gap: 6px; align-items: center; }
+
+/* MICRO-SPAZIO-CONTAINER p.5 · the globe's command in the Space's bar, with its «?» */
+.geo-chip { display: inline-flex; align-items: center; gap: 2px; }
+.geo-chip[data-geo-chip="missing"] > button:first-child { opacity: 0.75; }
+.geo-chip .geo-chip-help { min-width: 18px; padding: 0 4px; font-size: 10.5px; }
+/* MICRO-SPAZIO-CONTAINER p.9 · an empty scene says why, in one line under the summary */
+.scn-why-empty { display: block; font-size: 11px; white-space: normal; margin-top: 2px; }
+/* MICRO-SPAZIO-CONTAINER p.2/p.3 · a container's line of warning, and the new document's fields */
+.al-cont-warn td { font-size: 11.5px; color: var(--warn, #b26a00); padding-top: 0; padding-bottom: 2px; }
+.al-cont-warn button { font-size: 11px; padding: 0 6px; }
+.al-new-doc { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; margin: 4px 0 6px; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 0; max-width: 100%; box-sizing: border-box; }
+.al-new-doc label { display: contents; font-size: 12px; }
+.al-new-doc input, .al-new-doc select { min-width: 0; width: 100%; box-sizing: border-box; }
+.al-new-container { grid-template-columns: minmax(0, 1fr); }
+.al-new-container > label > select { max-width: 100%; }
+/* MICRO-SPAZIO-CONTAINER p.1 · the asset rows dragged with the pointer */
+.al-drag-ghost { position: fixed; z-index: 3000; pointer-events: none; padding: 2px 8px; font-size: 12px; border-radius: var(--radius-sm);
+  background: var(--bg-panel); border: 1px solid var(--accent, #c9a227); box-shadow: 0 4px 12px rgba(0,0,0,.25); }
+body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select: none !important; }

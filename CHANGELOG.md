@@ -7,6 +7,25 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **The Space after dev.118, and the containers with their document**
+  (MICRO-SPAZIO-CONTAINER, E.D., 13 November 2026). Archive › Assets: asset rows
+  are dragged with the POINTER (the desktop shell owns HTML5's drag and drop;
+  in E.D.'s dev.118 the 2013 tileset never reached «Survey2013»); on an EMPTY
+  container what is dropped enters as a member (an alternative of nothing would
+  drop its RM and its epoch), and the dialog says it; «New container…» proposes
+  a NEW Document (D.nn, what it documents, date, author) or an existing one, with
+  the epoch; a container in no epoch, and a container whose members are in
+  another epoch than its tileset or document, say it in one line, with «Give it
+  a document…» and «Align the members' epochs…» (preview, then confirmation).
+  Space: ONE epoch menu, a tree (epoch › phase); «🌐 Globe» always in the bar,
+  with the georeference in its title (CRS, shift, datum declared) or what is
+  missing; an empty scene says why in one line (layer off, hidden, replaced,
+  file missing, no proxy, a tileset whose root never arrived); the Outliner of
+  the Space puts the EPOCH above the 3D's dimensions (Proxies, Models with their
+  containers, RMDoc, RMSF, GIS), a row of the 3D selects the object and stays
+  (⌘/Ctrl, ⇧ range; its menu: go to the unit, frame, hide, isolate, delete the
+  proxies); the sync with the 3D is remembered per workspace; the search field
+  is never narrower than its word. Bridge level 67.
 - **The Narrative's modules, tried one by one and corrected** (MICRO-NARRATIVE-MODULI,
   E.D., 13 November 2026). Two families first in the «+» (decision of E.D.):
   **Document** shows the thing — its image (IIIF or the file through the

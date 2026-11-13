@@ -41,6 +41,12 @@ export interface UnifiedDeps {
   word: (k: "eye" | "menu" | "absent" | "active" | "activate") => string;
   /** MICRO-PIU-FONTI · the badge of a source not active: the explicit switch */
   activate?: (row: URow) => void;
+  /** MICRO-SPAZIO-CONTAINER p.6 · the Space's selection (its keys): a row with a
+   *  `skey` is lit by it, picked into it (⌘/Ctrl adds, ⇧ a range in the rows'
+   *  order) and stays where it is; its right click is the selection's menu */
+  selectedKeys?: () => ReadonlySet<string>;
+  pickKey?: (row: URow, e: MouseEvent, order: string[]) => void;
+  keyMenu?: (row: URow, anchor: HTMLElement, at: { x: number; y: number }) => void;
 }
 
 export interface UnifiedApi {
@@ -80,12 +86,14 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     spacer.style.height = `${rows.length * ROW_H}px`;
   };
 
-  const rowEl = (r: URow, i: number, sel: string | null): HTMLElement => {
+  const rowEl = (r: URow, i: number, sel: string | null, keys: ReadonlySet<string> | null): HTMLElement => {
     const el = document.createElement("div");
     el.className = `uo-row uo-${r.kind}`;
     if (r.absent) el.classList.add("uo-absent");
     if (r.active) el.classList.add("uo-active");
-    if (r.id && r.id === sel && (r.kind === "node" || r.kind === "sub" || r.kind === "group" || r.kind === "gis")) el.classList.add("uo-sel");
+    if (r.skey && keys) { if (keys.has(r.skey)) el.classList.add("uo-sel"); }
+    else if (r.id && r.id === sel && (r.kind === "node" || r.kind === "sub" || r.kind === "group" || r.kind === "gis")) el.classList.add("uo-sel");
+    if (r.skey) el.dataset.skey = r.skey;
     el.style.top = `${i * ROW_H}px`;
     el.style.paddingLeft = `${4 + r.depth * 12}px`;
     el.dataset.key = r.key;
@@ -153,11 +161,13 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     const h = scroll.clientHeight || 600;
     const from = Math.max(0, Math.floor(scroll.scrollTop / ROW_H) - OVERSCAN);
     const to = Math.min(rows.length, Math.ceil((scroll.scrollTop + h) / ROW_H) + OVERSCAN);
+    const keys = d.selectedKeys?.() ?? null;
     const sel = d.selectedId();
-    if (!force && from === drawnFrom && to === drawnTo && sel === drawnSel && gen === drawnGen) return;
-    drawnFrom = from; drawnTo = to; drawnSel = sel; drawnGen = gen;
+    const selSig = `${sel}|${keys ? [...keys].join(",") : ""}`;
+    if (!force && from === drawnFrom && to === drawnTo && selSig === drawnSel && gen === drawnGen) return;
+    drawnFrom = from; drawnTo = to; drawnSel = selSig; drawnGen = gen;
     const frag = document.createDocumentFragment();
-    for (let i = from; i < to; i++) frag.appendChild(rowEl(rows[i], i, sel));
+    for (let i = from; i < to; i++) frag.appendChild(rowEl(rows[i], i, sel, keys));
     layer.replaceChildren(frag);
   };
 
@@ -195,6 +205,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     if (m) { e.stopPropagation(); d.menu(r, m); return; }
     const badge = t.closest<HTMLElement>("[data-badge]");
     if (badge) { e.stopPropagation(); if (r.badge === "activate") d.activate?.(r); return; }
+    if (r.skey && d.pickKey) { d.pickKey(r, e, rows.filter((x) => x.skey).map((x) => x.skey!)); paint(true); return; }
     if (r.id || r.kind === "graph" || r.kind === "source") { d.pick(r, e); paint(true); return; }
     if (r.parent) toggleOpen(r);
   });
@@ -206,6 +217,14 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   });
   layer.addEventListener("contextmenu", (e) => {
     const r = rowOf(e.target);
+    if (r?.skey && d.keyMenu) {
+      e.preventDefault();
+      // a right click on a row not selected selects it first (as Blender's Outliner)
+      if (d.selectedKeys && !d.selectedKeys().has(r.skey)) d.pickKey?.(r, new MouseEvent("click"), []);
+      d.keyMenu(r, (e.target as HTMLElement).closest<HTMLElement>(".uo-row") ?? root, { x: e.clientX, y: e.clientY });
+      paint(true);
+      return;
+    }
     if (!r || !(r.kind === "source" || r.kind === "graph" || r.kind === "aux")) return;
     e.preventDefault();
     d.menu(r, (e.target as HTMLElement).closest<HTMLElement>(".uo-row") ?? root);
@@ -220,7 +239,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
         const r = rows[i];
         if (r.id && (r.kind === "node" || r.kind === "sub")) {
           e.preventDefault();
-          d.pick(r, new MouseEvent("click"));
+          if (r.skey && d.pickKey) d.pickKey(r, new MouseEvent("click"), []); else d.pick(r, new MouseEvent("click"));
           reveal(i);
           paint(true);
           return;

@@ -55,6 +55,10 @@ export interface OutlinerOpts {
   paradata?: boolean;
   /** the dimension open at first (the window's place decides: Fonti, the documents) */
   firstOpen?: Dim;
+  /** MICRO-SPAZIO-CONTAINER p.8 · the Outliner of the SPACE: its dimensions are the
+   *  3D's (a unit is its proxy, a document its RMDoc, a find its RMSF, a survey
+   *  its RM / container / tileset), and «by epoch» puts the epoch ABOVE them */
+  space?: boolean;
   query: string;
 }
 
@@ -85,6 +89,8 @@ export interface ThreeFacts {
   rmEpochs: Map<string, string[]>;
   /** the GIS layers and surfaces of the graph */
   gis: Array<{ id: string; name: string; kind: "layer" | "raster" | "surface" }>;
+  /** MICRO-SPAZIO-CONTAINER p.8 · model → the container it is in (the first) */
+  rmGroup?: Map<string, string>;
 }
 
 export function emptyFacts(): ThreeFacts {
@@ -127,6 +133,8 @@ export interface Texts {
   empty: string;
   /** the one line when nothing is open */
   noSources?: string;
+  /** MICRO-SPAZIO-CONTAINER p.8 · the 3D's dimensions under an epoch (the Space) */
+  space?: { proxies: string; models: string; rmdoc: string; rmsf: string; gis: string };
 }
 
 export type RowKind = "source" | "graph" | "dim" | "group" | "node" | "sub" | "gis" | "aux" | "empty";
@@ -166,6 +174,9 @@ export interface URow {
   badge?: "active" | "activate";
   /** a source's colour */
   color?: string;
+  /** MICRO-SPAZIO-CONTAINER p.6 · the object of the Space the row stands for
+   *  (`proxy:<unit>`, `rm:<id>`): selected as the Space's, not as the node's */
+  skey?: string;
 }
 
 interface TNode {
@@ -362,6 +373,86 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
   const auxKids = (): TNode[] => g.aux.map((a) => ({
     row: { key: k(`aux/${a.id}`), kind: "aux" as const, label: a.name, title: a.type, aux: a.id, slot: g.slot, glyphText: a.mapped ? "◉" : "○" },
     present: false, match: a.name.toLowerCase() }));
+
+  // MICRO-SPAZIO-CONTAINER p.8 (E.D., 13 Nov 2026: «la scansione per epoche dovrebbe
+  // essere a monte delle diverse tipologie e non a valle») · the Space's tree:
+  //   Epoch (its phases indented under it) → Proxy · Models (a container with
+  //   its members and its own alternative) · RMDoc · RMSF · GIS, then the objects;
+  // what has no epoch under «no epoch», the GIS layers there. «By type» and
+  // «alphabetical» stay the graph's dimensions.
+  if (opts.space && opts.hierarchy === "epoch" && texts.space) {
+    const W = texts.space;
+    const ol = outlineOf();
+    const epochIds = new Set((lists.get("epochs") ?? []).map((n) => n.id));
+    const rmEpochs = (id: string) => (facts.rmEpochs.get(id) ?? []).filter((e) => epochIds.has(e));
+    const isRmType = (n: EmNode) => n.node_type !== "RepresentationModelNodeGroup";
+    const models = (lists.get("models") ?? []).filter(isRmType);
+    const groups = (lists.get("models") ?? []).filter((n) => !isRmType(n));
+    const groupOf = (id: string) => facts.rmGroup?.get(id) ?? null;
+    const pxLeaf = (u: EmNode, at: string): TNode => leaf(u, `sp/${at}/px/${u.id}`, true, { eye: `proxy:${u.id}`, glyphText: "◆", skey: `proxy:${u.id}` });
+    const rmLeaf = (n: EmNode, at: string): TNode => leaf(n, `sp/${at}/rm/${n.id}`, true, { eye: `rm:${n.id}`, skey: `rm:${n.id}`,
+      ...(facts.tilesets.has(n.id) ? { glyphText: "▦", title: "tileset" } : {}) });
+    const typeGroup = (at: string, key: string, label: string, kids: TNode[], glyph?: string): TNode[] => kids.length
+      ? [{ row: { key: k(`sp/${at}/${key}`), kind: "group", label, ...(glyph ? { glyph } : {}) }, kids, def: true }] : [];
+    const modelsIn = (at: string, inEp: (id: string) => boolean): TNode[] => {
+      const out2: TNode[] = [];
+      const loose: TNode[] = [];
+      for (const gnode of groups.slice().sort(byName)) {
+        // the container's own alternative (its tileset), in this epoch: the Space has it as a model
+        const own = facts.rmEpochs.has(gnode.id) && inEp(gnode.id);
+        const mem = models.filter((m) => groupOf(m.id) === gnode.id && inEp(m.id)).sort(byName).map((m) => rmLeaf(m, at));
+        if (!own && !mem.length) continue;
+        out2.push({ row: { key: k(`sp/${at}/grp/${gnode.id}`), kind: "node", label: nameOf(gnode), id: gnode.id, slot: g.slot, glyph: String(gnode.node_type),
+          ...(own ? { eye: `rm:${gnode.id}`, skey: `rm:${gnode.id}`, glyphText: facts.tilesets.has(gnode.id) ? "▦" : undefined } : {}) },
+          kids: mem, def: false, present: true, match: nameOf(gnode).toLowerCase() });
+      }
+      for (const m of models.slice().sort(byName)) if (!groupOf(m.id) && inEp(m.id)) loose.push(rmLeaf(m, at));
+      return [...out2, ...loose];
+    };
+    const subOf = (at: string, map: Map<string, string[]>, owners: EmNode[], inEp: (id: string) => boolean, glyph: string): TNode[] => {
+      const out2: TNode[] = [];
+      for (const o of owners) for (const rid of map.get(o.id) ?? []) {
+        const rm = byId.get(rid);
+        if (rm && inEp(rid)) out2.push(leaf(rm, `sp/${at}/${glyph}/${rid}`, true, { eye: `rm:${rid}`, skey: `rm:${rid}`, glyph, desc: nameOf(o) }));
+      }
+      return out2;
+    };
+    const rmdocMap = new Map<string, string[]>([...facts.rmdocs].map(([d0, r]) => [d0, [r.rm]]));
+    const docs = (lists.get("documents") ?? []).filter((n) => rmdocMap.has(n.id)).sort(byName);
+    const finds = (lists.get("units") ?? []).filter((n) => (facts.rmsf.get(n.id) ?? []).length).sort(byName);
+    const block = (at: string, units: EmNode[], inEp: (id: string) => boolean, gis: boolean): TNode[] => [
+      ...typeGroup(at, "px", W.proxies, units.filter((u) => facts.proxies.has(u.id)).sort(byName).map((u) => pxLeaf(u, at))),
+      ...typeGroup(at, "models", W.models, modelsIn(at, inEp), "representation_model"),
+      ...typeGroup(at, "rmdoc", W.rmdoc, subOf(at, rmdocMap, docs, inEp, "representation_model_doc"), "representation_model_doc"),
+      ...typeGroup(at, "rmsf", W.rmsf, subOf(at, facts.rmsf, finds, inEp, "representation_model_sf"), "representation_model_sf"),
+      ...(gis ? typeGroup(at, "gis", W.gis, facts.gis.map((x) => ({ row: { key: k(`sp/${at}/gis/${x.id}`), kind: "gis" as const, label: x.name,
+        id: byId.has(x.id) ? x.id : undefined, slot: g.slot, glyphText: x.kind === "surface" ? "⛰" : x.kind === "raster" ? "▦" : "◇", gis: x.id },
+        present: true, match: x.name.toLowerCase() }))) : []),
+    ];
+    const out: TNode[] = [];
+    const placed = new Set<string>();
+    for (const e of ol.epochs) {
+      const units = e.units.map((u) => u.node);
+      for (const u of units) placed.add(u.id);
+      const kids = block(e.node.id, units, (id) => rmEpochs(id).includes(e.node.id), false);
+      const t: TNode & { indent?: number } = { row: { key: k(`sp/ep:${e.node.id}`), kind: "group", label: nameOf(e.node), id: e.node.id, slot: g.slot, glyph: "EpochNode",
+        title: e.start != null || e.end != null ? `${e.start ?? "…"} – ${e.end ?? "…"}` : undefined },
+        kids, def: true, present: true, match: nameOf(e.node).toLowerCase() };
+      t.indent = e.depth;
+      // an epoch with nothing of the 3D stays, empty, only when a phase under it has something
+      out.push(t);
+    }
+    // drop the epochs without anything, unless a deeper one after them (a phase) has
+    for (let i = out.length - 1; i >= 0; i--) {
+      const t = out[i] as TNode & { indent?: number };
+      const hasNext = i + 1 < out.length && ((out[i + 1] as TNode & { indent?: number }).indent ?? 0) > (t.indent ?? 0);
+      if (!(t.kids ?? []).length && !hasNext) out.splice(i, 1);
+    }
+    const loose = (lists.get("units") ?? []).filter((u) => !placed.has(u.id));
+    const none = block("-", loose, (id) => !rmEpochs(id).length, true);
+    if (none.length) out.push({ row: { key: k("sp/ep:-"), kind: "group", label: texts.noEpoch }, kids: none, def: true });
+    return out;
+  }
 
   const make: Record<Dim, () => TNode[]> = {
     units: unitKids, documents: docKids, authors: plain("authors"), epochs: epochKids, models: modelKids,

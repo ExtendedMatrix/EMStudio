@@ -144,4 +144,29 @@ if (path) {
   console.log(`${gs[0].nodes.length} nodes → ${rows.length} rows, every dimension open: ${ms.toFixed(1)} ms a build`);
   ok(rows.length > gs[0].nodes.length * 0.5, "most nodes listed");
 }
+// MICRO-SPAZIO-CONTAINER p.8 · the Outliner of the Space: the epoch ABOVE the 3D's dimensions
+// (Proxies, Models with their container, RMDoc, RMSF; the GIS under «no epoch»), rows with their
+// Space key; «by type» stays the graph's dimensions
+{
+  doc.graph.nodes.push(N("G1", "RepresentationModelNodeGroup", "Survey"), N("RM2", "representation_model", "Mesh 2"));
+  doc.graph.edges.push(E("E1", "RM2", "has_representation_model"));
+  const f2 = () => ({ ...facts(), rmEpochs: new Map([["RM1", ["E1"]], ["RM2", ["E1"]], ["RMD1", ["E1"]], ["RMSF1", ["E0"]]]),
+    rmGroup: new Map([["RM2", "G1"]]), gis: [{ id: "L1", name: "Catasto", kind: "layer" }] });
+  const src2 = [{ ...sources[0], graphs: [{ ...sources[0].graphs[0], facts: f2 }] }];
+  const t2 = { ...texts, space: { proxies: "Proxy", models: "Modelli", rmdoc: "RMDoc", rmsf: "RMSF", gis: "GIS" } };
+  const rows = O.flattenOutliner({ sources: src2, opts: { ...O.DEFAULT_OPTS, space: true }, texts: t2, toggled: new Set(["s1|sp/E1/grp/G1"]) });
+  const L = labels(rows); if (process.env.DUMP) console.log(L.join("\n"));
+  eq(rows.filter((r) => r.kind === "group" && r.glyph === "EpochNode").map((r) => r.label), ["Età romana", "Età arcaica"], "the epochs at the top of the graph");
+  const e1 = L.indexOf("    Età romana");
+  ok(e1 >= 0 && L[e1 + 1] === "      Proxy (1)" && L[e1 + 2] === "        US1", "under an epoch, its proxies");
+  ok(L.includes("        Survey") && L.includes("          Mesh 2") && L.includes("        Cella"), "Models: a container with its member, a model alone");
+  ok(L.includes("      RMDoc (1)") && L.includes("      RMSF (1)"), "RMDoc and RMSF under their epochs");
+  ok(L.filter((x) => x.trim() === "Survey").length === 1, "a container without an alternative of its own is listed where its members are, nowhere else");
+  eq(rows.find((r) => r.label === "US1" && r.skey)?.skey, "proxy:US1", "a proxy row carries its Space key");
+  eq(rows.find((r) => r.label === "Mesh 2")?.skey, "rm:RM2", "a model row too");
+  ok(L.includes("    No epoch (1)") && L.includes("        Catasto"), "the GIS layers under «no epoch»");
+  ok(!rows.some((r) => r.kind === "dim"), "no graph dimension in the Space's tree by epoch");
+  ok(O.flattenOutliner({ sources: src2, opts: { ...O.DEFAULT_OPTS, space: true, hierarchy: "type" }, texts: t2, toggled: new Set() }).some((r) => r.kind === "dim"),
+    "«by type» is the graph's dimensions");
+}
 console.log(`check-outliner-tree: ${checks} checks OK`);

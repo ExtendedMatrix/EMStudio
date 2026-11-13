@@ -50,6 +50,6 @@ eq(sp.summary("E13")?.units, ["U1"], "the units of a sub-epoch: those it holds")
 eq([...(sp.summary("XX")?.units ?? [])].sort(), ["U1", "U2"], "…and the epoch all of them");
 eq(sp.topOf("E15a"), "XX", "a sub-sub-epoch's top");
 const main = readFileSync(`${SRC}main.ts`, "utf8");
-ok(/subPick\.dataset\.subEpochPick = "1"/.test(main) && /\[data-epoch-pick\],\[data-sub-epoch-pick\]/.test(main), "the bar: a sub-epoch menu, its change is an epoch's");
+ok(/sp\?\.subEpochs\(e\.id\)/.test(main) && /\[data-epoch-pick\]/.test(main) && !/data-sub-epoch-pick/.test(main), "the bar: ONE menu, the epochs and their phases as a tree (MICRO-SPAZIO-CONTAINER p.9)");
 ok(/sp\.subEpochs\(top\)\.some\(\(e\) => e\.id === spaceEpochId\)\) return spaceEpochId/.test(main), "the scene's epoch may be a sub-epoch");
 console.log(`check-space-subepochs: ${checks} checks passed`);

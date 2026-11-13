@@ -161,6 +161,25 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     }
   };
 
+  /** MICRO-SPAZIO-CONTAINER p.5 · the georeference the globe would be placed by,
+   *  in a line: the CRS, the shift, the datum operation declared; or what is
+   *  missing (the GeoPositionNode, its CRS, its shift) */
+  const georefState = (): { line: string; missing: string[] } => {
+    const gp = (d.doc()?.graph?.nodes ?? []).find((n) => n.node_type === "geo_position");
+    if (!gp) return { line: "", missing: [t("geo.miss.node")] };
+    const x = (gp.data ?? {}) as Record<string, unknown>;
+    const g = geoOf(x);
+    if (g.ok && g.epsg === 4326) return { line: `EPSG:4326 · ${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}`, missing: [] };
+    const missing: string[] = [];
+    if (!Number(x.epsg)) missing.push(t("geo.miss.crs"));
+    if (!Number(x.shift_x) && !Number(x.shift_y)) missing.push(t("geo.miss.shift"));
+    const op = datumOperationOf(x);
+    const n = (v: unknown) => (Number(v) || 0).toFixed(Math.abs(Number(v) || 0) < 1000 ? 2 : 0);
+    const line = `EPSG:${Number(x.epsg) || "?"} · shift ${n(x.shift_x)}, ${n(x.shift_y)}, ${n(x.shift_z)}`
+      + ` · ${op ? t("geo.chipDatum", { op: String(op) }) : t("geo.chipNoDatum")}`;
+    return { line, missing };
+  };
+
   const start = async () => {
     if (busy) return;
     busy = true;
@@ -577,6 +596,28 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       // switch of the territory and «Livelli» are in the data panel (`section`),
       // «Vai al sito» in the bar's menu: here only the view, with the territory on
       const out: HTMLElement[] = [];
+      // MICRO-SPAZIO-CONTAINER p.5 (E.D., 13 Nov 2026: nothing in the Space said the
+      // globe exists) · ONE command in the bar, always: «Globo» with the state of
+      // the georeference in a line (CRS, shift, the datum declared), or what is
+      // missing to turn it on; the rest behind its «?»
+      const geo = georefState();
+      const chip = document.createElement("span");
+      chip.className = "scn-seg geo-chip";
+      chip.dataset.geoChip = geo.missing.length ? "missing" : s.on ? "on" : "off";
+      const tb = document.createElement("button");
+      tb.type = "button";
+      tb.dataset.geo = geo.missing.length ? "why" : "toggle";
+      tb.setAttribute("aria-pressed", String(s.on));
+      tb.textContent = geo.missing.length ? t("geo.chipMissing", { what: geo.missing.join(", ") }) : `🌐 ${t("geo.chip")}`;
+      tb.title = geo.missing.length ? t("geo.noAnchor") : `${t(s.on ? "geo.chipTurnOff" : "geo.chipTurnOn")} · ${geo.line}`;
+      const help = document.createElement("button");
+      help.type = "button";
+      help.className = "geo-chip-help";
+      help.dataset.geo = "why";
+      help.textContent = "?";
+      help.title = t("geo.chipHelp", { line: geo.line || "—" });
+      chip.append(tb, help);
+      out.push(chip);
       if (!s.on) return out;
       const seg = document.createElement("span");
       seg.className = "scn-seg geo-modes";
@@ -641,6 +682,11 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
           if (s.on) void start(); else stop();
           return true;
         case "site": globe?.goToSite(); return true;
+        case "why": {
+          const g = georefState();
+          d.toast(g.missing.length ? `${t("geo.noAnchor")} — ${t("geo.chipMissing", { what: g.missing.join(", ") })}` : t("geo.chipHelp", { line: g.line }));
+          return true;
+        }
         case "panel": s.panel = !s.panel; save(); draw(); d.redrawBar(); if (s.panel) void refreshCache(); return true;
       }
       return false;
