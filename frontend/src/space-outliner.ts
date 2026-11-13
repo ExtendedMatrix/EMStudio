@@ -339,6 +339,9 @@ export interface OutlinerActions {
   isolate(): void;
   frame(): void;
   search(q: string): void;
+  /** MICRO-TESTATE-COERENTI p.4 · the search and «+ ▾» live in the window's head */
+  searchInHead?: boolean;
+  addInHead?: boolean;
   close(): void;
   /** MICRO-SPAZIO-3D-3 · a click on the tree's empty part: nothing selected */
   clearSelection?(): void;
@@ -432,7 +435,9 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   x.title = v.texts.close;
   x.addEventListener("click", () => act.close());
   // p.2 · the base shapes: a menu at the head of the Outliner, the tree takes the height
-  if (act.addMenu) {
+  // MICRO-TESTATE-COERENTI p.4 · «+ ▾» went to the 3D window's head, beside its
+  // type, and the search to its 🔍: this row keeps what has no other place
+  if (act.addMenu && act.addInHead !== true) {
     const add = document.createElement("button");
     add.type = "button";
     add.className = "sol-btn sol-add";
@@ -442,7 +447,8 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     add.addEventListener("click", (e) => { e.stopPropagation(); const b = add.getBoundingClientRect(); act.addMenu!(b.left, b.bottom + 2); });
     head.append(add);
   }
-  head.append(q, iso, fr, x);
+  if (act.searchInHead !== true) head.append(q);
+  head.append(iso, fr, x);
   el.appendChild(head);
   const tree = document.createElement("div");
   tree.className = "sol-tree";

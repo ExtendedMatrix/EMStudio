@@ -7,6 +7,34 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **One place to switch the 3D's categories, the same head in every window,
+  the epochs in the Space** (MICRO-TESTATE-COERENTI, E.D., 13 November 2026).
+  «Visibilità ▾» in the 3D window's head is the ONE place of the categories
+  (Modelli RM, Tileset, RMDoc, RMSF, Proxy, Abbozzi, Estrattori 3D, Territorio /
+  GIS with EPSG and the GIS import), with counts, opacities, Tutti / Nessuno; the
+  button says «Visibilità · 1 spenta»; the «Livelli della scena» panel is gone,
+  the Overlays keep guides, texts, decorators and ways of drawing; the globe's
+  chip opens Visibilità instead of switching the territory. Rows of a category
+  off are attenuated in the Outliner with a ⊘ that turns it back on (the scene's
+  line too). Every head in one order — [type ▾] [+] [?] [context] … [Visibilità
+  / Filtri] [🔍] [⋯] [⛶] — by the controls' roles; the search of each window in
+  its head (🔍, «/» with the pointer on the window, Esc), the Inspector's
+  included. An epoch change never moves the camera (`frameOnArrival` of
+  MICRO-SPAZIO-CONTAINER removed; «⤢ inquadra» offered when the camera sees
+  nothing). The units of an epoch are born ∪ survived, a mother with its phases,
+  in the Outliner, the scene, the counts and the table (`epoch-presence.ts`,
+  checked against s3Dgraphy). The Outliner no longer calls RMDoc an RM published
+  by a document. The Inspector's «Tipo: RM · RMDoc · RMSF» (criterion from the
+  datamodel, preview of the edges, one undo). A container lies where it
+  DECLARES; a member with its own epoch is attenuated under it with «Segui il
+  container». «Sposta in epoca…» (M) / «Estendi a epoca…» (Alt+M) on any
+  selection, from the keyboard, the Outliner, the Matrix/Graph and the table,
+  s3Dgraphy's plan shown first. The card «Completa il container» (four bonds,
+  suggestions, Accetta tutti, change after). The Graph view draws epochs and
+  groups as discs and the members of folded groups; files with no resource are
+  drawn. Bridge level 69. Checks `check-epoch-presence`, `check-graph-families`,
+  `check-headers` (new), `check-outliner-tree`, `check-liquid` (updated).
+
 - **The images of a unit, the campaign as a document, the documents in the
   series, the tight frame of a tileset** (MICRO-FOTO-DOCUMENTI-BBOX, E.D., 13
   November 2026). The Inspector's «Immagini dell'unità» follows the four roads

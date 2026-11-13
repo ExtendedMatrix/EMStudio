@@ -33,6 +33,7 @@ import { frameAmong, type FileFrame } from "./file-frame";
 import visualRules from "./assets/em_visual_rules.json";
 import { basename } from "./paths";
 import { epochInstances } from "./epoch-instances";
+import { presenceIndex } from "./epoch-presence";
 
 /** The rule of the alternatives (em_visual_rules 1.6.37 → `alternatives`). */
 export const ALT_RULE = (visualRules as unknown as { alternatives: AlternativesRule }).alternatives;
@@ -584,20 +585,24 @@ export function buildSpace(
   // GRAFO REATTIVO · the units of every top epoch, in ONE pass over the nodes and
   // on first use: asked per epoch it was a pass over every node per question, and
   // the Models sheet asks once per unit (165 s to open 5000 units, measured)
-  let unitsByTop: Map<string, string[]> | null = null;
+  // MICRO-TESTATE-COERENTI p.7 · the units alive in an epoch: born there ∪
+  // surviving there, a mother with its phases — s3Dgraphy `epoch_presence`, the
+  // ONE reading every view by epoch uses (`epoch-presence.ts`)
+  let pres: ReturnType<typeof presenceIndex> | null = null;
+  const unitsMemo = new Map<string, string[]>();
   const unitsIn = (epochId: string): string[] => {
-    if (!unitsByTop) {
-      unitsByTop = new Map();
-      for (const u of nodes) {
-        // P2 · a continuity node says how long a unit lives; it is not a unit
-        // to model, so it is neither counted nor listed without a proxy
-        if (!opts.isUnit(u.node_type) || classOf(u.node_type) === "ContinuityNode") continue;
-        const tops = new Set<string>();
-        for (const l of EPOCH_LINKS) for (const e of outOf(u.id, l)) { const t = topOf(e); if (t) tops.add(t); }
-        for (const t of tops) (unitsByTop.get(t) ?? unitsByTop.set(t, []).get(t)!).push(u.id);
-      }
-    }
-    return unitsByTop.get(epochId) ?? [];
+    const hit = unitsMemo.get(epochId);
+    if (hit) return hit;
+    pres ??= presenceIndex({ graph: { nodes, edges } } as unknown as EmDocument);
+    const p = pres(epochId);
+    // P2 · a continuity node says how long a unit lives; it is not a unit
+    // to model, so it is neither counted nor listed without a proxy
+    const out = [...p.born, ...p.survive.map((x) => x.id)].filter((id) => {
+      const t = byId.get(id)?.node_type;
+      return opts.isUnit(t) && classOf(t) !== "ContinuityNode";
+    });
+    unitsMemo.set(epochId, out);
+    return out;
   };
 
   const rmGroups = new Map<string, SpaceRMGroup>();
@@ -656,7 +661,7 @@ export function buildSpace(
       // a sub-epoch: the models and the units of its subtree only
       const tree = sub ? subtree(epochId) : null;
       const mine = tree ? rms.filter((r) => (r.exactEpochs ?? []).some((x) => tree.has(x))) : rms.filter((r) => r.epochs.includes(epochId));
-      const units = tree ? unitsIn(sub!.top!).filter((u) => EPOCH_LINKS.some((l) => outOf(u, l).some((x) => tree.has(x)))) : unitsIn(epochId);
+      const units = unitsIn(epochId);
       const scene = opts.sceneProxies ?? null;
       const has = (u: string): boolean => proxies.has(u) || !!scene?.has(u);
       const withProxy = units.filter(has);

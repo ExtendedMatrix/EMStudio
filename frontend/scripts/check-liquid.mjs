@@ -3,7 +3,7 @@
 //   node scripts/check-liquid.mjs
 //
 // The family and the rings of a disc come from the datamodel's classes; the
-// radius grows with the degree inside its bounds; epochs and groups are halos,
+// radius grows with the degree inside its bounds; epochs and groups are discs (with halos),
 // not discs; the local graph is the selection and N steps; the filter dims or
 // hides; a registered query narrows. The worker and the drawing are measured in
 // a browser (the night's report): this is what can be said without one.
@@ -43,15 +43,18 @@ const doc = { graph: { nodes: [
   { source: "A", target: "B", edge_type: "is_after" }, { source: "B", target: "C", edge_type: "is_after" }, { source: "C", target: "D", edge_type: "has_property" },
 ] } };
 const sc = L.buildLiquidScene(doc, undefined, new Map(), () => ({ x: 0, y: 0 }));
-ok(sc.nodes.length === 4 && !sc.byId.has("EP") && !sc.byId.has("ACT"), "epochs and groups are not discs");
-ok(sc.edges.length === 3, "membership and attribution are halos, not lines");
+// MICRO-TESTATE-COERENTI p.13 · the epochs and the groups are discs too, with
+// their edges; the halos stay behind their members (until 13 Nov they were halos
+// only, and the family «Epochs» drew nothing)
+ok(sc.nodes.length === 6 && sc.byId.has("EP") && sc.byId.has("ACT"), "epochs and groups are discs");
+ok(sc.edges.length === 7, "every edge between two discs is drawn, membership and attribution included");
 const ep = sc.liquid.halos.find((h) => h.id === "EP"), act = sc.liquid.halos.find((h) => h.id === "ACT");
 ok(ep?.kind === "epoch" && ep.color === "#CC8800" && ep.members.sort().join() === "A,B", "the epoch's halo: its colour, its members");
 ok(act?.kind === "group" && act.members.sort().join() === "A,C", "the group's halo");
 ok(sc.byId.get("B").w > sc.byId.get("D").w, "a unit with two edges is larger than a property with one");
 ok(L.localNeighbourhood(sc, ["A"], 0) === null, "local graph off: no restriction");
-ok([...L.localNeighbourhood(sc, ["A"], 1)].sort().join() === "A,B", "one step from A: A and B");
-ok([...L.localNeighbourhood(sc, ["A"], 2)].sort().join() === "A,B,C", "two steps: and C");
+ok([...L.localNeighbourhood(sc, ["A"], 1)].sort().join() === "A,ACT,B,EP", "one step from A: A, B, its epoch and its activity (discs since p.13)");
+ok([...L.localNeighbourhood(sc, ["A"], 2)].sort().join() === "A,ACT,B,C,EP", "two steps: and C");
 const f = { epochs: null, text: "", hide: false };
 const n = (id) => sc.byId.get(id);
 const epochOf = (id) => (id === "A" || id === "B" ? ["EP"] : []);

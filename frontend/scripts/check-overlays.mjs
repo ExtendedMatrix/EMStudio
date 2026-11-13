@@ -28,12 +28,14 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
 // ── the inventory ────────────────────────────────────────────────────────────
 {
   eq(O.OVERLAY_GROUPS.map((g) => g.key), ["rights", "paradata", "time", "checks", "threed", "drawing",
-    "s3_guides", "s3_text", "s3_objects", "space3d_decor", "s3_geometry"],
-    "the groups, in the menu's order (the MICRO's five, «Drawing»; the Space's as Blender's Viewport Overlays: Guides, Text, Objects, Decorators, Geometry)");
+    "s3_guides", "s3_text", "s3_categories", "s3_objects", "space3d_decor", "s3_geometry"],
+    "the groups, in the menu's order (MICRO-TESTATE-COERENTI p.1: the Space's categories a group of their own, whose door is «Visibilità ▾», not this menu) (the MICRO's five, «Drawing»; the Space's as Blender's Viewport Overlays: Guides, Text, Objects, Decorators, Geometry)");
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "rights").items.map((i) => i.key),
     ["author", "author_ai", "license", "embargo", "inherited"], "authorship and rights: the four ornaments and the inherited");
   eq(new Set(O.OVERLAY_KEYS).size, O.OVERLAY_KEYS.length, "every overlay once");
-  eq(O.OVERLAY_KEYS.length, 48, "forty-eight overlays: twenty-four of the graph, twenty-four of the Space (MICRO-OUTLINER-UNICO: the RMDocs, a layer of their own; (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics; MICRO-GLIFI-OVERLAY-CONTINUITA p.3: the continuity, in Time; MICRO-SERVSF-FINE-ISTANZE p.3: the instances, in Objects; MICRO-MATRIX-FASI p.3: a document's RMDoc and an epoch's RM, in 3D)");
+  eq(O.OVERLAY_KEYS.length, 50, "fifty overlays (MICRO-TESTATE-COERENTI: + RMSF and the 3D extractors, categories of «Visibilità ▾»); forty-eight: twenty-four of the graph, twenty-four of the Space (MICRO-OUTLINER-UNICO: the RMDocs, a layer of their own; (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics; MICRO-GLIFI-OVERLAY-CONTINUITA p.3: the continuity, in Time; MICRO-SERVSF-FINE-ISTANZE p.3: the instances, in Objects; MICRO-MATRIX-FASI p.3: a document's RMDoc and an epoch's RM, in 3D)");
+  eq(O.OVERLAY_GROUPS.filter((g) => g.door).map((g) => g.key), ["s3_categories"], "one group has another door: the 3D's categories («Visibilità ▾»)");
+  eq(O.VISIBILITY_KEYS, ["s3_rm", "s3_tiles", "s3_rmdoc", "s3_rmsf", "s3_proxies", "s3_sketches", "s3_x3d"], "the categories of «Visibilità ▾», in its order");
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "time").items.map((i) => i.key), ["lane_pd_tag", "date_invite", "continuity"], "Time: the epoch's tag, the invitation, the continuity");
   // every overlay is drawn somewhere: the renderers name it (a key nobody draws
   // would be a box that switches nothing)
@@ -51,8 +53,9 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
     eq(O.overlayItemsFor(v).length, 24, `${v}: every overlay of the graph`);
   eq(O.overlayItemsFor("space").map((i) => i.key), ["s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_cursor", "s3_navgizmo", "s3_epoch_box", "s3_stats",
     "s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch",
-    "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles", "s3_rmdoc", "s3_sketches", "s3_instances", "s3_sel_outline", "s3_gizmo",
-    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its twenty-four, in their groups, and only them");
+    "s3_rm", "s3_tiles", "s3_rmdoc", "s3_rmsf", "s3_proxies", "s3_sketches", "s3_x3d",
+    "s3_proxy_wire", "s3_instances", "s3_sel_outline", "s3_gizmo",
+    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its twenty-six, in their groups (the categories first, switched in «Visibilità ▾»), and only them");
   eq(O.OVERLAY_VALUES.map((v) => [v.key, v.def]), [["s3_opacity_proxy", 0.42], ["s3_opacity_wire", 0.9], ["s3_opacity_rm", 1]],
      "Geometry: three sliders, at the opacities the scene used (the models' since MICRO-RIFINITURE p.6: 1, as they came)");
   // every label in en, it, de

@@ -53,6 +53,16 @@ export interface UnifiedDeps {
   dropLabel?: (row: URow, epoch: string, extend: boolean) => string | null;
   /** p.1 · the ⚠ of a container out of step: its menu («allinea…») */
   warnMenu?: (row: URow, at: { x: number; y: number }) => void;
+  /** MICRO-TESTATE-COERENTI p.11 · «Segui il container»: the member drops its own epoch */
+  follow?: (row: URow) => void;
+  /** p.11 · the word of that button */
+  followWord?: string;
+  /** p.10a · a model dropped on a container: it enters it (`put_in_container`) */
+  containerDrop?: (row: URow, groupId: string, from: string | null, add: boolean) => void;
+  /** …its words while dragging (null: nothing would happen there); groupId "" = out of `from` */
+  containerDropLabel?: (row: URow, groupId: string, from: string | null, add: boolean) => string | null;
+  /** p.9 · «Completa il container…» on a container's row */
+  card?: (row: URow) => void;
   /** p.4 · the Space's controls on a row that has something in the scene */
   space?: SpaceRowDeps;
 }
@@ -78,6 +88,10 @@ export interface SpaceRowDeps {
   /** an extractor whose document is not lit, its eye forced on */
   forced: (key: string) => boolean;
   words: { arrow: string; isolate: string; frame: string; ghost: string };
+  /** MICRO-TESTATE-COERENTI p.2 · the category of a row's key when it is OFF in
+   *  «Visibilità ▾» (its name, for the mark), null when on; and a click on the mark */
+  categoryOff?: (key: string) => { key: string; label: string; title: string } | null;
+  categoryOn?: (cat: string) => void;
 }
 
 export interface UnifiedApi {
@@ -163,6 +177,14 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       if (r.noteTitle) n.title = r.noteTitle;
       el.appendChild(n);
     }
+    if (r.followGroup && d.follow) {
+      const f = document.createElement("button");
+      f.type = "button";
+      f.className = "uo-follow";
+      f.dataset.follow = r.followGroup;
+      f.textContent = d.followWord ?? "↩";
+      el.appendChild(f);
+    }
     if (r.warn) {
       const w = document.createElement("button");
       w.type = "button";
@@ -239,6 +261,20 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       c.className = "uo-count";
       c.textContent = r.count;
       el.appendChild(c);
+    }
+    // MICRO-TESTATE-COERENTI p.2 · the row of a category switched off: attenuated,
+    // with a mark that says it and turns it back on
+    const cOff = S && r.skey ? S.categoryOff?.(r.skey) ?? null : null;
+    if (cOff) {
+      el.classList.add("uo-cat-off");
+      const m = document.createElement("button");
+      m.type = "button";
+      m.className = "uo-cat-off-mark";
+      m.dataset.catOn = cOff.key;
+      m.textContent = "⊘";
+      m.title = cOff.title;
+      m.setAttribute("aria-label", cOff.title);
+      el.appendChild(m);
     }
     if (S && r.skey && !r.ghost) {
       const lk = S.lockOpen(r.skey);
@@ -321,6 +357,9 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     const box = (x: HTMLElement) => { const b = x.getBoundingClientRect(); return { x: b.left, y: b.bottom + 2 }; };
     const w = t.closest<HTMLElement>("[data-warn]");
     if (w) { e.stopPropagation(); d.warnMenu?.(r, box(w)); return; }
+    if (t.closest("[data-follow]") && d.follow) { e.stopPropagation(); d.follow(r); return; }
+    const co = t.closest<HTMLElement>("[data-cat-on]");
+    if (co && d.space?.categoryOn) { e.stopPropagation(); d.space.categoryOn(co.dataset.catOn!); paint(true); return; }
     const sp = t.closest<HTMLElement>("[data-sp]");
     if (sp && d.space) {
       e.stopPropagation();
@@ -354,7 +393,10 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     if (!r || r.epochAt === undefined || !r.id || r.version || (e0.target as HTMLElement).closest("button,[data-tw]")) return;
     const x0 = e0.clientX, y0 = e0.clientY;
     let on = false;
-    let target: { el: HTMLElement; epoch: string } | null = null;
+    let target: { el: HTMLElement; epoch: string; group?: string } | null = null;
+    // MICRO-TESTATE-COERENTI p.10a · the container the row is listed in (a member's key)
+    const fromGroup = /\/grp\/([^/]+)\/m\/[^/]+$/.exec(r.key)?.[1] ?? null;
+    const isModel = /^representation_model|^RepresentationModelNodeGroup$/.test(String(r.glyph ?? ""));
     let alt = e0.altKey;
     let tag: HTMLElement | null = null;
     let lx = x0, ly = y0;
@@ -362,7 +404,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     const clear = () => { target?.el.classList.remove("uo-drop", "uo-drop-extend"); target = null; };
     const say = () => {
       if (!tag) return;
-      const txt = target ? d.dropLabel?.(r, target.epoch, alt) ?? null : null;
+      const txt = target ? (target.group !== undefined ? d.containerDropLabel?.(r, target.group, fromGroup, alt) ?? null : d.dropLabel?.(r, target.epoch, alt) ?? null) : null;
       tag.textContent = txt ?? r.label;
       tag.classList.toggle("uo-dragtag-none", !txt);
       tag.classList.toggle("uo-dragtag-extend", !!txt && alt);
@@ -374,8 +416,13 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       const under = document.elementFromPoint(lx, ly)?.closest<HTMLElement>(".uo-row");
       const tr = under && layer.contains(under) ? rows[Number(under.dataset.i ?? -1)] : null;
       const ep = tr && tr.id && tr.glyph === "EpochNode" ? tr.id : null;
-      if (target && (!under || target.el !== under || target.epoch !== ep)) clear();
-      if (ep && under && !target && (alt || ep !== r.epochAt) && d.dropLabel?.(r, ep, alt)) target = { el: under, epoch: ep };
+      // p.10a · a model onto a container: it enters it (Assets' rule, put_in_container);
+      // a member onto the «Models» heading: it leaves its container
+      const grp = isModel && tr && tr.id && tr.glyph === "RepresentationModelNodeGroup" && tr.id !== r.id && tr.id !== fromGroup ? tr.id
+        : isModel && fromGroup && tr && ((tr.kind === "group" && tr.glyph === "representation_model") || (tr.kind === "dim" && /models/.test(tr.key))) ? "" : null;
+      if (target && (!under || target.el !== under || target.epoch !== ep || (target.group ?? null) !== grp)) clear();
+      if (grp !== null && under && !target && d.containerDropLabel?.(r, grp, fromGroup, alt)) target = { el: under, epoch: "", group: grp };
+      else if (ep && under && !target && (alt || ep !== r.epochAt) && d.dropLabel?.(r, ep, alt)) target = { el: under, epoch: ep };
       say();
     };
     const move = (e: PointerEvent) => {
@@ -415,7 +462,10 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       const t2 = target;
       clear();
       if (on) dragEnded = Date.now();
-      if (drop && on && t2) d.epochDrop!(r, t2.epoch, alt);
+      if (drop && on && t2) {
+        if (t2.group !== undefined) d.containerDrop?.(r, t2.group, fromGroup, alt);
+        else d.epochDrop!(r, t2.epoch, alt);
+      }
     };
     const up = (e: PointerEvent) => { alt = e.altKey; end(true); };
     document.addEventListener("pointermove", move, true);
@@ -440,7 +490,9 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       paint(true);
       return;
     }
-    if (!r || !(r.kind === "source" || r.kind === "graph" || r.kind === "aux")) return;
+    // MICRO-TESTATE-COERENTI p.12 · a node's row: the menu of the selection
+    // («Sposta in epoca…», «Estendi a epoca…»)
+    if (!r || !(r.kind === "source" || r.kind === "graph" || r.kind === "aux" || ((r.kind === "node" || r.kind === "sub") && r.id))) return;
     e.preventDefault();
     d.menu(r, (e.target as HTMLElement).closest<HTMLElement>(".uo-row") ?? root);
   });

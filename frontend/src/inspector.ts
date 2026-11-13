@@ -48,6 +48,8 @@ export interface InspectorCallbacks {
   /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · the epochs of a unit, a model or a
    *  container, each with «Sposta qui» / «Estendi anche qui» / «Togli da qui» */
   epochMoves?: (nodeId: string) => HTMLElement | null;
+  /** MICRO-TESTATE-COERENTI p.8 · a model's kind: RM · RMDoc · RMSF */
+  modelKind?: (nodeId: string) => HTMLElement | null;
   /** MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of an object in the epochs */
   epochInstances?: (nodeId: string) => HTMLElement | null;
   /** MICRO-UN-POSTO · open the site selector on the graph node */
@@ -875,7 +877,10 @@ export function renderInspector(
   // MICRO-SOTTOFASI-E-TILESET-TEMPLU · a representation model's epoch is read
   // in both forms (`epoch → has_representation_model → RM`, the canonical one,
   // and the RM's own `has_first_epoch`); a move writes the canonical one
-  if (node.node_type !== "EpochNode") {
+  // MICRO-TESTATE-COERENTI p.10c (E.D., dev.121: «PHASE e EPOCHS dicono la stessa
+  // cosa in due modi») · with the section «Epoche» (every epoch, its phases
+  // indented, Move here / Extend here too / Remove from here) the old «Fase» goes
+  if (node.node_type !== "EpochNode" && !cb.epochMoves) {
     const cur = store.firstEpochOf(nodeId);
     if (cur) {
       const topEpoch = store.parentEpoch(cur) ?? cur;
@@ -957,6 +962,10 @@ export function renderInspector(
     }
   }
 
+  if (nodeId && cb.modelKind) {
+    const sec = cb.modelKind(nodeId);
+    if (sec) root.appendChild(sec);
+  }
   if (nodeId && cb.epochMoves && node.node_type !== "EpochNode") {
     const sec = cb.epochMoves(nodeId);
     if (sec) root.appendChild(sec);

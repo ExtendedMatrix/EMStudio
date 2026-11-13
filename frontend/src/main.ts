@@ -323,7 +323,7 @@ import { defaultLevel, isHeavy, levelShort, levelsOf, lightestVersion, type Leve
 import { oneLine } from "./one-line";
 import { findSet, isTilesetData, measureCoverage, planDeclareAlternative, planSubcontainer, SAME_COVERAGE_IOU, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
 import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
-import { ALT_RULE } from "./space";
+import { ALT_RULE, tilesKindOf } from "./space";
 import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame, type Relocation } from "./file-frame";
 import { trackpadClassifier } from "./wheel-kind";
 import { formatBytes as tilesBytes, isTilesetUrl, onEarth } from "./tiles3d";
@@ -404,6 +404,8 @@ import {
   resourceTypeOfLocator,
   is3dResourceType,
   reasoningText,
+  classIsA as dmClassIsA,
+  classOf as dmClassOf,
   // (the datamodel version exports are read by `versions.ts` for the footer's
   // breakdown popover — MENU-AUDIT removed this module's second, hardcoded copy)
 } from "./rules";
@@ -555,7 +557,7 @@ import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
 import {
   defaultOverlays, drawnOverlayCounts, farGlyphsHidden, withHideFar, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlayShown, overlaysHideSomething,
-  overlayValue, saveOverlays, withGroup, withOverlay, withValue, type OverlayKey, type OverlayState, type OverlayValueKey, type OverlayView,
+  overlayValue, saveOverlays, VISIBILITY_KEYS, withGroup, withOverlay, withValue, type OverlayKey, type OverlayState, type OverlayValueKey, type OverlayView,
 } from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
 import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
@@ -782,6 +784,7 @@ import {
 } from "./menu-ui";
 import { currentPlatform } from "./menu-table";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
+import nodeDatamodel from "./assets/s3Dgraphy_node_datamodel.json";
 import { onFirstVisible } from "./lazy";
 import { blendLabel, filterChoices, flatten, STATE_SIGN, type BlendFilters, type BlendFolder, type BlendState, type CheckRow } from "./blend-folder";
 import { applyGraphDelta, COMPOSE_PROFILES, fileKey, idsOfObject, LEASE_RENEW_S, leaseFor, leaseLabel,
@@ -2805,6 +2808,27 @@ window.__EM_SCENE__ = () => {
   setLeavesOf: (winId: string, leaves: string[]) => writeLeaves(winId, graphModeOf(winId), new Set(leaves)),
   setMono: (winId: string, on: boolean) => setMonoOf(winId, on),
   leafOf: (nodeType: string) => nodeLeaf(nodeType),
+  /** MICRO-TESTATE-COERENTI p.13 · per node family: what the «Detail level» panel
+   *  says (shown / total, the structure counted as shown) and how many of its
+   *  nodes the Graph view draws — for `check-graph-families.mjs` */
+  /** MICRO-TESTATE-COERENTI · a window's type, and the keys the Overlays menu of a view lists */
+  winType: (winId: string) => windowsOf().find((w) => w.id === winId)?.type ?? null,
+  overlayMenuKeys: (v: OverlayView) => {
+    const can = new Set(overlayItemsFor(v).map((i) => i.key));
+    return OVERLAY_GROUPS.filter((g) => !g.door).flatMap((g) => g.items.filter((i) => can.has(i.key)).map((i) => i.key));
+  },
+  graphFamilies: (winId?: string) => {
+    if (!store) return [];
+    const w = winId ?? [...graphWinIds()][0] ?? activeWin().id;
+    const visible = leavesOfWin(w, "graph");
+    const drawn = new Set<string>((scenes.graph?.nodes ?? []).map((n: { id: string }) => n.id));
+    return NODE_FAMILIES.map((f) => {
+      const nodes = store!.liveNodes().filter((n) => f.types.includes(String(n.node_type)));
+      const shown = nodes.filter((n) => { const l = nodeLeaf(n.node_type); return !l || visible.has(l); });
+      return { key: f.key, total: nodes.length, shown: shown.length, drawn: nodes.filter((n) => drawn.has(n.id)).length,
+               leaves: familyLeaves(f) };
+    });
+  },
   overlaysDrawn: () => drawnOverlayCounts(),
   // MICRO-SPAZIO-3D · the ornament badges as drawn (canvas-relative): «ha 3D» among them
   adornmentHits: () => drawnAdornmentHits().map((h) => ({ ...h })),
@@ -4253,6 +4277,7 @@ function renderInspectorInto(host: HTMLElement): void {
       continuity: (id) => continuityAction(id),
       endOfUnit: (id) => renderBrSection(id),
       epochMoves: (id) => renderEpochMoves(id),
+      modelKind: (id) => renderModelKind(id),
       epochInstances: (id) => renderInstancesSection(id),
       onAddPhase: (epochId) => {
         const ph = store!.addPhase(epochId, (n) => t("l.phaseDefault", { n }));
@@ -4488,26 +4513,9 @@ function finishInspector(host: HTMLElement, nodeType: string): void {
       try { localStorage.setItem(INSP_SECT_KEY, JSON.stringify(all)); } catch { /* private mode */ }
     });
   }
-  // the search, at the top (under the type and the close)
-  if (host.querySelector(".insp-sect")) {
-    const box = document.createElement("div");
-    box.className = "insp-search";
-    const q = document.createElement("input");
-    q.type = "search";
-    q.className = "insp-search-input";
-    q.placeholder = t("insp.searchPh");
-    q.setAttribute("aria-label", t("insp.searchPh"));
-    q.value = inspQuery;
-    q.addEventListener("input", () => { inspQuery = q.value; applyInspSearch(host); });
-    q.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Escape" && q.value) { e.preventDefault(); q.value = ""; inspQuery = ""; applyInspSearch(host); }
-    });
-    box.appendChild(q);
-    const head = host.querySelector(".insp-head");
-    if (head) head.after(box); else col.prepend(box);
-    if (inspQuery) applyInspSearch(host);
-  }
+  // MICRO-TESTATE-COERENTI p.4 · «Search this panel» is the 🔍 of the Inspector's
+  // head now (the same query, `inspQuery`): the body keeps only its effect
+  if (host.querySelector(".insp-sect") && inspQuery) applyInspSearch(host);
 }
 /** the text a piece of the Inspector says, the values of its fields included */
 function inspText(el: Element): string {
@@ -6032,7 +6040,10 @@ function filteredView(opts: { wholeGraph?: boolean;
                          *  document (the Matrix in horizons draws them all) */
                         doc?: EmDocument;
                         /** the Matrix: no LocationNodeGroup drawn (11 Oct 2026) */
-                        placesUndrawn?: boolean } = {}): {
+                        placesUndrawn?: boolean;
+                        /** MICRO-TESTATE-COERENTI p.13 · the Graph view: no group is
+                         *  a box there, so a fold (the Matrix's) hides nothing */
+                        unfolded?: boolean } = {}): {
   nodes: EmDocument["graph"]["nodes"];
   edges: EmDocument["graph"]["edges"];
   badges: Map<string, number>;
@@ -6044,7 +6055,7 @@ function filteredView(opts: { wholeGraph?: boolean;
   const wholeGraph = !!opts.wholeGraph;
   const hiddenNodeTypes = opts.hidden?.nodes ?? hiddenNodesNow;
   const hiddenEdgeTypes = opts.hidden?.edges ?? hiddenEdgesNow;
-  const folded = new Set(doc.layout?.folded_groups ?? []);
+  const folded = new Set(opts.unfolded ? [] : doc.layout?.folded_groups ?? []);
   // a place the Matrix does not draw cannot be drawn folded either: its
   // members are shown, unfolded
   if (opts.placesUndrawn) {
@@ -6112,7 +6123,9 @@ function filteredView(opts: { wholeGraph?: boolean;
   // visible, exempt from the "Paradata nodes" ring toggle.
   const byId = new Map(doc.graph.nodes.map((n) => [n.id, n]));
   const epochPdg = new Set<string>();
-  for (const e of doc.graph.edges)
+  // (the Graph view draws no box: there it is a paradata group like the others,
+  // shown and hidden with its family — MICRO-TESTATE-COERENTI p.13)
+  if (!opts.unfolded) for (const e of doc.graph.edges)
     if (
       e.edge_type === "has_paradata_nodegroup" &&
       classOf(byId.get(e.source)?.node_type) === "EpochNode"
@@ -6527,10 +6540,11 @@ function buildScenesNow(): void {
   const views = new Map<string, ReturnType<typeof filteredView>>();
   const viewFor = (v: ViewKind, whole = false): ReturnType<typeof filteredView> => {
     const noPlaces = v === "matrix";
-    const key = `${whole ? "W" : ""}${noPlaces ? "P" : ""}${[...circleState[v]].sort().join(",")}`;
+    const unfolded = v === "graph";
+    const key = `${whole ? "W" : ""}${noPlaces ? "P" : ""}${unfolded ? "U" : ""}${[...circleState[v]].sort().join(",")}`;
     let fv = views.get(key);
     if (!fv) {
-      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v), placesUndrawn: noPlaces });
+      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v), placesUndrawn: noPlaces, unfolded });
       views.set(key, fv);
     }
     return fv;
@@ -12145,7 +12159,7 @@ function unifiedFacts(): ThreeFacts {
   const doc = st.doc;
   const v = emptyFacts();
   for (const id of unitsWithout3d(doc).with) v.proxies.add(id);
-  for (const [d, r] of documentRmDocs(doc)) v.rmdocs.set(d, r);
+  for (const [d, r] of documentRmDocs(doc, true)) v.rmdocs.set(d, r);
   for (const e of doc.graph.edges) {
     if (e.edge_type !== "has_representation_model_sf" || (e as { attributes?: { removed?: unknown } }).attributes?.removed) continue;
     const l = v.rmsf.get(e.source);
@@ -12259,9 +12273,11 @@ function renderEpochMoves(id: string): HTMLElement | null {
   let mine: string[];
   let first: string | null = null;
   if (kind === "group") {
+    // MICRO-TESTATE-COERENTI p.11 · a container is where it DECLARES (an epoch
+    // reaching it, the Document publishing it), never where its members are
     const set = new Set(epochsOfNode(st.doc, id));
-    for (const e of st.doc.graph.edges) if (e.edge_type === "is_in_representation_model_group" && e.target === id)
-      for (const x of epochsOfNode(st.doc, e.source)) set.add(x);
+    for (const e of st.doc.graph.edges) if (e.edge_type === "has_representation_model" && e.target === id && st.node(e.source)?.node_type === "document")
+      for (const x of st.doc.graph.edges) if (x.source === e.source && (x.edge_type === "has_first_epoch" || x.edge_type === "survive_in_epoch") && st.node(x.target)?.node_type === "EpochNode") set.add(x.target);
     mine = [...set];
   } else {
     mine = epochsOfNode(st.doc, id);
@@ -12277,6 +12293,40 @@ function renderEpochMoves(id: string): HTMLElement | null {
   sec.appendChild(h);
   const list = document.createElement("div");
   list.className = "insp-ep-list";
+  // MICRO-TESTATE-COERENTI p.10b (E.D., dev.121: «RMSF for ME_PRATO_LOD1», no epoch,
+  // in Survey2015) · a model WITHOUT an epoch says whom it follows, and the list
+  // of the epochs is the way to give it one of its own, folded
+  let host: HTMLElement = list;
+  const inGroup = kind === "rm" ? st.doc.graph.edges.find((e) => e.source === id && e.edge_type === "is_in_representation_model_group")?.target : undefined;
+  if (inGroup && mine.length) {
+    const p = document.createElement("p");
+    p.className = "insp-hint insp-ep-own-choice";
+    p.textContent = t("uo.c.ownChoice", { epochs: mine.map((x) => String(st.node(x)?.name ?? x)).join(", ") });
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "insp-btn";
+    b.dataset.follow = inGroup;
+    b.textContent = t("ep.follow");
+    b.title = t("ep.followTitle", { group: String(st.node(inGroup)?.name ?? inGroup) });
+    b.addEventListener("click", () => followContainer(id));
+    p.append(" ", b);
+    sec.appendChild(p);
+  }
+  if (!mine.length && kind !== "unit") {
+    const gid = st.doc.graph.edges.find((e) => e.source === id && e.edge_type === "is_in_representation_model_group")?.target;
+    const g = gid ? st.node(gid) : undefined;
+    const p = document.createElement("p");
+    p.className = "insp-hint insp-ep-follows";
+    p.dataset.epochFollows = gid ?? "";
+    p.textContent = g ? t("ep.followsContainer", { group: String(g.name ?? g.id) }) : t("ep.noEpoch");
+    sec.appendChild(p);
+    const det = document.createElement("details");
+    det.className = "insp-ep-own";
+    const sum = document.createElement("summary");
+    sum.textContent = t("ep.giveOwn");
+    det.append(sum, list);
+    host = det;
+  }
   for (const e of outline.epochs) {
     const row = document.createElement("div");
     row.className = "insp-ep-row";
@@ -12300,15 +12350,320 @@ function renderEpochMoves(id: string): HTMLElement | null {
       b.dataset.epochVerb = verb;
       b.textContent = label;
       b.title = t(`ep.title.${verb}`, { epoch: String(e.node.name ?? e.node.id) });
-      b.addEventListener("click", () => { void epochGesture(id, verb, e.node.id); });
+      // MICRO-TESTATE-COERENTI p.12 · move and extend are the one command's
+      // (s3Dgraphy's plan); «remove from here» stays the page's own gesture
+      b.addEventListener("click", () => { void (verb === "remove" ? epochGesture(id, verb, e.node.id) : epochMoveSelection([id], e.node.id, verb, { quiet: true })); });
       row.appendChild(b);
     };
     if (!here) { btn("move", t("ep.moveHere")); btn("extend", t("ep.extendHere")); }
-    else if (kind === "unit" ? e.node.id !== first : mine.length > 1) btn("remove", t("ep.removeHere"));
+    else if (kind === "unit" ? e.node.id !== first : mine.length > 1) {
+      // p.10c · an extended epoch says it plainly, and its «Remove from here» is
+      // a button of its own (not one more beside the others)
+      btn("remove", `✕ ${t("ep.removeHere")}`);
+      row.classList.add("insp-ep-extended");
+    }
     list.appendChild(row);
   }
-  sec.appendChild(list);
+  sec.appendChild(host);
   return sec;
+}
+
+// ── MICRO-TESTATE-COERENTI p.12 (E.D., 13 Nov 2026, 17:10: «per mettere a posto le
+// cose») · «Sposta in epoca…» (M) / «Estendi a epoca…» (Alt+M): ONE command for
+// the whole app, on the current selection, mixed types included. The rule is
+// s3Dgraphy's (`epoch_scope.plan_epoch_move`, through the bridge): per node from
+// where to where, the nodes it does not apply to with the reason, a container's
+// members with an epoch of their own (left, unless asked), the chronology the
+// move would break — shown BEFORE, then written here in ONE step of undo.
+
+interface PyEdge { source: string; target: string; edge_type: string }
+interface PyEpochPlan {
+  epoch: string; mode: "move" | "extend"; with_own: boolean;
+  items: { id: string; name: string; node_type: string; from: string[]; to: string[] }[];
+  excluded: { id: string; name: string; node_type: string; reason: string }[];
+  counts: Record<string, number>; following: string[]; own_choice: string[];
+  warnings: { code: string; text: string }[]; add: PyEdge[]; remove: PyEdge[];
+}
+
+/** the selection the command acts on: every selected node of the graph */
+function epochSelection(): string[] {
+  const st = store;
+  if (!st) return [];
+  const ids = new Set<string>(selectedIds);
+  if (selectedId) ids.add(selectedId);
+  return [...ids].filter((id) => !!st.node(id));
+}
+
+/** the epochs as a tree (the phases under their epoch), for the menu */
+function epochTreeRows(): { id: string; name: string; depth: number }[] {
+  const st = store;
+  if (!st) return [];
+  return buildOutline(st.doc, st.liveNodes(), () => false).epochs.map((e) => ({ id: e.node.id, name: String(e.node.name ?? e.node.id), depth: e.depth }));
+}
+
+/** M / Alt+M, and the menus' «Sposta in epoca…»: the epochs as a tree at the
+ *  pointer (or the middle of the window); a click asks the plan */
+function openEpochMoveMenu(extend: boolean, at?: { x: number; y: number }, ids: string[] = epochSelection()): void {
+  hideContextMenu();
+  if (!ids.length) { toast(t("em.none")); return; }
+  const rows = epochTreeRows();
+  if (!rows.length) { toast(t("em.noEpochs")); return; }
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu em-epoch-menu";
+  menu.dataset.epochMenu = extend ? "extend" : "move";
+  menu.style.left = `${Math.min((at?.x ?? innerWidth / 2 - 120), innerWidth - 260)}px`;
+  menu.style.top = `${at?.y ?? innerHeight / 3}px`;
+  const head = document.createElement("div");
+  head.className = "ctx-header";
+  head.textContent = t(extend ? "em.headExtend" : "em.headMove", { n: String(ids.length) });
+  head.append(" ", helpGlyph(t("em.help"), "epoch-command"));
+  menu.appendChild(head);
+  for (const r of rows) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.epoch = r.id;
+    b.style.paddingLeft = `${10 + r.depth * 14}px`;
+    b.textContent = `${r.depth ? "└ " : ""}${r.name}`;
+    b.onclick = () => { hideContextMenu(); void epochMoveSelection(ids, r.id, extend ? "extend" : "move"); };
+    menu.appendChild(b);
+  }
+  const sw = document.createElement("button");
+  sw.type = "button";
+  sw.className = "ctx-sep-before";
+  sw.textContent = t(extend ? "em.switchMove" : "em.switchExtend");
+  sw.onclick = () => openEpochMoveMenu(!extend, at, ids);
+  menu.appendChild(sw);
+  document.body.appendChild(menu);
+  ctxMenuEl = keepOnScreen(menu);
+  (menu.querySelector("button[data-epoch]") as HTMLButtonElement | null)?.focus();
+}
+
+/** the preview of a plan: how many, by type, from where to where, the excluded
+ *  with the reason, the warnings of the chronology */
+function epochPlanBody(st: DocumentStore, plan: PyEpochPlan, onOwn: (on: boolean) => void): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "em-plan";
+  box.dataset.epochPlan = plan.mode;
+  const epName = (xs: string[]) => xs.map((x) => String(st.node(x)?.name ?? x)).join(", ") || "—";
+  const p = (cls: string, text: string) => { const e = document.createElement("p"); e.className = cls; e.textContent = text; box.appendChild(e); return e; };
+  const counts = Object.entries(plan.counts).map(([k, n]) => `${n} ${unitTypeLabel(k)}`).join(" · ");
+  p("em-plan-counts", t("em.counts", { n: String(plan.items.length), what: counts || "—" }));
+  const ul = document.createElement("ul");
+  ul.className = "em-plan-items";
+  for (const it of plan.items.slice(0, 14)) {
+    const li = document.createElement("li");
+    li.dataset.planItem = it.id;
+    li.textContent = `${it.name}: ${epName(it.from)} → ${epName(it.to)}`;
+    ul.appendChild(li);
+  }
+  if (plan.items.length > 14) { const li = document.createElement("li"); li.textContent = t("al.removeMore", { n: String(plan.items.length - 14) }); ul.appendChild(li); }
+  box.appendChild(ul);
+  if (plan.following.length) p("em-plan-note", tn("em.following", plan.following.length));
+  if (plan.own_choice.length) {
+    const lab = document.createElement("label");
+    lab.className = "em-plan-own";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = plan.with_own;
+    cb.dataset.withOwn = "1";
+    cb.addEventListener("change", () => onOwn(cb.checked));
+    lab.append(cb, " ", t("em.withOwn", { n: String(plan.own_choice.length) }));
+    box.appendChild(lab);
+  }
+  for (const x of plan.excluded) p("em-plan-excl", `${x.name} — ${t(`em.ex.${x.reason}`)}`).dataset.planExcluded = x.reason;
+  for (const w of plan.warnings.slice(0, 8)) p("em-plan-warn", `⚠ ${w.text}`).dataset.planWarning = w.code;
+  if (plan.warnings.length > 8) p("em-plan-warn", t("al.removeMore", { n: String(plan.warnings.length - 8) }));
+  return box;
+}
+
+/** write a plan of s3Dgraphy in the document: ONE step of undo */
+function applyPyEdges(st: DocumentStore, remove: PyEdge[], add: PyEdge[]): void {
+  for (const r of remove) {
+    const e = st.doc.graph.edges.find((x) => x.source === r.source && x.target === r.target && x.edge_type === r.edge_type);
+    if (e) st.deleteEdge(e);
+  }
+  for (const a of add) if (!st.hasEdge(a.source, a.target, a.edge_type) && st.node(a.source) && st.node(a.target)) st.addEdge(a.source, a.target, a.edge_type);
+}
+
+/** The command: the plan asked, shown (a single node without notes goes
+ *  straight when `quiet`), written. An old bridge: the page's own rule for one node. */
+async function epochMoveSelection(ids: string[], epoch: string, mode: "move" | "extend", o: { quiet?: boolean } = {}): Promise<boolean> {
+  const st = store;
+  if (!st || refuseReadOnly()) return false;
+  const ask = (withOwn: boolean) => postGraph<{ plan: PyEpochPlan }>("/graph/epoch-move", { doc: st.doc, ids, epoch, mode, with_own: withOwn });
+  let j = await ask(false);
+  if (!j.ok || !j.plan) {
+    if (j.status === 404 && ids.length === 1) return epochGesture(ids[0], mode, epoch);
+    toast(String(j.error ?? j.status));
+    return false;
+  }
+  let plan = j.plan;
+  const ep = String(st.node(epoch)?.name ?? epoch);
+  if (!plan.items.length && !plan.own_choice.length) {
+    toast(plan.excluded.length ? `${t("em.nothing", { epoch: ep })} — ${plan.excluded.map((x) => `${x.name}: ${t(`em.ex.${x.reason}`)}`).join(" · ")}` : t("em.nothing", { epoch: ep }));
+    return false;
+  }
+  const simple = o.quiet && ids.length === 1 && plan.items.length === 1 && !plan.own_choice.length && !plan.warnings.length && !plan.excluded.length;
+  if (!simple) {
+    const holder = document.createElement("div");
+    const draw = () => holder.replaceChildren(epochPlanBody(st, plan, (on) => {
+      void ask(on).then((r) => { if (r.ok && r.plan) { plan = r.plan; draw(); } });
+    }));
+    draw();
+    const a = await openDialog({ kind: "epoch-move", title: t(mode === "extend" ? "em.titleExtend" : "em.titleMove", { epoch: ep }),
+      body: holder, ok: t(mode === "extend" ? "em.okExtend" : "em.okMove", { n: String(plan.items.length) }) });
+    if (!a.ok || !plan.items.length) return false;
+  }
+  st.batch(() => applyPyEdges(st, plan.remove, plan.add));
+  const msg = t(mode === "extend" ? "em.doneExtend" : "em.doneMove", { n: String(plan.items.length), epoch: ep });
+  logInfo(msg, [...plan.items.map((x) => x.id), epoch]);
+  toastUndo(msg, st);
+  refreshInspector();
+  return true;
+}
+
+/** MICRO-TESTATE-COERENTI p.11 · «Segui il container»: a member drops the epoch
+ *  of its own choice and lives again in its container's (the epochs reaching
+ *  it, and an RM's old own edges, go — one step of undo) */
+function followContainer(id: string): void {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  const gone = st.doc.graph.edges.filter((e) => (e.target === id && e.edge_type === "has_representation_model" && st.node(e.source)?.node_type === "EpochNode")
+    || (e.source === id && (e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch") && st.node(e.target)?.node_type === "EpochNode"));
+  if (!gone.length) return;
+  st.batch(() => { for (const e of [...gone]) st.deleteEdge(e); });
+  const gid = st.doc.graph.edges.find((e) => e.source === id && e.edge_type === "is_in_representation_model_group")?.target;
+  const msg = t("ep.followed", { name: String(st.node(id)?.name ?? id), group: String(st.node(gid ?? "")?.name ?? gid ?? "") });
+  logInfo(msg, [id]);
+  toastUndo(msg, st);
+  refreshInspector();
+}
+
+// ── MICRO-TESTATE-COERENTI p.8 · a model's kind: RM · RMDoc · RMSF ─────────────
+//
+// The criterion of each is the datamodel's (node datamodel 1.6.44, scope_note),
+// read here, not written; the edges that change are s3Dgraphy's
+// (`epoch_scope.plan_model_kind`), shown before and written in one step.
+
+const MODEL_KINDS: { kind: "RM" | "RMDoc" | "RMSF"; nt: string; cls: string }[] = [
+  { kind: "RM", nt: "representation_model", cls: "RepresentationModelNode" },
+  { kind: "RMDoc", nt: "representation_model_doc", cls: "RepresentationModelDocNode" },
+  { kind: "RMSF", nt: "representation_model_sf", cls: "RepresentationModelSpecialFindNode" },
+];
+
+/** the datamodel's criterion of a class, its first sentence after «THE CRITERION» */
+function kindCriterion(cls: string): string {
+  const dm = nodeDatamodel as unknown as Record<string, Record<string, { scope_note?: string; label?: string }>>;
+  for (const block of Object.values(dm)) {
+    const c = block && typeof block === "object" ? (block as Record<string, { scope_note?: string }>)[cls] : undefined;
+    const sn = c?.scope_note;
+    if (sn) { const i = sn.indexOf("THE CRITERION"); return (i >= 0 ? sn.slice(i) : sn).replace(/^THE CRITERION \([^)]*\):\s*/, ""); }
+  }
+  return "";
+}
+
+interface PyKindPlan { id: string; name: string; from: string; to: string; add: PyEdge[]; remove: PyEdge[]; dropped: { edge: PyEdge; reason: string }[]; needs: null | "document" | "unit" }
+
+/** the Inspector's «Tipo: RM · RMDoc · RMSF», with the criterion in its «?» */
+function renderModelKind(id: string): HTMLElement | null {
+  const st = store;
+  const n = st?.node(id);
+  if (st && n?.node_type === "RepresentationModelNodeGroup") {
+    // MICRO-TESTATE-COERENTI p.9 · the container's bonds in one line, and its card
+    const sec = document.createElement("div");
+    sec.className = "insp-ccard";
+    sec.dataset.inspCcard = id;
+    const h = document.createElement("h3");
+    h.className = "insp-sect";
+    h.textContent = t("cc.sect");
+    h.append(" ", helpGlyph(t("cc.help"), "container-card"));
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "insp-btn";
+    b.dataset.ccardOpen = id;
+    b.textContent = t("cc.open");
+    b.addEventListener("click", () => { void openContainerCard(id); });
+    sec.append(h, b);
+    void containerLinksOf(id).then((l) => { if (l && sec.isConnected) h.after(containerLinksLine(l)); });
+    return sec;
+  }
+  if (!st || !n || !MODEL_KINDS.some((k) => k.nt === n.node_type)) return null;
+  const sec = document.createElement("div");
+  sec.className = "insp-kind";
+  sec.dataset.modelKind = String(n.node_type);
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("mk.sect");
+  h.append(" ", helpGlyph(MODEL_KINDS.map((k) => `${k.kind}: ${kindCriterion(k.cls)}`).join("\n\n"), "model-kind"));
+  sec.appendChild(h);
+  const bar = document.createElement("div");
+  bar.className = "insp-actions insp-kind-bar";
+  for (const k of MODEL_KINDS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "insp-btn" + (k.nt === n.node_type ? " insp-btn-current" : "");
+    b.dataset.kind = k.kind;
+    b.textContent = k.nt === n.node_type ? `✓ ${k.kind}` : k.kind;
+    b.setAttribute("aria-pressed", String(k.nt === n.node_type));
+    b.title = kindCriterion(k.cls);
+    if (k.nt !== n.node_type) b.addEventListener("click", () => { void changeModelKind(id, k.kind); });
+    bar.appendChild(b);
+  }
+  sec.appendChild(bar);
+  return sec;
+}
+
+/** pick a node of a kind (a document for an RMDoc, a special find for an RMSF) */
+async function pickNodeOf(title: string, nodes: EmNode[]): Promise<string | null> {
+  if (!nodes.length) { toast(t("mk.noneToPick")); return null; }
+  const sel = document.createElement("select");
+  sel.className = "app-dialog-select";
+  for (const x of nodes.slice().sort((a, b) => String(a.name ?? a.id).localeCompare(String(b.name ?? b.id), undefined, { numeric: true }))) {
+    const o = document.createElement("option");
+    o.value = x.id;
+    o.textContent = `${String(x.name ?? x.id)}${x.description ? ` — ${String(x.description).slice(0, 60)}` : ""}`;
+    sel.appendChild(o);
+  }
+  const a = await openDialog({ kind: "model-kind-pick", title, body: sel });
+  return a.ok ? sel.value : null;
+}
+
+async function changeModelKind(id: string, kind: "RM" | "RMDoc" | "RMSF", extra: { document?: string; unit?: string } = {}): Promise<boolean> {
+  const st = store;
+  if (!st || refuseReadOnly()) return false;
+  const j = await postGraph<{ plan: PyKindPlan }>("/graph/model-kind", { doc: st.doc, id, kind, ...extra });
+  if (!j.ok || !j.plan) { toast(String(j.error ?? j.status)); return false; }
+  const plan = j.plan;
+  if (plan.needs === "document") {
+    const d = await pickNodeOf(t("mk.pickDocument"), st.liveNodes().filter((x) => x.node_type === "document"));
+    return d ? changeModelKind(id, kind, { ...extra, document: d }) : false;
+  }
+  if (plan.needs === "unit") {
+    const u = await pickNodeOf(t("mk.pickUnit"), st.liveNodes().filter((x) => dmClassIsA(dmClassOf(x.node_type), "SpecialFindUnit")));
+    return u ? changeModelKind(id, kind, { ...extra, unit: u }) : false;
+  }
+  const nm = (x: string) => String(st.node(x)?.name ?? x);
+  const line = (e: PyEdge) => `${nm(e.source)} —${e.edge_type}→ ${nm(e.target)}`;
+  const body = document.createElement("div");
+  body.className = "mk-plan";
+  body.dataset.kindPlan = kind;
+  const para = (cls: string, text: string) => { const e = document.createElement("p"); e.className = cls; e.textContent = text; body.appendChild(e); };
+  para("mk-crit", kindCriterion(MODEL_KINDS.find((k) => k.kind === kind)!.cls));
+  for (const e of plan.remove) para("mk-rem", `− ${line(e)}`);
+  for (const e of plan.add) para("mk-add", `+ ${line(e)}`);
+  for (const d of plan.dropped) para("mk-drop", `⚠ ${line(d.edge)} — ${t(`mk.drop.${d.reason}`)}`);
+  if (!plan.remove.length && !plan.add.length) para("mk-none", t("mk.noEdges"));
+  const a = await openDialog({ kind: "model-kind", title: t("mk.title", { name: plan.name, from: unitTypeLabel(plan.from), to: kind }), body, ok: t("mk.ok", { kind }) });
+  if (!a.ok) return false;
+  st.batch(() => {
+    st.updateNode(id, { node_type: plan.to } as Partial<EmNode>);
+    applyPyEdges(st, plan.remove, plan.add);
+  });
+  const msg = t("mk.done", { name: plan.name, kind });
+  logInfo(msg, [id]);
+  toastUndo(msg, st);
+  refreshInspector();
+  return true;
 }
 
 /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the extractors with a valence in 3D: an
@@ -12382,6 +12737,8 @@ function extractorMarks(winId?: string): SceneMark[] {
   const hidden = new Set(p.hidden);
   const forced = new Set(p.forced ?? []);
   const marks: SceneMark[] = [];
+  // MICRO-TESTATE-COERENTI p.1 · the category «Estrattori 3D» of «Visibilità ▾»
+  if (!space3dShown("s3_x3d", winId ?? spaceWinId())) { x3dMarksMemo = null; return marks; }
   for (const [docId, xs] of extractors3d(st.doc)) {
     const lit = !!cur && docLitIn(docId, cur);
     for (const x of xs) {
@@ -12785,9 +13142,11 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     texts: () => ({ dim: uoDimWords(), noEpoch: t("uo.noEpoch"), typeLabel: unitTypeLabel, sourceNone: t("uo.noFile"), empty: t("uo.empty"),
                     noSources: t("uo.noSources"),
                     space: { proxies: t("uo.sp.proxies"), models: t("uo.sp.models"), rmdoc: t("uo.sp.rmdoc"), rmsf: t("uo.sp.rmsf"), gis: t("uo.sp.gis"),
-                             x3d: t("uo.sp.x3d"), sketches: t("s3.sketches"), x3dOff: t("uo.x3dGhost") },
+                             x3d: t("uo.sp.x3d"), sketches: t("s3.sketches"), x3dOff: t("uo.x3dGhost"),
+                             survives: (from) => t("uo.sp.survives", { from }), survivesMark: "⟲" },
                     container: { alternative: t("uo.c.alternative"), livesIn: (e) => t("uo.c.livesIn", { epochs: e }),
-                                 outOfStep: (n, theirs, ref) => t("al.epochsOut", { n: String(n), theirs, ref }), follows: t("uo.c.follows") } }),
+                                 outOfStep: (n, theirs, ref) => t("al.epochsOut", { n: String(n), theirs, ref }), follows: t("uo.c.follows"),
+                                 ownChoice: (e) => t("uo.c.ownChoice", { epochs: e }) } }),
     opts: () => unifiedOptsOf(win),
     toggled: () => new Set((winCurrent(win, "outliner.toggled") as string[] | null) ?? []),
     setToggled: (s) => setWinCurrent(win, "outliner.toggled", s.size ? [...s] : null),
@@ -12840,6 +13199,23 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     epochDrop: (r: URow, epoch: string, extend: boolean) => { if (r.id) void epochGesture(r.id, extend ? "extend" : "move", epoch, r.epochAt || null); },
     dropLabel: (r: URow, epoch: string, extend: boolean) => (r.id && r.slot === emtree.activeId ? epochDropLabel(r.id, epoch, extend, r.epochAt || null) : null),
     // p.1 · a container out of step: «Allinea le epoche dei membri…» (MICRO-SPAZIO-CONTAINER's)
+    follow: (r: URow) => { if (r.id) followContainer(r.id); },
+    // MICRO-TESTATE-COERENTI p.10a (E.D., dev.121: SM_OB_PRATO_LOD1 dragged onto
+    // Survey2015 did nothing) · the Assets' rule: in (a move from its container;
+    // with Alt, added — m:n), out of its container onto «Models»
+    containerDropLabel: (r: URow, gid: string, from: string | null, add: boolean) => {
+      if (!r.id) return null;
+      if (!gid) return from ? t("uo.c.dropOut", { group: String(store?.node(from)?.name ?? from) }) : null;
+      return t(add || !from ? "uo.c.dropIn" : "uo.c.dropMove", { group: String(store?.node(gid)?.name ?? gid) });
+    },
+    containerDrop: (r: URow, gid: string, from: string | null, add: boolean) => {
+      if (!r.id) return;
+      const name = String(store?.node(r.id)?.name ?? r.id);
+      if (!gid && from) void containerOp("leave", { group: from, ids: [r.id] }, t("uo.c.leftSay", { name, group: String(store?.node(from)?.name ?? from) }));
+      else if (gid) void containerOp("member", { group: gid, ids: [r.id], ...(from && !add ? { move_from: from } : {}) },
+        t("uo.c.enteredSay", { name, group: String(store?.node(gid)?.name ?? gid) }));
+    },
+    followWord: t("ep.follow"),
     warnMenu: (r: URow, at: { x: number; y: number }) => {
       if (!r.id) return;
       const c = { id: r.id, name: r.label };
@@ -12865,6 +13241,24 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
   };
 }
 
+/** MICRO-TESTATE-COERENTI p.2 · the category of «Visibilità ▾» a Space key falls in */
+function categoryOfKey(k: string): OverlayKey | null {
+  if (k.startsWith("proxy:")) return "s3_proxies";
+  if (k.startsWith("sketch:")) return "s3_sketches";
+  if (k.startsWith("x3d:")) return "s3_x3d";
+  if (k.startsWith("rm:")) {
+    const r = currentSpace()?.rms.find((x) => x.id === k.slice(3));
+    return r ? rmLayerOf(r) : "s3_rm";
+  }
+  return null;
+}
+/** …turned back on from the mark of a row or the line of the scene (one gesture, the same state) */
+function turnCategoryOn(cat: OverlayKey): void {
+  const w = spaceWinId();
+  setOverlays("space", withOverlay(overlaysOfWin(w, "space"), cat, true), w ?? undefined);
+  refreshSurfaces("scene");
+}
+
 /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the controls of the old Outliner of the
  *  scene on the one Outliner's rows, in the Space: the same functions, the same
  *  local preferences (`emstudio.space3d`) */
@@ -12877,6 +13271,13 @@ function spaceRowDeps(): SpaceRowDeps {
   };
   const membersOfRow = (gid: string) => (currentSpace()?.rms ?? []).filter((x) => x.group === gid && !x.resource?.tiles).map((x) => x.id);
   return {
+    categoryOff: (k) => {
+      const cat = categoryOfKey(k);
+      if (!cat || space3dShown(cat)) return null;
+      const label = t(`vis.cat.${cat}`);
+      return { key: cat, label, title: t("vis.rowOff", { cat: label }) };
+    },
+    categoryOn: (cat) => turnCategoryOn(cat as OverlayKey),
     lockOpen: (k) => !space3dPrefs().locked.includes(k),
     toggleLock: (k) => {
       const p = space3dPrefs();
@@ -12998,6 +13399,18 @@ function unifiedReveal(id: string): void {
  *  of the EMTree), an auxiliary file (map, unmap, remove) */
 function unifiedMenu(r: URow, anchor: HTMLElement): void {
   const box = anchor.getBoundingClientRect();
+  if ((r.kind === "node" || r.kind === "sub") && r.id) {
+    // the selection's, when the row is in it; the row's own otherwise
+    const sel = epochSelection();
+    const ids = sel.includes(r.id) ? sel : [r.id];
+    spaceMenu(box.left, box.bottom + 2, ids.length > 1 ? tn("sel.count", ids.length) : r.label, [
+      { label: t("em.ctxMove"), act: "epoch-move", run: () => openEpochMoveMenu(false, { x: box.left, y: box.bottom + 2 }, ids) },
+      { label: t("em.ctxExtend"), act: "epoch-extend", run: () => openEpochMoveMenu(true, { x: box.left, y: box.bottom + 2 }, ids) },
+      ...(store?.node(r.id)?.node_type === "RepresentationModelNodeGroup"
+        ? ["sep" as const, { label: t("cc.open"), act: "container-card", run: () => { void openContainerCard(r.id!); } }] : []),
+    ]);
+    return;
+  }
   if (r.kind === "graph" && r.slot) { openGraphMenu(r.slot, anchor); return; }
   if (r.kind === "source") {
     const fid = r.source ?? "";
@@ -16401,7 +16814,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 68;   // 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 69;   // 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -21056,6 +21469,7 @@ function renderOverlayPanel(): void {
   }
   const can = new Set(overlayItemsFor(v).map((i) => i.key));
   for (const g of OVERLAY_GROUPS) {
+    if (g.door) continue;   // MICRO-TESTATE-COERENTI p.1 · the categories: «Visibilità ▾»
     const items = g.items.filter((i) => can.has(i.key));
     // MICRO-GIZMO-ASSI · the Space's «Geometry»: sliders, no switch
     const values = v === "space" ? g.values ?? [] : [];
@@ -29978,8 +30392,12 @@ const sceneHandles = new Map<string, SpaceSceneHandle>();
 /** MICRO-SPAZIO-COMPATTO p.1 · each Space's bar (epochs, layers, ⤢, Territory),
  *  drawn IN its window's header: one row instead of two */
 const sceneBars = new Map<string, HTMLElement>();
+/** MICRO-TESTATE-COERENTI p.3 · the tail of a 3D window's bar (Visibilità ▾ · 🔍 · ⋯), at the end of its head */
+const sceneTails = new Map<string, HTMLElement>();
 /** MICRO-RIFINITURE p.6 · per Space window, the «Livelli» section of its data panel */
 const spaceLayerSections = new Map<string, () => HTMLElement>();
+/** MICRO-TESTATE-COERENTI p.1/p.2 · per 3D window, open its «Visibilità ▾» (on a category) */
+const visOpeners = new Map<string, (cat?: OverlayKey) => void>();
 /** the ornament id of a unit's «ha 3D» badge: not a node, a door */
 const HAS3D_BADGE = "has3d:";
 /** MICRO-MATRIX-FASI p.3 · …and of a document's «RMDoc» badge (+ the RMDoc's id) */
@@ -30064,11 +30482,12 @@ function openEpochInSpace(epochId: string): void {
 /** the overlays that are CONTENT (what is drawn), not decorators: the general
  *  switch leaves them as they are — switching the overlays off does not empty
  *  the scene, as in Blender */
-const CONTENT_3D = new Set<OverlayKey>(["s3_proxies", "s3_rm", "s3_tiles", "s3_sketches", "s3_proxy_wire", "s3_rmdoc"]);
+const CONTENT_3D = new Set<OverlayKey>(["s3_proxies", "s3_rm", "s3_tiles", "s3_sketches", "s3_proxy_wire", "s3_rmdoc", "s3_rmsf", "s3_x3d"]);
 /** MICRO-OUTLINER-UNICO · an RMDoc (a document placed in space) is the layer «RMDoc», not «RM» */
 function rmLayerOf(r: { id: string; resource?: { tiles?: string } | null }): OverlayKey {
   if (r.resource?.tiles) return "s3_tiles";
-  return store?.node(r.id)?.node_type === "representation_model_doc" ? "s3_rmdoc" : "s3_rm";
+  const nt = store?.node(r.id)?.node_type;
+  return nt === "representation_model_doc" ? "s3_rmdoc" : nt === "representation_model_sf" ? "s3_rmsf" : "s3_rm";
 }
 /** MICRO-OVERLAY-PER-FINESTRA · the 3D window whose overlays a question about
  *  «the Space» answers when none is named: the focused one, else the first */
@@ -33189,8 +33608,9 @@ function useAlternativeFrom(rmId: string, x: number, y: number): void {
 /** MICRO-RIFINITURE p.6 · the Outliner, and the scene's «Livelli» under its head */
 function renderOutlinerAndLayers(el: HTMLElement, win: Win, ...rest: [Parameters<typeof renderOutliner>[1], Parameters<typeof renderOutliner>[2]]): void {
   renderOutliner(el, ...rest);
-  const sec = spaceLayerSections.get(win.id)?.();
-  if (sec) el.querySelector(".sol-head")?.after(sec);
+  // MICRO-TESTATE-COERENTI p.1 · the «Livelli della scena» are no longer here:
+  // «Visibilità ▾» in the 3D window's head is the one place of the categories
+  void win;
   // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the one Outliner does what this panel did
   // (the scene's view): it stays behind T for one more version, and says so
   if (unifiedOutlinerOnScreen()) {
@@ -33369,6 +33789,8 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     addShape: (id, drop) => addShapeIn(win, id, drop),
     // MICRO-SPAZIO-COMPATTO p.2 · «+ Forma ▾»: Shift+A's menu, under the button
     addMenu: (x, y) => openShapeMenu(x, y, win),
+    searchInHead: true,
+    addInHead: true,
   });
 }
 
@@ -33432,10 +33854,20 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   // it is not the header's (no drag of the window, no magnify on a double click)
   for (const ev of ["pointerdown", "dblclick"]) bar.addEventListener(ev, (e) => e.stopPropagation());
   sceneBars.set(win.id, bar);
+  // MICRO-TESTATE-COERENTI p.3 · the bar's tail — «Visibilità ▾», 🔍, «⋯» — goes to
+  // the END of the head (after its space, before ⛶), as in every other window
+  const tail = document.createElement("span");
+  tail.className = "scn-bar-tail";
+  tail.dataset.hdr = "filters";
+  sceneTails.set(win.id, tail);
   const placeBar = () => {
     const strip = body.closest<HTMLElement>(".tile-area")?.querySelector<HTMLElement>(":scope > .tile-bar .win-strip-scene");
     if (strip && bar.parentElement !== strip) strip.appendChild(bar);
     else if (!strip && !bar.parentElement) wrap.prepend(bar);
+    const head = strip?.closest<HTMLElement>(".tile-bar");
+    const sep = head?.querySelector<HTMLElement>(":scope > .win-sep");
+    if (head && sep) { if (tail.previousElementSibling !== sep) sep.after(tail); }
+    else if (tail.parentElement !== bar) bar.appendChild(tail);
   };
   // MICRO-SPAZIO-3D · the Outliner on the left (T), the scene on the right
   const row = document.createElement("div");
@@ -33518,6 +33950,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   let selBeforePick: SpaceSel | null = null;
   /** MICRO-SPAZIO-CONTAINER p.9 · the late reading of an empty scene of tilesets */
   let whyTimer = 0;
+  let viewTimer = 0;
   const handle = mountSpaceScene(host, {
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
@@ -33710,7 +34143,119 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   // MICRO-RIFINITURE p.6 · the «Livelli» of the scene at the head of the data panel:
   // Models, Proxies (each shown or hidden, and its opacity), the Territory (and
   // the globe's «Livelli» inside it), the GIS layers as documents of the graph
+  // MICRO-TESTATE-COERENTI p.1 · the «Livelli» of the data panel are GONE: the
+  // categories are switched in «Visibilità ▾» (below), the one place; the GIS
+  // part (the territory, EPSG, a GIS file brought in) is its «Territorio / GIS» row
   const layersOpen = { on: true };
+  void layersOpen;
+  const visCounts = (): Partial<Record<OverlayKey, number>> => {
+    const sp = currentSpace();
+    const ep = sp ? spaceEpochOf(sp) : null;
+    const sum = sp && ep ? sp.summary(ep) : null;
+    const out: Partial<Record<OverlayKey, number>> = { s3_rm: 0, s3_tiles: 0, s3_rmdoc: 0, s3_rmsf: 0, s3_proxies: 0, s3_sketches: listSketches().length, s3_x3d: 0 };
+    for (const r of sum?.rms ?? []) { const k = rmLayerOf(r); out[k] = (out[k] ?? 0) + 1; }
+    out.s3_proxies = (sum?.withProxy ?? []).filter((u) => sp!.proxies.has(u)).length;
+    if (store && ep) for (const [docId, xs] of extractors3d(store.doc)) if (docLitIn(docId, ep)) out.s3_x3d = (out.s3_x3d ?? 0) + xs.length;
+    return out;
+  };
+  const visOff = (): OverlayKey[] => VISIBILITY_KEYS.filter((k) => !space3dShown(k, win.id));
+  const VIS_OPACITY: Partial<Record<OverlayKey, OverlayValueKey>> = { s3_rm: "s3_opacity_rm", s3_proxies: "s3_opacity_proxy" };
+  const visibilityBody = (): HTMLElement => {
+    const box = document.createElement("div");
+    box.className = "vis-body";
+    box.dataset.visBody = "1";
+    const ovs = () => overlaysOfWin(win.id, "space");
+    const counts = visCounts();
+    const head = document.createElement("div");
+    head.className = "vis-head";
+    const all = (on: boolean) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "sol-btn";
+      b.dataset.visAll = on ? "on" : "off";
+      b.textContent = t(on ? "vis.all" : "vis.none");
+      b.addEventListener("click", () => {
+        let st = ovs();
+        for (const k of VISIBILITY_KEYS) st = withOverlay(st, k, on);
+        setOverlays("space", st, win.id);
+        redrawVis();
+      });
+      return b;
+    };
+    head.append(all(true), all(false), helpGlyph(t("vis.help"), "visibility"));
+    box.appendChild(head);
+    for (const k of VISIBILITY_KEYS) {
+      const r = document.createElement("div");
+      r.className = "sol-lay-row vis-row";
+      r.dataset.visRow = k;
+      const lab = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = space3dShown(k, win.id);
+      cb.dataset.visCb = k;
+      cb.addEventListener("change", () => { setOverlays("space", withOverlay(ovs(), k, cb.checked), win.id); redrawVis(); });
+      const nm = document.createElement("span");
+      nm.textContent = t(`vis.cat.${k}`);
+      const n = document.createElement("span");
+      n.className = "vis-count";
+      n.dataset.visCount = String(counts[k] ?? 0);
+      n.textContent = String(counts[k] ?? 0);
+      n.title = t("vis.countTitle");
+      lab.append(cb, nm, n);
+      r.appendChild(lab);
+      const value = VIS_OPACITY[k];
+      if (value) {
+        const op = document.createElement("input");
+        op.type = "range"; op.min = "0.05"; op.max = "1"; op.step = "0.01";
+        op.className = "sol-lay-op";
+        op.value = String(overlayValue(ovs(), value));
+        op.title = t("lay.opacity");
+        op.addEventListener("change", () => setOverlays("space", withValue(ovs(), value, Number(op.value)), win.id));
+        r.appendChild(op);
+      }
+      box.appendChild(r);
+    }
+    // the territory and the GIS (EPSG, a GIS file brought into the graph): a row of the menu
+    const geo = document.createElement("details");
+    geo.className = "vis-geo";
+    geo.dataset.visRow = "territory";
+    geo.open = visGeoOpen;
+    geo.addEventListener("toggle", () => { visGeoOpen = geo.open; });
+    const gs = document.createElement("summary");
+    gs.textContent = `${t("vis.cat.territory")}${geoSpace.isOn() ? "" : ` · ${t("vis.offShort")}`}`;
+    geo.append(gs, geoSpace.section(), gisSpace.section());
+    box.appendChild(geo);
+    return box;
+  };
+  let visGeoOpen = false;
+  let visMenu: HTMLElement | null = null;
+  const closeVis = () => { visMenu?.remove(); visMenu = null; document.removeEventListener("pointerdown", visOutside, true); document.removeEventListener("keydown", visKey, true); };
+  const visOutside = (e: Event) => { const el = e.target as HTMLElement; if (visMenu && !visMenu.contains(el) && !el.closest("[data-vis]")) closeVis(); };
+  const visKey = (e: KeyboardEvent) => { if (e.key === "Escape" && visMenu) { e.stopPropagation(); closeVis(); } };
+  const redrawVis = () => { if (visMenu) { visMenu.replaceChildren(visibilityBody()); } refresh(); };
+  const openVis = (anchor: HTMLElement, territory = false) => {
+    if (visMenu) { closeVis(); return; }
+    if (territory) visGeoOpen = true;
+    const m = document.createElement("div");
+    m.className = "ctx-menu vis-menu";
+    m.dataset.visMenu = win.id;
+    const r = anchor.getBoundingClientRect();
+    m.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 340))}px`;
+    m.style.top = `${r.bottom + 4}px`;
+    for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) m.addEventListener(ev, (e) => e.stopPropagation());
+    m.appendChild(visibilityBody());
+    document.body.appendChild(m);
+    keepOnScreen(m);
+    visMenu = m;
+    document.addEventListener("pointerdown", visOutside, true);
+    document.addEventListener("keydown", visKey, true);
+  };
+  visOpeners.set(win.id, (cat?: OverlayKey) => {
+    const b = tail.querySelector<HTMLElement>("[data-vis]");
+    if (!b) return;
+    if (!visMenu) openVis(b);
+    if (cat) visMenu?.querySelector<HTMLElement>(`[data-vis-row="${cat}"]`)?.classList.add("vis-flash");
+  });
   const spaceLayersSection = (): HTMLElement => {
     const box = document.createElement("details");
     box.className = "sol-layers";
@@ -33754,6 +34299,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   spaceLayerSections.set(win.id, spaceLayersSection);
   gisSpaces.set(win.id, gisSpace);   // MICRO-OUTLINER-UNICO · the eyes of the Outliner's GIS branch
   const onBar = (e: Event) => {
+    const vb = (e.target as HTMLElement).closest<HTMLElement>("[data-vis]");
+    if (vb) { e.stopPropagation(); openVis(vb); return; }
+    // the globe's chip turns the territory on and off no more: that is a category,
+    // switched in «Visibilità ▾» (it opens there, on «Territorio / GIS»)
+    const gt = (e.target as HTMLElement).closest<HTMLElement>("[data-geo='toggle']");
+    if (gt) { e.stopPropagation(); const v2 = tail.querySelector<HTMLElement>("[data-vis]"); if (v2) { closeVis(); openVis(v2, true); } return; }
     if (geoSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     if (gisSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     const hwb = (e.target as HTMLElement).closest<HTMLElement>("[data-hw]");
@@ -33797,6 +34348,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     refresh();
   };
   bar.addEventListener("click", onBar);
+  tail.addEventListener("click", onBar);
   // p.3 · the epochs' menu: a choice is the click on that epoch's button
   bar.addEventListener("change", (e) => {
     const pick = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-epoch-pick]");
@@ -33931,16 +34483,31 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // profile ⚙; Models, Proxies, Territory, Layers and GIS are sections of the
     // data panel (`spaceLayersSection`), ⤢ and «Vai al sito» in the menu «⋯»
     void tog; void fr;
+    // MICRO-TESTATE-COERENTI p.1 · «Visibilità ▾»: the categories, in one place; the
+    // button says at a glance when something is off («Visibilità · 1 spenta»)
+    const off = visOff();
+    const cnt = visCounts();
+    const offHere = off.filter((k) => (cnt[k] ?? 0) > 0);
+    const vis = document.createElement("button");
+    vis.type = "button";
+    vis.className = "scn-tg scn-vis" + (offHere.length ? " vis-off" : off.length ? " vis-off-quiet" : "");
+    vis.dataset.vis = String(off.length);
+    vis.dataset.hdr = "filters";
+    vis.dataset.visOffHere = String(offHere.length);
+    vis.textContent = offHere.length ? `${t("vis.title")} · ${tn("vis.off", offHere.length)} ▾` : `${t("vis.title")} ▾`;
+    vis.title = off.length ? `${t("vis.offList")}: ${off.map((k) => t(`vis.cat.${k}`)).join(", ")}` : t("vis.tip");
     const more = document.createElement("button");
     more.type = "button";
     more.className = "scn-tg scn-more";
     more.dataset.act = "more";
     more.textContent = "⋯";
     more.title = t("lay.moreTitle");
+    more.dataset.hdr = "more";
     seg.classList.toggle("scn-seg-hz", hzOn);
     // EXPERIMENTAL · Epochs ⇄ Horizons and the site's marks («Funzioni sperimentali» on)
     bar.append(back, ...(EXPERIMENTAL ? [bands] : []), lab, seg, ...geoSpace.barButtons(),
-      ...(EXPERIMENTAL ? spaceButtons(win.id) : []), hwb, more);
+      ...(EXPERIMENTAL ? spaceButtons(win.id) : []), hwb);
+    tail.replaceChildren(vis, sceneSearch(win), more);
     gisSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
@@ -34015,9 +34582,14 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // MICRO-SPAZIO-COMPATTO p.4 · folded by default (a chip on the view's line): «summary:open» unfolds it
     const folded = !(prefs.collapsed ?? []).includes("summary:open");
     const fold = `<button type="button" class="scn-fold" data-fold="summary" aria-expanded="${!folded}">${folded ? "▸" : "▾"}</button>`;
+    // MICRO-TESTATE-COERENTI p.2 · a category switched off that has something in this
+    // epoch is said on the line, with the same link that turns it back on
+    const cnt0 = visCounts();
+    const catsOff = VISIBILITY_KEYS.filter((k) => !space3dShown(k, win.id) && (cnt0[k] ?? 0) > 0)
+      .map((k) => ` · <button type="button" class="link vis-cat-off" data-cat-on="${k}" title="${escapeHtml(t("vis.rowOff", { cat: t(`vis.cat.${k}`) }))}">⊘ ${escapeHtml(t("vis.lineOff", { cat: t(`vis.cat.${k}`), n: String(cnt0[k]) }))}</button>`).join("");
     overlay.classList.toggle("folded", folded);
     if (folded) overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${escapeHtml(t("s3.foldedSummary", { rm: String(sum.rms.length), px: String(sum.withProxy.length), n: String(sum.units.length) }))}`
-      + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "");
+      + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "") + catsOff;
     else overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${rmPart}<br>`
       + `${escapeHtml(t(spaceBandsWin() ? "space.proxiesHz" : "space.proxies", { n: String(sum.withProxy.length), m: String(sum.units.length) }))}`
       + (sum.inScene.length ? ` <span class="ref" data-sum="inScene">${escapeHtml(t("space.inScene", { n: String(sum.inScene.length) }))}</span>` : "")
@@ -34029,7 +34601,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       + (spaceIsolated ? ` · <button type="button" class="link" data-unisolate="1">${escapeHtml(t("s3.showAll"))}</button>` : "")
       // MICRO-SPAZIO-3D-3 p.6 · the free sketches, a light warning that opens their list
       + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "")
-      + proxyFolderOffer(sum.without);
+      + proxyFolderOffer(sum.without) + catsOff;
     // MICRO-PANNELLI-LATERALI p.2 · folded, the line may be shortened: the whole in the tooltip
     if (folded) overlay.title = (overlay.textContent ?? "").replace(/^▸/, ""); else overlay.removeAttribute("title");
     overlay.querySelector<HTMLButtonElement>("[data-fold=summary]")?.addEventListener("click", (e) => {
@@ -34039,6 +34611,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     overlay.onclick = folded ? (e) => { if (!(e.target as HTMLElement).closest("button")) { e.stopPropagation(); foldPanel("summary:open", true); } } : null;
     overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); select(b.dataset.go!); refreshInspector();
+    }));
+    overlay.querySelectorAll<HTMLButtonElement>("[data-cat-on]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      turnCategoryOn(b.dataset.catOn as OverlayKey);
     }));
     overlay.querySelector<HTMLButtonElement>("[data-unisolate]")?.addEventListener("click", (e) => {
       e.stopPropagation(); spaceIsolated = null; refreshSurfaces("scene");
@@ -34157,8 +34733,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // renderer never asks a tile it does not see — the scene stayed empty for ever
     // (measured on the bench: the 2015 survey shown at its first frame, 0 B after
     // the camera had moved). Once per layer (`framedOnArrival`), as a dropped tileset
-    if (items.length && items.every((x) => x.kind === "rm" && !!x.tiles))
-      for (const x of items) x.frameOnArrival = true;
+    // MICRO-TESTATE-COERENTI p.6 (E.D., 13 Nov 2026, 12:16: «cambiare epoca non muove
+    // la camera») REPLACES that: no epoch change frames anything — the camera stays
+    // where it is; one frames with a gesture (⤢, Shift+D, the Outliner's «Inquadra»).
+    // When the camera then sees nothing of the epoch, the line of the empty scene
+    // says it and offers «⤢ inquadra» (below). A tileset dragged in from the Finder
+    // still frames itself at its first opening (`tilesHandoff`): that is a gesture.
     // MICRO-SPAZIO-CONTAINER p.9 (E.D., 13 Nov 2026: «2015 · 1 models · proxies 0 of 4»
     // and nothing in the scene) · an empty scene says why, in one line
     const drawable = items.filter((x) => x.kind === "proxy" || (x.state !== "missing" && x.state !== "refused" && !!x.url));
@@ -34170,11 +34750,40 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       line.className = "scn-why-empty miss";
       line.dataset.sum = "why-empty";
       line.textContent = `${t("space.why.title")}: ${why.length ? why.join(" · ") : t("space.why.unknown")}`;
+      // MICRO-TESTATE-COERENTI p.2 · the categories off, each with the link that turns it on
+      for (const k of VISIBILITY_KEYS.filter((x) => !space3dShown(x, win.id) && (visCounts()[x] ?? 0) > 0)) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "link vis-cat-off";
+        b.dataset.catOn = k;
+        b.textContent = ` ⊘ ${t("vis.turnOn", { cat: t(`vis.cat.${k}`) })}`;
+        b.addEventListener("click", (e) => { e.stopPropagation(); turnCategoryOn(k); });
+        line.appendChild(b);
+      }
       overlay.appendChild(line);
       if (folded) overlay.title = `${overlay.title}\n${line.textContent}`;
     }
     handle.update(items);
     handle.syncSketches();
+    // MICRO-TESTATE-COERENTI p.6 · the camera stays where it is at an epoch change:
+    // when it then sees nothing of the epoch the line says it and offers «⤢ inquadra»
+    // (it never frames on its own)
+    clearTimeout(viewTimer);
+    if (items.length) viewTimer = window.setTimeout(() => {
+      if (handle.inView?.() !== false || overlay.querySelector("[data-sum='out-of-view']")) return;
+      const line = document.createElement("div");
+      line.className = "scn-why-empty miss";
+      line.dataset.sum = "out-of-view";
+      line.append(`${t("space.outOfView")} `);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "scn-why-frame";
+      b.dataset.frame = "1";
+      b.textContent = `⤢ ${t("space.frameIt")}`;
+      b.addEventListener("click", (e) => { e.stopPropagation(); handle.frame(); line.remove(); });
+      line.appendChild(b);
+      overlay.appendChild(line);
+    }, 2500);
     // …and a scene of tilesets only whose roots have not arrived says it too,
     // once they had their time (the scene's own reading of its layers)
     clearTimeout(whyTimer);
@@ -34195,7 +34804,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     }, 12000);
   };
   refresh();
-  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); spaceLayerSections.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
 }
 
 /** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
@@ -47165,9 +47774,11 @@ function assetListView(win: Win): HTMLElement {
             w.append(c0, c1);
             tb.appendChild(w);
           };
-          if (chk?.no_epoch) warn("no-epoch", t("al.noEpoch"), "al-container-document", t("al.docGiveShort"), () => void giveContainerADocument(cont));
-          else if (chk && !chk.documents.length && !chk.own.length && !g.assets.some((a) => a.id !== cont.id && a.epochs.length))
-            warn("no-epoch", t("al.noEpoch"), "al-container-document", t("al.docGiveShort"), () => void giveContainerADocument(cont));
+          // MICRO-TESTATE-COERENTI p.9/p.11 · a container that declares no epoch or no
+          // document is INCOMPLETE: the warning opens its card (the suggestions there)
+          if (chk && (!chk.own.length || !chk.documents.length))
+            warn("incomplete", t("cc.incomplete", { what: [!chk.documents.length ? t("cc.box.document") : "", !chk.own.length ? t("cc.box.epoch") : ""].filter(Boolean).join(", ") }),
+              "al-container-card", t("cc.openShort"), () => void openContainerCard(cont.id));
           if (chk?.mismatched.length) {
             const out = chk.members.filter((m) => !m.ok);
             const theirs = [...new Set(out.flatMap((m) => m.epochs))];
@@ -48098,8 +48709,13 @@ async function newContainerAsked(ids: string[]): Promise<void> {
     validate: (v) => (v.trim() ? null : t("al.containerNeedsName")) });
   if (!a.ok) return;
   const d = nd.value(a.value.trim());
-  await containerOp("create", { label: a.value.trim(), epoch: ep.value, ids, ...(d.new ? { new_document: d.new } : { document: d.id }) },
-    t("al.containerCreated", { name: a.value.trim(), n: String(ids.length) }) + (d.new ? ` · ${t("al.docBorn", { doc: d.new.name })}` : ""));
+  const before = new Set(st.liveNodes().filter((n) => n.node_type === "RepresentationModelNodeGroup").map((n) => n.id));
+  if (await containerOp("create", { label: a.value.trim(), epoch: ep.value, ids, ...(d.new ? { new_document: d.new } : { document: d.id }) },
+    t("al.containerCreated", { name: a.value.trim(), n: String(ids.length) }) + (d.new ? ` · ${t("al.docBorn", { doc: d.new.name })}` : ""))) {
+    // p.9 · the same card at the birth of a container: what is still missing, suggested
+    const born = st.liveNodes().find((n) => n.node_type === "RepresentationModelNodeGroup" && !before.has(n.id));
+    if (born) void openContainerCard(born.id);
+  }
 }
 
 /** MICRO-SPAZIO-CONTAINER p.2 (E.D., 13 Nov 2026: «tutti gli asset 3D da rilievo
@@ -48200,12 +48816,213 @@ async function alignContainerEpochs(c: { id: string; name: string }): Promise<vo
   await containerOp("align", { group: c.id }, t("al.aligned", { name: c.name, n: String(ch.length) }));
 }
 
+// ── MICRO-TESTATE-COERENTI p.9 (E.D., dev.120, 12:36: «dalla riga del container non si
+// può né rinominarlo né associarlo ad altri nodi»; «da studiare come renderlo facile»)
+// · THE CARD «Completa il container»: four boxes — Pubblicato da · Epoca ·
+// Alternativa · Membri —, each with its «?» in one sentence, what it is now (✕ to
+// take it off, «Cambia…» / «Aggiungi…»), and on an empty one a SUGGESTION computed
+// from the graph (s3Dgraphy `container_links`) with «Accetta»; one «Accetta tutti»
+// with its preview. Every change is s3Dgraphy's rule (the bridge's op «card»), ONE
+// step of undo. Not modal: it stays while the graph changes, and it is reachable
+// always (Assets' row, the Inspector, the Outliner), complete or not.
+
+interface CardLinks {
+  group: string; name: string;
+  documents: { id: string; name: string }[]; epochs: { id: string; name: string }[];
+  alternatives: { id: string; name: string }[]; members: { id: string; name: string }[];
+  suggestions: { document: { id: string; name: string; why: { code: string; n?: number; of?: number } } | null;
+    epoch: { id: string; name: string; why: { code: string; n?: number; of?: number; document?: string } } | null;
+    alternative: { id: string; name: string; why: { code: string } } | null };
+}
+type CardStep = { op: string; [k: string]: unknown };
+
+/** the one line of a container's bonds: «pubblicato da D.01 · epoca 2015 · alternativa: X», the missing ones marked */
+function containerLinksLine(l: CardLinks): HTMLElement {
+  const p = document.createElement("div");
+  p.className = "ccard-line";
+  p.dataset.ccardLine = l.group;
+  const part = (key: string, xs: { name: string }[]) => {
+    const sp = document.createElement("span");
+    sp.className = xs.length ? "ccard-have" : "ccard-missing";
+    sp.dataset.ccardPart = key;
+    sp.textContent = xs.length ? t(`cc.line.${key}`, { what: xs.map((x) => x.name).join(", ") }) : t(`cc.miss.${key}`);
+    return sp;
+  };
+  p.append(part("document", l.documents), " · ", part("epoch", l.epochs), " · ", part("alternative", l.alternatives));
+  return p;
+}
+
+let ccardEl: HTMLElement | null = null;
+async function containerLinksOf(gid: string): Promise<CardLinks | null> {
+  const st = store;
+  if (!st) return null;
+  const j = await postGraph<{ links: CardLinks }>("/graph/container-links", { doc: st.doc, group: gid });
+  if (!j.ok || !j.links) { toast(String(j.error ?? j.status)); return null; }
+  return j.links;
+}
+/** apply steps on a container: ONE delta, one undo */
+async function cardApply(gid: string, steps: CardStep[], say: string): Promise<boolean> {
+  if (!steps.length) return false;
+  const ok = await containerOp("card", { group: gid, steps }, say);
+  if (ok && ccardEl?.dataset.ccard === gid) void openContainerCard(gid);
+  return ok;
+}
+
+/** pick a node among a kind (documents, epochs, tilesets, models) */
+async function cardPick(title: string, nodes: EmNode[]): Promise<string | null> {
+  return pickNodeOf(title, nodes);
+}
+
+async function openContainerCard(gid: string): Promise<void> {
+  const st = store;
+  if (!st) return;
+  const l = await containerLinksOf(gid);
+  if (!l) return;
+  const nm = (id: string) => String(st.node(id)?.name ?? id);
+  ccardEl?.remove();
+  const card = document.createElement("div");
+  card.className = "ccard";
+  card.dataset.ccard = gid;
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) card.addEventListener(ev, (e) => e.stopPropagation());
+  const head = document.createElement("div");
+  head.className = "ccard-head";
+  const h = document.createElement("b");
+  h.textContent = t("cc.title", { name: l.name });
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "ccard-x";
+  x.dataset.ccardClose = "1";
+  x.textContent = "✕";
+  x.title = t("cc.close");
+  x.addEventListener("click", () => { card.remove(); ccardEl = null; });
+  head.append(h, helpGlyph(t("cc.help"), "container-card"), x);
+  card.append(head, containerLinksLine(l));
+  const sug = l.suggestions;
+  const btn = (label: string, run: () => void, data: string, cls = "insp-btn") => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = cls;
+    b.dataset.ccardAct = data;
+    b.textContent = label;
+    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    return b;
+  };
+  const box = (key: "document" | "epoch" | "alternative" | "members", have: { id: string; name: string }[], removeStep: (id: string) => CardStep | null,
+               suggestion: { id: string; name: string; why: Record<string, unknown> } | null, acceptStep: (id: string) => CardStep, change: () => void) => {
+    const b = document.createElement("section");
+    b.className = "ccard-box" + (have.length ? "" : " ccard-empty");
+    b.dataset.ccardBox = key;
+    const bh = document.createElement("div");
+    bh.className = "ccard-box-head";
+    bh.append(t(`cc.box.${key}`), " ", helpGlyph(t(`cc.q.${key}`), `container-card-${key}`));
+    b.appendChild(bh);
+    const list = document.createElement("div");
+    list.className = "ccard-have-list";
+    for (const x0 of have.slice(0, key === "members" ? 6 : 99)) {
+      const chip = document.createElement("span");
+      chip.className = "ccard-chip";
+      chip.dataset.ccardHave = x0.id;
+      chip.textContent = x0.name;
+      const rs = removeStep(x0.id);
+      if (rs) chip.appendChild(btn("✕", () => { void cardApply(gid, [rs], t("cc.removed", { what: x0.name, name: l.name })); }, `remove-${key}`, "ccard-chip-x"));
+      list.appendChild(chip);
+    }
+    if (key === "members" && have.length > 6) list.append(` ${t("al.removeMore", { n: String(have.length - 6) })}`);
+    if (!have.length) { const e = document.createElement("span"); e.className = "ccard-none"; e.textContent = t("cc.none"); list.appendChild(e); }
+    b.appendChild(list);
+    if (suggestion && !have.length) {
+      const sg = document.createElement("div");
+      sg.className = "ccard-sugg";
+      sg.dataset.ccardSugg = key;
+      sg.append(t(`cc.sugg.${key}`, { name: suggestion.name, n: String(suggestion.why.n ?? ""), of: String(suggestion.why.of ?? ""), why: t(`cc.why.${String(suggestion.why.code)}`, { n: String(suggestion.why.n ?? ""), of: String(suggestion.why.of ?? ""), document: String(suggestion.why.document ?? "") }) }), " ");
+      sg.appendChild(btn(t("cc.accept"), () => { void cardApply(gid, [acceptStep(suggestion.id)], t("cc.accepted", { what: suggestion.name, name: l.name })); }, `accept-${key}`));
+      b.appendChild(sg);
+    }
+    b.appendChild(btn(t(have.length ? (key === "members" ? "cc.add" : "cc.changeAdd") : "cc.choose"), change, `change-${key}`, "sol-btn"));
+    card.appendChild(b);
+  };
+  const docs = () => st.liveNodes().filter((n) => n.node_type === "document");
+  const epochs = () => st.liveNodes().filter((n) => n.node_type === "EpochNode");
+  // the tilesets: an RM that hats one, or a tileset resource left without a hat
+  const tilesetRms = () => {
+    const sp = currentSpace();
+    const ids = new Set((sp?.rms ?? []).filter((r) => r.resource?.tiles && r.altOf !== gid).map((r) => r.altOf ?? r.id));
+    const hatted = new Set(st.doc.graph.edges.filter((e) => e.edge_type === "has_linked_resource").map((e) => e.target));
+    return st.liveNodes().filter((n) => n.id !== gid && (ids.has(n.id)
+      || (n.node_type === "resource" && !hatted.has(n.id) && !!tilesKindOf((n.data ?? {}) as Record<string, unknown>))));
+  };
+  const models = () => st.liveNodes().filter((n) => /^representation_model/.test(String(n.node_type)) || (n.node_type === "RepresentationModelNodeGroup" && n.id !== gid));
+  box("document", l.documents, (id) => ({ op: "unpublish", document: id }), sug.document, (id) => ({ op: "publish", document: id }), () => {
+    void (async () => {
+      const a = await openDialog({ kind: "ccard-doc", title: t("cc.box.document"), message: t("cc.q.document"),
+        choices: [{ key: "new", label: t("al.docNew") }], ok: t("cc.existing") });
+      if (!a.ok) return;
+      if (a.choice === "new") { await giveContainerADocument({ id: gid, name: l.name }); void openContainerCard(gid); return; }
+      const d = await cardPick(t("cc.box.document"), docs());
+      if (d) await cardApply(gid, [{ op: "publish", document: d }], t("cc.accepted", { what: nm(d), name: l.name }));
+    })();
+  });
+  box("epoch", l.epochs, (id) => ({ op: "unepoch", epoch: id }), sug.epoch, (id) => ({ op: "epoch", epoch: id, mode: "extend" }), () => {
+    void (async () => {
+      const e = await cardPick(t("cc.box.epoch"), epochs());
+      if (!e) return;
+      // move (the container's epoch becomes this) or extend (one more): s3Dgraphy's plan
+      if (l.epochs.length) await epochMoveSelection([gid], e, (await askConfirm(t("cc.epochMoveOrExtend", { epoch: nm(e) }), { kind: "ccard-epoch" })) ? "move" : "extend");
+      else await cardApply(gid, [{ op: "epoch", epoch: e, mode: "extend" }], t("cc.accepted", { what: nm(e), name: l.name }));
+      void openContainerCard(gid);
+    })();
+  });
+  box("alternative", l.alternatives, (id) => ({ op: "unalternative", id }), sug.alternative, (id) => ({ op: "alternative", id }), () => {
+    void (async () => {
+      const r = await cardPick(t("cc.box.alternative"), tilesetRms());
+      if (r) await cardApply(gid, [{ op: "alternative", id: r }], t("cc.accepted", { what: nm(r), name: l.name }));
+    })();
+  });
+  box("members", l.members, (id) => ({ op: "leave", id }), null, (id) => ({ op: "member", id }), () => {
+    void (async () => {
+      const m = await cardPick(t("cc.box.members"), models().filter((n) => !l.members.some((x) => x.id === n.id)));
+      if (m) await cardApply(gid, [{ op: "member", id: m }], t("cc.accepted", { what: nm(m), name: l.name }));
+    })();
+  });
+  // «Accetta tutti», with its preview: the epoch first (an alternative then follows it)
+  const all: CardStep[] = [];
+  const said: string[] = [];
+  if (sug.document && !l.documents.length) { all.push({ op: "publish", document: sug.document.id }); said.push(t("cc.line.document", { what: sug.document.name })); }
+  if (sug.epoch && !l.epochs.length) { all.push({ op: "epoch", epoch: sug.epoch.id, mode: "extend" }); said.push(t("cc.line.epoch", { what: sug.epoch.name })); }
+  if (sug.alternative && !l.alternatives.length) { all.push({ op: "alternative", id: sug.alternative.id }); said.push(t("cc.line.alternative", { what: sug.alternative.name })); }
+  const foot = document.createElement("div");
+  foot.className = "ccard-foot";
+  if (all.length > 1) foot.appendChild(btn(t("cc.acceptAll", { n: String(all.length) }), () => {
+    void (async () => {
+      if (!(await askConfirm(`${t("cc.acceptAllAsk", { name: l.name })}\n\n${said.map((x) => `• ${x}`).join("\n")}`, { kind: "ccard-all" }))) return;
+      await cardApply(gid, all, t("cc.acceptedAll", { name: l.name, n: String(all.length) }));
+    })();
+  }, "accept-all"));
+  foot.appendChild(btn(t("al.containerRename"), () => {
+    void (async () => {
+      const v = await askText(t("al.containerName"), l.name, { kind: "al-container-rename" });
+      if (v && v.trim() && v.trim() !== l.name) await cardApply(gid, [{ op: "rename", label: v.trim() }], t("al.containerRenamed", { old: l.name, name: v.trim() }));
+    })();
+  }, "rename", "sol-btn"));
+  foot.appendChild(btn(t("cc.into"), () => {
+    void (async () => {
+      const p = await cardPick(t("cc.into"), st.liveNodes().filter((n) => n.node_type === "RepresentationModelNodeGroup" && n.id !== gid));
+      if (p) await cardApply(gid, [{ op: "into", parent: p }], t("cc.intoDone", { name: l.name, parent: nm(p) }));
+    })();
+  }, "into", "sol-btn"));
+  foot.appendChild(btn(t("cc.showGraph"), () => { jumpTo(gid); }, "show-graph", "sol-btn"));
+  card.appendChild(foot);
+  document.body.appendChild(card);
+  ccardEl = card;
+}
+
 /** A container's own menu (its header «⋯»): rename, empty, remove when empty. */
 async function containerMenu(c: { id: string; name: string }, members: number): Promise<void> {
   const a = await openDialog({ kind: "al-container-menu", title: c.name, message: t("al.containerFilesStay"),
-    choices: [{ key: "rename", label: t("al.containerRename") }, { key: "empty", label: t("al.containerEmpty") },
+    choices: [{ key: "card", label: t("cc.open") }, { key: "rename", label: t("al.containerRename") }, { key: "empty", label: t("al.containerEmpty") },
               ...(members ? [] : [{ key: "remove", label: t("al.containerRemove") }])], ok: t("al.containerClose") });
   if (!a.ok || !a.choice) return;
+  if (a.choice === "card") { void openContainerCard(c.id); return; }
   if (a.choice === "rename") {
     const v = await askText(t("al.containerName"), c.name, { kind: "al-container-rename" });
     if (v && v.trim() && v.trim() !== c.name) await containerOp("rename", { group: c.id, label: v.trim() }, t("al.containerRenamed", { old: c.name, name: v.trim() }));
@@ -54321,6 +55138,149 @@ function closeActiveWindow(win: Win): void {
  *    the windows are side by side. The SPLIT verbs stayed, with glyphs that say
  *    what they do: → a new area beside, ↓ a new area below.
  */
+/** MICRO-TESTATE-COERENTI p.4 · the 3D's search, in its bar before «⋯»: what it
+ *  finds is the scene's objects — it sets the query of the Outliner of this
+ *  workspace (its scene view) and of the old scene panel behind T */
+function sceneSearch(win: Win): HTMLElement {
+  const ws = win.id.split(":")[0];
+  const outs = () => windowsOf().filter((w) => w.type === "outliner" && w.id.split(":")[0] === ws);
+  const el = searchControl(win.id, {
+    placeholder: t("hdr.searchScene"),
+    get: () => spaceQuery || (outs()[0] ? unifiedQuery.get(outs()[0].id) ?? "" : ""),
+    set: (q) => {
+      spaceQuery = q;
+      for (const o of outs()) { unifiedQuery.set(o.id, q); unifiedApis.get(o.id)?.refresh(); }
+      refreshSurfaces("scene");
+    },
+  });
+  el.querySelector<HTMLInputElement>("input")?.setAttribute("data-scene-search", win.id);
+  return el;
+}
+
+// ── MICRO-TESTATE-COERENTI p.3/p.4 (E.D., 13 Nov 2026) · THE SAME HEAD IN EVERY WINDOW
+//
+//   [view type ▾] [?] [context: modes, epoch, the type's strip…] … [Visibility /
+//   Filters ▾] [🔍 search] [⋯] [⛶]
+//
+// Each control of a head carries its ROLE (`data-hdr`), and the head is put in
+// that order once built — whoever added a control, wherever. The maximise stays
+// ⛶: ⤢ is the 3D's «Inquadra», and one icon for two functions is what the MICRO
+// asks to remove. `check-headers.mjs` reads the order of every window.
+const HDR_ORDER = ["type", "add", "help", "context", "spacer", "filters", "search", "more", "max"] as const;
+type HdrRole = (typeof HDR_ORDER)[number];
+function hdrRoleOf(el: Element): HdrRole {
+  const own = (el as HTMLElement).dataset?.hdr as HdrRole | undefined;
+  if (own && (HDR_ORDER as readonly string[]).includes(own)) return own;
+  const c = el.classList;
+  if (c.contains("win-type")) return "type";
+  if (c.contains("win-help")) return "help";
+  if (c.contains("win-sep")) return "spacer";
+  if (c.contains("win-max") || c.contains("wi-restore")) return "max";
+  if (c.contains("win-menu")) return "more";
+  if (c.contains("win-search")) return "search";
+  if (c.contains("win-fbar-slot") || c.contains("uo-head")) return "filters";
+  return "context";
+}
+function orderHeader(frag: DocumentFragment): void {
+  const kids = [...frag.children];
+  kids.forEach((k) => { (k as HTMLElement).dataset.hdr = hdrRoleOf(k); });
+  const rank = (k: Element) => HDR_ORDER.indexOf(hdrRoleOf(k));
+  const sorted = kids.map((k, i) => ({ k, i })).sort((a, b) => rank(a.k) - rank(b.k) || a.i - b.i).map((x) => x.k);
+  for (const k of sorted) frag.appendChild(k);
+}
+
+/** What the 🔍 of a window searches: a field of its own that sets a query
+ *  (`set`), or an existing field of the window it opens (`focus`, a selector
+ *  inside the area; the Matrix's and the Graph's is the graph's name strip). */
+interface HeaderSearch { placeholder: string; get?: () => string; set?: (q: string) => void; focus?: string; global?: boolean }
+function headerSearchOf(win: Win): HeaderSearch | null {
+  switch (win.type) {
+    case "outliner": return { placeholder: t("uo.search"), get: () => unifiedQuery.get(win.id) ?? "",
+      set: (q) => { unifiedQuery.set(win.id, q); unifiedApis.get(win.id)?.refresh(); } };
+    case "inspector": return { placeholder: t("insp.searchPh"), get: () => inspQuery,
+      set: (q) => { inspQuery = q; refreshInspector(); } };
+    case "table": return { placeholder: t("hdr.searchTable"), focus: "input.fq" };
+    case "storage": return { placeholder: t("hdr.searchFiles"), focus: "input.files-q" };
+    case "shelf": return { placeholder: t("hdr.searchShelf"), focus: "input.shelf-find-q" };
+    case "narrative-index": return { placeholder: t("nidx.find"), focus: "input.nidx-search" };
+    case "graph": return { placeholder: t("hdr.searchGraph"), focus: "#search", global: true };
+    default: return null;
+  }
+}
+/** the open 🔍 fields, per window (a rebuild of the heads keeps them open) */
+const hdrSearchOpen = new Set<string>();
+function headerSearchControl(win: Win): HTMLElement | null {
+  if (win.type === "scene") return null;   // the 3D's is in its bar, before its «⋯» (`sceneSearch`)
+  const hs = headerSearchOf(win);
+  if (!hs) return null;
+  return searchControl(win.id, hs);
+}
+function searchControl(winId: string, hs: HeaderSearch): HTMLElement {
+  const wrap = document.createElement("span");
+  wrap.className = "win-search";
+  wrap.dataset.hdr = "search";
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "win-act win-search-btn";
+  b.dataset.hdrSearch = winId;
+  b.textContent = "🔍";
+  b.title = `${hs.placeholder} (/)`;
+  b.setAttribute("aria-label", hs.placeholder);
+  wrap.appendChild(b);
+  if (hs.set) {
+    const inp = document.createElement("input");
+    inp.type = "search";
+    inp.className = "win-search-q";
+    inp.dataset.hdrSearchQ = winId;
+    inp.placeholder = hs.placeholder;
+    inp.value = hs.get?.() ?? "";
+    const open = hdrSearchOpen.has(winId) || !!inp.value;
+    wrap.classList.toggle("open", open);
+    let timer = 0;
+    inp.addEventListener("input", () => { clearTimeout(timer); timer = window.setTimeout(() => hs.set!(inp.value), 120); });
+    inp.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") { e.preventDefault(); inp.value = ""; hs.set!(""); hdrSearchOpen.delete(winId); wrap.classList.remove("open"); b.focus(); }
+    });
+    wrap.appendChild(inp);
+  }
+  b.addEventListener("click", (e) => { e.stopPropagation(); openHeaderSearch(winId); });
+  return wrap;
+}
+/** open a window's search: its own field, or the field it stands for */
+function openHeaderSearch(winId: string): boolean {
+  const win = windowsOf().find((w) => w.id === winId);
+  if (!win) return false;
+  if (win.type === "scene") {
+    const f = document.querySelector<HTMLElement>(`[data-scene-search="${CSS.escape(winId)}"]`);
+    if (f) { f.closest(".win-search")?.classList.add("open"); hdrSearchOpen.add(winId); (f as HTMLInputElement).focus(); return true; }
+    return false;
+  }
+  const hs = headerSearchOf(win);
+  if (!hs) return false;
+  if (hs.set) {
+    hdrSearchOpen.add(winId);
+    const area = winAreas.get(winId);
+    const inp = area?.querySelector<HTMLInputElement>(`[data-hdr-search-q="${CSS.escape(winId)}"]`);
+    inp?.closest(".win-search")?.classList.add("open");
+    inp?.focus();
+    inp?.select();
+    return !!inp;
+  }
+  const root: ParentNode = hs.global ? document : (winAreas.get(winId) ?? document);
+  const f = root.querySelector<HTMLInputElement>(hs.focus!);
+  if (!f) { toast(t("hdr.searchNone")); return false; }
+  f.focus();
+  f.select?.();
+  return true;
+}
+/** the window under the pointer (for «/»), or null */
+function winUnderPointer(): string | null {
+  const el = document.elementFromPoint(lastPointer.x, lastPointer.y);
+  const area = el?.closest<HTMLElement>("[data-win]");
+  return area?.dataset.win ?? null;
+}
+
 function buildAreaHeader(win: Win): DocumentFragment {
   const frag = document.createDocumentFragment();
   const type = win.type;
@@ -54706,9 +55666,20 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // MICRO-CONTENTS-1 B2 · in «Archivio» the «?» says what this space hangs on
   if (type === "emtree") frag.appendChild(helpMark(t(activeWorkspace() === "assets" ? "emtree.introContents" : "emtree.intro")));
   // MICRO-VIEWER-SPAZIO-EMTREE p.1–2 · the clicks of the 3D, said where the 3D is
-  if (type === "scene") { const q = helpMark(t("s3.gestures")); q.dataset.gestures = "space"; frag.appendChild(q); }
+  if (type === "scene") {
+    const q = helpMark(t("s3.gestures")); q.dataset.gestures = "space"; frag.appendChild(q);
+    // MICRO-TESTATE-COERENTI p.4 · «+ ▾» (the base shapes) beside the type of view
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "win-act win-add";
+    add.dataset.hdr = "add";
+    add.textContent = "+ ▾";
+    add.title = t("s3.addShapeTitle");
+    add.addEventListener("click", (e) => { e.stopPropagation(); const r = add.getBoundingClientRect(); openShapeMenu(r.left, r.bottom + 2, win); });
+    frag.appendChild(add);
+  }
   // MICRO-OUTLINER-UNICO · the selector and the search, in this one row
-  if (type === "outliner") { frag.append(...unifiedHeader(win), helpMark(t("uo.help"))); }
+  if (type === "outliner") { frag.append(unifiedHeader(win)[0], helpMark(t("uo.help"))); }
   if (type === "viewer") { const q = helpMark(t("vw.gestures")); q.dataset.gestures = "viewer"; frag.appendChild(q); }
   if (type === "graph") {
     // MICRO-PULIZIA p.4 · the «+» left the bar: «Aggiungi» is ⇧A and Tools ▸
@@ -54851,6 +55822,12 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // MICRO-CONTENTS-2 A8 · magnify said by a button, as in every tiling system
   // (it was a double click on the empty header, or Ctrl+Space, said only in a
   // tooltip); while magnified the chip below brings the arrangement back
+  // MICRO-TESTATE-COERENTI p.4 · the SEARCH of the window, in its head: a 🔍 that
+  // opens into a field (`/` with the pointer on the window, Esc closes it)
+  const hs = headerSearchControl(win);
+  if (hs) frag.appendChild(hs);
+  const tl = type === "scene" ? sceneTails.get(win.id) : undefined;
+  if (tl) frag.appendChild(tl);
   if (maximizedWin() !== win.id && windowsOf().length > 1 && !isDetachedWin(win.id)) {
     const max = document.createElement("button");
     max.className = "win-act win-max";
@@ -54874,6 +55851,14 @@ function buildAreaHeader(win: Win): DocumentFragment {
     });
     frag.appendChild(restore);
   }
+  // MICRO-TESTATE-COERENTI p.3 · every head has its «?» (what the window is), and
+  // every head is in the same order
+  if (![...frag.children].some((k) => k.classList.contains("win-help"))) {
+    const q = helpMark(t(`hdr.help.${type}`));
+    q.dataset.helpOf = type;
+    frag.appendChild(q);
+  }
+  orderHeader(frag);
   // ONE SURFACE · the head does NOT know who has the focus, and that is
   // stronger than the parity it used to be checked for.
   //
@@ -58892,6 +59877,9 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
     }
   }
   item(t("ctx.reflowNode"), () => void reflowNodes(ids));
+  // MICRO-TESTATE-COERENTI p.12 · the one command, from the Matrix and the Graph too
+  item(t("em.ctxMove"), () => openEpochMoveMenu(false, { x: clientX, y: clientY }, ids)).dataset.cmd = "epoch-move";
+  item(t("em.ctxExtend"), () => openEpochMoveMenu(true, { x: clientX, y: clientY }, ids)).dataset.cmd = "epoch-extend";
   // DEV30 U3 · «Lock position» lives where the layout is made. Measured on San
   // Pietro (dev.15): USM05 dragged 30 px and pinned stays at 30 through Layout,
   // unpinned it goes back to 0 — the lock works, for the nodes the Matrix lets
@@ -59039,6 +60027,18 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     openAddMenuFromKeyboard();
     return;
+  }
+  // MICRO-TESTATE-COERENTI p.12 · M «Sposta in epoca…», Alt+M «Estendi a epoca…»
+  // (Blender's «Move to collection»), on the current selection
+  if (e.code === "KeyM" && !e.metaKey && !e.ctrlKey && !e.shiftKey && store && epochSelection().length) {
+    e.preventDefault();
+    openEpochMoveMenu(e.altKey, lastPointer.x || lastPointer.y ? { x: lastPointer.x, y: lastPointer.y } : undefined);
+    return;
+  }
+  // MICRO-TESTATE-COERENTI p.4 · «/» with the pointer on a window: ITS search
+  if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const w = winUnderPointer();
+    if (w && windowsOf().find((x) => x.id === w)?.type !== "graph" && openHeaderSearch(w)) { e.preventDefault(); return; }
   }
   // STRUTTURA · «/» takes you to the full-text search of the name strip
   if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -59325,6 +60325,15 @@ void bootSession();
 
 refreshIdentityChip();     // IDENTITY · who is authoring, from the first frame
 initEmData({
+  // MICRO-TESTATE-COERENTI p.12 · the table's row: «Sposta / Estendi in epoca…»
+  onRowMenu: (id, x, y) => {
+    const sel = epochSelection();
+    const ids = sel.includes(id) ? sel : [id];
+    spaceMenu(x, y, ids.length > 1 ? tn("sel.count", ids.length) : String(store?.node(id)?.name ?? id), [
+      { label: t("em.ctxMove"), act: "epoch-move", run: () => openEpochMoveMenu(false, { x, y }, ids) },
+      { label: t("em.ctxExtend"), act: "epoch-extend", run: () => openEpochMoveMenu(true, { x, y }, ids) },
+    ]);
+  },
   onDeleted: (name, st) => toastUndo(t("del.one", { name }), st),
   // MICRO-CRONO-MULTIPLA p.2 · ⌘/Alt: a cell's edit goes to the selected rows
   getSelection: () => [...selectedIds],

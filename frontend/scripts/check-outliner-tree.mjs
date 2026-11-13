@@ -159,12 +159,14 @@ if (path) {
   eq(rows.filter((r) => r.kind === "group" && r.glyph === "EpochNode").map((r) => r.label), ["Età romana", "Età arcaica"], "the epochs at the top of the graph");
   const e1 = L.indexOf("    Età romana");
   ok(e1 >= 0 && L[e1 + 1] === "      Proxy (1)" && L[e1 + 2] === "        US1", "under an epoch, its proxies");
-  ok(L.includes("        Survey") && L.includes("          Mesh 2") && L.includes("        Cella"), "Models: a container with its member, a model alone");
+  // MICRO-TESTATE-COERENTI p.11 · «Survey» declares no epoch: it lies under «no
+  // epoch»; its member with an epoch of its own is full under that epoch
+  ok(L.filter((x) => x === "        Mesh 2").length === 1 && L.includes("        Cella"), "Models: the member living by its own epoch is full there, a model alone");
   ok(L.includes("      RMDoc (1)") && L.includes("      RMSF (1)"), "RMDoc and RMSF under their epochs");
-  ok(L.filter((x) => x.trim() === "Survey").length === 1, "a container without an alternative of its own is listed where its members are, nowhere else");
+  ok(L.filter((x) => x.trim() === "Survey").length === 1 && L.indexOf("        Survey") > L.findIndex((x) => x.startsWith("    No epoch")), "a container that declares no epoch is under «no epoch», nowhere else");
   eq(rows.find((r) => r.label === "US1" && r.skey)?.skey, "proxy:US1", "a proxy row carries its Space key");
   eq(rows.find((r) => r.label === "Mesh 2")?.skey, "rm:RM2", "a model row too");
-  ok(L.includes("    No epoch (1)") && L.includes("        Catasto"), "the GIS layers under «no epoch»");
+  ok(L.some((x) => x.startsWith("    No epoch")) && L.includes("        Catasto"), "the GIS layers under «no epoch»");
   ok(!rows.some((r) => r.kind === "dim"), "no graph dimension in the Space's tree by epoch");
   ok(O.flattenOutliner({ sources: src2, opts: { ...O.DEFAULT_OPTS, space: true, hierarchy: "type" }, texts: t2, toggled: new Set() }).some((r) => r.kind === "dim"),
     "«by type» is the graph's dimensions");
@@ -195,31 +197,40 @@ if (path) {
   const src3 = [{ id: "f2", name: "v9.em.json", kind: "file", graphs: [{ slot: "s2", name: "Temple", active: true, doc: () => d2, facts: f3, aux: [] }] }];
   const t3 = { ...texts, space: { proxies: "Proxy", models: "Modelli", rmdoc: "RMDoc", rmsf: "RMSF", gis: "GIS", x3d: "Estrattori 3D", sketches: "Abbozzi", x3dOff: "spento" },
     container: { alternative: "alt", livesIn: (e) => `vive in ${e}`, outOfStep: (n, a, b) => `${n} fuori passo: ${a} / ${b}`, follows: "segue" } };
-  const open = new Set(["s2|models/ep:XX/grp/S15", "s2|models/ep:Y15/grp/S15"]);
+  const open = new Set(["s2|models/ep:XX/grp/S15", "s2|models/ep:Y15/grp/S15", "s2|models/ep:-/grp/S15"]);
   const rows = O.flattenOutliner({ sources: src3, opts: { ...O.DEFAULT_OPTS, dims: ["models"], firstOpen: "models" }, texts: t3, toggled: open });
   const L = labels(rows); if (process.env.DUMP) console.log(L.join("\n"));
-  const xx = L.indexOf("      XX sec");
-  ok(xx >= 0 && L[xx + 1] === "        Survey2015", "Models by epoch: the container is a branch under XX sec");
-  ok(L[xx + 2] === "          TempluMare tileset" && rows[xx + 2].alt === true, "…its alternative first, marked as such");
-  ok(L.slice(xx, xx + 8).includes("          SM_OB_EST") && L.slice(xx, xx + 8).includes("          SM_OB_INT"), "…its members under it");
-  const podio = rows.find((r) => r.label === "SM_OB_PODIO" && r.key.includes("ep:XX"));
-  ok(!!podio && podio.note === "⟂ 2015" && podio.noteTitle === "vive in 2015", "a member in another epoch: listed under its container, its epoch said");
-  ok(rows.find((r) => r.label === "RMSF prato" && r.key.includes("ep:XX"))?.noteTitle === "segue", "a member without an epoch follows its container");
-  ok(L.includes("        Loose") && !rows.some((r) => r.label === "SM_OB_EST" && !r.key.includes("/grp/")), "a model in a container is not listed again under the epoch; a loose one is");
+  // MICRO-TESTATE-COERENTI p.11 · Survey2015 declares no epoch (its tileset gives it
+  // none): under «no epoch», its members ATTENUATED there with their own epoch said
+  // and FULL under their epochs; never two full presences, nothing «out of step»
+  const none = L.findIndex((x) => x.startsWith("      No epoch"));
+  const sv = L.indexOf("        Survey2015");
+  ok(none >= 0 && sv > none, "a container without a declared epoch lies under «no epoch»");
+  ok(L[sv + 1] === "          TempluMare tileset" && rows[sv + 1].alt === true, "…its alternative first, marked as such");
+  const ghost = rows.filter((r) => r.label === "SM_OB_EST" && r.key.includes("/grp/"));
+  ok(ghost.length >= 1 && ghost.every((r) => r.ghost && r.note === "⟂ XX sec" && r.followGroup === "S15" && r.noteTitle === "vive in XX sec"),
+    "a member with an epoch of its own: attenuated under the container, its epoch said, «follow the container» offered");
+  const full = rows.filter((r) => r.label === "SM_OB_EST" && !r.ghost);
+  eq(full.length, 1, "…and full once, under its own epoch");
+  ok(full[0].key.includes("ep:XX"), "…which is XX sec");
+  ok(rows.find((r) => r.label === "RMSF prato")?.noteTitle === "segue" && !rows.find((r) => r.label === "RMSF prato")?.ghost, "a member without an epoch follows its container (full there)");
+  ok(L.includes("        Loose"), "a loose model under its epoch");
   ok(L.includes("        Survey_2015_egm2008"), "the 2015 tileset (not a member) stays under 2015");
-  eq(rows.find((r) => r.label === "SM_OB_EST" && r.key.includes("ep:XX"))?.epochAt, "XX", "a row says the epoch it is listed under (the drag moves from it)");
-  ok(!rows.find((r) => r.label === "Survey2015")?.warn, "no reference (no own epoch, no tileset member): nothing out of step (s3Dgraphy)");
-  // the container with an epoch of its own (2015): the meshes in XX sec are out of step
+  eq(full[0].epochAt, "XX", "a row says the epoch it is listed under (the drag moves from it)");
+  ok(!rows.some((r) => r.warn), "nothing out of step: a member's own epoch is a choice");
+  // the container DECLARES 2015: it lies there; the members of 2015 follow it in full, those of XX sec are attenuated
   d2.graph.edges.push(E2("Y15", "S15", "has_representation_model"));
-  const rows2 = O.flattenOutliner({ sources: src3, opts: { ...O.DEFAULT_OPTS, dims: ["models"], firstOpen: "models" }, texts: t3, toggled: open });
+  const rows2 = O.flattenOutliner({ sources: src3, opts: { ...O.DEFAULT_OPTS, dims: ["models"], firstOpen: "models" }, texts: t3,
+    toggled: new Set(["s2|models/ep:Y15/grp/S15"]) });
   const c2 = rows2.filter((r) => r.label === "Survey2015");
-  eq(c2.length, 1, "with an epoch of its own the container is placed there only");
-  eq(c2[0].warn, "2 fuori passo: XX sec / 2015", "…and says its members out of step");
-  ok(rows2.some((r) => r.label === "SM_OB_EST" && r.note === "⟂ XX sec"), "…the members in XX sec under it, their epoch said");
+  eq(c2.length, 1, "with a declared epoch the container is placed there only");
+  ok(!c2[0].warn, "…without a warning");
+  ok(rows2.some((r) => r.label === "SM_OB_PODIO" && r.key.includes("/grp/") && !r.ghost), "…its member in 2015 full under it");
+  ok(rows2.some((r) => r.label === "SM_OB_EST" && r.key.includes("/grp/") && r.ghost && r.note === "⟂ XX sec"), "…its members in XX sec attenuated, their epoch said");
   // the Space's tree: versions under a model, the 3D extractors under their document, the sketches at the bottom
   d2.graph.edges.pop();
   const rows3 = O.flattenOutliner({ sources: src3, opts: { ...O.DEFAULT_OPTS, space: true }, texts: t3,
-    toggled: new Set(["s2|sp/XX/grp/S15", "s2|sp/XX/grp/S15/m/M1"]) });
+    toggled: new Set(["s2|sp/XX/rm/M1"]) });   // p.11: M1 full under XX sec, its own epoch
   const L3 = labels(rows3); if (process.env.DUMP) console.log(L3.join("\n"));
   ok(rows3.some((r) => r.kind === "version" && r.label === "LOD1" && r.version?.drawn && r.version.rm === "M1"), "a model's versions under it (the one drawn said)");
   const xr = rows3.find((r) => r.label === "D.01.61");

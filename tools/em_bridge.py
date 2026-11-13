@@ -2570,7 +2570,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: sample by level (and the largest of each level), the rest estimated
 #: (``estimated``), ``{tiles_full: true}`` reads all; one measure per (path,
 #: size, mtime) at a time, kept on disk, stopped when no page waits for it.
-BRIDGE_LEVEL = 68   # 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 69   # 69 = POST /graph/epoch-move (a selection moved or extended to an epoch: s3Dgraphy epoch_scope.plan_epoch_move, the plan for the page to write), POST /graph/model-kind (RM · RMDoc · RMSF: plan_model_kind), POST /graph/container-links (the four bonds and their suggestions), /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -4046,7 +4046,8 @@ def make_handler(api):
                 self._json(out, status)
             elif route in ("/consolidate", "/graph/compose-plan", "/graph/before-after", "/graph/tileset-whole",
                            "/graph/register-new-version", "/graph/tileset-master", "/assets/list",
-                           "/graph/containers", "/assets/versions/remove", "/assets/textures/remove"):
+                           "/graph/containers", "/assets/versions/remove", "/assets/textures/remove",
+                           "/graph/epoch-move", "/graph/model-kind", "/graph/container-links"):
                 # MICRO-BLEND-OFFICINA-3 · s3Dgraphy's consolidate and
                 # graph_compose: «Consolida per…», «Componi un .blend dal
                 # grafo», the before/after of the check, the tileset «Intero»
@@ -4075,6 +4076,9 @@ def make_handler(api):
                       "/graph/tileset-master": self._tileset_master,
                       "/assets/list": self._asset_list,
                       "/graph/containers": self._containers,
+                      "/graph/epoch-move": self._epoch_move,
+                      "/graph/model-kind": self._model_kind,
+                      "/graph/container-links": self._container_links,
                       "/assets/versions/remove": self._asset_versions_remove,
                       "/assets/textures/remove": self._asset_texture_remove}[route]
                 try:
@@ -5308,6 +5312,45 @@ def make_handler(api):
                     if src and not any(e.edge_type == "has_representation_model" and e.edge_source == src and e.edge_target == group for e in graph.edges):
                         graph.add_edge(f"{src}_has_representation_model_{group}", src, group, "has_representation_model")
                 return {"group": group, "document": did, "born": bool(nd)}
+            def _card(graph, group, steps):
+                """MICRO-TESTATE-COERENTI p.9 · the bonds of a container, in order:
+                publish / unpublish {document}, epoch {epoch, mode} / unepoch
+                {epoch}, alternative / unalternative {id}, member / leave {id},
+                rename {label}, into {parent} — s3Dgraphy's rules only."""
+                from s3dgraphy import epoch_scope as ES
+                done = []
+                for st in steps if isinstance(steps, list) else []:
+                    k = str(st.get("op") or "")
+                    if k == "publish":
+                        d = str(st.get("document") or "")
+                        if graph.find_node_by_id(d) is None:
+                            raise ValueError(f"{d!r} is not a node of this graph")
+                        if not any(e.edge_type == "has_representation_model" and e.edge_source == d and e.edge_target == group for e in graph.edges):
+                            graph.add_edge(f"{d}_has_representation_model_{group}", d, group, "has_representation_model")
+                    elif k == "unpublish":
+                        ALT.unpublish_container(graph, group, str(st.get("document") or ""))
+                    elif k == "epoch":
+                        ES.move_to_epoch(graph, [group], str(st.get("epoch") or ""), mode=str(st.get("mode") or "extend"))
+                    elif k == "unepoch":
+                        for e in list(graph.edges):
+                            if e.edge_type == "has_representation_model" and e.edge_target == group and e.edge_source == st.get("epoch"):
+                                graph.remove_edge(e.edge_id)
+                    elif k == "alternative":
+                        ALT.declare_alternative(graph, str(st.get("id") or ""), group)
+                    elif k == "unalternative":
+                        ALT.remove_alternative(graph, group, str(st.get("id") or ""))
+                    elif k == "member":
+                        ALT.put_in_container(graph, str(st.get("id") or ""), group)
+                    elif k == "leave":
+                        ALT.leave_container(graph, str(st.get("id") or ""), group)
+                    elif k == "rename":
+                        ALT.rename_container(graph, group, str(st.get("label") or ""))
+                    elif k == "into":
+                        ALT.put_in_container(graph, group, str(st.get("parent") or ""))
+                    else:
+                        raise ValueError(f"unknown step of the card {k!r}")
+                    done.append(k)
+                return {"group": group, "done": done}
             graph, _f = self._graph_of(body)
             op = str(body.get("op") or "")
             ids = [str(x) for x in body.get("ids") or [] if x]
@@ -5330,6 +5373,14 @@ def make_handler(api):
                 "remove": lambda: ALT.remove_container(graph, group),
                 "active": lambda: ALT.set_active_alternative(graph, group, body.get("which") or None,
                                                              use=str(body.get("use") or "*")),
+                # MICRO-TESTATE-COERENTI p.9/p.10 · a bond taken off, a member out,
+                # a container inside another
+                "leave": lambda: [ALT.leave_container(graph, i, group) for i in ids],
+                "unpublish": lambda: ALT.unpublish_container(graph, group, str(body.get("document") or "")),
+                "unalternative": lambda: [ALT.remove_alternative(graph, group, i) for i in ids],
+                "subcontainer": lambda: ALT.put_in_container(graph, group, str(body.get("parent") or "")),
+                # p.9 · the card «Completa il container»: several bonds in ONE delta (one undo)
+                "card": lambda: _card(graph, group, body.get("steps") or []),
             }
             if op not in fns:
                 return 400, {"ok": False, "error": f"unknown container gesture {op!r}"}
@@ -5340,6 +5391,41 @@ def make_handler(api):
             warnings = [w for x in (got if isinstance(got, list) else [got]) if isinstance(x, dict)
                         for w in x.get("warnings") or []]
             return 200, {"ok": True, "op": op, "got": got, "warnings": warnings, "delta": delta}
+
+        def _epoch_move(self, body):
+            """MICRO-TESTATE-COERENTI p.12 · ``POST /graph/epoch-move {doc, ids,
+            epoch, mode: move|extend, with_own?}`` — s3Dgraphy's
+            ``epoch_scope.plan_epoch_move`` for the selection: per node from
+            where to where, the nodes excluded with the reason, the chronology
+            warnings, and the edges to add and remove. Nothing is written
+            here: the page writes the plan in its document in one step."""
+            from s3dgraphy import epoch_scope as ES
+            graph, _f = self._graph_of(body)
+            ids = [str(x) for x in body.get("ids") or [] if x]
+            plan = ES.plan_epoch_move(graph, ids, str(body.get("epoch") or ""),
+                                      mode=str(body.get("mode") or "move"), with_own=bool(body.get("with_own")))
+            return 200, {"ok": True, "plan": plan}
+
+        def _model_kind(self, body):
+            """MICRO-TESTATE-COERENTI p.8 · ``POST /graph/model-kind {doc, id,
+            kind: RM|RMDoc|RMSF, document?, unit?}`` — s3Dgraphy's
+            ``epoch_scope.plan_model_kind``: the new node_type and the edges
+            (who publishes it, whom it represents, its epochs) as the
+            connections datamodel wants them. The page writes it."""
+            from s3dgraphy import epoch_scope as ES
+            graph, _f = self._graph_of(body)
+            plan = ES.plan_model_kind(graph, str(body.get("id") or ""), str(body.get("kind") or ""),
+                                      document_id=str(body.get("document") or "") or None,
+                                      unit_id=str(body.get("unit") or "") or None)
+            return 200, {"ok": True, "plan": plan}
+
+        def _container_links(self, body):
+            """MICRO-TESTATE-COERENTI p.9 · ``POST /graph/container-links {doc,
+            group}`` — the four bonds of a container and a suggestion for each
+            empty one (s3Dgraphy ``alternatives.container_links``)."""
+            from s3dgraphy.resources import alternatives as ALT
+            graph, _f = self._graph_of(body)
+            return 200, {"ok": True, "links": ALT.container_links(graph, str(body.get("group") or ""))}
 
         def _asset_versions_remove(self, body):
             """MICRO-ASSETS-LIVELLI · ``POST /assets/versions/remove {doc,

@@ -34,6 +34,7 @@
  * (`scripts/check-outliner-tree.mjs`); `unified-outliner.ts` draws it.
  */
 import { buildOutline } from "./outline";
+import { presenceIndex } from "./epoch-presence";
 import { classIsA, classOf } from "./rules";
 import type { EmDocument, EmNode } from "./types";
 
@@ -149,10 +150,14 @@ export interface Texts {
   /** MICRO-SPAZIO-CONTAINER p.8 · the 3D's dimensions under an epoch (the Space) */
   space?: { proxies: string; models: string; rmdoc: string; rmsf: string; gis: string;
     /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 */
-    x3d?: string; sketches?: string; x3dOff?: string };
+    x3d?: string; sketches?: string; x3dOff?: string;
+    /** MICRO-TESTATE-COERENTI p.7 · a unit that survives in the epoch, not born there */
+    survives?: (from: string) => string; survivesMark?: string };
   /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 · a container's alternative, a member out
    *  of its epoch, a container out of step */
-  container?: { alternative: string; livesIn: (epochs: string) => string; outOfStep: (n: number, theirs: string, ref: string) => string; follows: string };
+  container?: { alternative: string; livesIn: (epochs: string) => string; outOfStep: (n: number, theirs: string, ref: string) => string; follows: string;
+    /** MICRO-TESTATE-COERENTI p.11 · a member in an epoch of its own choice */
+    ownChoice?: (epochs: string) => string };
 }
 
 export type RowKind = "source" | "graph" | "dim" | "group" | "node" | "sub" | "gis" | "aux" | "empty" | "version";
@@ -210,6 +215,9 @@ export interface URow {
   version?: { rm: string } & VersionIn;
   /** p.4 · an extractor whose document is not lit: drawn only forced, as a ghost */
   ghost?: boolean;
+  /** MICRO-TESTATE-COERENTI p.11 · a member living by its own choice: the
+   *  container it can follow again («Segui il container») */
+  followGroup?: string;
 }
 
 interface TNode {
@@ -323,17 +331,22 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
       const docs = liveEdges.filter((e) => e.target === g0.id && e.edge_type === "has_representation_model" && byId.get(e.source)?.node_type === "document").map((e) => e.source);
       const own = new Set(epochsOfNode(g0.id));
       for (const d0 of docs) for (const e of liveEdges) if (e.source === d0 && (e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch") && isEp(e.target)) own.add(e.target);
-      // …and the reference (`container_epoch_check`): those, and its tilesets'
+      // MICRO-TESTATE-COERENTI p.11 (E.D., 13 Nov 17:05, «come in EM Tools») · a
+      // container lies where it DECLARES (s3Dgraphy `container_epoch_check`: its
+      // reference is its own epochs, never its tileset's nor its members'); a
+      // member with an epoch of its own lives there by its own choice — not a
+      // member out of step: nothing to warn. Without a declared epoch the
+      // container is under «no epoch» (its card proposes one).
       const ref = new Set(own);
-      const plain = deep.filter((x) => x.node_type !== "RepresentationModelNodeGroup");
-      for (const x of plain) if (facts.tilesets.has(x.id)) for (const e of epochsOfNode(x.id)) ref.add(e);
-      const bad = ref.size ? plain.filter((x) => !facts.tilesets.has(x.id) && epochsOfNode(x.id).length && !epochsOfNode(x.id).every((e) => ref.has(e))) : [];
-      const union = new Set<string>();
-      for (const x of plain) for (const e of epochsOfNode(x.id)) union.add(e);
-      m.set(g0.id, { node: g0, members, deep, alts, ref: [...ref], placed: ref.size ? [...ref] : [...union], bad, docs });
+      m.set(g0.id, { node: g0, members, deep, alts, ref: [...ref], placed: [...ref], bad: [], docs });
     }
     contMemo = m;
     return m;
+  };
+  /** p.11 · a member that lives in an epoch of its own, not its container's */
+  const ownChoice = (id: string, c: Cont): boolean => {
+    const eps = epochsOfNode(id);
+    return eps.length > 0 && !(eps.length === c.placed.length && eps.every((e) => c.placed.includes(e)));
   };
   const epName = (ids: string[]) => ids.map((e) => nameOf(byId.get(e) ?? ({ id: e } as EmNode))).join(", ");
   /** a container as a BRANCH under the epoch `at` ("" = no epoch): its
@@ -356,9 +369,14 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
       const t = mkModel(m, `${gk}/m/${m.id}`);
       const eps = epochsOfNode(m.id);
       t.row = { ...t.row, epochAt: at };
-      if (eps.length && !(at && eps.includes(at))) {
+      // p.11 · a member with an epoch of its own (not the container's) is drawn
+      // ATTENUATED here, with an informative note; full only under its epoch —
+      // never two full presences
+      if (ownChoice(m.id, c)) {
         t.row.note = `⟂ ${epName(eps)}`;
-        if (C) t.row.noteTitle = C.livesIn(epName(eps));
+        t.row.ghost = true;
+        t.row.followGroup = c.node.id;
+        if (C) t.row.noteTitle = C.ownChoice ? C.ownChoice(epName(eps)) : C.livesIn(epName(eps));
       } else if (!eps.length && C) t.row.noteTitle = C.follows;
       kids.push(t);
     }
@@ -376,7 +394,10 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     const out2: TNode[] = [];
     const cs = [...containers().values()].filter((c) => !memberOf.has(c.node.id)).sort((a, b) => byName(a.node, b.node));
     for (const c of cs) if (at ? c.placed.includes(at) : !c.placed.length) out2.push(contBranch(c, at, pre, mkModel, space));
-    const loose = (lists.get("models") ?? []).filter((n) => n.node_type !== "RepresentationModelNodeGroup" && !memberOf.has(n.id) && inEp(n.id)).sort(byName);
+    // the models in no container, and those of a container that live by their own
+    // choice elsewhere (p.11): full here, where their epoch is
+    const chose = (n: EmNode) => { const c = containers().get(memberOf.get(n.id) ?? ""); return !!c && ownChoice(n.id, c); };
+    const loose = (lists.get("models") ?? []).filter((n) => n.node_type !== "RepresentationModelNodeGroup" && (!memberOf.has(n.id) || chose(n)) && inEp(n.id)).sort(byName);
     for (const n of loose) { const t = mkModel(n, `${pre}/rm/${n.id}`); t.row = { ...t.row, epochAt: at }; out2.push(t); }
     return out2;
   };
@@ -443,11 +464,25 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
       for (let j = i + 1; !has && j < ol.epochs.length && ol.epochs[j].depth > e.depth; j++) has = ol.epochs[j].units.length > 0;
       if (has) keepEp.add(e.node.id);
     });
+    // MICRO-TESTATE-COERENTI p.7 · after the units born there, those that SURVIVE
+    // there (s3Dgraphy `epoch_presence`, the epoch alone: its phases list theirs)
+    const presU = presenceIndex(doc);
+    const survivors = (epId: string): TNode[] => presU(epId, false).survive.map((x) => byId.get(x.id))
+      .filter((u): u is EmNode => !!u && isUnitType(u.node_type)).sort(byName).map((u) => {
+        const t = mk(u);
+        const from = presU.firstOf(u.id);
+        const fromName = from ? nameOf(byId.get(from) ?? ({ id: from } as EmNode)) : "—";
+        t.row = { ...t.row, key: k(`units/ep:${epId}/sv:${u.id}`), epochAt: epId,
+          ...(texts.space?.survives ? { note: texts.space.survivesMark ?? "⟲", noteTitle: texts.space.survives(fromName) } : {}) };
+        return t;
+      });
+    ol.epochs.forEach((e) => { if (!keepEp.has(e.node.id) && presU(e.node.id, false).survive.length) keepEp.add(e.node.id); });
     for (const e of ol.epochs) {
       if (!keepEp.has(e.node.id)) continue;
       out.push({ row: { key: k(`units/ep:${e.node.id}`), kind: "group", label: nameOf(e.node), id: e.node.id, slot: g.slot, glyph: "EpochNode",
         title: e.start != null || e.end != null ? `${e.start ?? "…"} – ${e.end ?? "…"}` : undefined },
-        kids: e.units.map((u) => { const t = mk(u.node); t.row = { ...t.row, key: k(`units/ep:${e.node.id}/${u.node.id}`), epochAt: e.node.id }; (t as TNode & { indent?: number }).indent = u.depth; return t; }),
+        kids: [...e.units.map((u) => { const t = mk(u.node); t.row = { ...t.row, key: k(`units/ep:${e.node.id}/${u.node.id}`), epochAt: e.node.id }; (t as TNode & { indent?: number }).indent = u.depth; return t; }),
+          ...survivors(e.node.id)],
         def: true, present: true, match: nameOf(e.node).toLowerCase() });
       (out[out.length - 1] as TNode & { indent?: number }).indent = e.depth;
     }
@@ -511,12 +546,17 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
 
   const proxyKids = (): TNode[] => {
     const units = (lists.get("units") ?? []).filter((n) => facts.proxies.has(n.id));
-    const ol = opts.hierarchy === "epoch" ? outlineOf() : null;
-    const epochOf = (n: EmNode): string[] => {
-      if (!ol) return [];
-      for (const e of ol.epochs) if (e.units.some((u) => u.node.id === n.id)) return [e.node.id];
-      return [];
-    };
+    // MICRO-TESTATE-COERENTI p.7 · a proxy is under every epoch its unit lives in
+    // (born ∪ survived, a mother with its phases: s3Dgraphy `epoch_presence`)
+    const lives = new Map<string, string[]>();
+    if (opts.hierarchy === "epoch") {
+      const presP = presenceIndex(doc);
+      for (const ep of lists.get("epochs") ?? []) {
+        const p = presP(ep.id);
+        for (const id of [...p.born, ...p.survive.map((x) => x.id)]) { const l = lives.get(id); if (l) l.push(ep.id); else lives.set(id, [ep.id]); }
+      }
+    }
+    const epochOf = (n: EmNode): string[] => lives.get(n.id) ?? [];
     return grouped("proxies", units, (n) => leaf(n, `proxies/${n.id}`, true, { eye: `proxy:${n.id}`, glyphText: "◆" }), epochOf);
   };
 
@@ -543,7 +583,17 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     const ol = outlineOf();
     const epochIds = new Set((lists.get("epochs") ?? []).map((n) => n.id));
     const rmEpochs = (id: string) => (facts.rmEpochs.get(id) ?? []).filter((e) => epochIds.has(e));
-    const pxLeaf = (u: EmNode, at: string): TNode => leaf(u, `sp/${at}/px/${u.id}`, true, { eye: `proxy:${u.id}`, glyphText: "◆", skey: `proxy:${u.id}` });
+    // MICRO-TESTATE-COERENTI p.7 · the units of an epoch are those BORN there and
+    // those that SURVIVE there (s3Dgraphy `epoch_presence`, `epoch-presence.ts`);
+    // a mother epoch gathers its sub-epochs. A survivor says where it comes from.
+    const pres = presenceIndex(doc);
+    const survFrom = new Map<string, Map<string, string | null>>();
+    const pxLeaf = (u: EmNode, at: string): TNode => {
+      const from = survFrom.get(at)?.get(u.id);
+      const fromName = from !== undefined ? (from ? nameOf(byId.get(from) ?? ({ id: from } as EmNode)) : "—") : null;
+      return leaf(u, `sp/${at}/px/${u.id}`, true, { eye: `proxy:${u.id}`, glyphText: "◆", skey: `proxy:${u.id}`,
+        ...(fromName != null && W.survives ? { note: W.survivesMark ?? "⟲", noteTitle: W.survives(fromName) } : {}) });
+    };
     // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · a model's versions under it (a click on one draws it)
     const versionRows = (n: EmNode, key: string): TNode[] => {
       const vs = facts.versions?.(n.id) ?? [];
@@ -618,8 +668,12 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     ];
     const out: TNode[] = [];
     const placed = new Set<string>();
+    const isUnitNode = (n: EmNode | undefined): n is EmNode => !!n && isUnitType(n.node_type);
     for (const e of ol.epochs) {
-      const units = e.units.map((u) => u.node);
+      const p = pres(e.node.id);
+      const sv = new Map(p.survive.map((x) => [x.id, x.first]));
+      survFrom.set(e.node.id, sv);
+      const units = [...p.born, ...p.survive.map((x) => x.id)].map((id) => byId.get(id)).filter(isUnitNode);
       for (const u of units) placed.add(u.id);
       const kids = block(e.node.id, units, (id) => rmEpochs(id).includes(e.node.id), false);
       const t: TNode & { indent?: number } = { row: { key: k(`sp/ep:${e.node.id}`), kind: "group", label: nameOf(e.node), id: e.node.id, slot: g.slot, glyph: "EpochNode",

@@ -114,10 +114,10 @@ export interface LiquidExtra {
 const EPOCH_EDGES = new Set(["has_first_epoch", "survive_in_epoch", "is_in_epoch"]);
 
 /**
- * The Graph's liquid scene: every node but the epochs and the groups, as discs
- * at `pos` (the simulation's positions; a node without one is placed by
- * `seed`); the halos of the epochs and the groups; the edges between discs —
- * membership and epoch edges are the halos now, not lines.
+ * The Graph's liquid scene: every node, the epochs and the groups included
+ * (MICRO-TESTATE-COERENTI p.13), as discs at `pos` (the simulation's positions;
+ * a node without one is placed by `seed`); the halos of the epochs and the
+ * groups behind their members; every edge between two discs.
  */
 export function buildLiquidScene(
   doc: EmDocument,
@@ -128,7 +128,12 @@ export function buildLiquidScene(
   const allNodes = view?.nodes ?? doc.graph.nodes;
   const allEdges = view?.edges ?? doc.graph.edges;
   const isHalo = (n: EmNode): boolean => n.node_type === "EpochNode" || isGroupType(n.node_type);
-  const nodes = allNodes.filter((n) => !isHalo(n));
+  // MICRO-TESTATE-COERENTI p.13 (E.D., dev.121: «la famiglia Epochs 6/6 si accende
+  // e si spegne ma i nodi d'epoca non compaiono mai») · in the Graph view the
+  // epochs and the groups are NODES too (invariant 4: they are nodes only here),
+  // each a disc with its edges (has_first_epoch, survive_in_epoch, has_sub_epoch,
+  // has_representation_model, the memberships); their halos stay behind them
+  const nodes = allNodes;
   const ids = new Set(nodes.map((n) => n.id));
   const haloNodes = new Map(allNodes.filter(isHalo).map((n) => [n.id, n]));
   const placeEdge = placeEdgeType();
@@ -142,11 +147,8 @@ export function buildLiquidScene(
     // the place is drawn as every place is, a halo; the HDT-O layer's
     // study_took_place_at is that membership)
     if ((MEMBERSHIP_EDGES.has(et) || EPOCH_EDGES.has(et) || et === placeEdge) &&
-        ids.has(e.source) && haloNodes.has(e.target)) {
+        ids.has(e.source) && haloNodes.has(e.target) && !haloNodes.has(e.source))
       (members.get(e.target) ?? members.set(e.target, new Set()).get(e.target)!).add(e.source);
-      continue;
-    }
-    if (et === "has_paradata_nodegroup" && haloNodes.has(e.target)) continue;
     if (!ids.has(e.source) || !ids.has(e.target) || e.source === e.target) continue;
     edges.push(e);
     degree.set(e.source, (degree.get(e.source) ?? 0) + 1);

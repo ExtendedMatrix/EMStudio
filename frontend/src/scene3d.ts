@@ -238,6 +238,9 @@ export interface SceneMenuRequest {
 export interface SpaceSceneHandle {
   update(items: SceneItem[]): void;
   frame(): void;
+  /** MICRO-TESTATE-COERENTI p.6 · does the camera see anything of what is drawn?
+   *  null when nothing has a box yet */
+  inView?(): boolean | null;
   dispose(): void;
   /** MICRO-SPAZIO-3D · the camera, for «Indietro» */
   camera(): CamState | null;
@@ -1340,6 +1343,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         camera.updateProjectionMatrix();
         updateClip();
         controls.update();
+      };
+      api.inView = () => {
+        const b = new THREE.Box3();
+        for (const c of content.children) if (!c.userData.contour && !c.userData.helper) b.expandByObject(c);
+        for (const l of liveLayers()) { const lb = l.layer.bounds(); if (lb) b.union(lb); }
+        if (b.isEmpty()) return null;
+        camera.updateMatrixWorld(true);
+        const f = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+        return f.intersectsBox(b);
       };
       const ray = new THREE.Raycaster();
       const ndcOf = (x: number, y: number) => {
@@ -3807,6 +3819,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       rebuild?.();
     },
     frame() { frameIt?.(); },
+    inView: () => api.inView?.() ?? null,
     dispose() {
       disposed = true;
       cleanup?.();

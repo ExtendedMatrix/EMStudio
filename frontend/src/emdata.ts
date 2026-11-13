@@ -83,6 +83,8 @@ let currentRowOf: () => string | null = () => null;
 let setCurrentRow: (id: string | null) => void = () => {};
 //: ROWSELECT · what picking a row means BEYOND marking it current.
 let onRowPicked: (id: string) => void = () => {};
+/** MICRO-TESTATE-COERENTI p.12 · the right click on a row: the menu of the selection */
+let onRowMenu: ((id: string, x: number, y: number) => void) | null = null;
 /** MICRO-CRONO-MULTIPLA p.2 · the selection (⌘/Alt: a cell's edit goes to every
  *  selected row of the sheet) and the Log line of such an edit */
 let getSelection: () => string[] = () => [];
@@ -382,7 +384,9 @@ export function initEmData(opts: {
   /** MICRO-CRONO-MULTIPLA p.2 · the selected nodes, and the Log line of an edit made on several */
   getSelection?: () => string[];
   onMultiLog?: (msg: string, ids: string[], store: DocumentStore) => void;
+  onRowMenu?: (id: string, x: number, y: number) => void;
 }): void {
+  if (opts.onRowMenu) onRowMenu = opts.onRowMenu;
   if (opts.getSelection) getSelection = opts.getSelection;
   if (opts.onMultiLog) onMultiLog = opts.onMultiLog;
   if (opts.getLedgerCtx) getLedgerCtx = opts.getLedgerCtx;
@@ -1119,8 +1123,15 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
     body.querySelectorAll("tr.emdata-current").forEach((r) => r.classList.remove("emdata-current"));
     if (rowId) body.querySelector(`tr[data-row="${CSS.escape(rowId)}"]`)?.classList.add("emdata-current");
   };
-  body.querySelectorAll<HTMLTableRowElement>("tr[data-row]").forEach((tr) =>
-    tr.addEventListener("mousedown", () => markCurrent(tr.getAttribute("data-row"))));
+  body.querySelectorAll<HTMLTableRowElement>("tr[data-row]").forEach((tr) => {
+    tr.addEventListener("mousedown", () => markCurrent(tr.getAttribute("data-row")));
+    tr.addEventListener("contextmenu", (e) => {
+      const id = tr.getAttribute("data-row");
+      if (!onRowMenu || !id || (e.target as HTMLElement).closest("input, select, textarea")) return;
+      e.preventDefault();
+      onRowMenu(id, e.clientX, e.clientY);
+    });
+  });
   // MICRO-VIEWER-UNICO p.6 · the three read-only sheets: a click on a row (not
   // on one of its buttons) selects its node — the Viewer and the Inspector follow
   body.querySelectorAll<HTMLTableRowElement>("table.ledger-table tr[data-row]").forEach((tr) =>

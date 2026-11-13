@@ -62,6 +62,9 @@ export type OverlayKey =
   | "s3_tiles"
   /** MICRO-OUTLINER-UNICO · the RMDocs, a layer of their own */
   | "s3_rmdoc"
+  /** MICRO-TESTATE-COERENTI p.1 · the RMSF and the 3D extractors, categories too */
+  | "s3_rmsf"
+  | "s3_x3d"
   | "s3_grid"
   | "s3_epoch_box"
   | "s3_sel_outline"
@@ -83,7 +86,7 @@ export type OverlayKey =
   | "fold_count";
 
 export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "threed" | "drawing"
-  | "s3_guides" | "s3_text" | "s3_objects" | "space3d_decor" | "s3_geometry";
+  | "s3_guides" | "s3_text" | "s3_objects" | "space3d_decor" | "s3_geometry" | "s3_categories";
 
 /** MICRO-GIZMO-ASSI · a value of a view's overlays, not a switch: a slider of
  *  the «Geometry» group (Blender's Overlays ▸ Geometry) */
@@ -103,6 +106,9 @@ export interface OverlayItem {
 export interface OverlayGroup {
   key: OverlayGroupKey;
   items: OverlayItem[];
+  /** MICRO-TESTATE-COERENTI p.1 · not in the Overlays menu: its door is another
+   *  (the 3D window's «Visibilità ▾», the ONE place the categories are switched) */
+  door?: "visibility";
   /** its sliders (the Space's «Geometry») */
   values?: OverlayValueItem[];
 }
@@ -170,13 +176,21 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     { key: "s3_labels_proxy", kind: "proxy" },
     { key: "s3_labels_sketch", text: "◇" },
   ] },
-  { key: "s3_objects", items: [
-    { key: "s3_proxies", kind: "proxy" },
-    { key: "s3_proxy_wire", text: "▱" },
+  // MICRO-TESTATE-COERENTI p.1 (E.D., 13 Nov 2026: «non vedevo i proxy, erano spenti, e
+  // non trovavo dove riaccenderli» — three places) · the CATEGORIES of objects are
+  // switched in ONE place, the 3D window's «Visibilità ▾»; the Overlays keep the
+  // guides, the texts, the decorators and the ways of drawing
+  { key: "s3_categories", door: "visibility", items: [
     { key: "s3_rm", kind: "representation_model" },
     { key: "s3_tiles", kind: "tileset" },
     { key: "s3_rmdoc", kind: "representation_model_doc" },
+    { key: "s3_rmsf", kind: "representation_model_sf" },
+    { key: "s3_proxies", kind: "proxy" },
     { key: "s3_sketches", text: "◇" },
+    { key: "s3_x3d", kind: "extractor" },
+  ] },
+  { key: "s3_objects", items: [
+    { key: "s3_proxy_wire", text: "▱" },
     { key: "s3_instances", text: "┄" },
     { key: "s3_sel_outline", text: "◌" },
     { key: "s3_gizmo", text: "✛" },
@@ -268,7 +282,7 @@ export function withValue(st: OverlayState, key: OverlayValueKey, v: number): Ov
 }
 
 /** The Space's items (a group of their own). */
-const SPACE_GROUPS = new Set<OverlayGroupKey>(["s3_guides", "s3_text", "s3_objects", "space3d_decor", "s3_geometry"]);
+const SPACE_GROUPS = new Set<OverlayGroupKey>(["s3_guides", "s3_text", "s3_objects", "space3d_decor", "s3_geometry", "s3_categories"]);
 const SPACE_KEYS = new Set<OverlayKey>(OVERLAY_GROUPS.filter((g) => SPACE_GROUPS.has(g.key)).flatMap((g) => g.items.map((i) => i.key)));
 
 /** The items a view can draw: the liquid Graph draws only its own few. */
@@ -289,7 +303,9 @@ export function overlayShown(st: OverlayState | null | undefined, key: OverlayKe
  *  dot, so that what is hidden is not forgotten. */
 export function overlaysHideSomething(st: OverlayState, view: OverlayView): boolean {
   if (!st.master) return true;
-  const can = new Set(overlayItemsFor(view).map((i) => i.key));
+  // MICRO-TESTATE-COERENTI p.1 · a category off is said by «Visibilità ▾», not here
+  const doors = new Set(OVERLAY_GROUPS.filter((g) => g.door).flatMap((g) => g.items.map((i) => i.key)));
+  const can = new Set(overlayItemsFor(view).map((i) => i.key).filter((k) => !doors.has(k)));
   // MICRO-SPAZIO-3D · the wireframe is a way of drawing the proxies, not a
   // thing: switched off it hides nothing. MICRO-GIZMO-ASSI · neither does what
   // is off by default (the axis Z, the sketches' labels): nothing was hidden
@@ -412,3 +428,7 @@ export function markOverlay(k: OverlayKey): void {
 export function drawnOverlayCounts(): Partial<Record<OverlayKey, number>> {
   return Object.fromEntries(drew);
 }
+
+/** MICRO-TESTATE-COERENTI p.1 · the categories of objects of the 3D window, in the
+ *  order of its «Visibilità ▾» (the ONE place they are switched) */
+export const VISIBILITY_KEYS: readonly OverlayKey[] = OVERLAY_GROUPS.filter((g) => g.door === "visibility").flatMap((g) => g.items.map((i) => i.key));

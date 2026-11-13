@@ -837,9 +837,16 @@ export function foldFiles<N extends EmNode, E extends EmEdge>(nodes: N[], edges:
     open: ReadonlySet<string>): { nodes: N[]; edges: E[] } {
   if (!nodes.some((n) => n.node_type === "resource_file")) return { nodes, edges };
   const shown = new Set<string>();
-  for (const e of edges)
-    if (e.edge_type === EDGE_HAS_FILE && open.has(e.source)) shown.add(e.target);
-  const hidden = new Set(nodes.filter((n) => n.node_type === "resource_file" && !shown.has(n.id))
+  // MICRO-TESTATE-COERENTI p.13 · only a file that HAS a resource folds into it: a
+  // file no resource holds (`has_file`) had no disc to open and was drawn nowhere
+  // (Templu Mare v9: 65 proxy glb of the DTC, measured 13 Nov 2026)
+  const held = new Set<string>();
+  for (const e of edges) {
+    if (e.edge_type !== EDGE_HAS_FILE) continue;
+    held.add(e.target);
+    if (open.has(e.source)) shown.add(e.target);
+  }
+  const hidden = new Set(nodes.filter((n) => n.node_type === "resource_file" && held.has(n.id) && !shown.has(n.id))
     .map((n) => n.id));
   if (!hidden.size) return { nodes, edges };
   return { nodes: nodes.filter((n) => !hidden.has(n.id)),

@@ -268,7 +268,12 @@ export function unitFacts(ix: Index, warned: Set<string>, n: EmNode): FacetRow {
   const text = [n.name, n.id, n.node_type, n.description, nameOf(ix, ep),
                 ...propsOf(ix, n.id).flatMap((p) => [propType(p), propValue(p)])]
     .map(str).join(" ").toLowerCase();
-  return { text, fx: { type: [n.node_type], epoch: epochLine(ix, ep), state } };
+  // MICRO-TESTATE-COERENTI p.7 · filtered by an epoch, a unit is there when it is
+  // born there OR survives there (s3Dgraphy `epoch_presence`): its first epoch
+  // and every `survive_in_epoch`, each with the epochs above it (a mother holds
+  // its phases' units)
+  const lives = [...new Set([ep, ...ix.out(n.id, "survive_in_epoch")].filter((x): x is string => !!x).flatMap((x) => epochLine(ix, x)))];
+  return { text, fx: { type: [n.node_type], epoch: lives, state } };
 }
 
 export interface ClaimFacts extends FacetRow {

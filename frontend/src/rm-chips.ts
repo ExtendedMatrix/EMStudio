@@ -34,8 +34,15 @@ const removedEdge = (e: EmEdge): boolean =>
   !!((e as { attributes?: Record<string, unknown> }).attributes?.removed);
 const RM_LIKE = new Set(["representation_model", "representation_model_doc", "representation_model_sf"]);
 
-/** document id → its RMDoc (the first with a file, else the first declared) */
-export function documentRmDocs(doc: EmDocument): Map<string, DocRmDoc> {
+/** document id → its RMDoc (the first with a file, else the first declared).
+ *
+ *  MICRO-TESTATE-COERENTI p.8 (E.D., 13 Nov 2026: «XX sec mostra RMDoc 1/1 ma non è
+ *  un RMDoc») · `strict`: only a node that IS an RMDoc (`representation_model_doc`).
+ *  The criterion is the datamodel's (node datamodel 1.6.44, scope_note): an RM
+ *  published by a document (`has_representation_model`, D.01 → its meshes) is
+ *  not for that an RMDoc. The Outliner reads it strict; the «ha 3D» chip of a
+ *  document keeps the wide reading (the document has a representation). */
+export function documentRmDocs(doc: EmDocument, strict = false): Map<string, DocRmDoc> {
   const byId = new Map(doc.graph.nodes.map((n) => [n.id, n]));
   const edges = doc.graph.edges.filter((e) => !removedEdge(e));
   const withFile = new Set<string>();
@@ -46,6 +53,7 @@ export function documentRmDocs(doc: EmDocument): Map<string, DocRmDoc> {
     if (e.edge_type !== "has_representation_model_doc" && e.edge_type !== "has_representation_model") continue;
     const d = byId.get(e.source), rm = byId.get(e.target);
     if (!d || d.node_type !== "document" || removedNode(d) || removedNode(rm) || !RM_LIKE.has(String(rm!.node_type))) continue;
+    if (strict && rm!.node_type !== "representation_model_doc") continue;
     const full = withFile.has(e.target);
     const was = out.get(e.source);
     // a declared `representation_model_doc` wins over an old `representation_model`
