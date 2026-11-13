@@ -34,6 +34,9 @@ export interface AddMenuCategory {
   offNote?: string;
   /** shown instead of the caret (Matrix paradata: «↑» when there is a selection) */
   hint?: string;
+  /** MICRO-NARRATIVE-MENU p.3 · a short family drawn IN the list, under its
+   *  label, instead of behind a submenu row */
+  inline?: boolean;
   entries: AddMenuEntry[];
 }
 
@@ -179,6 +182,16 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
   // `card`: show the hover card beside the highlighted row — only for a
   // keyboard move, when the menu is on screen (the first paint runs before the
   // menu is attached, and a card placed from a detached row lands at 0,0)
+  // MICRO-NARRATIVE-MENU p.2 · the highlighted row is brought into view by
+  // its OWN list, by hand: `scrollIntoView` also scrolls every ancestor, and a
+  // submenu row (fixed, but a child of the list) dragged the list down under
+  // the search field
+  const reveal = (el: HTMLElement, scroller: HTMLElement): void => {
+    if (!scroller.isConnected) return;
+    const r = el.getBoundingClientRect(), v = scroller.getBoundingClientRect();
+    if (r.top < v.top) scroller.scrollTop -= v.top - r.top;
+    else if (r.bottom > v.bottom) scroller.scrollTop += r.bottom - v.bottom;
+  };
   const paintHi = (card = false): void => {
     const list = subOpen ? subOpen.rows : rows;
     const idx = subOpen ? subOpen.hi : hi;
@@ -187,7 +200,7 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
     const cur = list[idx];
     if (cur) {
       cur.el.classList.add("hi");
-      cur.el.scrollIntoView({ block: "nearest" });
+      reveal(cur.el, subOpen ? (cur.el.parentElement as HTMLElement) : body);
       if (card) cur.el.dispatchEvent(new Event("em-hi"));
       else hideTip();
     } else hideTip();
@@ -282,13 +295,20 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
       for (const r of body.querySelectorAll(".addm-cat.open")) r.classList.remove("open");
       row.classList.add("open");
       // `position: fixed`, placed here: the body scrolls, and an absolute child
-      // of a scroller is clipped by it. Beside the menu, flipped to the left
-      // when the right has no room, and kept above the bottom edge.
+      // of a scroller is clipped by it. MICRO-NARRATIVE-MENU p.1 · measured, not
+      // guessed: on the side of the menu where it fits (right, else left, else
+      // the roomier one, kept inside the window), and above the bottom edge
       const m = menu.getBoundingClientRect();
       const rr = row.getBoundingClientRect();
-      const left = m.right + 214 > window.innerWidth ? m.left - 214 : m.right + 4;
-      sub.style.left = Math.max(4, left) + "px";
-      sub.style.top = Math.max(4, Math.min(rr.top - 6, window.innerHeight - 8 - Math.min(360, c.entries.length * 27 + 12))) + "px";
+      const s = sub.getBoundingClientRect();
+      const W = window.innerWidth, H = window.innerHeight, gap = 4, edge = 4;
+      let left: number;
+      if (m.right + gap + s.width <= W - edge) left = m.right + gap;
+      else if (m.left - gap - s.width >= edge) left = m.left - gap - s.width;
+      else left = W - m.right > m.left ? W - edge - s.width : edge;
+      sub.style.left = Math.max(edge, Math.min(left, W - edge - s.width)) + "px";
+      sub.style.top = Math.max(edge, Math.min(rr.top - 6, H - edge - s.height)) + "px";
+      sub.scrollTop = 0;
       subOpen = { row, rows: subRows, hi: -1 };
     };
     row.addEventListener("mouseenter", open);
@@ -334,7 +354,12 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
         sep();
       }
       if (model.newHeader && model.categories.length) group(model.newHeader);
-      for (const c of model.categories) categoryRow(c);
+      for (const c of model.categories) {
+        if (!c.inline || !c.entries.length) { categoryRow(c); continue; }
+        if (body.lastElementChild && !body.lastElementChild.classList.contains("addm-sep")) sep();
+        group(c.label);
+        for (const e of c.entries) push(e);
+      }
       if (model.extraFirst && model.extra.length) {
         sep();
         for (const e of model.extra) push(e);
@@ -366,6 +391,15 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
       }
     }
     paintHi();
+    body.scrollTop = 0;
+    if (menu.isConnected) fit();
+  };
+  // on screen, whatever the point — again whenever the search changes its
+  // height (a short list placed low grew past the bottom edge)
+  const fit = (): void => {
+    const r = menu.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - r.width - 8)) + "px";
+    menu.style.top = Math.max(8, Math.min(clientY, window.innerHeight - r.height - 8)) + "px";
   };
 
   input.addEventListener("input", render);
@@ -427,12 +461,13 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
 
   render();
   document.body.appendChild(menu);
-  // on screen, whatever the point
-  const r = menu.getBoundingClientRect();
-  menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - r.width - 8)) + "px";
-  menu.style.top = Math.max(8, Math.min(clientY, window.innerHeight - r.height - 8)) + "px";
+  fit();
   openMenu = { el: menu, close };
   document.addEventListener("pointerdown", onOutside, true);
   document.addEventListener("keydown", onKey, true);
-  input.focus();
+  // p.2 · the list opens on its first row, whole, under the search field —
+  // whatever the focus or the engine does to the scroll on the way
+  input.focus({ preventScroll: true });
+  body.scrollTop = 0;
+  globalThis.requestAnimationFrame?.(() => { if (!input.value) body.scrollTop = 0; });
 }

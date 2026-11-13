@@ -7,6 +7,25 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **The Narrative's menus, inside the screen and in order** (MICRO-NARRATIVE-MENU,
+  E.D., 13 November 2026). The menu component every «Add»/«Insert» uses
+  (`add-menu-ui.ts`): a submenu is measured and opens on the side where it
+  fits (right, else left, kept inside the window), as wide as its rows ask up
+  to a maximum; a label never breaks inside a word («Matri / x», «T / i.» in
+  dev.118) and a description goes to a second line instead of a horizontal
+  scroll; the list opens on its first row, whole, under the search field (the
+  highlighted row is revealed by its own list, not `scrollIntoView`), and the
+  menu is kept on screen again when the search changes its height. The «+»
+  between paragraphs: Document and 3D scene on top, then Text (not offered on
+  «/», where it did nothing), the five views of the graph and the standard
+  blocks IN the list under their labels (no submenus), the gestures, «Or cite a
+  node» last. Export ▾ closes on Esc and on a second click; the context menus
+  (Narrative and every other `ctx-menu`) stay inside the window, above the
+  pointer when the bottom has no room; the Narrative's right click in families,
+  «Insert a block after this one…» (it inserted BEFORE, beside «Mention … after
+  this block»), a refused item says why; the Index's «Epochs not told yet» no
+  longer repeats the same line under each row. New check
+  `check-narrative-menu.mjs` (Playwright, a copy of Templu Mare v9).
 - **The Space after dev.118, and the containers with their document**
   (MICRO-SPAZIO-CONTAINER, E.D., 13 November 2026). Archive › Assets: asset rows
   are dragged with the POINTER (the desktop shell owns HTML5's drag and drop;

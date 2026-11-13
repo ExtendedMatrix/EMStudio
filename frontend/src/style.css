@@ -8198,13 +8198,17 @@ body.gesturing-resize * {
   font-size: 12.5px;
   outline: none;
 }
-.addm-body { overflow-y: auto; overflow-x: visible; min-height: 0; }
+.addm-body { overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .addm-grp {
   font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--text-muted); padding: 4px 12px 2px;
 }
 .addm-item, .addm-cat {
-  display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
+  /* MICRO-NARRATIVE-MENU p.1 · label and description on one line when they
+     fit, the description on a second line when they don't — never a word
+     broken letter by letter, never a horizontal scroll */
+  display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 1px;
+  width: 100%; box-sizing: border-box;
   border: 0; background: none; padding: 5px 12px; font: inherit; color: var(--text);
   text-align: left; cursor: pointer;
 }
@@ -8216,16 +8220,26 @@ body.gesturing-resize * {
 .addm-ic { width: 24px; height: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .addm-ic img, .addm-ic svg, .addm-ic canvas { max-width: 24px; max-height: 14px; }
 .addm-l {
-  flex: 1; min-width: 0; overflow: hidden; white-space: normal; overflow-wrap: anywhere;
+  flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: normal; overflow-wrap: break-word;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
 }
 .addm-lmg { font-size: 11px; color: var(--text-muted); padding: 4px 12px 1px 44px; }
-.addm-d { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
+.addm-d {
+  font-size: 10.5px; color: var(--text-faint); white-space: normal; overflow-wrap: break-word;
+  flex: 0 1 auto; min-width: 0; margin-left: auto; text-align: left;
+  /* on a line of its own it starts under the label, past the icon slot */
+  padding-left: 24px;
+}
+.addm-cat > .addm-d, .addm-car { flex: none; }
 .addm-car { color: var(--text-faint); }
 .addm-sep { height: 1px; background: var(--border); margin: 4px 0; }
 .addm-note { font-size: 11px; color: var(--text-muted); margin: 6px 12px 2px; }
 .addm-sub {
-  display: none; position: fixed; width: 210px; max-height: 360px; overflow-y: auto;
+  /* p.1 · as wide as its rows ask (never narrower than a word), up to a
+     maximum; placed by add-menu-ui.ts on the side where it fits */
+  display: none; position: fixed; box-sizing: border-box;
+  width: max-content; min-width: 220px; max-width: min(380px, calc(100vw - 8px));
+  max-height: min(420px, calc(100vh - 8px)); overflow-y: auto; overflow-x: hidden;
   background: var(--bg-elevated); border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22); padding: 5px 0;
   z-index: 1101;

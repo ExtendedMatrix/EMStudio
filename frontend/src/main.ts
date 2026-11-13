@@ -24610,16 +24610,18 @@ function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTML
   // MICRO-NARRATIVE-MODULI p.19 (E.D., 13 Nov 2026) · TWO FAMILIES first:
   // Document (it shows the thing) and 3D scene (space and time); then the
   // graph's views, the standard blocks, and the gestures of writing
+  // MICRO-NARRATIVE-MENU p.3 · the two modules on top, the paragraph after
+  // them; on «/» (an empty paragraph replaced) «Text» is not offered — it did
+  // nothing there
   const blockEntries: AddMenuEntry[] = [
-    { key: "b|prose", label: t("nv.blk.prose"), detail: t("nv.blk.proseHint"), run: () => {
-        if (replace) return; // «/» on an empty paragraph asked for something else
+    ...["document", "scene3d"].filter((vt) => nedit.VIEW_TYPES.includes(vt)).map(media),
+    ...(replace ? [] : [{ key: "b|prose", label: t("nv.blk.prose"), detail: t("nv.blk.proseHint"), run: () => {
         nedit.editChapters(st, narrativeId, (cs) => cs[c]?.blocks?.splice(at, 0, { block_type: "prose", text: "" }));
         setNarrativeSelection(narrativeId, { chapter: c, block: at });
         // after the page is redrawn by the edit (it is, on the store's change)
         window.setTimeout(() => activeNarrativeHost()
           ?.querySelector<HTMLElement>(`.nv-block-row[data-block="${c}:${at}"] .nv-prose-edit`)?.focus(), 60);
-      } },
-    ...["document", "scene3d"].filter((vt) => nedit.VIEW_TYPES.includes(vt)).map(media),
+      } }]),
   ];
   const graphViews: AddMenuEntry[] = ["matrix", "table", "timeline", "map", "paradata"]
     .filter((vt) => nedit.VIEW_TYPES.includes(vt)).map(media);
@@ -24653,9 +24655,11 @@ function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTML
   showAddMenu({
     title: t("nv.insertTitle"), context: `${chapter?.title ?? ""} · ${at + 1}`, placeholder: t("link.q"),
     linkedHeader: t("nv.blocks"), linked: blockEntries, recent: [],
+    // p.3 · five views and three standard blocks: in the list, under their
+    // label, not behind two submenus (which the panel's edge cut)
     categories: [
-      { label: t("nv.graphViews"), entries: graphViews },
-      ...(standard.length ? [{ label: t("nv.standardBlocks"), entries: standard }] : []),
+      { label: t("nv.graphViews"), entries: graphViews, inline: true },
+      ...(standard.length ? [{ label: t("nv.standardBlocks"), entries: standard, inline: true }] : []),
     ],
     existing: {
       header: t("nv.orCite"),
@@ -25374,29 +25378,39 @@ function openNarrativeContextMenu(narrativeId: string, c: number, b: number | nu
   head.className = "ctx-header";
   head.textContent = b == null ? String(chapters[c]?.title ?? "") : `${String(chapters[c]?.title ?? "")} · ${b + 1}`;
   menu.appendChild(head);
-  const item = (label: string, probe: string, run: () => void, disabled = false): void => {
+  // MICRO-NARRATIVE-MENU p.4 · a refused item says why (it was grey and mute)
+  const item = (label: string, probe: string, run: () => void, why?: string): void => {
     const btn = document.createElement("button");
     btn.textContent = label;
     btn.dataset.nvCtx = probe;
-    btn.disabled = disabled;
+    btn.disabled = !!why;
+    if (why) btn.title = why;
     btn.onclick = () => { hideContextMenu(); run(); };
     menu.appendChild(btn);
   };
+  const sep = (): void => { const s = document.createElement("div"); s.className = "ctx-sep"; menu.appendChild(s); };
   const anchor = (): HTMLElement => activeNarrativeHost()?.querySelector<HTMLElement>(
     b == null ? `.nv-chapter[data-chapter="${c}"] .nv-chapter-head` : `.nv-block-row[data-block="${c}:${b}"]`) ?? document.body;
+  // p.4 · in families, in reading order: what goes INTO the chapter or after
+  // the block; the chapters around it; moving it
   if (b == null) {
-    item(t("nv.ctx.chapterAfter"), "chapter-after", () => newChapterHere(narrativeId, c));
-    item(t("nv.ctx.chapterBefore"), "chapter-before", () => newChapterHere(narrativeId, c - 1));
-    item(t("nv.ctx.moveUp"), "up", () => moveChapterKeepingView(narrativeId, c, c - 1), c === 0);
-    item(t("nv.ctx.moveDown"), "down", () => moveChapterKeepingView(narrativeId, c, c + 2), c >= chapters.length - 1);
     item(t("nv.ctx.insert"), "insert", () => openBlocksMenu(narrativeId, c, 0, anchor(), false));
+    sep();
+    item(t("nv.ctx.chapterBefore"), "chapter-before", () => newChapterHere(narrativeId, c - 1));
+    item(t("nv.ctx.chapterAfter"), "chapter-after", () => newChapterHere(narrativeId, c));
+    sep();
+    item(t("nv.ctx.moveUp"), "up", () => moveChapterKeepingView(narrativeId, c, c - 1), c === 0 ? t("nv.ctx.firstChapter") : undefined);
+    item(t("nv.ctx.moveDown"), "down", () => moveChapterKeepingView(narrativeId, c, c + 2), c >= chapters.length - 1 ? t("nv.ctx.lastChapter") : undefined);
   } else {
-    item(t("nv.ctx.insertHere"), "insert", () => openBlocksMenu(narrativeId, c, b, anchor(), false));
+    // «here» inserted BEFORE the block, beside «Mention … after this block»:
+    // both go after it now, as their labels say
+    item(t("nv.ctx.insertHere"), "insert", () => openBlocksMenu(narrativeId, c, b + 1, anchor(), false));
     item(t("nv.ctx.mention"), "mention", () => mentionAt(narrativeId, c, b + 1, anchor()));
-    item(t("nv.ctx.chapterHere"), "chapter-here", () => newChapterHere(narrativeId, c, b), b === 0);
+    sep();
+    item(t("nv.ctx.chapterHere"), "chapter-here", () => newChapterHere(narrativeId, c, b), b === 0 ? t("nv.ctx.chapterHereFirst") : undefined);
   }
   document.body.appendChild(menu);
-  ctxMenuEl = menu;
+  ctxMenuEl = keepOnScreen(menu);
 }
 
 // NARR-BUTTONS · `setNarrativeOpen()` is GONE. It was the WIN1 back-compat
@@ -25450,7 +25464,10 @@ function revealFromNarrative(nodeId: string): void {
 // chapter, each a link to its paragraph. «Esporta comunque, con ⚠︎ accanto»
 // is a choice for THAT export, never a setting that stays.
 function openPublishMenu(anchor: HTMLElement): void {
-  document.querySelector(".nv-pubmenu")?.remove();
+  // MICRO-NARRATIVE-MENU p.4 · a second click on «Export ▾» closes it (it
+  // opened it again), and so does Esc (it stayed open)
+  const was = document.querySelector(".nv-pubmenu");
+  if (was) { was.remove(); return; }
   const menu = document.createElement("div");
   menu.className = "dd-menu nv-pubmenu";
   const r = anchor.getBoundingClientRect();
@@ -25481,12 +25498,24 @@ function openPublishMenu(anchor: HTMLElement): void {
     : t("nv.pub.allValidated");
   menu.appendChild(note);
   document.body.appendChild(menu);
-  const off = (e: PointerEvent): void => {
-    if (menu.contains(e.target as Node)) return;
+  keepOnScreen(menu);
+  const done = (): void => {
     menu.remove();
     document.removeEventListener("pointerdown", off, true);
+    document.removeEventListener("keydown", esc, true);
+  };
+  const off = (e: PointerEvent): void => {
+    if (menu.contains(e.target as Node) || anchor.contains(e.target as Node)) return;
+    done();
+  };
+  const esc = (e: KeyboardEvent): void => {
+    if (e.key !== "Escape" || !menu.isConnected) return;
+    e.stopPropagation();
+    done();
   };
   document.addEventListener("pointerdown", off, true);
+  document.addEventListener("keydown", esc, true);
+  for (const b of menu.querySelectorAll("button")) b.addEventListener("click", done);
 }
 
 function copyReaderLink(): void {
@@ -33777,14 +33806,16 @@ function openIndexAddMenu(narrId: string, anchor: HTMLElement): void {
       } }] : []),
   ];
   const epochs = undescribedEpochs(s, narrId).map((ep): AddMenuEntry => ({
-    key: `i|epoch|${ep.id}`, label: t("nidx.add.epochChapter", { name: ep.name }), detail: t("nidx.add.epochHint"),
+    // MICRO-NARRATIVE-MENU p.4 · the same line under each row said what the
+    // submenu's title says: found by it, not repeated
+    key: `i|epoch|${ep.id}`, label: t("nidx.add.epochChapter", { name: ep.name }), alias: t("nidx.add.epochHint"),
     run: () => addEpochChapter(s, narrId, ep.id),
   }));
   showAddMenu({
     title: t("nidx.addMenu"), context: "", placeholder: t("link.q"),
     linked: entries, recent: [], categories: epochs.length ? [{ label: t("nidx.add.untold"), entries: epochs }] : [],
     extra: [], searchable: [...entries, ...epochs],
-    matches: (e, q) => `${e.label} ${e.detail ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()),
+    matches: (e, q) => `${e.label} ${e.detail ?? ""} ${e.alias ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()),
     count: "", noResults: t("add.noResults"), keysHint: t("add.keys"),
   }, r.left, r.bottom + 4);
 }
@@ -50972,7 +51003,7 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
     void navigator.clipboard?.writeText(entry.path).then(() => toast(t("storage.pathCopied")), () => toast(entry.path));
   });
   document.body.appendChild(menu);
-  ctxMenuEl = menu;
+  ctxMenuEl = keepOnScreen(menu);
 }
 
 // ── MICRO-INGRESSO-ASSET-1 · «Fai entrare un asset» ─────────────────────────
@@ -51064,7 +51095,7 @@ function showBlendObjectMenu(blend: string, object: string, master: string | nul
   };
   menu.append(header, b);
   document.body.appendChild(menu);
-  ctxMenuEl = menu;
+  ctxMenuEl = keepOnScreen(menu);
 }
 
 /** the masters of the graph an object of a .blend already stands for */
@@ -55249,7 +55280,7 @@ function showWorkspaceTabMenu(x: number, y: number, w: (typeof WORKSPACES)[numbe
     workspaceModified(w.id) ? undefined : t("ws.notModified"));
   else item(t("ws.removeItem"), () => removeSpace(w.id, workspaceLabel(w, t)));
   document.body.appendChild(menu);
-  ctxMenuEl = menu;
+  ctxMenuEl = keepOnScreen(menu);
 }
 renderWorkspaceBar();
 onLocaleChange(renderWorkspaceBar);
@@ -55487,7 +55518,7 @@ function showLaneMenu(clientX: number, clientY: number, lane: { id: string; labe
     });
   }
   document.body.appendChild(menu);
-  ctxMenuEl = menu;
+  ctxMenuEl = keepOnScreen(menu);
 }
 
 (document.getElementById("graph-layout") as HTMLSelectElement).addEventListener(
@@ -56932,6 +56963,22 @@ function validGroupTargets(
 }
 
 let ctxMenuEl: HTMLDivElement | null = null;
+/** MICRO-NARRATIVE-MENU p.4 · a context menu opened low or far right stays in
+ *  the window: moved left of the edge, and above the pointer when the bottom
+ *  has no room (it opened past the bottom edge, its last items unreachable);
+ *  taller than the window, it scrolls. Called once it is in the page. */
+function keepOnScreen<T extends HTMLElement>(menu: T): T {
+  const edge = 8;
+  const r = menu.getBoundingClientRect();
+  if (r.height > innerHeight - 2 * edge) {
+    menu.style.maxHeight = `${innerHeight - 2 * edge}px`;
+    menu.style.overflowY = "auto";
+  }
+  const h = Math.min(r.height, innerHeight - 2 * edge);
+  if (r.right > innerWidth - edge) menu.style.left = `${Math.max(edge, innerWidth - edge - r.width)}px`;
+  if (r.top + h > innerHeight - edge) menu.style.top = `${Math.max(edge, Math.min(r.top - h, innerHeight - edge - h))}px`;
+  return menu;
+}
 function hideContextMenu(): void {
   ctxMenuEl?.remove();
   ctxMenuEl = null;
@@ -57013,7 +57060,7 @@ function showMissingParentMenu(
   // LO STESSO elemento del menu del documento: la chiusura al pointerdown fuori
   // esiste già una volta sola (window listener, più in basso), e un secondo
   // meccanismo di chiusura sarebbe un secondo modo di lasciare un menu aperto.
-  ctxMenuEl = menu;
+  ctxMenuEl = keepOnScreen(menu);
 }
 
 /** Delete the node selection — the Delete key and the context menu's «Elimina»,
@@ -58079,7 +58126,7 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
   menu.appendChild(sepDel);
   item(t("ctx.delete"), () => deleteSelectedNodes(), "ctx-danger");
   document.body.appendChild(menu);
-  ctxMenuEl = menu;
+  ctxMenuEl = keepOnScreen(menu);
 }
 
 // close the menu on any pointerdown outside it
