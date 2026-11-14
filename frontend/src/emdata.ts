@@ -754,7 +754,13 @@ function chronCells(cs: ChronState) {
     if (rule === "contained" && e.contained)
       return `${ruleLabel(rule)} · ${byName(e.contained.source)}` +
         (e.contained.original ? " ← " + byName(e.contained.original) : "");
-    if (rule === "tpq" || rule === "taq") return `${rel ?? ruleLabel(rule)} ${src}`;
+    // the limit of an epoch is not an end (MICRO-C-CORREZIONI-ED): a bound
+    // born on an epoch says so — «is_after USV101 · limite dell'epoca II A.D.»
+    const root = side === "start" ? e.start_root : e.end_root;
+    const limit = root && (root.rule === "epoch" || root.rule === "sub_epoch")
+      ? ` · ${t("insp.time.rootLimit", { epoch: byName(root.source) })}` : "";
+    if (rule === "tpq" || rule === "taq") return `${rel ?? ruleLabel(rule)} ${src}${limit}`;
+    if (rule === "epoch" || rule === "sub_epoch") return t("insp.time.rootLimit", { epoch: src });
     return `${ruleLabel(rule)}${src ? " · " + src : ""}`;
   };
   const bound = (e: ChronEntry, side: "start" | "end"): string => {

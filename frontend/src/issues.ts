@@ -177,7 +177,7 @@ export interface IssueSources {
    *  survivals they contradict, the dating warnings — and the bulk cures */
   inheritance?: {
     redundant: Array<{ id: string; name: string; epochs: string[]; kind: "servile" | "survive" | "servile_differs" | "survive_contradicting"; master_name?: string }>;
-    dating: Array<{ rule: string; id: string; message: string; fix: string; epoch?: string | null; other: string }>;
+    dating: Array<{ rule: string; id: string; message: string; fix: string | null; epoch?: string | null; other: string }>;
     epochName: (id: string) => string;
     /** the epochs a node is attributed to, own or inherited (`epochAttribution`) */
     attributed?: (id: string) => string[];

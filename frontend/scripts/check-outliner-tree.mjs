@@ -54,7 +54,10 @@ const labels = (rows) => rows.map((r) => `${"  ".repeat(r.depth)}${r.label}${r.c
   ok(L.includes("      No epoch (1)") && L.includes("        US9"), "units with no epoch apart");
   eq(rows.filter((r) => r.kind === "dim").map((r) => r.label), ["Units", "Documents", "Authors", "Epochs", "Models", "Proxies", "Paradata"],
     "default dimensions (paradata on when not synced, other off, no GIS / aux when empty)");
-  ok(rows.find((r) => r.label === "Units").count === "5", "the count of the units");
+  // MICRO-C-CORREZIONI-ED · SF1 is «real» (the datamodel's family): born in
+  // Età arcaica and still existing, it is a row of Età romana too — the count
+  // counts the rows (5 units, 6 rows)
+  ok(rows.find((r) => r.label === "Units").count === "6", "the count of the units");
 }
 // 2 · alphabetical and by type
 {
@@ -69,7 +72,9 @@ const labels = (rows) => rows.map((r) => `${"  ".repeat(r.depth)}${r.label}${r.c
   const rows = run({}, tg);
   const d1 = rows.findIndex((r) => r.id === "D1");
   eq([rows[d1 + 1].id, rows[d1 + 1].kind, rows[d1 + 1].glyph], ["RMD1", "sub", "representation_model_doc"], "RMDoc under D.01");
-  const sf = rows.findIndex((r) => r.id === "SF1");
+  // SF1 is still existing (MICRO-C: real by its family): its row under Età arcaica, where it was born
+  const arc = rows.findIndex((r) => r.label === "Età arcaica");
+  const sf = rows.findIndex((r, i) => r.id === "SF1" && i > arc);
   eq([rows[sf + 1].id, rows[sf + 1].glyph, rows[sf + 1].eye], ["RMSF1", "representation_model_sf", "rm:RMSF1"], "RMSF under SF1, with the eye");
   ok(!rows.some((r) => r.kind === "node" && r.id === "RMD1"), "the RMDoc is not a model of its own list");
 }
@@ -81,7 +86,8 @@ const labels = (rows) => rows.map((r) => `${"  ".repeat(r.depth)}${r.label}${r.c
   ok(!grey.find((r) => r.id === "SF1").absent, "SF1 has an RMSF: present");
   ok(grey.find((r) => r.id === "D2").absent && !grey.find((r) => r.id === "D1").absent, "D.02 (no RMDoc) grey, D.01 not");
   ok(!grey.some((r) => r.label === "Paradata"), "paradata off by default when synced");
-  eq(grey.find((r) => r.label === "Units").count, "2 / 5", "the count says present / all");
+  // SF1 (present) is a row of two epochs since MICRO-C: 3 rows present of 6
+  eq(grey.find((r) => r.label === "Units").count, "3 / 6", "the count says present / all");
   const filt = run({ sync3d: true, absent: "filter" }, tg);
   ok(!filt.some((r) => r.id === "US9") && !filt.some((r) => r.id === "D2"), "filtered: the absent ones go");
   ok(!filt.some((r) => r.label === "No epoch"), "…and a group left empty with them");

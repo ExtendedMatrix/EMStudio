@@ -863,6 +863,19 @@ export function isContinuityType(nodeType: string | undefined): boolean {
   return ancestorsOf(nodeType).includes("ContinuityNode");
 }
 
+/** The `family` the node datamodel declares for a stratigraphic subtype
+ *  (`stratigraphic_nodes › StratigraphicNode › subtypes › <type> › family`):
+ *  "real" | "virtual" | null (BR, SE, any other type) — s3Dgraphy's
+ *  `classification.get_family`, one source (MICRO-C-CORREZIONI-ED). */
+const _SUBTYPE_FAMILY: Record<string, string | undefined> = Object.fromEntries(
+  Object.entries((nodeDatamodel as unknown as {
+    stratigraphic_nodes?: { StratigraphicNode?: { subtypes?: Record<string, { family?: string }> } };
+  }).stratigraphic_nodes?.StratigraphicNode?.subtypes ?? {}).map(([k, v]) => [k, v?.family]));
+export function unitFamily(nodeType: string | undefined): "real" | "virtual" | null {
+  const f = nodeType ? _SUBTYPE_FAMILY[nodeType] : undefined;
+  return f === "real" || f === "virtual" ? f : null;
+}
+
 /** Virtual stratigraphic unit — detected from the datamodel class names
  *  (VirtualStratigraphicUnit / …VirtualSpecialFindUnit / SeriesOf…Virtual…),
  *  so it also covers VSF and the virtual series, not just USVn/USVs. */

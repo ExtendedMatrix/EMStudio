@@ -41,7 +41,14 @@ export interface ChronEntry {
   /** the rule from the contents, reported beside the value (even when a
    *  written start stands over it); `via` = the relations walked */
   contained?: { start: number; source: string; original: string | null; via?: string[] };
+  /** where a pushed (tpq / taq) bound was BORN: the unit whose own bound it is,
+   *  its rule and source — `epoch` / `sub_epoch` = the LIMIT of the epoch
+   *  `source`, not an end (s3Dgraphy `Graph.chronology`, MICRO-C-CORREZIONI-ED) */
+  start_root?: ChronRoot;
+  end_root?: ChronRoot;
 }
+
+export interface ChronRoot { node: string; rule: ChronRule | null; source: string | null }
 
 /** `off` = the bridge did not answer at all; `error` = it answered with a
  *  failure (an s3Dgraphy too old for `/chronology` is a 501). */

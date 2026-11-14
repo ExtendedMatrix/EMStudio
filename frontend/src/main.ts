@@ -5519,6 +5519,8 @@ function catalogueStateOf(st: DocumentStore, docId: string): CatalogueState {
   const pix = provIndexOf(st);
   const date = (rule: "absolute_time_start" | "absolute_time_end"): number | null => {
     const r = resolveProvenance(pix, docId, rule);
+    // the limit of an epoch is not an end (MICRO-C-CORREZIONI-ED)
+    if (rule === "absolute_time_end" && r.bound === "epoch_limit") return null;
     return r.level && r.level !== "graph" && typeof r.value === "number" ? r.value : null;
   };
   return catalogueState(mediaIndex(st.doc.graph as never), docId, { start: date("absolute_time_start"), end: date("absolute_time_end") });
@@ -6957,7 +6959,7 @@ function filteredView(opts: { wholeGraph?: boolean;
       const p = resolveProvenance(pix, n.id, rule);
       if (p.value == null || p.level === "node") continue;
       const arr = adornments.get(n.id) ?? [];
-      arr.push({ ornamentId: "", kind: rule, label: provTitle(pix, rule, p), inherited: true });
+      arr.push({ ornamentId: "", kind: rule, label: provTitle(pix, rule, p, n.id), inherited: true });
       adornments.set(n.id, arr);
     }
   }
@@ -22184,16 +22186,22 @@ function overlaysOfWin(winId: string | null | undefined, v: OverlayView): Overla
 }
 /** MICRO-A-PROPRIO-EREDITATO (E.D., 14 Nov 2026: «come Blender, più un
  *  selettore nel menu della singola vista») · a 3D window either FOLLOWS the
- *  Outliner (its eyes hide and force objects here, the default) or is
- *  PERSONALISED (the Outliner's eyes do not reach it: it shows what its own
- *  categories of «Visibilità ▾» let through). The window's state, never em.json */
+ *  Outliner or is PERSONALISED. MICRO-C-CORREZIONI-ED (E.D., same day): no
+ *  eyes of a view — that would be a filter with no counterpart in the
+ *  Outliner. The Outliner's eyes reach every view; «Personalizzata» is ONLY the
+ *  view's filter by categories of «Visibilità ▾» (per window), «Segui
+ *  l'Outliner» no filter at all. A window with no mode written is personalised
+ *  when one of its categories is off (what it showed before stays as it was).
+ *  The window's state, never em.json */
 export type VisMode = "outliner" | "custom";
 function visModeOf(winId: string | null | undefined): VisMode {
-  return winById(winId)?.state["current.visMode"] === "custom" ? "custom" : "outliner";
+  const m = winById(winId)?.state["current.visMode"];
+  if (m === "custom" || m === "outliner") return m;
+  const off = overlaysOfWin(winId ?? null, "space").off;
+  return VISIBILITY_KEYS.some((k) => off.includes(k)) ? "custom" : "outliner";
 }
-/** the Outliner's eyes as a 3D window applies them: none when it is personalised */
-function eyesOf(winId: string | null | undefined): { hidden: Set<string>; forced: Set<string> } {
-  if (visModeOf(winId) === "custom") return { hidden: new Set(), forced: new Set() };
+/** the Outliner's eyes as a 3D window applies them: the same in every view */
+function eyesOf(_winId: string | null | undefined): { hidden: Set<string>; forced: Set<string> } {
   const p = space3dPrefs();
   return { hidden: new Set(p.hidden), forced: new Set(p.forced ?? []) };
 }
@@ -31453,6 +31461,7 @@ function openEpochInSpace(epochId: string): void {
 /** the overlays that are CONTENT (what is drawn), not decorators: the general
  *  switch leaves them as they are — switching the overlays off does not empty
  *  the scene, as in Blender */
+const VIS_KEYS = new Set<OverlayKey>(VISIBILITY_KEYS);
 const CONTENT_3D = new Set<OverlayKey>(["s3_proxies", "s3_rm", "s3_tiles", "s3_sketches", "s3_proxy_wire", "s3_rmdoc", "s3_rmsf", "s3_x3d"]);
 /** MICRO-OUTLINER-UNICO · an RMDoc (a document placed in space) is the layer «RMDoc», not «RM» */
 function rmLayerOf(r: { id: string; resource?: { tiles?: string } | null }): OverlayKey {
@@ -31468,6 +31477,9 @@ function spaceWinId(): string | null {
   return windowsOf().find((w) => w.type === "scene")?.id ?? null;
 }
 function space3dShown(k: OverlayKey, winId: string | null = spaceWinId()): boolean {
+  // MICRO-C-CORREZIONI-ED · a view that follows the Outliner has no filter of
+  // its own: every category is there, the Outliner's eyes decide
+  if (VIS_KEYS.has(k) && visModeOf(winId) === "outliner") return true;
   const st = overlaysOfWin(winId, "space");
   return CONTENT_3D.has(k) ? !st.off.includes(k) : overlayShown(st, k);
 }
@@ -31732,7 +31744,7 @@ function spaceDecorators(st: DocumentStore, sp: Space, units: string[]): (u: str
       if (has.has(rule)) continue;
       const p = resolveProvenance(pix, u, rule);
       if (p.value == null || p.level === "node") continue;
-      out.push({ group: "rights", kind: rule, title: provTitle(pix, rule, p), inherited: true });
+      out.push({ group: "rights", kind: rule, title: provTitle(pix, rule, p, u), inherited: true });
     }
     const g = pd.get(u);
     if (g) out.push({ group: "pd", text: `PD ${g.count}`, title: t("compact.badge", { n: String(g.count) }) });
@@ -35138,6 +35150,21 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     if (store && ep) for (const [docId, xs] of extractors3d(store.doc)) if (docLitIn(docId, ep)) out.s3_x3d = (out.s3_x3d ?? 0) + xs.length;
     return out;
   };
+  /** per category, what is in this epoch AND lit in the Outliner (its eyes) */
+  const litCounts = (): Partial<Record<OverlayKey, number>> => {
+    const sp = currentSpace();
+    const ep = sp ? spaceEpochOf(sp) : null;
+    const sum = sp && ep ? sp.summary(ep) : null;
+    const hidden = eyesOf(win.id).hidden;
+    const out: Partial<Record<OverlayKey, number>> = {};
+    const add = (k: OverlayKey) => { out[k] = (out[k] ?? 0) + 1; };
+    for (const r of sum?.rms ?? []) if (!hidden.has(`rm:${r.id}`)) add(rmLayerOf(r));
+    for (const u of sum?.withProxy ?? []) if (sp!.proxies.has(u) && !hidden.has(`proxy:${u}`)) add("s3_proxies");
+    for (const x of listSketches()) if (!hidden.has(`sketch:${x.id}`)) add("s3_sketches");
+    if (store && ep) for (const [docId, xs] of extractors3d(store.doc)) if (docLitIn(docId, ep))
+      for (const x of xs) if (!hidden.has(`x3d:${x.id}`)) add("s3_x3d");
+    return out;
+  };
   const visOff = (): OverlayKey[] => VISIBILITY_KEYS.filter((k) => !space3dShown(k, win.id));
   const VIS_OPACITY: Partial<Record<OverlayKey, OverlayValueKey>> = { s3_rm: "s3_opacity_rm", s3_proxies: "s3_opacity_proxy" };
   const visibilityBody = (): HTMLElement => {
@@ -35158,6 +35185,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         let st = ovs();
         for (const k of VISIBILITY_KEYS) st = withOverlay(st, k, on);
         setOverlays("space", st, win.id);
+        // all on is following the Outliner; any category off is the view's filter
+        setWinCurrent(win, "visMode", on ? "outliner" : "custom");
+        x3dMarksMemo = null;
         redrawVis();
       });
       return b;
@@ -35176,7 +35206,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       rb.checked = visModeOf(win.id) === m;
       rb.addEventListener("change", () => {
         if (!rb.checked) return;
-        setWinCurrent(win, "visMode", m === "custom" ? "custom" : null);   // persisted with the windows
+        setWinCurrent(win, "visMode", m);   // persisted with the windows
         x3dMarksMemo = null;
         redrawVis();
       });
@@ -35196,7 +35226,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       cb.type = "checkbox";
       cb.checked = space3dShown(k, win.id);
       cb.dataset.visCb = k;
-      cb.addEventListener("change", () => { setOverlays("space", withOverlay(ovs(), k, cb.checked), win.id); redrawVis(); });
+      // a category switched here is the view's own filter: «Personalizzata»
+      cb.addEventListener("change", () => {
+        setOverlays("space", withOverlay(ovs(), k, cb.checked), win.id);
+        setWinCurrent(win, "visMode", "custom");
+        x3dMarksMemo = null;
+        redrawVis();
+      });
       const nm = document.createElement("span");
       nm.textContent = t(`vis.cat.${k}`);
       const n = document.createElement("span");
@@ -35587,9 +35623,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const fold = `<button type="button" class="scn-fold" data-fold="summary" aria-expanded="${!folded}">${folded ? "▸" : "▾"}</button>`;
     // MICRO-TESTATE-COERENTI p.2 · a category switched off that has something in this
     // epoch is said on the line, with the same link that turns it back on
-    const cnt0 = visCounts();
-    const catsOff = VISIBILITY_KEYS.filter((k) => !space3dShown(k, win.id) && (cnt0[k] ?? 0) > 0)
-      .map((k) => ` · <button type="button" class="link vis-cat-off" data-cat-on="${k}" title="${escapeHtml(t("vis.rowOff", { cat: t(`vis.cat.${k}`) }))}">⊘ ${escapeHtml(t("vis.lineOff", { cat: t(`vis.cat.${k}`), n: String(cnt0[k]) }))}</button>`).join("");
+    // MICRO-C-CORREZIONI-ED · what the view's filter hides and the Outliner
+    // shows, in one row: «nascosti da questa vista: Estrattori 3D (5) · Segui
+    // l'Outliner» (one click: the view drops its filter)
+    const cnt0 = litCounts();
+    const hiddenHere = VISIBILITY_KEYS.filter((k) => !space3dShown(k, win.id) && (cnt0[k] ?? 0) > 0);
+    const catsOff = hiddenHere.length
+      ? ` · <span class="vis-hidden-here" data-vis-hidden-here="${hiddenHere.join(",")}">${escapeHtml(t("vis.hiddenHere"))} `
+        + hiddenHere.map((k) => `<button type="button" class="link vis-cat-off" data-cat-on="${k}" title="${escapeHtml(t("vis.rowOff", { cat: t(`vis.cat.${k}`) }))}">⊘ ${escapeHtml(t("vis.hiddenCat", { cat: t(`vis.cat.${k}`), n: String(cnt0[k]) }))}</button>`).join(", ")
+        + ` · <button type="button" class="link" data-follow-outliner="1" title="${escapeHtml(t("vis.mode.outlinerTitle"))}">${escapeHtml(t("vis.mode.outliner"))}</button></span>`
+      : "";
     overlay.classList.toggle("folded", folded);
     if (folded) overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${escapeHtml(t("s3.foldedSummary", { rm: String(sum.rms.length), px: String(sum.withProxy.length), n: String(sum.units.length) }))}`
       + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "") + catsOff;
@@ -35619,6 +35662,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       e.stopPropagation();
       turnCategoryOn(b.dataset.catOn as OverlayKey);
     }));
+    overlay.querySelector<HTMLButtonElement>("[data-follow-outliner]")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setWinCurrent(win, "visMode", "outliner");
+      x3dMarksMemo = null;
+      redrawVis();
+    });
     overlay.querySelector<HTMLButtonElement>("[data-unisolate]")?.addEventListener("click", (e) => {
       e.stopPropagation(); spaceIsolated = null; refreshSurfaces("scene");
     });

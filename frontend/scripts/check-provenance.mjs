@@ -57,6 +57,37 @@ const E = (source, target, edge_type) => ({ id: `${source}__${edge_type}__${targ
   eq(M.unitLife(ix2, "SU1").status, "ended_undated", "a continuity closes it");
   const rep = M.redundancyReport(ix2);
   eq([rep.servile.map((r) => r.id), rep.survive.map((r) => r.id)], [["PD1"], ["SU1"]], "the redundant edges");
+  // MICRO-C-CORREZIONI-ED · the limit of an epoch is not an end
+  const e2 = M.resolveProvenance(ix2, "SU1", "absolute_time_end");
+  eq([e2.value, e2.bound, e2.limit_of], [2014, "epoch_limit", "E13"], "an undated continuity: the limit of its epoch");
+  eq([M.unitLife(ix2, "V1").end_kind, M.unitLife(ix2, "V1").end_limit_of], ["epoch_limit", "PA"], "a virtual unit: the limit of its epoch");
+}
+
+// ── MICRO-C-CORREZIONI-ED · real = the datamodel's family; when a model was made ──
+{
+  const doc = { graph: { nodes: [
+    N("II", "EpochNode", "II A.D.", { start_time: 100, end_time: 199 }), N("XX", "EpochNode", "XX sec", { start_time: 1801, end_time: 2026 }),
+    N("E13", "EpochNode", "2013", { start_time: 2013, end_time: 2014 }),
+    N("T1", "SF", "T01"), N("V1", "USVn", "USV1"), N("D1", "document", "D.01"),
+    N("M1", "representation_model", "m1"), N("M2", "representation_model", "m2"), N("M3", "representation_model", "m3"),
+    N("R1", "resource", "mesh1"), N("S1", "resource", "photos1"), N("P1", "dtc_process", "photogrammetry", { dtc_kind: "transformation" }),
+    N("A1", "dtc_acquisition", "campaign 2015", { dtc_kind: "photo", date: "2015-06-03" }),
+    N("R2", "resource", "mesh2"), N("A2", "dtc_acquisition", "campaign 2013", { dtc_kind: "laserscanner", date: "2013" }),
+    N("R3", "resource", "mesh3"), N("A3", "dtc_acquisition", "download", { dtc_kind: "download", date: "2020" })],
+  edges: [E("T1", "II", "has_first_epoch"), E("V1", "II", "has_first_epoch"), E("XX", "E13", "has_sub_epoch"),
+    E("D1", "E13", "has_first_epoch"),
+    E("XX", "M1", "has_representation_model"), E("II", "M2", "has_representation_model"), E("XX", "M3", "has_representation_model"),
+    E("D1", "M1", "has_representation_model"), E("D1", "M2", "has_representation_model"), E("D1", "M3", "has_representation_model"),
+    E("M1", "R1", "has_linked_resource"), E("P1", "R1", "dtc_had_output"), E("P1", "S1", "dtc_had_input"), E("A1", "S1", "dtc_had_output"),
+    E("M2", "R2", "has_linked_resource"), E("A2", "R2", "dtc_had_output"),
+    E("M3", "R3", "has_linked_resource"), E("A3", "R3", "dtc_had_output")] } };
+  const ix = M.provIndex(doc);
+  eq([M.unitLife(ix, "T1").real, M.unitLife(ix, "T1").status], [true, "still_existing"], "an SF is real (the datamodel's family)");
+  eq([M.unitLife(ix, "V1").real, M.unitLife(ix, "V1").status], [false, "birth_only"], "a USVn is virtual");
+  eq(M.acquisitionDates(ix, "M1").start, 2015, "the date of a capture up the DTC chain");
+  eq(M.acquisitionDates(ix, "M3").start, null, "a retrieval is not when a model was made");
+  const w = M.datingWarnings(ix).filter((x) => x.rule === "model_vs_document");
+  eq([w.map((x) => x.id), w[0]?.fix ?? null], [["M1"], null], "only the model made outside its document's dates, no cure");
 }
 
 // ── the v10 against s3Dgraphy ───────────────────────────────────────────────
@@ -79,8 +110,8 @@ from s3dgraphy.unit_life import life_table
 from s3dgraphy.attribution import attribution_table, redundancy_report, dating_warnings
 g,_=api.load_emjson_file(sys.argv[1])
 t=provenance_table(g)
-out={"prov":{k:{r:[v["value"],v["level"],v["origin"]] for r,v in rs.items()} for k,rs in t.items()},
-     "life":{k:[v["status"],v["epochs"],v["redundant"],v["contradicting"]] for k,v in life_table(g).items()},
+out={"prov":{k:{r:[v["value"],v["level"],v["origin"],v.get("bound"),v.get("limit_of")] for r,v in rs.items()} for k,rs in t.items()},
+     "life":{k:[v["status"],v["epochs"],v["redundant"],v["contradicting"],v["real"],v["end_kind"],v["end_limit_of"]] for k,v in life_table(g).items()},
      "attr":{k:[sorted(v["epochs"]),v["level"],v["origin"]] for k,v in attribution_table(g).items()},
      "red":{k:sorted(r["id"] for r in v) for k,v in redundancy_report(g).items()},
      "warn":sorted([w["rule"],w["id"],w.get("other")] for w in dating_warnings(g))}
@@ -96,15 +127,15 @@ for (const [id, rules] of Object.entries(want.prov)) {
   nodes++;
   for (const [r, w] of Object.entries(rules)) {
     const p = M.resolveProvenance(ix, id, r);
-    const got = [num(p.value), p.level, p.origin];
-    const exp = [num(w[0]), w[1], w[2]];
+    const got = [num(p.value), p.level, p.origin, p.bound ?? null, p.limit_of ?? null];
+    const exp = [num(w[0]), w[1], w[2], w[3] ?? null, w[4] ?? null];
     if (JSON.stringify(got) !== JSON.stringify(exp)) bad.push(`${byId.get(id).node_type} ${byId.get(id).name} ${r}: page ${JSON.stringify(got)} s3Dgraphy ${JSON.stringify(exp)}`);
     else checks++;
   }
 }
 for (const [id, w] of Object.entries(want.life)) {
   const l = M.unitLife(ix, id);
-  const got = [l.status, l.epochs, l.redundant, l.contradicting];
+  const got = [l.status, l.epochs, l.redundant, l.contradicting, l.real, l.end_kind, l.end_limit_of];
   if (JSON.stringify(got) !== JSON.stringify(w)) bad.push(`life ${byId.get(id)?.name}: page ${JSON.stringify(got)} s3Dgraphy ${JSON.stringify(w)}`);
   else checks++;
 }

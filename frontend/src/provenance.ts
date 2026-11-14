@@ -17,16 +17,17 @@
  *  - `mastersOf`: paradata group → the node it serves, property → its owner,
  *    extractor / combiner → the unit(s) it feeds, proxy → the unit of its
  *    geometry, annotated region → its document;
- *  - `unitLife`: a real unit lives until a continuity closes it («still
- *    existing» otherwise), any other unit lives in its epoch and a continuity
- *    extends it;
+ *  - `unitLife`: a real unit (the datamodel's `family`, `rules.unitFamily`)
+ *    lives until a continuity closes it («still existing» otherwise), any
+ *    other unit lives in its epoch and a continuity extends it; the limit of an
+ *    epoch is not an end (`end_kind` / `bound` «epoch_limit», MICRO-C);
  *  - `epochAttribution`, `redundancyReport`, `datingWarnings`.
  *
  * Pure: an index of the document is built once per pass (`provIndex`) and
  * memoises its answers; build a new one after the graph changes.
  */
 import type { EmDocument, EmEdge, EmNode } from "./types";
-import { isStratigraphicType } from "./rules";
+import { dtcKindFamily, isStratigraphicType, unitFamily } from "./rules";
 import { t } from "./i18n";
 
 export type ProvRule = "absolute_time_start" | "absolute_time_end" | "author" | "license" | "embargo";
@@ -45,6 +46,11 @@ export interface Prov {
   from_level?: ProvLevel | null;
   /** a unit's end: still_existing · ended · ended_undated · birth_only */
   status?: string;
+  /** an inherited date: «epoch_limit» = the limit of the epoch `limit_of`, not
+   *  a date of the node (MICRO-C-CORREZIONI-ED); «date» = a date written on
+   *  another node (a dated continuity…) */
+  bound?: "epoch_limit" | "date";
+  limit_of?: string | null;
 }
 
 const SERVILE = new Set(["ParadataNodeGroup", "property", "extractor", "combiner", "semantic_shape", "annotation_region"]);
@@ -53,7 +59,6 @@ const MEMBER_DATED = new Set(["ActivityNodeGroup"]);
 const MODEL_TYPES = new Set(["representation_model", "representation_model_doc", "representation_model_sf"]);
 const CONTAINER = "RepresentationModelNodeGroup";
 const EPOCH = "EpochNode";
-const PERSISTENT = new Set(["US", "serSU"]);
 const TEMPORAL = new Set(["absolute_time_start", "absolute_time_end"]);
 const AGG: Partial<Record<ProvRule, (xs: number[]) => number>> = {
   absolute_time_start: (xs) => Math.min(...xs),
@@ -324,6 +329,11 @@ export function resolveProvenance(ix: ProvIndex, id: string, rule: ProvRule, see
   if (m) return { ...m };
   const s2 = new Set(seen); s2.add(id);
   const r = walk(ix, n, id, rule, s2);
+  // the limit of an epoch is not a date of the node (MICRO-C-CORREZIONI-ED)
+  if (TEMPORAL.has(rule) && r.value != null && r.origin && r.origin !== id) {
+    if (ix.isEpoch(r.origin)) { r.bound = "epoch_limit"; r.limit_of = r.origin; }
+    else r.bound = "date";
+  }
   ix.memo.set(key, r);
   return { ...r };
 }
@@ -404,6 +414,9 @@ export interface Life {
   status: "still_existing" | "ended" | "ended_undated" | "birth_only" | "undated";
   epochs: string[]; why: string; declared: string[]; redundant: string[]; contradicting: string[];
   end_value: number | null; end_origin: string | null; end_chain: string[]; end_dated: boolean;
+  /** «dated» (a dated continuity) or «epoch_limit»: the value is the limit of
+   *  the epoch `end_limit_of`, not an end of the unit */
+  end_kind: "dated" | "epoch_limit" | null; end_limit_of: string | null;
 }
 
 function epochBounds(ix: ProvIndex): { starts: Map<string, number>; ends: Map<string, number> } {
@@ -426,9 +439,9 @@ const fmtYear = (v: number): string => String(Number.isInteger(v) ? v : v);
 
 export function unitLife(ix: ProvIndex, id: string): Life {
   const n = ix.node(id);
-  const out: Life = { unit: id, real: PERSISTENT.has(String(n?.node_type)), birth: null, end_epoch: null, continuity: null,
+  const out: Life = { unit: id, real: unitFamily(n?.node_type) === "real", birth: null, end_epoch: null, continuity: null,
     status: "undated", epochs: [], why: "", declared: [], redundant: [], contradicting: [],
-    end_value: null, end_origin: null, end_chain: [], end_dated: false };
+    end_value: null, end_origin: null, end_chain: [], end_dated: false, end_kind: null, end_limit_of: null };
   if (!n) return out;
   const firsts = ix.targets(id, "has_first_epoch").filter((t) => ix.isEpoch(t));
   const declared = ix.targets(id, "survive_in_epoch").filter((t) => ix.isEpoch(t));
@@ -466,25 +479,34 @@ export function unitLife(ix: ProvIndex, id: string): Life {
   out.redundant = undatedLanes ? [] : declared.filter((d) => epochs.includes(d) && d !== birth);
   out.contradicting = undatedLanes ? [] : declared.filter((d) => !epochs.includes(d));
   const nm = (e: string | null): string => ix.name(e);
+  const limit = (e: string | null): string => {
+    const v = e ? ends.get(e) : undefined;
+    return v != null ? t("pv.why.limit", { year: fmtYear(v) }) : "";
+  };
+  const asLimit = (e: string | null, v: number | null): Partial<Life> =>
+    (v != null ? { end_kind: "epoch_limit", end_limit_of: e } : {});
   if (br != null) {
     const date = temporalProperty(ix, br, "absolute_time_end") ?? temporalProperty(ix, br, "absolute_time_start");
     if (date != null) {
       Object.assign(out, { status: "ended", end_value: date, end_origin: br, end_chain: [id, br], end_dated: true,
-        why: t("pv.why.ended", { birth: nm(birth), date: fmtYear(date) }) });
+        end_kind: "dated", why: t("pv.why.ended", { birth: nm(birth), date: fmtYear(date) }) });
     } else {
-      Object.assign(out, { status: "ended_undated", end_value: endEpoch ? (ends.get(endEpoch) ?? null) : null,
-        end_origin: endEpoch ?? br, end_chain: [id, br, ...(endEpoch ? [endEpoch] : [])],
-        why: endEpoch ? t("pv.why.endedUndated", { birth: nm(birth), end: nm(endEpoch) })
+      const ev = endEpoch ? (ends.get(endEpoch) ?? null) : null;
+      Object.assign(out, { status: "ended_undated", end_value: ev,
+        end_origin: endEpoch ?? br, end_chain: [id, br, ...(endEpoch ? [endEpoch] : [])], ...asLimit(endEpoch, ev),
+        why: endEpoch ? t("pv.why.endedUndated", { birth: nm(birth), end: nm(endEpoch), limit: limit(endEpoch) })
           : t("pv.why.endedNoEpoch", { birth: nm(birth) }) });
     }
   } else if (out.real) {
     let last: string | null = null;
     for (const e of epochs) if (ends.has(e) && (last == null || ends.get(e)! > ends.get(last)!)) last = e;
     Object.assign(out, { status: "still_existing", end_value: last ? ends.get(last)! : null, end_origin: last,
-      end_chain: [id, ...(last ? [last] : [])], why: t("pv.why.still", { birth: nm(birth) }) });
+      end_chain: [id, ...(last ? [last] : [])], ...(last ? asLimit(last, ends.get(last)!) : {}),
+      why: t("pv.why.still", { birth: nm(birth) }) });
   } else {
-    Object.assign(out, { status: "birth_only", end_value: ends.get(birth) ?? null, end_origin: birth, end_chain: [id, birth],
-      why: t("pv.why.birthOnly", { birth: nm(birth) }) });
+    const ev = ends.get(birth) ?? null;
+    Object.assign(out, { status: "birth_only", end_value: ev, end_origin: birth, end_chain: [id, birth],
+      ...asLimit(birth, ev), why: t("pv.why.birthOnly", { birth: nm(birth), limit: limit(birth) }) });
   }
   return out;
 }
@@ -580,7 +602,41 @@ export function redundancyReport(ix: ProvIndex): Redundancy {
   return out;
 }
 
-export interface DatingWarning { rule: "model_vs_document" | "member_vs_container" | "servile_vs_master"; id: string; name: string; other: string; other_name: string; message: string; fix: string; epoch?: string | null }
+export interface DatingWarning { rule: "model_vs_document" | "member_vs_container" | "servile_vs_master"; id: string; name: string; other: string; other_name: string; message: string; fix: string | null; epoch?: string | null; acquired?: [number, number]; acquisitions?: string[] }
+
+const yearOf = (v: unknown): number | null => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const m = /^\s*(-?\d{1,4})/.exec(v == null ? "" : String(v));
+  return m ? Number(m[1]) : null;
+};
+
+/** WHEN a model was MADE, as the DTC says (s3Dgraphy
+ *  `attribution.acquisition_dates`, MICRO-C-CORREZIONI-ED): up the chain from
+ *  its resources (← dtc_had_output, process → dtc_had_input, dtc_derived_from)
+ *  to the acquisitions of the CAPTURE family; their `data.date`, else
+ *  `data.taken_at`. A retrieval, `created_at`: not read. Never invented. */
+export function acquisitionDates(ix: ProvIndex, modelId: string): { start: number | null; end: number | null; acquisitions: string[] } {
+  const seen = new Set<string>();
+  const todo = [...ix.targets(modelId, "has_linked_resource")];
+  const years: number[] = [];
+  const acqs: string[] = [];
+  while (todo.length && seen.size < 5000) {
+    const id = todo.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const nt = ix.nt(id);
+    if (nt === "dtc_acquisition") {
+      const d = dataOf(ix.node(id));
+      if (typeof d.dtc_kind !== "string" || dtcKindFamily(d.dtc_kind) !== "capture") continue;
+      const y = yearOf(d.date) ?? yearOf(d.taken_at);
+      if (y != null) { years.push(y); acqs.push(id); }
+      continue;
+    }
+    if (nt === "dtc_process") { todo.push(...ix.targets(id, "dtc_had_input")); continue; }
+    todo.push(...ix.sources(id, "dtc_had_output"), ...ix.targets(id, "dtc_derived_from"));
+  }
+  return years.length ? { start: Math.min(...years), end: Math.max(...years), acquisitions: acqs } : { start: null, end: null, acquisitions: [] };
+}
 
 /** the container's declared epochs (alternatives.container_own_epochs): an
  *  epoch reaching it, the epochs of the Document publishing it */
@@ -598,17 +654,24 @@ export function datingWarnings(ix: ProvIndex): DatingWarning[] {
   for (const [id, n] of ix.nodes) {
     if (!MODEL_TYPES.has(n.node_type)) continue;
     const [ms, me] = span(id);
-    if (!own(ms)) continue;
+    // MICRO-C-CORREZIONI-ED · when the model was MADE (the DTC's capture)
+    // against the Document's dates, not what it represents; silent without an
+    // acquisition date; no cure of its own
+    const acq = acquisitionDates(ix, id);
     const pubs = [...new Set(["has_representation_model", "has_representation_model_doc"].flatMap((et) => ix.sources(id, et)).filter((s) => ix.nt(s) === "document"))];
-    for (const d of pubs) {
+    for (const d of acq.start != null ? pubs : []) {
       const [ds, de] = span(d);
       if (!own(ds) || ds.value == null) continue;
-      if (ms.value === ds.value && me.value === de.value) continue;
-      if (me.value != null && de.value != null && (me.value as number) < (ds.value as number)) continue;
+      const d0 = Number(ds.value);
+      const d1 = de.value != null && own(de) ? Number(de.value) : d0;
+      if (d0 <= acq.start! && acq.end! <= d1) continue;
+      const a = acq.end === acq.start ? `${acq.start}` : `${acq.start}–${acq.end}`;
+      const b = d1 === d0 ? `${d0}` : `${d0}–${d1}`;
       out.push({ rule: "model_vs_document", id, name: ix.name(id), other: d, other_name: ix.name(d),
-        message: t("pv.msg.modelDoc", { m: ix.name(id), ms: fmt(ms, me), mo: ix.name(ms.origin), d: ix.name(d), ds: fmt(ds, de), dorig: ix.name(ds.origin) }),
-        fix: "move_to_document_epoch", epoch: laneEpochs(ix, d)[0] ?? null });
+        message: t("pv.msg.modelAcq", { m: ix.name(id), a, acq: acq.acquisitions.map((x) => ix.name(x)).join(", "), d: ix.name(d), ds: b }),
+        fix: null, acquired: [acq.start!, acq.end!], acquisitions: acq.acquisitions });
     }
+    if (!own(ms)) continue;
     for (const c of ix.targets(id, "is_in_representation_model_group")) {
       if (!containerOwnEpochs(ix, c).length) continue;
       const [cs, ce] = span(c);

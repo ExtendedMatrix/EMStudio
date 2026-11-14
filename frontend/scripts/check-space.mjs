@@ -50,12 +50,14 @@ const isUnit = (t) => UNITS.has(t);
   // MICRO-A-PROPRIO-EREDITATO (E.D., 14 Nov 2026) · a real unit lives until a
   // continuity closes it: the medieval US103, US104, USM101 (no continuity) are
   // still there in Età moderna, beside US102 born there
+  // MICRO-C-CORREZIONI-ED · «real» is the datamodel's family: the finds
+  // RSF100b and SF100 (family real, no continuity) are still there too
   eq([mod.rms.map((r) => r.id), mod.units, mod.withProxy, mod.rmReference],
-     [["RM01", "RM02"], ["US102", "USM101", "US103", "US104"], ["US102", "USM101", "US103"], ["RM02"]],
+     [["RM01", "RM02"], ["US102", "USM101", "RSF100b", "SF100", "US103", "US104"], ["US102", "USM101", "RSF100b", "US103"], ["RM02"]],
      "Età moderna: two RMs, the unit born there and the medieval ones still existing");
   eq([med.rms.length, med.units.sort(), med.without, med.reference, med.missing],
-     [0, ["RSF100b", "US103", "US104", "USM101", "USV106"], ["US104"], ["RSF100b"], []],
-     "Medioevo: no RM, five units, one without a proxy, one referenced");
+     [0, ["RSF100b", "SF100", "US103", "US104", "USM101", "USV106"], ["US104", "SF100"], ["RSF100b"], []],
+     "Medioevo: no RM, six units (SF100 still existing), two without a proxy, one referenced");
   eq([rom.rms.length, rom.units, rom.withProxy], [0, ["SF100"], []], "Età imperiale: nothing in 3D");
 
   // what the scene found missing is missing
@@ -73,7 +75,7 @@ const isUnit = (t) => UNITS.has(t);
   ok(!med.units.includes("BR1") && !med.without.includes("BR1"),
      "P2 · a continuity node is neither counted as a unit nor listed without a proxy");
   const sc = M.buildSpace(d, { isUnit: isUnitBR, sceneProxies: new Set(["US104"]) }).summary("EP_MED");
-  eq([sc.withProxy.includes("US104"), sc.inScene, sc.without], [true, ["US104"], []],
+  eq([sc.withProxy.includes("US104"), sc.inScene, sc.without], [true, ["US104"], ["SF100"]],
      "Y6 · a proxy in the connected scene counts, and is said to be the scene's");
 }
 

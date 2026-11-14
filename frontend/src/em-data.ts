@@ -178,7 +178,11 @@ export function buildTable(
     for (const [key, rule] of PV) {
       const p = resolveProvenance(pix, id, rule);
       cells[key] = p.value == null ? "" : typeof p.value === "number" ? String(Math.round(p.value * 1000) / 1000) : p.value;
-      const from = p.level && p.level !== "node" ? t("pv.from", { node: pix.name(p.origin) }) : "";
+      // the limit of an epoch is not an end (MICRO-C-CORREZIONI-ED): «limite
+      // dell'epoca II A.D.», not «da II A.D.»
+      const from = !p.level || p.level === "node" ? ""
+        : p.bound === "epoch_limit" ? t("pv.limitOf", { epoch: pix.name(p.limit_of ?? p.origin) })
+          : t("pv.from", { node: pix.name(p.origin) });
       meta[key] = { inherited: !!p.level && p.level !== "node", level: p.level ?? "", origin: p.origin ?? "", from,
         title: p.value == null ? `${t(`pv.rule.${rule}`)}: ${t("pv.none")}`
           : `${t(`pv.rule.${rule}`)}: ${cells[key]} — ${p.level === "node" ? t("pv.own") : `${from} (${t(`pv.level.${p.level}`)})`}` };

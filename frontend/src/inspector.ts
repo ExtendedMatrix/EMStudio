@@ -352,9 +352,18 @@ function renderTimeRows(host: HTMLElement, store: DocumentStore,
         text = t("insp.time.contained", { node: name(e.contained?.source ?? src) })
           + (e.contained?.original ? ` ← ${name(e.contained.original)}` : "");
         break;
-      case "tpq": case "taq":
+      case "tpq": case "taq": {
         text = t("insp.time.bound", { rule: t(`table.rule.${rule}`), rel: rel ?? "", node: name(src) });
+        // where the value was born: the limit of an epoch is not an end
+        // (MICRO-C-CORREZIONI-ED) — «TAQ · is_after USV101 — limite
+        // dell'epoca II A.D.»
+        const root = side === "start" ? e.start_root : e.end_root;
+        if (root?.rule === "epoch" || root?.rule === "sub_epoch")
+          text += ` — ${t("insp.time.rootLimit", { epoch: name(root.source) })}`;
+        else if (root?.rule === "written" && root.node !== src)
+          text += ` — ${t("insp.time.rootWritten", { node: name(root.node) })}`;
         break;
+      }
       default: text = `${rule ?? "?"} · ${name(src)}`;
     }
     const own = rule === "written";

@@ -7,6 +7,27 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **Three corrections of E.D.** (MICRO-C-CORREZIONI-ED, 14 November 2026).
+  `provenance.ts › unitLife` reads «real» from the node datamodel's `family`
+  (`rules.unitFamily`), as s3Dgraphy: SF, RSF, USD, USN… without a continuity
+  are still existing. **The limit of an epoch is not an end**: the Inspector's
+  «Proprio / ereditato» rows say «limite dell'epoca: 199 · da II A.D.» and the
+  end of a unit «vive nell'epoca II A.D.», «chiusa nell'epoca 2013, data della
+  fine non indicata», a bare year only for a real date; the same in the
+  tooltips, the Tabular («limite dell'epoca X») and the «Cronologia calcolata»
+  rows («limite dell'epoca II A.D.»; a TPQ / TAQ says where it was born, «TAQ ·
+  is_after USV101 — limite dell'epoca II A.D.», s3Dgraphy's `end_root`); a
+  catalogue is not closed by its epoch's end. **«Visibilità ▾»**: no eyes of a
+  view — the Outliner's eyes reach every view; «Personalizzata» is only the
+  view's filter by categories (a checkbox chooses it), «Segui l'Outliner» no
+  filter; what the filter hides and the Outliner shows is said in the view's
+  line, «nascosti da questa vista: Modelli RM (10) · Segui l'Outliner», one
+  click. **«Rilievo acquisito fuori dalle date del suo documento»**: the date a
+  model was MADE (the capture acquisitions up its DTC chain,
+  `acquisitionDates`) against its Document, silent without one, no cure of its
+  own. `check-provenance.mjs` compares `bound`, `limit_of`, `real`, `end_kind`
+  with s3Dgraphy (15 320 ✓); `check-space`, `check-outliner-tree` updated for
+  the finds still existing.
 - **Documents and media: the strip, the image viewer, the catalogue**
   (MICRO-B-DOCUMENTI-MEDIA, E.D., 14 November 2026). New `media.ts` (the page's
   reading of s3Dgraphy's `resources.sets`, `catalog`, `media_roles`:

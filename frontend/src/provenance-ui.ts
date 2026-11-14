@@ -50,10 +50,29 @@ export function provSource(ix: ProvIndex, p: Prov): string {
   return p.via && p.via !== p.origin ? `${from} · ${t("pv.via", { node: ix.name(p.via) })}` : from;
 }
 
-/** the tooltip / Tabular words of one rule: «Inizio 100 — da II A.D. (la sua epoca)» */
-export function provTitle(ix: ProvIndex, rule: ProvRule, p: Prov): string {
+/** the value of a date as it is: a year, or «limite dell'epoca: 199» (the
+ *  epoch is the row's «da II A.D.») — the limit of an epoch is not an end
+ *  (MICRO-C-CORREZIONI-ED) */
+export function provValueWords(p: Prov): string {
+  if (p.value == null) return t("pv.none");
+  if (p.bound !== "epoch_limit") return fmtValue(p.value);
+  return t("pv.limitValue", { year: fmtValue(p.value) });
+}
+
+/** the words of a unit's end: «chiusa nell'epoca 2013, data della fine non
+ *  indicata», «vive nell'epoca II A.D.», «still existing», «finita (…)» */
+function statusWords(ix: ProvIndex, id: string, p: Prov): string {
+  if (!p.status) return "";
+  const life = unitLife(ix, id);
+  return t(`pv.status.${p.status}`, { epoch: ix.name(life.status === "birth_only" ? life.birth : life.end_epoch) });
+}
+
+/** the tooltip words of one rule: «Inizio: limite dell'epoca: 170 — da II
+ *  A.D. (la sua epoca)», «Fine: finita (continuity datato) · 2013 — da BR1 (…)» */
+export function provTitle(ix: ProvIndex, rule: ProvRule, p: Prov, id?: string): string {
   if (p.value == null) return `${t(`pv.rule.${rule}`)}: ${t("pv.none")}`;
-  return `${t(`pv.rule.${rule}`)}: ${fmtValue(p.value)} — ${provSource(ix, p)}`
+  const st = id && rule === "absolute_time_end" ? statusWords(ix, id, p) : "";
+  return `${t(`pv.rule.${rule}`)}: ${st ? `${st} · ` : ""}${provValueWords(p)} — ${provSource(ix, p)}`
     + (p.level && p.level !== "node" ? ` (${t(`pv.level.${p.level}`)})` : "");
 }
 
@@ -108,10 +127,14 @@ export function renderProvenance(root: HTMLElement, store: DocumentStore, id: st
     row.dataset.level = p.level ?? "";
     row.dataset.origin = p.origin ?? "";
     row.dataset.value = p.value == null ? "" : String(p.value);
-    row.title = provTitle(ix, rule, p);
+    row.dataset.bound = p.bound ?? "";
+    row.title = provTitle(ix, rule, p, id);
     row.appendChild(el("span", "insp-prop-rule", t(`pv.rule.${rule}`)));
-    let shown = p.value == null ? t("pv.none") : fmtValue(p.value);
-    if (rule === "absolute_time_end" && p.status) shown += ` · ${t(`pv.status.${p.status}`, { epoch: ix.name(unitLife(ix, id).end_epoch) })}`;
+    // the limit of an epoch is not an end: «vive nell'epoca II A.D. · limite
+    // dell'epoca II A.D.: 199», a year alone only when it is really a date
+    const st = rule === "absolute_time_end" ? statusWords(ix, id, p) : "";
+    const shown = p.bound === "epoch_limit" ? [st, provValueWords(p)].filter(Boolean).join(" · ")
+      : p.value == null ? t("pv.none") : fmtValue(p.value) + (st ? ` · ${st}` : "");
     row.appendChild(el("span", "insp-prop-value", shown));
     if (p.value != null) {
       if (own) row.appendChild(el("span", "insp-prop-source", t("pv.own")));
