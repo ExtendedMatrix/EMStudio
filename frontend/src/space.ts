@@ -34,6 +34,7 @@ import visualRules from "./assets/em_visual_rules.json";
 import { basename } from "./paths";
 import { epochInstances } from "./epoch-instances";
 import { presenceIndex } from "./epoch-presence";
+import { epochNewestFirst } from "./outline";
 
 /** The rule of the alternatives (em_visual_rules 1.6.37 → `alternatives`). */
 export const ALT_RULE = (visualRules as unknown as { alternatives: AlternativesRule }).alternatives;
@@ -375,7 +376,7 @@ export function buildSpace(
   };
   const epochs: SpaceEpoch[] = nodes.filter((n) => isEpoch(n) && !parentOf.has(n.id))
     .map((n) => ({ id: n.id, name: str(n.name) || n.id, start: num(dataOf(n).start_time), end: num(dataOf(n).end_time) }))
-    .sort((a, b) => (b.start ?? -Infinity) - (a.start ?? -Infinity));
+    .sort(epochNewestFirst);
   // MICRO-RIFINITURE p.8 (E.D., 6 Nov 2026: the 2013 and 2015 surveys as two
   // sub-epochs of XX sec) · the sub-epochs, by their top; an epoch's subtree
   const childrenOf = new Map<string, string[]>();
@@ -387,7 +388,8 @@ export function buildSpace(
     const walk = (id: string, depth: number, seen: Set<string>) => {
       const kids = (childrenOf.get(id) ?? []).filter((k) => !seen.has(k)).map((k) => byId.get(k)!).filter(Boolean)
         .map((n) => ({ id: n.id, name: str(n.name) || n.id, start: num(dataOf(n).start_time), end: num(dataOf(n).end_time), top: top.id, depth }))
-        .sort((a, b) => ((a.start ?? Infinity) - (b.start ?? Infinity)) || a.name.localeCompare(b.name));
+        // MICRO-RITOCCHI-CHIARI p.8 · the Matrix's order (the newest first), as every list of epochs
+        .sort(epochNewestFirst);
       for (const k of kids) { seen.add(k.id); list.push(k); subById.set(k.id, k); walk(k.id, depth + 1, seen); }
     };
     walk(top.id, 1, new Set([top.id]));

@@ -60,6 +60,17 @@ async function measure(page, label) {
       return new Set(g.edges.filter((e) => e.edge_type === "has_file" && drawn.has(e.source) && !drawn.has(e.target)).map((e) => e.target)).size;
     }) : 0;
     eq(off.drawn + filesOff, off.shown, `${label} · family ${f.key} OFF: drawn = the panel's shown (${off.shown}/${off.total}, the structure stays)`);
+    // MICRO-RITOCCHI-CHIARI p.6 · Epochs off in the Graph: no epoch disc, no edge of theirs
+    if (f.key === "epochs") {
+      const ep = await page.evaluate(() => {
+        const d = JSON.parse(window.__EM_DRAG__.docJson()); const g = d.graphs[d.active_graph_id];
+        const eps = new Set(g.nodes.filter((n) => n.node_type === "EpochNode").map((n) => n.id));
+        const drawn = new Set(window.__EM_DRAG__.viewNodeIds("graph"));
+        const edges = (window.__EM_SCENE__?.()?.edges ?? []).filter((e) => eps.has(e.source) || eps.has(e.target)).length;
+        return { discs: [...eps].filter((x) => drawn.has(x)).length, edges };
+      });
+      eq(ep, { discs: 0, edges: 0 }, `${label} · Epochs OFF: no epoch disc, no edge of an epoch`);
+    }
     await page.evaluate(([w, leaves]) => window.__EM_DRAG__.setLeavesOf(w, leaves), [winId, all]);
   }
   const ep = fams.find((x) => x.key === "epochs");

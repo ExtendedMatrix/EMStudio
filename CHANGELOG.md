@@ -7,6 +7,29 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **The clear touches of the dev.123 trial** (MICRO-RITOCCHI-CHIARI, E.D., 14
+  November 2026). The search of every window is a FIELD in its head, always
+  there, grey «Cerca / Search», typed into directly («/» focuses it, Esc empties
+  it), narrowing in a tight head instead of turning into an icon; where a window
+  has its own field in the body (Tabular, Files, Shelf, the index, the graph's
+  strip) the head's writes into it. The Inspector's WARNINGS fold with their
+  triangle; the Warnings table picks rows (a box, a group's box, all on screen,
+  ⌘/Shift-click) with verbs over them — «Assegna autore…» to the extractors
+  picked (preview, «replace» or add, one undo), «Seleziona nel grafo».
+  «Extractor without author» only when no level answers: an extractor inherits
+  its epoch's or the graph's author (s3Dgraphy's author rule; on Templu Mare v10
+  36 hints → 0, `check-author-scope`). A 3D extractor with a POINT anchor moves
+  in the Space: selected, G or a drag of its label, Ctrl onto the surface under
+  the pointer; ids and edges kept, the reading read again, one undo. The
+  Outliner's rows as Blender's: the marks in one column, then fixed columns
+  right-aligned with a heading — ↖ selectable, ◉ visible, 🔒 position locked
+  (no G / R / S, the N panel's fields read-only; a local preference, never in
+  the em.json) — and each epoch's branch on the colour of its Matrix band. In
+  the Graph the Epochs family switches the epoch discs and their edges off (in
+  the Matrix the lanes stay). «Estrattori 3D» off in «Visibilità ▾» takes their
+  marks out of the scene (the marks' memory answered first), each 3D view with
+  its own. One order for every list of epochs, the Matrix's: newest first, the
+  phases of a mother too (the 3D's menu listed 2013 before 2015).
 - **One place to switch the 3D's categories, the same head in every window,
   the epochs in the Space** (MICRO-TESTATE-COERENTI, E.D., 13 November 2026).
   «Visibilità ▾» in the 3D window's head is the ONE place of the categories

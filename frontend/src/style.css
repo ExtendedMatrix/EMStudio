@@ -8154,7 +8154,9 @@ body.gesturing-resize * {
    (dev.17: «Rename by the rule» squeezed the text to one word per line) */
 .insp-issue .insp-issue-txt { flex: 1 1 12em; min-width: 0; }
 .insp-issue > .tv-act { flex: none; margin-left: auto; }
-.insp-issues > .tv-act { display: block; margin: 6px 0 2px; white-space: normal; text-align: left; }
+.insp-issues h3.insp-issues-eyebrow { margin: 0 0 4px; }
+.insp-issues h3.insp-issues-eyebrow.closed { margin: 0; }
+.insp-issues > .tv-act, .insp-issues > .insp-sect-body > .tv-act { display: block; margin: 6px 0 2px; white-space: normal; text-align: left; }
 .insp-issue.warn .ico { color: var(--warn-ink); }
 .insp-issue.info .ico { color: var(--info-ink); }
 .insp-issues-open { margin-top: 4px; font-size: 12px; }
@@ -11809,11 +11811,17 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 .insp-ep-row.insp-ep-extended .insp-ep-btn[data-epoch-verb="remove"] { color: var(--warn-ink); border-color: var(--warn-border); }
 .insp-ep-follows { font-style: italic; }
 .scn-why-frame { margin-left: 6px; }
-/* p.4 · the search of a window, in its head: 🔍, opened into a field */
-.win-search { display: inline-flex; align-items: center; gap: 2px; }
-.win-search .win-search-q { display: none; width: 140px; min-width: 88px; }
-.win-search.open .win-search-q { display: inline-block; }
-.win-search.open .win-search-btn { opacity: .7; }
+/* MICRO-RITOCCHI-CHIARI p.1 · the search of a window: a FIELD, always there, that
+   narrows when the head is tight (never an icon) */
+.win-header .win-search, .win-search { position: relative; display: inline-flex; align-items: center;
+  flex: 0 1 150px; min-width: 52px; max-width: 170px; }
+.win-search .win-search-glyph { position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; opacity: .55; pointer-events: auto; cursor: text; filter: grayscale(1); }
+.win-search .win-search-q { width: 100%; min-width: 0; height: 22px; box-sizing: border-box; padding: 0 6px 0 20px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg, 6px);
+  color: var(--text); font-size: 12px; }
+.win-search .win-search-q::placeholder { color: var(--text-dim, #8a8f98); opacity: .8; }
+.win-search .win-search-q:focus { outline: none; border-color: var(--accent); }
 .scn-bar-tail { display: inline-flex; align-items: center; gap: 4px; }
 /* p.9 · the card «Completa il container» (not modal) */
 .ccard { position: fixed; left: calc(50% - 190px); top: 110px; width: 380px; max-height: calc(100vh - 160px); overflow: auto; z-index: 900;
@@ -11830,3 +11838,54 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 .ccard-none { opacity: .6; font-style: italic; }
 .ccard-foot { display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid var(--border, #ddd); padding-top: 8px; margin-top: 4px; }
 .scn-vis { white-space: nowrap; }
+/* MICRO-RITOCCHI-CHIARI p.2b · the Warnings table: rows picked by hand, verbs over them */
+.tv-issues .tv-pick { width: 22px; text-align: center; padding-left: 2px; padding-right: 2px; }
+.tv-issues tr[aria-selected="true"] > td { background: var(--accent-soft, rgba(80, 140, 255, .12)); }
+.tv-pickbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0 6px; padding: 4px 8px;
+  border-radius: var(--radius, 6px); background: var(--bg-hover); font-size: 12px; }
+.tv-pickbar > span { font-weight: 600; margin-right: 4px; }
+.aa-plan .app-dialog-select { width: 100%; margin-bottom: 6px; }
+/* MICRO-RITOCCHI-CHIARI p.4 · the Outliner's rows as Blender's: the marks in one
+   column, then the fixed columns (↖ ◉ 🔒) right-aligned, always there, stacked */
+.uo-marks { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 3px; overflow: hidden; justify-content: flex-end; }
+.uo-marks:empty { display: none; }
+.uo-cols { flex: none; display: inline-flex; align-items: center; margin-left: auto; padding-right: 4px; }
+.uo-row .uo-label { flex: 1 1 auto; }
+.uo-col { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  font-size: 11px; line-height: 1; background: none; border: 0; color: inherit; }
+button.uo-col { cursor: pointer; }
+.uo-row .uo-col.uo-eye, .uo-row .uo-col.uo-arrow { padding: 0; }
+.uo-pin { opacity: .28; filter: grayscale(1); font-size: 10px; }
+.uo-pin.uo-pin-on { opacity: .95; }
+.uo-row:hover .uo-pin:not(.uo-pin-on) { opacity: .6; }
+.uo-colhead { flex: none; display: flex; align-items: center; height: 18px; border-bottom: 1px solid var(--border);
+  font-size: 10.5px; color: var(--text-muted); background: var(--bg-panel); }
+.uo-colhead-fill { flex: 1; }
+.uo-colhead .uo-col { cursor: default; opacity: .75; }
+.uo-colhead .uo-col-pin { filter: grayscale(1); font-size: 10px; }
+.uo-scroll { scrollbar-gutter: stable; }
+.uo-colhead { padding-right: var(--uo-gutter, 0px); }
+/* p.5 · behind an epoch's branch, the epoch's colour (the Matrix's band): a wash
+   and a rail at the left; the bands alternate as the Matrix's lanes, and the
+   epoch's own row opens its band with a line */
+.uo-row.uo-band { background: color-mix(in srgb, var(--ep-color) 13%, transparent);
+  box-shadow: inset 3px 0 0 var(--ep-color), inset 4px 0 0 color-mix(in srgb, var(--text) 18%, transparent); }
+.uo-row.uo-band.uo-band-odd { background: color-mix(in srgb, var(--ep-color) 13%, color-mix(in srgb, var(--text) 5%, transparent)); }
+.uo-row.uo-band.uo-band-first { border-top: 1px solid color-mix(in srgb, var(--ep-color) 55%, var(--border)); }
+.uo-row.uo-band:hover { background: color-mix(in srgb, var(--ep-color) 22%, var(--bg-hover)); }
+.uo-row.uo-band.uo-sel { background: var(--bg-accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.scn-modal.scn-modal-ctrl { outline: 2px solid var(--accent, #2f6fdf); }
+/* p.1 · in a narrow head the empty part gives way before the search field does
+   (it still takes every pixel left over: the double-click target) */
+.win-header .win-sep { min-width: 8px; }
+.win-header .win-search, .win-search { min-width: 48px; }
+.win-search .win-search-q { padding-left: 18px; }
+.uo-marks { flex: 0 0 auto; overflow: visible; }
+/* the fixed columns sit at the row's right edge whatever the row holds: the
+   rest gives way (the name first, then the marks), never pushes them */
+.uo-row { overflow: hidden; padding-right: calc(var(--uo-cols-w, 18px) + 6px); }
+.uo-row > .uo-cols { position: absolute; right: 4px; top: 0; bottom: 0; margin: 0; padding: 0; }
+.uo-row .uo-label { min-width: 2.5em; }
+.uo-marks { flex: 0 1 auto; overflow: hidden; }
+.uo-marks > .uo-count, .uo-marks > .uo-badge { flex: none; }
+.uo-colhead > .uo-cols { margin-right: 4px; padding: 0; }

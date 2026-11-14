@@ -13,6 +13,7 @@
 //   does not switch the territory (it opens «Visibilità ▾»);
 // · proxies off → the button says it («Visibilità · 1 spenta») → one click on the
 //   mark of the Outliner turns them back on.
+import { existsSync, readFileSync } from "node:fs";
 import { bench } from "./page-bench.mjs";
 
 const B = await bench("check-headers");
@@ -36,7 +37,10 @@ for (const [W, H] of SIZES) {
       const bar = a.querySelector(":scope > .tile-bar");
       const els = [...(bar?.querySelectorAll("[data-hdr]") ?? [])].filter((x) => !x.parentElement?.closest("[data-hdr]") || x.closest(".scn-bar, .win-strip, .scn-bar-tail"));
       const type = window.__EM_DRAG__.winType?.(a.dataset.win) ?? null;
-      return { win: a.dataset.win, type, roles: els.map((x) => x.dataset.hdr),
+      const q = bar?.querySelector("input[data-hdr-search-q]");
+      const qr = q?.getBoundingClientRect();
+      const field = q ? { visible: !!q.offsetParent && getComputedStyle(q).display !== "none", w: Math.round(qr.width), ph: q.placeholder } : null;
+      return { win: a.dataset.win, type, field, roles: els.map((x) => x.dataset.hdr),
         glyphs: Object.fromEntries(els.map((x) => [x.dataset.hdr, (x.querySelector("button") ?? x).textContent.trim()])) };
     }));
     for (const h of heads) {
@@ -46,6 +50,9 @@ for (const [W, H] of SIZES) {
       ok(h.roles.includes("help"), `${tag} ${h.win}: a «?»`);
       for (const [role, g] of Object.entries(GLYPH)) if (h.roles.includes(role)) ok(h.glyphs[role]?.startsWith(g), `${tag} ${h.win}: ${role} is ${g} (got «${h.glyphs[role]}»)`);
       if (h.type && SEARCHABLE.has(h.type)) ok(h.roles.includes("search"), `${tag} ${h.win} (${h.type}): its 🔍 in the head`);
+      // MICRO-RITOCCHI-CHIARI p.1 · a FIELD, always there, «Cerca» in grey, never a button alone
+      if (h.type && SEARCHABLE.has(h.type)) ok(h.field && h.field.visible && h.field.w >= 40 && /^(Search|Cerca)$/.test(h.field.ph),
+        `${tag} ${h.win} (${h.type}): the search is a visible field «Cerca» (${JSON.stringify(h.field)})`);
     }
   }
   // «/» on the Outliner and on the Inspector of the Space: their own search opens
@@ -60,7 +67,12 @@ for (const [W, H] of SIZES) {
     await page.waitForTimeout(200);
     const focused = await page.evaluate(() => document.activeElement?.dataset?.hdrSearchQ ?? null);
     ok(focused === w, `${tag} «/» with the pointer on ${w} opens its search (focus: ${focused})`);
+    await page.keyboard.type("su0");
+    await page.waitForTimeout(300);
     await page.keyboard.press("Escape");
+    await page.waitForTimeout(200);
+    const left = await page.evaluate((id) => document.querySelector(`[data-hdr-search-q="${id}"]`)?.value ?? null, w);
+    ok(left === "", `${tag} Esc empties the search of ${w} («${left}»)`);
   }
   // the categories: ONE place
   const ov = await page.evaluate(async () => {
@@ -101,6 +113,33 @@ for (const [W, H] of SIZES) {
   await page.waitForTimeout(800);
   const back = await page.evaluate(() => document.querySelector("[data-vis]")?.dataset.vis);
   ok(back === "0", `${tag} one click on the mark turns them back on (off now: ${back})`);
+  // MICRO-RITOCCHI-CHIARI p.7 · «Estrattori 3D» off takes their marks out of the scene
+  // (the marks' memory answered before the category: they stayed)
+  // on Templu Mare v10 (EM_V10) D.01.61 is lit in 2015: the case has a mark to switch off
+  const v10 = process.env.EM_V10 ?? "/tmp/rc/T/EM/TempluMare_v10.em.json";
+  if (existsSync(v10)) {
+    await page.evaluate(([d, p]) => window.__EM_DRAG__.openAt(d, p), [JSON.parse(readFileSync(v10, "utf8")), v10]);
+    await page.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 90000 });
+    await page.evaluate(() => document.querySelector('#workspace-bar .ws-tab[data-ws="space"]')?.click());
+    await page.waitForTimeout(2500);
+  }
+  const ep15 = await page.evaluate(() => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const g = d.graphs[d.active_graph_id];
+    return g.nodes.find((n) => n.node_type === "EpochNode" && n.name === "2015")?.id; });
+  if (ep15) {
+    await page.evaluate((id) => window.__EM_DRAG__.setSpaceEpoch(id), ep15);
+    await page.waitForTimeout(2500);
+    const x3d = () => page.evaluate(() => document.querySelectorAll('.scn-mark[data-mark^="x3d:"], .scn-mark-label[data-mark^="x3d:"]').length);
+    const before = await x3d();
+    await page.evaluate(() => document.querySelector("[data-vis]")?.click());
+    await page.waitForTimeout(300);
+    await page.evaluate(() => { const c = document.querySelector('[data-vis-cb="s3_x3d"]'); if (c) { c.checked = false; c.dispatchEvent(new Event("change")); } });
+    await page.waitForTimeout(800);
+    const after = await x3d();
+    ok(after === 0, `${tag} «Estrattori 3D» off: no extractor mark in the scene (${before} → ${after})`);
+    if (!before) console.log(`  – ${tag}: no extractor mark lit in 2015 on this file (the case proves nothing here)`);
+    await page.evaluate(() => { const c = document.querySelector('[data-vis-cb="s3_x3d"]'); if (c) { c.checked = true; c.dispatchEvent(new Event("change")); } });
+    await page.keyboard.press("Escape");
+  }
   ok(errors.length === 0, `${tag} no page error (${errors.slice(0, 2).join(" | ")})`);
   await page.context().close();
 }

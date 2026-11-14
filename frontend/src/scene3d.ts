@@ -374,6 +374,13 @@ export interface SpaceSceneOptions {
   /** …the marks to draw, read at every frame (cheap: a few points), and a click on one */
   marks?: () => SceneMark[];
   onMark?: (id: string) => void;
+  /** MICRO-RITOCCHI-CHIARI p.3 · the point mark that G (or a drag of its label)
+   *  moves now — the selected 3D extractor with a point anchor — and where it is */
+  markGrab?: () => { id: string; at: V3 } | null;
+  /** …its new place, when the gesture is confirmed (the scene's frame, Y up) */
+  onMarkMoved?: (id: string, to: V3) => void;
+  /** …the words of the bar while it moves */
+  markMoveHint?: string;
   onPickUnit?: (unitId: string) => void;
   onPickRm?: (rmId: string) => void;
   /** MICRO-SPAZIO-3D · a click on nothing (Blender deselects) */
@@ -397,6 +404,10 @@ export interface SpaceSceneOptions {
   overlayValue?: (k: OverlayValueKey) => number;
   /** items not selectable (the Outliner's arrow), by key */
   locked?: () => ReadonlySet<string>;
+  /** MICRO-RITOCCHI-CHIARI p.4 · the keys whose position is locked (the padlock):
+   *  never moved, rotated, scaled — and what to say when a gesture finds one */
+  pinned?: () => ReadonlySet<string>;
+  onPinned?: (key: string) => void;
   /** a sketch shown (the Outliner's eye, «Isola») */
   sketchVisible?: (id: string) => boolean;
   /** the epoch's name, for its box */
@@ -2679,6 +2690,77 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         name: st.item.flow?.find((x) => x.id === st.current)?.name ?? null, share: st.share ?? null,
         url: st.item.flow?.find((x) => x.id === st.current)?.url, asking: st.asking ?? null, dist: st.dist ?? null, want: st.want ?? null,
         errs: st.item.flow?.map((v) => [v.ord, v.err, v.errFrom]) }));
+      // MICRO-RITOCCHI-CHIARI p.3 (E.D., 14 Nov 2026) · a 3D extractor with a POINT
+      // anchor is moved, not deleted: selected, G (Blender) or a drag of its
+      // label carries it in the plane facing the camera; with Ctrl held it lands
+      // on the surface under the pointer (the nearest hit). Click / Enter / the
+      // release confirm, Esc / the right button give it back. The scene draws the
+      // point where it goes; the document is written once, at the end (the
+      // caller's `onMarkMoved`, one undo step).
+      let markMove: { id: string; start: V3; cur: V3; plane: any; drag: boolean; moved: boolean } | null = null;
+      let markClickSwallow = false;
+      const markPointAt = (x: number, y: number, ctrl: boolean): V3 | null => {
+        if (!markMove) return null;
+        if (ctrl) {
+          const h = hitsAt(x, y)[0];
+          if (h) return [h.point.x, h.point.y, h.point.z];
+        }
+        ray.setFromCamera(ndcOf(x, y), camera);
+        const p = new THREE.Vector3();
+        return ray.ray.intersectPlane(markMove.plane, p) ? [p.x, p.y, p.z] : null;
+      };
+      const markMoveMove = (e: PointerEvent) => {
+        if (!markMove) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const p = markPointAt(e.clientX, e.clientY, e.ctrlKey);
+        if (p) { markMove.cur = p; markMove.moved = true; }
+        modalEl.classList.toggle("scn-modal-ctrl", e.ctrlKey);
+      };
+      const endMarkMove = (ok: boolean) => {
+        const m = markMove;
+        if (!m) return;
+        markMove = null;
+        const doc = renderer.domElement.ownerDocument;
+        doc.removeEventListener("pointermove", markMoveMove, true);
+        doc.removeEventListener("pointerdown", markMoveDown, true);
+        doc.removeEventListener("pointerup", markMoveUp, true);
+        controls.enabled = true;
+        host.classList.remove("scn-mark-moving");
+        modalEl.classList.add("hidden");
+        if (ok && m.moved) opts.onMarkMoved?.(m.id, m.cur);
+      };
+      const markMoveDown = (e: PointerEvent) => {
+        if (!markMove) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!markMove.drag) endMarkMove(e.button === 0);
+      };
+      const markMoveUp = (e: PointerEvent) => {
+        if (!markMove?.drag) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        markClickSwallow = true;
+        endMarkMove(true);
+      };
+      const startMarkMove = (drag: boolean): boolean => {
+        const g = opts.markGrab?.();
+        if (!g || markMove) return false;
+        const n = new THREE.Vector3();
+        camera.getWorldDirection(n);
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, new THREE.Vector3(g.at[0], g.at[1], g.at[2]));
+        markMove = { id: g.id, start: g.at, cur: g.at, plane, drag, moved: false };
+        const doc = renderer.domElement.ownerDocument;
+        doc.addEventListener("pointermove", markMoveMove, true);
+        doc.addEventListener("pointerdown", markMoveDown, true);
+        doc.addEventListener("pointerup", markMoveUp, true);
+        controls.enabled = false;
+        host.classList.add("scn-mark-moving");
+        modalEl.textContent = opts.markMoveHint ?? "Move";
+        modalEl.classList.remove("hidden");
+        return true;
+      };
+      (probe as Record<string, unknown>).__spaceMarkMove = () => (markMove ? { id: markMove.id, cur: markMove.cur, moved: markMove.moved } : null);
       // MICRO-VIEWER-UNICO p.4 · the marks: projected at every frame, a dot per
       // vertex, a line through them (closed for a plane), the name at the first
       let marksSig = "";
@@ -2717,8 +2799,23 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               l.className = `scn-mark-label${m.selected ? " sel" : ""}${m.ghost ? " ghost" : ""}`;
               l.dataset.mark = m.id;
               l.textContent = m.label;
-              l.addEventListener("pointerdown", (e) => e.stopPropagation());
-              l.addEventListener("click", (e) => { e.stopPropagation(); opts.onMark?.(m.id); });
+              l.addEventListener("pointerdown", (e) => {
+                e.stopPropagation();
+                // p.3 · the label of the point being moved is its handle: a drag carries it
+                if (e.button !== 0 || opts.markGrab?.()?.id !== m.id) return;
+                const x0 = e.clientX, y0 = e.clientY;
+                const doc = l.ownerDocument;
+                const mv = (ev: PointerEvent) => {
+                  if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+                  doc.removeEventListener("pointermove", mv, true);
+                  doc.removeEventListener("pointerup", up, true);
+                  if (startMarkMove(true)) markMoveMove(ev);
+                };
+                const up = () => { doc.removeEventListener("pointermove", mv, true); doc.removeEventListener("pointerup", up, true); };
+                doc.addEventListener("pointermove", mv, true);
+                doc.addEventListener("pointerup", up, true);
+              });
+              l.addEventListener("click", (e) => { e.stopPropagation(); if (markClickSwallow) { markClickSwallow = false; return; } opts.onMark?.(m.id); });
               markLabels.appendChild(l);
             }
           }
@@ -2729,7 +2826,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         ms.forEach((m, k) => {
           const g = groups[k];
           if (!g) return;
-          const pts = m.vertices.map(proj);
+          const pts = (markMove && markMove.id === m.id ? [markMove.cur] : m.vertices).map(proj);
           const ok = pts.every(Boolean);
           g.style.display = ok ? "" : "none";
           if (ok) {
@@ -3076,11 +3173,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const b = localBox(modalObject(id));
         return b ? threeToBlender(arr(b.getCenter(new THREE.Vector3()))) : null;
       };
+      const pinnedSaid = new Set<string>();
       const movable = (k: string): boolean => {
+        // p.4 · a closed padlock: the object stays where it is (said once per gesture)
+        if (opts.pinned?.().has(k)) { if (!pinnedSaid.has(k)) { pinnedSaid.add(k); opts.onPinned?.(k); } return false; }
         if (k.startsWith("sketch:")) return ov("s3_sketches") && sketchMeshes.has(k.slice(7));
         return roots.has(k) && !roots.get(k).userData.tiles && !locked().has(k);
       };
       const startModalOn = (mode: ModalMode) => {
+        pinnedSaid.clear();
         let ids: string[];
         if (opts.transformTargets) ids = opts.transformTargets().filter(movable);
         else if (sketchSel && ov("s3_sketches")) ids = [`sketch:${sketchSel}`];
@@ -3534,6 +3635,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const t = e.target as HTMLElement | null;
         if (t && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t.isContentEditable)) return;
         const stop = () => { e.preventDefault(); e.stopPropagation(); };
+        // MICRO-RITOCCHI-CHIARI p.3 · a point mark moving owns the keyboard too
+        if (markMove) {
+          stop();
+          if (e.key === "Escape") endMarkMove(false);
+          else if (e.key === "Enter") endMarkMove(true);
+          return;
+        }
         if (modal) {
           stop();
           // MICRO-SPAZIO-3D-3 p.5 · Ctrl pressed or released without moving
@@ -3573,6 +3681,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           case "box-select": boxArmed = true; boxMode = "select"; host.classList.add("scn-armed"); stop(); return;
           case "cursor-reset": centreScene(); stop(); return;
           case "grab": case "rotate": case "scale":
+            if (a === "grab" && startMarkMove(false)) { stop(); return; }
             if (startModalOn(a === "grab" ? "grab" : a === "rotate" ? "rotate" : "scale")) stop();
             return;
           case "cancel":

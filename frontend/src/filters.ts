@@ -82,11 +82,19 @@ function isStructuralNodeType(nodeType: string): boolean {
   return !!nearest && def.structural.includes(nearest);
 }
 
-/** The leaf the panel switches for a node type, or null when it is structure. */
-export function nodeLeaf(nodeType: string | undefined): string | null {
+/** MICRO-RITOCCHI-CHIARI p.6 (E.D., 14 Nov 2026) · the leaves that are structure
+ *  in the MATRIX only: its lanes are the epochs, drawn whatever the filter; in
+ *  the Graph an epoch is a disc with its edges, switched off with its family. */
+export const MATRIX_LANES: ReadonlySet<string> = new Set(["n:EpochNode"]);
+
+/** The leaf the panel switches for a node type, or null when it is structure
+ *  (in `view`: an epoch is structure in the Matrix, a node in the Graph). */
+export function nodeLeaf(nodeType: string | undefined, view?: ViewKind): string | null {
   const t = nodeType ?? "";
   if (!KNOWN_NODE_TYPES.has(t)) return UNKNOWN_NODE_LEAF;
-  return isStructuralNodeType(t) ? null : `n:${t}`;
+  if (isStructuralNodeType(t)) return null;
+  const l = `n:${t}`;
+  return view === "matrix" && MATRIX_LANES.has(l) ? null : l;
 }
 
 // ---- edge families ----------------------------------------------------------
@@ -148,15 +156,17 @@ export function edgeOrigin(e: { attributes?: unknown; [k: string]: unknown }, re
   return "unmarked";
 }
 
-/** every leaf of a family (its switchable types, «Other» with its wildcard) */
-export function familyLeaves(f: Family): string[] {
+/** every leaf of a family (its switchable types, «Other» with its wildcard;
+ *  in the Matrix without its lanes) */
+export function familyLeaves(f: Family, view?: ViewKind): string[] {
   const p = f.kind === "node" ? "n:" : "e:";
-  const out = f.types.filter((t) => !f.structural.has(t)).map((t) => p + t);
+  const out = f.types.filter((t) => !f.structural.has(t)).map((t) => p + t)
+    .filter((l) => view !== "matrix" || !MATRIX_LANES.has(l));
   if (f.key === "other") out.push(f.kind === "node" ? UNKNOWN_NODE_LEAF : UNKNOWN_EDGE_LEAF);
   return out;
 }
 
-const ALL_LEAVES: string[] = [...NODE_FAMILIES, ...EDGE_FAMILIES].flatMap(familyLeaves);
+const ALL_LEAVES: string[] = [...NODE_FAMILIES, ...EDGE_FAMILIES].flatMap((f) => familyLeaves(f));
 
 // ---- defaults per view, templates ------------------------------------------
 function defaultOn(view: "matrix" | "graph", def: { matrix: boolean; graph: boolean; matrixExcept?: string[] }, type: string): boolean {
@@ -198,6 +208,9 @@ export const TEMPLATES: DetailTemplate[] = TEMPLATE_TABLE.map((tp) => {
   for (const k of tp.edgeFamilies) for (const l of familyLeaves(EDGE_FAMILIES.find((f) => f.key === k)!)) leaves.add(l);
   for (const t of tp.nodeTypes ?? []) { const l = nodeLeaf(t); if (l) leaves.add(l); }
   for (const t of tp.edgeTypes ?? []) { const l = edgeLeaf(t); if (l) leaves.add(l); }
+  // the epochs were drawn under every template while they were structure: a
+  // template keeps them (switching the family off is the person's gesture)
+  for (const l of MATRIX_LANES) leaves.add(l);
   return { key: tp.key, label: tp.label, leaves };
 });
 

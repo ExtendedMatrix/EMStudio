@@ -20,6 +20,7 @@ import type { EmEdge, EmNode } from "./types";
 import { isStratigraphicType, nodeLabel, propertyLabel, typesOfClass } from "./rules";
 import { RELATION_CLAIMS } from "./table-views";
 import { sha1 } from "./sha1";
+import { epochsInTreeOrder } from "./outline";
 
 // ── deterministic identity (mirror of UnifiedXLSXImporter._mint) ────────────
 // Fixed namespace, copied verbatim from s3Dgraphy so ids computed here match the
@@ -138,11 +139,11 @@ export function buildTable(
       .filter((t) => isStratigraphicType(t))
       .map((t) => ({ value: t, label: `${t} — ${nodeLabel(t)}` }));
 
+  // MICRO-RITOCCHI-CHIARI p.8 · the Matrix's order, the phases under their epoch
   const epochOptions = () => [
     { value: "", label: "—" },
-    ...nodes
-      .filter(isEpoch)
-      .map((e) => ({ value: e.id, label: str(e.name) || e.id })),
+    ...epochsInTreeOrder(store.doc, nodes.filter(isEpoch))
+      .map(({ node: e, depth }) => ({ value: e.id, label: `${"\u2003".repeat(depth)}${str(e.name) || e.id}` })),
   ];
 
   // the FIRST has_first_epoch of each unit, indexed on first use (asked per row,

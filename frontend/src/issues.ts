@@ -21,6 +21,7 @@
 import type { EmDocument, EmNode } from "./types";
 import { composedPropertyName } from "./naming";
 import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
+import { epochsInTreeOrder } from "./outline";
 
 export type IssueSeverity = "warn" | "info";
 
@@ -456,8 +457,33 @@ export function issues(src: IssueSources): Issue[] {
     set.add(e.edge_type ?? "");
     hasOut.set(e.source, set);
   }
-  const epochs = nodes.filter((n) => n.node_type === "EpochNode")
-    .map((n) => ({ value: n.id, label: name(n.id) }));
+  // MICRO-RITOCCHI-CHIARI p.8 · in the Matrix's order (the newest first, phases under their epoch)
+  const epochs = epochsInTreeOrder(doc, nodes.filter((n) => n.node_type === "EpochNode"))
+    .map(({ node: n, depth }) => ({ value: n.id, label: `${"\u2003".repeat(depth)}${name(n.id)}` }));
+  // MICRO-RITOCCHI-CHIARI p.2c · an extractor with no `has_author` of its own
+  // INHERITS one: s3Dgraphy's author rule (resolvers/builtin_rules.AUTHOR_RULE,
+  // read by property_resolver.resolve_with_source) walks node → its epochs
+  // (has_first_epoch / survive_in_epoch → has_author) → the graph (the author
+  // members of the graph-scope paradata group). The hint is owed only when no
+  // level answers.
+  const authorTypes = new Set(["author", "author_ai"]);
+  const typeOf = new Map(nodes.map((n) => [n.id, String(n.node_type)]));
+  const authoredBy = (id: string) => (doc.graph.edges ?? []).some((e) => e.source === id && e.edge_type === "has_author");
+  let graphAuthor: boolean | null = null;
+  const graphScopeAuthor = (): boolean => {
+    if (graphAuthor != null) return graphAuthor;
+    const roots = new Set(nodes.filter((n) => n.node_type === "graph").map((n) => n.id));
+    const pdgs = new Set((doc.graph.edges ?? []).filter((e) => roots.has(e.source) && e.edge_type === "has_paradata_nodegroup").map((e) => e.target));
+    graphAuthor = (doc.graph.edges ?? []).some((e) => e.edge_type === "is_in_paradata_nodegroup" && pdgs.has(e.target)
+      && authorTypes.has(typeOf.get(e.source) ?? ""));
+    return graphAuthor;
+  };
+  const authorInScope = (id: string): boolean => {
+    if (hasOut.get(id)?.has("has_author")) return true;
+    const eps = (doc.graph.edges ?? []).filter((e) => e.source === id && (e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch"));
+    if (eps.some((e) => authoredBy(e.target))) return true;
+    return graphScopeAuthor();
+  };
   for (const n of nodes) {
     if (src.isUnit(n.node_type) && !hasOut.get(n.id)?.has("has_first_epoch"))
       push({ node: n.id, sev: "warn", rule: "epoch",
@@ -473,7 +499,7 @@ export function issues(src: IssueSources): Issue[] {
              txt: t("issues.noProps", { n: name(n.id) }),
              ...(fx.addProperty ? { fix: { kind: "button" as const, label: fx.addProperty.label,
                                            run: () => fx.addProperty!.run(n.id) } } : {}) });
-    if (n.node_type === "extractor" && !hasOut.get(n.id)?.has("has_author"))
+    if (n.node_type === "extractor" && !authorInScope(n.id))
       push({ node: n.id, sev: "info", rule: "author",
              txt: t("issues.noAuthor", { n: name(n.id) }),
              ...(fx.itsMe ? { fix: { kind: "button" as const, label: fx.itsMe.label,

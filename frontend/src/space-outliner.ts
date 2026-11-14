@@ -215,6 +215,10 @@ export interface Space3dPrefs {
   /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the extractors whose document is not lit,
    *  their eye FORCED on (shown as ghosts) */
   forced?: string[];
+  /** MICRO-RITOCCHI-CHIARI p.4 · objects whose POSITION is locked (the padlock of
+   *  the Outliner): no move, rotation, scale in the Space. Local, never in the em.json
+   *  (the datamodel has no field of the kind, checked 14 Nov 2026) */
+  pinned?: string[];
 }
 
 export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [], versionModes: {} };

@@ -48,6 +48,40 @@ export const epochStart = (n: EmNode): number | null =>
 export const epochEnd = (n: EmNode): number | null =>
   num((n.data as Record<string, unknown> | undefined)?.end_time);
 
+/** MICRO-RITOCCHI-CHIARI p.8 (E.D., 14 Nov 2026) · ONE order for every list of
+ *  epochs — the Matrix's, top to bottom: the newest first, at every level (a
+ *  mother's phases too), an undated one last, then by name. The Outliner, the
+ *  Inspector, the 3D's menu, the M menu, the table's selects all read it. */
+export function epochNewestFirst(a: { start: number | null; name: string }, b: { start: number | null; name: string }): number {
+  return (b.start ?? -Infinity) - (a.start ?? -Infinity)
+    || a.name.localeCompare(b.name, undefined, { numeric: true });
+}
+/** the epochs of a document in that order, each mother followed by its phases */
+export function epochsInTreeOrder(doc: EmDocument, nodes: EmNode[]): Array<{ node: EmNode; depth: number }> {
+  const isEp = (n: EmNode | undefined) => n?.node_type === "EpochNode" || n?.node_type === "epoch";
+  const byId = new Map(nodes.filter(isEp).map((n) => [n.id, n]));
+  const kids = new Map<string, string[]>();
+  const hasParent = new Set<string>();
+  for (const e of doc.graph.edges ?? [])
+    if (e.edge_type === "has_sub_epoch" && byId.has(e.source) && byId.has(e.target)) {
+      (kids.get(e.source) ?? kids.set(e.source, []).get(e.source)!).push(e.target);
+      hasParent.add(e.target);
+    }
+  const key = (n: EmNode) => ({ start: epochStart(n), name: String(n.name || n.id) });
+  const sort = (ns: EmNode[]) => ns.sort((a, b) => epochNewestFirst(key(a), key(b)));
+  const out: Array<{ node: EmNode; depth: number }> = [];
+  const seen = new Set<string>();
+  const rec = (n: EmNode, depth: number) => {
+    if (seen.has(n.id)) return;
+    seen.add(n.id);
+    out.push({ node: n, depth });
+    for (const c of sort((kids.get(n.id) ?? []).map((k) => byId.get(k)!))) rec(c, depth + 1);
+  };
+  for (const n of sort([...byId.values()].filter((n) => !hasParent.has(n.id)))) rec(n, 0);
+  for (const n of byId.values()) rec(n, 0);   // a cycle of phases: still listed
+  return out;
+}
+
 /** "1100–1350", "?–1350", or "" when neither bound is known. */
 export function epochSpan(n: EmNode): string {
   const s = epochStart(n);

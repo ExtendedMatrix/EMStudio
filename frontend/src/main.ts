@@ -545,6 +545,7 @@ import {
   edgeOrigin,
   type Family,
   familyLeaves,
+  MATRIX_LANES,
   familyOfLeaf,
   isAdornmentNodeType,
   NODE_FAMILIES,
@@ -1235,7 +1236,7 @@ function hiddenFor(v: ViewKind, visible: Set<string> = circleState[v]): { nodes:
   const edges = new Set<string>();
   if (!store) return { nodes, edges };
   for (const n of store.doc.graph.nodes) {
-    const l = nodeLeaf(n.node_type);
+    const l = nodeLeaf(n.node_type, v);
     if (l && !visible.has(l)) nodes.add(n.node_type);
   }
   for (const e of store.doc.graph.edges) {
@@ -5016,8 +5017,11 @@ function renderInspectorIssues(host: HTMLElement): void {
   if (!mine.length) return;
   const sec = document.createElement("section");
   sec.className = "insp-issues" + (mine.some((i) => i.sev === "warn") ? "" : " only-info");
-  const eb = document.createElement("div");
-  eb.className = "insp-issues-eyebrow";
+  // MICRO-RITOCCHI-CHIARI p.2a · a section like the others: its heading folds
+  // it with the triangle (`finishInspector`), the state kept per node type
+  const eb = document.createElement("h3");
+  eb.className = "insp-sect insp-issues-eyebrow";
+  eb.dataset.sect = "warnings";
   eb.textContent = t("issues.section", { n: String(mine.length) });
   sec.appendChild(eb);
   for (const i of mine) {
@@ -8281,7 +8285,7 @@ function hzSceneOfWin(winId: string): HzScene {
     // over its neighbours — E.D.'s screenshots of 25 Oct)
     const doc = st.doc;
     const hiddenNodes = new Set<string>();
-    for (const n of st.doc.graph.nodes) { const l = nodeLeaf(n.node_type); if (l && !leaves.has(l)) hiddenNodes.add(n.node_type); }
+    for (const n of st.doc.graph.nodes) { const l = nodeLeaf(n.node_type, "matrix"); if (l && !leaves.has(l)) hiddenNodes.add(n.node_type); }
     const hiddenEdges = new Set<string>();
     for (const e of st.doc.graph.edges) { const l = edgeLeaf(e.edge_type ?? ""); if (l && !leaves.has(l)) hiddenEdges.add(e.edge_type ?? ""); }
     const fv = filteredView({ doc, hidden: { nodes: hiddenNodes, edges: hiddenEdges }, placesUndrawn: true });
@@ -12613,6 +12617,91 @@ function renderModelKind(id: string): HTMLElement | null {
   return sec;
 }
 
+/** MICRO-RITOCCHI-CHIARI p.2b · «Assegna autore…» to the extractors picked in
+ *  the Warnings table: the author chosen (one of the study's, or «me»), the
+ *  preview of what changes (who gets it, who had another, what is not an
+ *  extractor and is left out), and ONE undo step. The authors already declared
+ *  stay unless «replace» is ticked (an extractor may have several). */
+async function assignAuthorToPicked(ids: string[]): Promise<boolean> {
+  const st = store;
+  if (!st || refuseReadOnly()) return false;
+  const nm = (x: string) => String(st.node(x)?.name ?? x);
+  const live = ids.filter((id) => !!st.node(id));
+  const ex = live.filter((id) => st.node(id)?.node_type === "extractor");
+  const left = live.filter((id) => st.node(id)?.node_type !== "extractor");
+  if (!ex.length) { toast(t("issues.assignNone")); return false; }
+  // the people first (an AI author is chosen on purpose, never by default)
+  const authors = st.liveNodes().filter((n) => n.node_type === "author" || n.node_type === "author_ai")
+    .sort((a, b) => Number(a.node_type === "author_ai") - Number(b.node_type === "author_ai")
+      || String(a.name ?? a.id).localeCompare(String(b.name ?? b.id)));
+  const me = identityForSigning();
+  const authorsOf = (x: string) => st.doc.graph.edges.filter((e) => e.source === x && e.edge_type === "has_author").map((e) => e.target);
+  const body = document.createElement("div");
+  body.className = "em-plan aa-plan";
+  body.dataset.assignAuthor = String(ex.length);
+  const sel = document.createElement("select");
+  sel.className = "app-dialog-select";
+  sel.dataset.aaAuthor = "1";
+  if (me && !authors.some((a) => String((a.data as Record<string, unknown> | undefined)?.orcid ?? "") === me.orcid)) {
+    const o = document.createElement("option"); o.value = "@me"; o.textContent = t("issues.assignMe", { who: me.label }); sel.appendChild(o);
+  }
+  for (const a of authors) {
+    const o = document.createElement("option"); o.value = a.id;
+    o.textContent = `${String(a.name ?? a.id)}${a.node_type === "author_ai" ? " (AI)" : ""}`;
+    sel.appendChild(o);
+  }
+  if (!sel.options.length) { toast(t("issues.assignNoAuthors")); return false; }
+  const repl = document.createElement("label");
+  repl.className = "em-plan-own";
+  const rcb = document.createElement("input"); rcb.type = "checkbox"; rcb.dataset.aaReplace = "1";
+  repl.append(rcb, " ", t("issues.assignReplace"));
+  const prev = document.createElement("div");
+  prev.className = "aa-preview";
+  const draw = () => {
+    prev.textContent = "";
+    const who = sel.value === "@me" ? (me?.label ?? "") : nm(sel.value);
+    const gets = ex.filter((x) => !authorsOf(x).includes(sel.value));
+    const had = gets.filter((x) => authorsOf(x).length > 0);
+    const p = (cls: string, text: string) => { const e = document.createElement("p"); e.className = cls; e.textContent = text; prev.appendChild(e); return e; };
+    p("em-plan-head", t("issues.assignWill", { n: String(gets.length), who }));
+    const ul = document.createElement("ul"); ul.className = "em-plan-items";
+    for (const x of gets.slice(0, 40)) {
+      const li = document.createElement("li");
+      const was = authorsOf(x).map(nm).join(", ");
+      li.textContent = was ? `${nm(x)} — ${rcb.checked ? t("issues.assignInstead", { was }) : t("issues.assignAlso", { was })}` : nm(x);
+      ul.appendChild(li);
+    }
+    if (gets.length > 40) { const li = document.createElement("li"); li.textContent = `+${gets.length - 40}`; ul.appendChild(li); }
+    prev.appendChild(ul);
+    const already = ex.length - gets.length;
+    if (already) p("em-plan-excl", t("issues.assignAlready", { n: String(already) }));
+    if (left.length) p("em-plan-excl", t("issues.assignLeft", { n: String(left.length), names: left.slice(0, 6).map(nm).join(", ") }));
+    if (had.length && !rcb.checked) p("em-plan-excl", t("issues.assignKeeps", { n: String(had.length) }));
+    prev.dataset.aaGets = String(gets.length);
+  };
+  sel.addEventListener("change", draw);
+  rcb.addEventListener("change", draw);
+  body.append(sel, repl, prev);
+  draw();
+  const a = await openDialog({ kind: "assign-author", title: t("issues.assignTitle", { n: String(ex.length) }), body, ok: t("issues.assignOk") });
+  if (!a.ok) return false;
+  const replace = rcb.checked;
+  let n = 0;
+  st.batch(() => {
+    const author = sel.value === "@me" && me ? nauth.authorForIdentity(st, me) : sel.value;
+    for (const x of ex) {
+      const had = st.doc.graph.edges.filter((e) => e.source === x && e.edge_type === "has_author");
+      if (replace) for (const e of had) if (e.target !== author) st.deleteEdge(e);
+      if (!st.hasEdge(x, author, "has_author")) { st.addEdge(x, author, "has_author"); n++; }
+    }
+  });
+  const msg = t("issues.assignDone", { n: String(n), who: sel.value === "@me" ? (me?.label ?? "") : nm(sel.value) });
+  logInfo(msg, ex);
+  toastUndo(msg, st);
+  refreshInspector();
+  return true;
+}
+
 /** pick a node of a kind (a document for an RMDoc, a special find for an RMSF) */
 async function pickNodeOf(title: string, nodes: EmNode[]): Promise<string | null> {
   if (!nodes.length) { toast(t("mk.noneToPick")); return null; }
@@ -12732,13 +12821,15 @@ function extractorMarks(winId?: string): SceneMark[] {
   if (!st || !sp) return [];
   const p = space3dPrefs();
   const cur = spaceEpochOf(sp) ?? "";
-  const key = `${st.rev}|${spaceVersion}|${cur}|${p.hidden.length}:${p.hidden.join(",").length}|${(p.forced ?? []).join(",")}|${selectedId ?? ""}`;
+  // MICRO-TESTATE-COERENTI p.1 · the category «Estrattori 3D» of «Visibilità ▾» —
+  // asked BEFORE the memory (MICRO-RITOCCHI-CHIARI p.7: the memory answered first,
+  // and the marks stayed in the scene with the category off), per window
+  if (!space3dShown("s3_x3d", winId ?? spaceWinId())) return [];
+  const key = `${winId ?? ""}|${st.rev}|${spaceVersion}|${cur}|${p.hidden.length}:${p.hidden.join(",").length}|${(p.forced ?? []).join(",")}|${selectedId ?? ""}`;
   if (x3dMarksMemo?.key === key) return x3dMarksMemo.marks;
   const hidden = new Set(p.hidden);
   const forced = new Set(p.forced ?? []);
   const marks: SceneMark[] = [];
-  // MICRO-TESTATE-COERENTI p.1 · the category «Estrattori 3D» of «Visibilità ▾»
-  if (!space3dShown("s3_x3d", winId ?? spaceWinId())) { x3dMarksMemo = null; return marks; }
   for (const [docId, xs] of extractors3d(st.doc)) {
     const lit = !!cur && docLitIn(docId, cur);
     for (const x of xs) {
@@ -12750,9 +12841,54 @@ function extractorMarks(winId?: string): SceneMark[] {
         label: `${x.name}${res ? ` · ${res}` : ""}${lit ? "" : ` · ${t("uo.x3dGhostShort")}`}`, selected: selectedId === x.id, ...(lit ? {} : { ghost: true }) });
     }
   }
-  void winId;
   x3dMarksMemo = { key, marks };
   return marks;
+}
+
+/** a key of the Space (`rm:`, `proxy:`, `sketch:`, `x3d:`…), as a person names it */
+function spaceKeyName(k: string): string {
+  const i = k.indexOf(":");
+  const id = i >= 0 ? k.slice(i + 1) : k;
+  if (k.startsWith("sketch:")) return listSketches().find((x) => x.id === id)?.name ?? id;
+  return String(store?.node(id)?.name ?? id);
+}
+/** MICRO-RITOCCHI-CHIARI p.3 (E.D., 14 Nov 2026) · the point a G moves in the
+ *  Space: the selected extractor, when its 3D anchor is ONE point and its mark
+ *  is drawn here. The other kinds (a line, a polyline, a plane) stay as they are. */
+function x3dPointGrab(winId: string): { id: string; at: V3 } | null {
+  if (!selectedId || !store) return null;
+  const k = `x3d:${selectedId}`;
+  const m = extractorMarks(winId).find((x) => x.id === k);
+  if ((space3dPrefs().pinned ?? []).includes(k)) return null;   // p.4 · its padlock is closed
+  return m && m.kind === "point" && m.vertices.length === 1 && !m.ghost ? { id: k, at: m.vertices[0] } : null;
+}
+/** …written where it went: the region keeps its id and every edge (the
+ *  extractor is cited in chains of paradata), its `coords` the new point in the
+ *  same frame as before (the model's glTF frame, the scene's — the frame the
+ *  Viewer writes and the marks read), and what it reads read again (a spot
+ *  height's value and the extractor's `result`). One undo step. */
+function moveX3dPoint(xid: string, to: V3): void {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  const r = chain.regionOfExtractor(st.doc, xid);
+  const x = st.node(xid);
+  if (!r || !x) return;
+  const rd = { ...((r.data ?? {}) as Record<string, unknown>) };
+  const tool: Viewer3dTool | null = rd.reading_kind === "spot_height" ? "elevation" : rd.reading_kind === "impost_height" ? "impost" : null;
+  const num = (v: number, d: number) => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false });
+  const read = tool ? reading3dOf(tool, [to], null, VW_READ_TEXTS(), num) : null;
+  const p = read && "vertices" in read.trace ? read.trace.vertices[0] as V3 : (to.map((v) => Math.round(v * 1e6) / 1e6) as V3);
+  const before = String(((x.data ?? {}) as Record<string, unknown>).result ?? "");
+  st.batch(() => {
+    st.updateNode(r.id, { data: { ...rd, coords: [p], vertex_count: 1, ...(read ? read.regionData : {}) } });
+    if (read) st.updateNode(xid, { data: { ...((x.data ?? {}) as Record<string, unknown>), result: read.result } });
+  });
+  x3dMarksMemo = null;
+  const msg = t("x3d.moved", { name: String(x.name ?? xid), was: before || "—", now: read?.result ?? p.map((v) => v.toFixed(3)).join(", ") });
+  logInfo(msg, [xid]);
+  toastUndo(msg, st);
+  refreshSurfaces("scene");
+  refreshInspector();
 }
 
 /** the sources: the open files with their graphs, then the graphs with no file */
@@ -13195,6 +13331,13 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     word: (k) => t(k === "eye" ? "uo.eye" : k === "menu" ? "uo.menu" : k === "active" ? "src.badgeActive"
       : k === "activate" ? "src.badgeActivate" : "uo.absent"),
     activate: (r) => { if (r.kind === "source") activateSource(r.source ?? ""); },
+    // MICRO-RITOCCHI-CHIARI p.5 · an epoch's colour behind its branch (the Matrix's band)
+    epochColor: (id) => {
+      const n = store?.node(id);
+      const c = String(((n?.data ?? {}) as Record<string, unknown>).color ?? "").trim();
+      return /^#[0-9a-f]{3,8}$/i.test(c) || /^(rgb|hsl)a?\(/i.test(c) ? c : n ? "var(--text-muted)" : null;
+    },
+    columnWords: { arrow: t("s3.arrow"), eye: t("uo.eye"), pin: t("uo.pinHead") },
     // MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · a row dropped on an epoch: moved (or, with Alt, extended)
     epochDrop: (r: URow, epoch: string, extend: boolean) => { if (r.id) void epochGesture(r.id, extend ? "extend" : "move", epoch, r.epochAt || null); },
     dropLabel: (r: URow, epoch: string, extend: boolean) => (r.id && r.slot === emtree.activeId ? epochDropLabel(r.id, epoch, extend, r.epochAt || null) : null),
@@ -13311,6 +13454,15 @@ function spaceRowDeps(): SpaceRowDeps {
       void chooseLevels([[rm.id, r.version.id]]);
     },
     forced: (k) => (space3dPrefs().forced ?? []).includes(k),
+    // MICRO-RITOCCHI-CHIARI p.4 · the padlock: position locked, a local preference per person
+    pinned: (k) => (space3dPrefs().pinned ?? []).includes(k),
+    togglePin: (k) => {
+      const p = space3dPrefs();
+      const s2 = new Set(p.pinned ?? []);
+      if (s2.has(k)) s2.delete(k); else s2.add(k);
+      setSpace3dPrefs({ ...p, pinned: [...s2] });
+    },
+    pinWords: { on: t("uo.pinOn"), off: t("uo.pinOff") },
     words: { arrow: t("s3.arrow"), isolate: t("s3.isolate"), frame: t("s3.frame"), ghost: t("uo.x3dGhost") },
   };
 }
@@ -20925,7 +21077,7 @@ function renderCirclesPanel(): void {
       const rows: Array<{ type: string; leaf: string | null; count: number; label: string; tip: string }> =
         fam.types.map((ty) => ({
           type: ty,
-          leaf: fam.structural.has(ty) ? null : `${kind === "node" ? "n" : "e"}:${ty}`,
+          leaf: fam.structural.has(ty) || (fv === "matrix" && MATRIX_LANES.has(`n:${ty}`) && kind === "node") ? null : `${kind === "node" ? "n" : "e"}:${ty}`,
           count: counts.get(ty) ?? 0,
           label: kind === "node" ? datamodelTypeLabel(ty) : edgeLabel(ty),
           tip: kind === "node" ? typeDescription(ty) : edgeTypeDescription(ty),
@@ -20938,7 +21090,7 @@ function renderCirclesPanel(): void {
           label: t("fp.unknown"),
           tip: unknownTypes.join(", "),
         });
-      const leaves = familyLeaves(fam);
+      const leaves = familyLeaves(fam, fv);
       const onLeaves = leaves.filter((l) => visible.has(l));
       const total = rows.reduce((a, r) => a + r.count, 0);
       const shownN = rows.reduce((a, r) => a + (!r.leaf || visible.has(r.leaf) ? r.count : 0), 0);
@@ -30695,6 +30847,8 @@ function xfTexts(): TransformFormTexts {
 }
 /** Where the numbers of a key live, said under the form. */
 function xfNote(key: string, sp: Space | null): { note: string; readOnly: boolean } {
+  // MICRO-RITOCCHI-CHIARI p.4 · the padlock of the Outliner: the fields say it and do not write
+  if ((space3dPrefs().pinned ?? []).includes(key)) return { note: t("uo.pinOn"), readOnly: true };
   if (key.startsWith("rm:")) {
     const r = sp?.rms.find((x) => `rm:${x.id}` === key);
     if (r?.resource?.tiles) return { note: t("xf.noteTiles"), readOnly: true };
@@ -34047,6 +34201,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     overlay: (k) => space3dShown(k, win.id),
     overlayValue: (k) => overlayValue(overlaysOfWin(win.id, "space"), k),
     locked: () => new Set(space3dPrefs().locked),
+    // MICRO-RITOCCHI-CHIARI p.4 · the padlock of the Outliner: no G / R / S on them
+    pinned: () => new Set(space3dPrefs().pinned ?? []),
+    onPinned: (k: string) => toast(t("uo.pinRefused", { name: spaceKeyName(k) })),
     sketchVisible: (id) => { const k = `sketch:${id}`; return !space3dPrefs().hidden.includes(k) && (!spaceIsolated || spaceIsolated === k); },
     epochLabel: () => { const sp = currentSpace(); const e = sp ? spaceEpochOf(sp) : null;
       return e ? String(store?.node(e)?.name ?? sp?.epochs.find((x) => x.id === e)?.name ?? e) : ""; },
@@ -34063,6 +34220,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · an extractor's mark: the chain source → extractor → property
       else if (id.startsWith("x3d:")) { select(id.slice(4)); refreshInspector(); }
     },
+    // MICRO-RITOCCHI-CHIARI p.3 · the selected 3D extractor with a point anchor moves
+    markGrab: () => x3dPointGrab(win.id),
+    onMarkMoved: (id, to) => { if (id.startsWith("x3d:")) moveX3dPoint(id.slice(4), to); },
+    markMoveHint: t("x3d.moveHint"),
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
       if (a === "outliner") { const p = space3dPrefs();
@@ -55153,7 +55314,6 @@ function sceneSearch(win: Win): HTMLElement {
       refreshSurfaces("scene");
     },
   });
-  el.querySelector<HTMLInputElement>("input")?.setAttribute("data-scene-search", win.id);
   return el;
 }
 
@@ -55207,71 +55367,75 @@ function headerSearchOf(win: Win): HeaderSearch | null {
     default: return null;
   }
 }
-/** the open 🔍 fields, per window (a rebuild of the heads keeps them open) */
-const hdrSearchOpen = new Set<string>();
+/** MICRO-RITOCCHI-CHIARI p.1 (E.D., 14 Nov 2026) · the search of a window is a
+ *  FIELD, not a button: always there, grey «Search / Cerca» in it, you type
+ *  straight in; «/» brings the focus, Esc empties it. When the head is tight the
+ *  field narrows — it never turns back into an icon. One component everywhere:
+ *  a window with a field of its own in the body (Tabular, Files, Shelf, index,
+ *  the graph's name strip) gets the same head field, which writes into that one
+ *  (its value, its input event; Enter and the arrows are passed on). */
 function headerSearchControl(win: Win): HTMLElement | null {
   if (win.type === "scene") return null;   // the 3D's is in its bar, before its «⋯» (`sceneSearch`)
   const hs = headerSearchOf(win);
   if (!hs) return null;
   return searchControl(win.id, hs);
 }
+/** the body field a head field stands for (null when the window has its own query) */
+function searchTarget(winId: string, hs: HeaderSearch): HTMLInputElement | null {
+  if (!hs.focus) return null;
+  const root: ParentNode = hs.global ? document : (winAreas.get(winId) ?? document);
+  return root.querySelector<HTMLInputElement>(hs.focus);
+}
 function searchControl(winId: string, hs: HeaderSearch): HTMLElement {
   const wrap = document.createElement("span");
   wrap.className = "win-search";
   wrap.dataset.hdr = "search";
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = "win-act win-search-btn";
-  b.dataset.hdrSearch = winId;
-  b.textContent = "🔍";
-  b.title = `${hs.placeholder} (/)`;
-  b.setAttribute("aria-label", hs.placeholder);
-  wrap.appendChild(b);
-  if (hs.set) {
-    const inp = document.createElement("input");
-    inp.type = "search";
-    inp.className = "win-search-q";
-    inp.dataset.hdrSearchQ = winId;
-    inp.placeholder = hs.placeholder;
-    inp.value = hs.get?.() ?? "";
-    const open = hdrSearchOpen.has(winId) || !!inp.value;
-    wrap.classList.toggle("open", open);
-    let timer = 0;
-    inp.addEventListener("input", () => { clearTimeout(timer); timer = window.setTimeout(() => hs.set!(inp.value), 120); });
-    inp.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Escape") { e.preventDefault(); inp.value = ""; hs.set!(""); hdrSearchOpen.delete(winId); wrap.classList.remove("open"); b.focus(); }
-    });
-    wrap.appendChild(inp);
-  }
-  b.addEventListener("click", (e) => { e.stopPropagation(); openHeaderSearch(winId); });
+  const glyph = document.createElement("span");
+  glyph.className = "win-search-glyph";
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.textContent = "🔍";
+  wrap.appendChild(glyph);
+  const inp = document.createElement("input");
+  inp.type = "search";
+  inp.className = "win-search-q";
+  inp.dataset.hdrSearchQ = winId;
+  inp.placeholder = t("uo.search");
+  inp.title = `${hs.placeholder} (/)`;
+  inp.setAttribute("aria-label", hs.placeholder);
+  inp.spellcheck = false;
+  const write = (q: string) => {
+    if (hs.set) { hs.set(q); return; }
+    const f = searchTarget(winId, hs);
+    if (!f) return;
+    f.value = q;
+    f.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  // the value it shows: the window's query, or the field it stands for (read
+  // after the body is built, which comes after the head)
+  inp.value = hs.get?.() ?? "";
+  if (!hs.set) queueMicrotask(() => { const f = searchTarget(winId, hs); if (f && document.activeElement !== inp) inp.value = f.value; });
+  let timer = 0;
+  inp.addEventListener("input", () => { clearTimeout(timer); timer = window.setTimeout(() => write(inp.value), hs.set ? 120 : 0); });
+  inp.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") { e.preventDefault(); clearTimeout(timer); inp.value = ""; write(""); inp.blur(); return; }
+    if (!hs.set && (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      const f = searchTarget(winId, hs);
+      if (f) { e.preventDefault(); f.dispatchEvent(new KeyboardEvent("keydown", { key: e.key, shiftKey: e.shiftKey, bubbles: true, cancelable: true })); }
+    }
+  });
+  wrap.appendChild(inp);
+  wrap.addEventListener("pointerdown", (e) => e.stopPropagation());
+  glyph.addEventListener("click", () => inp.focus());
   return wrap;
 }
-/** open a window's search: its own field, or the field it stands for */
+/** «/» on a window: the focus in its head field */
 function openHeaderSearch(winId: string): boolean {
-  const win = windowsOf().find((w) => w.id === winId);
-  if (!win) return false;
-  if (win.type === "scene") {
-    const f = document.querySelector<HTMLElement>(`[data-scene-search="${CSS.escape(winId)}"]`);
-    if (f) { f.closest(".win-search")?.classList.add("open"); hdrSearchOpen.add(winId); (f as HTMLInputElement).focus(); return true; }
-    return false;
-  }
-  const hs = headerSearchOf(win);
-  if (!hs) return false;
-  if (hs.set) {
-    hdrSearchOpen.add(winId);
-    const area = winAreas.get(winId);
-    const inp = area?.querySelector<HTMLInputElement>(`[data-hdr-search-q="${CSS.escape(winId)}"]`);
-    inp?.closest(".win-search")?.classList.add("open");
-    inp?.focus();
-    inp?.select();
-    return !!inp;
-  }
-  const root: ParentNode = hs.global ? document : (winAreas.get(winId) ?? document);
-  const f = root.querySelector<HTMLInputElement>(hs.focus!);
-  if (!f) { toast(t("hdr.searchNone")); return false; }
-  f.focus();
-  f.select?.();
+  const sel = `[data-hdr-search-q="${CSS.escape(winId)}"]`;
+  const inp = winAreas.get(winId)?.querySelector<HTMLInputElement>(sel) ?? document.querySelector<HTMLInputElement>(sel);
+  if (!inp) return false;
+  inp.focus();
+  inp.select();
   return true;
 }
 /** the window under the pointer (for «/»), or null */
@@ -60347,6 +60511,10 @@ initEmData({
     if (f.kind === "button") f.run(); else f.run(value);
   },
   runIssueBulk: (key, nodes) => allIssues().find((i) => i.bulk?.key === key)?.bulk?.run(nodes),
+  runIssuesPicked: (verb, nodes) => {
+    if (verb === "author") void assignAuthorToPicked(nodes);
+    else if (verb === "select") selectMany(nodes.filter((id) => !!store?.node(id)));
+  },
   // CURRENT-ELEMENT · the row lives on the window, not in the table module
   currentRow: () => currentRowId(),
   // ROWSELECT · picking a row selects its NODE, and shows it if a graph window

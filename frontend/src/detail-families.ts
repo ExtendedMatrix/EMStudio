@@ -115,11 +115,13 @@ export const NODE_FAMILY_TABLE: NodeFamilyDef[] = [
     matrix: true, graph: true,
   },
   { key: "continuity", classes: ["ContinuityNode"], matrix: true, graph: true },
-  // the epochs are the Matrix's lanes: never a filtered node. The horizons and
+  // the epochs are the Matrix's lanes: never a filtered node THERE
+  // (`filters.MATRIX_LANES`); in the Graph they are discs a person switches off
+  // like any family (MICRO-RITOCCHI-CHIARI p.6, E.D. 14 Nov 2026). The horizons and
   // their periodizations (datamodel 1.6.37: named spans the reader applies, not
   // epochs, dating nothing) are time's references beside them — listed here,
   // switchable, off in the Matrix, whose lanes are the epochs (MICRO-SUITE-VERDE)
-  { key: "epochs", classes: ["EpochNode", "PeriodizationNode", "HorizonNode"], structural: ["EpochNode"],
+  { key: "epochs", classes: ["EpochNode", "PeriodizationNode", "HorizonNode"],
     matrix: true, graph: true, matrixExcept: ["horizon", "periodization"] },
   // the abstract ParadataNode (a paradata node of no kind) sits with the sources
   { key: "documents", classes: ["ParadataNode", "DocumentNode"], matrix: true, graph: true },

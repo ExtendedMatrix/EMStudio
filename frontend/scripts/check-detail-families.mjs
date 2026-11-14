@@ -60,9 +60,13 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
 {
   const structuralE = edgeTypes.filter((e) => F.edgeLeaf(e) === null).sort();
   eq(structuralE, [...F.MEMBERSHIP_EDGES].sort(), "the structural edges are exactly the containers' membership edges");
-  const structuralN = nodeTypes.filter((t) => F.nodeLeaf(t) === null).sort();
+  // MICRO-RITOCCHI-CHIARI p.6 · the epochs are structure in the MATRIX (its lanes),
+  // a switchable family in the Graph
+  const structuralN = nodeTypes.filter((t) => F.nodeLeaf(t, "matrix") === null).sort();
   const want = nodeTypes.filter((t) => (R.isGroupType(t) && R.classOf(t) !== "ParadataNodeGroup") || R.classOf(t) === "EpochNode").sort();
-  eq(structuralN, want, "the structural nodes are the group boxes (a paradata group excepted) and the epochs");
+  eq(structuralN, want, "the structural nodes of the Matrix are the group boxes (a paradata group excepted) and the epochs");
+  const structuralG = nodeTypes.filter((t) => F.nodeLeaf(t, "graph") === null).sort();
+  eq(structuralG, want.filter((t) => R.classOf(t) !== "EpochNode"), "in the Graph the epochs are a leaf like the others");
 }
 
 // ── 3 · relative chronology, stratigraphic relations, epochs: three families ──

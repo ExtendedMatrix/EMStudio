@@ -98,6 +98,12 @@ let runIssueAction: (issueId: string) => void = () => {};
 /** CAMPAGNA · a warning's CORRECTION (its `fix`), with the value chosen */
 let runIssueFix: (issueId: string, value: string) => void = () => {};
 let runIssueBulk: (key: string, nodes: string[]) => void = () => {};
+/** MICRO-RITOCCHI-CHIARI p.2b · the rows of the Warnings table picked by hand
+ *  (their nodes, for the session), and the verbs over them */
+const pickedIssueNodes = new Set<string>();
+let runIssuesPicked: (verb: string, nodes: string[]) => void = () => {};
+/** the picked nodes (a test reads them) */
+export function pickedIssues(): string[] { return [...pickedIssueNodes]; }
 
 /**
  * WIN5 · where a table is drawn. One renderer, many mounts.
@@ -371,6 +377,8 @@ export function initEmData(opts: {
   runIssueFix?: (issueId: string, value: string) => void;
   /** CATENA · the bulk fix of the rows on screen */
   runIssueBulk?: (key: string, nodes: string[]) => void;
+  /** MICRO-RITOCCHI-CHIARI p.2b · a verb on the rows picked by hand («Assegna autore…») */
+  runIssuesPicked?: (verb: string, nodes: string[]) => void;
   /** AUDIT N11 · a row went: say which, and give it back («Annulla») */
   onDeleted?: (name: string, store: DocumentStore) => void;
   /** SPAZIO · the space of the graph, for «Modelli e proxy» */
@@ -402,6 +410,7 @@ export function initEmData(opts: {
   if (opts.runIssueAction) runIssueAction = opts.runIssueAction;
   if (opts.runIssueFix) runIssueFix = opts.runIssueFix;
   if (opts.runIssueBulk) runIssueBulk = opts.runIssueBulk;
+  if (opts.runIssuesPicked) runIssuesPicked = opts.runIssuesPicked;
   // MICRO-cronologia · an answer from the bridge redraws the tables
   onChronologyUpdate(() => renderEmData());
   try {
@@ -924,7 +933,8 @@ function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<t
     t(`issues.rule.${rule}`) === `issues.rule.${rule}` ? rule : t(`issues.rule.${rule}`);
   const rowHtml = (i: ViewCtx["issues"][number], group = ""): string =>
     `<tr class="tv-issue${group ? " tv-grouped" : ""}"${i.node ? ` data-id="${escapeAttr(i.node)}"` : ""} data-rule="${escapeAttr(i.rule)}"` +
-    `${group ? ` data-group="${escapeAttr(group)}"${openIssueGroups.has(group) ? "" : " hidden"}` : ""}>` +
+    `${group ? ` data-group="${escapeAttr(group)}"${openIssueGroups.has(group) ? "" : " hidden"}` : ""}${i.node && pickedIssueNodes.has(i.node) ? ` aria-selected="true"` : ""}>` +
+    `<td class="tv-pick">${i.node ? `<input type="checkbox" data-issue-pick="${escapeAttr(i.node)}"${pickedIssueNodes.has(i.node) ? " checked" : ""} aria-label="${escapeAttr(t("issues.pickRow"))}">` : ""}</td>` +
     `<td><span class="sevtag ${i.sev}">${ico(i.sev)} ${escapeHtml(t(`issues.sev.${i.sev}`))}</span></td>` +
     `<td class="tv-rule">${escapeHtml(ruleLabel(i.rule))}</td>` +
     `<td class="tv-id">${i.node ? escapeHtml(nm(ix.byId.get(i.node))) : "—"}</td>` +
@@ -950,7 +960,10 @@ function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<t
     const all = bulk.length > 1
       ? ` <button class="tv-act" type="button" data-issue-bulk="${escapeAttr(bulk[0].bulk!.key)}" data-nodes="${escapeAttr([...new Set(bulk.map((x) => x.node))].join(" "))}">${escapeHtml(bulk[0].bulk!.label(bulk.length))}</button>`
       : "";
+    const gNodes = [...new Set(g.map((x) => x.node).filter(Boolean))];
+    const gAll = gNodes.length > 0 && gNodes.every((x) => pickedIssueNodes.has(x));
     body.push(`<tr class="tv-issue-group" data-group="${escapeAttr(key)}">` +
+      `<td class="tv-pick">${gNodes.length ? `<input type="checkbox" data-issue-pick-many="${escapeAttr(gNodes.join(" "))}"${gAll ? " checked" : ""} aria-label="${escapeAttr(t("issues.pickGroup"))}">` : ""}</td>` +
       `<td><span class="sevtag ${i.sev}">${ico(i.sev)} ${escapeHtml(t(`issues.sev.${i.sev}`))}</span></td>` +
       `<td class="tv-rule">${escapeHtml(ruleLabel(i.rule))}</td>` +
       `<td class="tv-id" colspan="2"><button class="tv-group-toggle" type="button" data-issue-group="${escapeAttr(key)}" aria-expanded="${open}">` +
@@ -958,12 +971,25 @@ function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<t
       `<td class="tv-fix">${all}</td></tr>`);
     for (const x of g) body.push(rowHtml(x, key));
   }
-  return `<div class="tv-pad">${tabs}<p class="tv-lead">${escapeHtml(t("issues.lead"))} ${bulkBtns}</p>` +
-    `<table class="emdata-table tv-table tv-issues"><thead><tr><th>${escapeHtml(t("table.fx.sev"))}</th>` +
+  // MICRO-RITOCCHI-CHIARI p.2b · picked by hand: a bar of verbs over them
+  const shownNodes = [...new Set(rows.map((i) => i.node).filter(Boolean))];
+  for (const id of [...pickedIssueNodes]) if (!ix.byId.has(id)) pickedIssueNodes.delete(id);
+  const picked = [...pickedIssueNodes];
+  const allShown = shownNodes.length > 0 && shownNodes.every((x) => pickedIssueNodes.has(x));
+  const pickBar = picked.length
+    ? `<div class="tv-pickbar" data-issue-pickbar="${picked.length}"><span>${escapeHtml(t("issues.picked", { n: String(picked.length) }))}</span>` +
+      `<button class="tv-act" type="button" data-issues-verb="author">${escapeHtml(t("issues.assignAuthor"))}</button>` +
+      `<button class="tv-act" type="button" data-issues-verb="select">${escapeHtml(t("issues.selectPicked"))}</button>` +
+      `<button class="tv-act" type="button" data-issues-verb="clear">${escapeHtml(t("issues.unpick"))}</button></div>`
+    : "";
+  return `<div class="tv-pad">${tabs}<p class="tv-lead">${escapeHtml(t("issues.lead"))} ${bulkBtns}</p>${pickBar}` +
+    `<table class="emdata-table tv-table tv-issues"><thead><tr>` +
+    `<th class="tv-pick"><input type="checkbox" data-issue-pick-many="${escapeAttr(shownNodes.join(" "))}"${allShown ? " checked" : ""} aria-label="${escapeAttr(t("issues.pickAll"))}" title="${escapeAttr(t("issues.pickAll"))}"></th>` +
+    `<th>${escapeHtml(t("table.fx.sev"))}</th>` +
     `<th>${escapeHtml(t("table.fx.rule"))}</th><th>${escapeHtml(t("table.col.node"))}</th>` +
     `<th>${escapeHtml(t("table.col.msg"))}</th><th>${escapeHtml(t("issues.fixCol"))}</th></tr></thead><tbody>` +
     (rows.length ? body.join("")
-      : `<tr><td colspan="5" class="tv-ok">${escapeHtml(t("issues.none"))}</td></tr>`) +
+      : `<tr><td colspan="6" class="tv-ok">${escapeHtml(t("issues.none"))}</td></tr>`) +
     `</tbody></table></div>`;
 }
 
@@ -1036,7 +1062,14 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
   body.querySelectorAll<HTMLElement>("[data-open-doc]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); onOpenDoc(el.dataset.openDoc!, el); }));
   body.querySelectorAll<HTMLElement>("[data-id]").forEach((el) =>
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
+      if (el.matches("tr.tv-issue") && !el.dataset.verified && (e.metaKey || e.ctrlKey || e.shiftKey)
+          && !(e.target as HTMLElement).closest("button, a, input, select")) {
+        const id = el.dataset.id!;
+        if (pickedIssueNodes.has(id)) pickedIssueNodes.delete(id); else pickedIssueNodes.add(id);
+        renderEmData();
+        return;
+      }
       setCurrentRow(el.dataset.id!);
       onRowPicked(el.dataset.id!);
     }));
@@ -1075,6 +1108,23 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
       const key = b.dataset.issueGroup!;
       if (openIssueGroups.has(key)) openIssueGroups.delete(key); else openIssueGroups.add(key);
       renderEmData();
+    }));
+  // MICRO-RITOCCHI-CHIARI p.2b · pick rows by hand (a box, a group's box, all
+  // the rows on screen; ⌘/Shift-click on a row), then a verb over them
+  body.querySelectorAll<HTMLInputElement>("[data-issue-pick], [data-issue-pick-many]").forEach((cb) => {
+    cb.addEventListener("click", (e) => e.stopPropagation());
+    cb.addEventListener("change", () => {
+      const ids = cb.dataset.issuePick ? [cb.dataset.issuePick] : (cb.dataset.issuePickMany ?? "").split(" ").filter(Boolean);
+      for (const id of ids) if (cb.checked) pickedIssueNodes.add(id); else pickedIssueNodes.delete(id);
+      renderEmData();
+    });
+  });
+  body.querySelectorAll<HTMLButtonElement>("[data-issues-verb]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const verb = b.dataset.issuesVerb!;
+      if (verb === "clear") { pickedIssueNodes.clear(); renderEmData(); return; }
+      runIssuesPicked(verb, [...pickedIssueNodes]);
     }));
   body.querySelectorAll<HTMLButtonElement>("[data-issue-bulk]").forEach((b) =>
     b.addEventListener("click", (e) => {

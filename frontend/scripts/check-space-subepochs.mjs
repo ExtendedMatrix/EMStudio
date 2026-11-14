@@ -1,6 +1,7 @@
 // MICRO-RIFINITURE p.8 (E.D., 6 Nov 2026) · the SUB-EPOCHS in the Space: XX sec.
 // with two surveys (2013, 2015) as sub-epochs. `subEpochs(top)` lists them (the
-// whole subtree, the oldest first); `summary(sub)` gives only the sub-epoch's
+// whole subtree, the NEWEST first since MICRO-RITOCCHI-CHIARI p.8: the Matrix's
+// order, as every list of epochs); `summary(sub)` gives only the sub-epoch's
 // models (and its own sub-epochs'), `summary(top)` all of them — as the Matrix
 // shows them in sub-bands. And the bar: a «sub-epoch» menu beside the epoch.
 //
@@ -38,7 +39,7 @@ const edges = [
 ];
 const sp = S.buildSpace({ graph: { nodes, edges } }, { isUnit: S.isStratigraphicType });
 eq(sp.epochs.map((e) => e.name), ["XX sec", "II A.D."], "the bar's epochs are the top ones, newest first");
-eq(sp.subEpochs("XX").map((e) => `${e.name}@${e.depth}`), ["2013@1", "2015@1", "2015 · campagna B@2"], "XX sec's sub-epochs: the subtree, the oldest first, with the depth");
+eq(sp.subEpochs("XX").map((e) => `${e.name}@${e.depth}`), ["2015@1", "2015 · campagna B@2", "2013@1"], "XX sec's sub-epochs: the subtree, the newest first (the Matrix's order), with the depth");
 eq(sp.subEpochs("II"), [], "an epoch without sub-epochs: none");
 const ids = (ep) => (sp.summary(ep)?.rms ?? []).map((r) => r.id).sort();
 eq(ids("XX"), ["OLD", "S13", "S15", "S15b"], "the top epoch («all»): the models of every sub-epoch, and its own");

@@ -61,6 +61,10 @@ export interface UnifiedDeps {
   containerDrop?: (row: URow, groupId: string, from: string | null, add: boolean) => void;
   /** …its words while dragging (null: nothing would happen there); groupId "" = out of `from` */
   containerDropLabel?: (row: URow, groupId: string, from: string | null, add: boolean) => string | null;
+  /** MICRO-RITOCCHI-CHIARI p.5 · an epoch's colour (the Matrix's lane, its band), for its branch */
+  epochColor?: (epochId: string) => string | null;
+  /** …the words of the columns' heading (Blender's Outliner: arrow, eye, padlock) */
+  columnWords?: { arrow: string; eye: string; pin: string };
   /** p.9 · «Completa il container…» on a container's row */
   card?: (row: URow) => void;
   /** p.4 · the Space's controls on a row that has something in the scene */
@@ -87,6 +91,11 @@ export interface SpaceRowDeps {
   chooseVersion: (row: URow) => void;
   /** an extractor whose document is not lit, its eye forced on */
   forced: (key: string) => boolean;
+  /** MICRO-RITOCCHI-CHIARI p.4 · the padlock: the object's position locked (no
+   *  move, rotation, scale in the Space) — a local preference per person */
+  pinned?: (key: string) => boolean;
+  togglePin?: (key: string) => void;
+  pinWords?: { on: string; off: string };
   words: { arrow: string; isolate: string; frame: string; ghost: string };
   /** MICRO-TESTATE-COERENTI p.2 · the category of a row's key when it is OFF in
    *  «Visibilità ▾» (its name, for the mark), null when on; and a click on the mark */
@@ -120,13 +129,57 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   root.appendChild(scroll);
   host.appendChild(root);
 
+  // MICRO-RITOCCHI-CHIARI p.4 · the columns' heading, as Blender's Outliner: the
+  // icons of the fixed columns at the right of every row (↖ selectable, ◉ visible,
+  // 🔒 position locked — in the Space; the eye alone elsewhere)
+  const colHead = document.createElement("div");
+  colHead.className = "uo-colhead";
+  colHead.dataset.uoColhead = "1";
+  root.insertBefore(colHead, scroll);
+  root.style.setProperty("--uo-cols-w", d.space ? "54px" : "18px");
+  const drawColHead = (): void => {
+    const W = d.columnWords;
+    colHead.textContent = "";
+    const fill = document.createElement("span");
+    fill.className = "uo-colhead-fill";
+    colHead.appendChild(fill);
+    const cols = document.createElement("span");
+    cols.className = "uo-cols";
+    const cell = (glyph: string, title: string, k: string) => {
+      const c = document.createElement("span");
+      c.className = `uo-col uo-col-${k}`;
+      c.textContent = glyph;
+      c.title = title;
+      cols.appendChild(c);
+    };
+    if (d.space) cell("↖", W?.arrow ?? "", "arrow");
+    cell("◉", W?.eye ?? "", "eye");
+    if (d.space) cell("🔒", W?.pin ?? "", "pin");
+    colHead.appendChild(cols);
+  };
+  drawColHead();
+
   let rows: URow[] = [];
+  /** p.5 · per row, the epoch whose branch it is in (its colour behind the row) and the band's parity */
+  let bands: Array<{ epoch: string; odd: boolean; first: boolean } | null> = [];
   let drawnFrom = -1, drawnTo = -1, drawnSel: string | null | undefined, drawnGen = -1;
   let gen = 0;
   let queued = false;
 
   const build = (): void => {
     rows = flattenOutliner({ sources: d.sources(), opts: d.opts(), texts: d.texts(), toggled: d.toggled() });
+    // p.5 · the branch of an epoch (its row and everything under it, until a
+    // row at its depth or above); a phase opens a band of its own inside it
+    bands = [];
+    const stack: Array<{ depth: number; id: string; odd: boolean }> = [];
+    let n = 0;
+    for (const r of rows) {
+      while (stack.length && stack[stack.length - 1].depth >= r.depth) stack.pop();
+      const isEp = r.glyph === "EpochNode" && !!r.id && !!d.epochColor;
+      if (isEp) stack.push({ depth: r.depth, id: r.id!, odd: n++ % 2 === 1 });
+      const top = stack[stack.length - 1];
+      bands.push(top ? { epoch: top.id, odd: top.odd, first: isEp } : null);
+    }
     gen++;
     spacer.style.height = `${rows.length * ROW_H}px`;
   };
@@ -159,12 +212,25 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       lab.append(" ", ds);
     }
     el.appendChild(lab);
+    // p.5 · the epoch's colour behind its branch (the Matrix's band)
+    const band = bands[i];
+    const bc = band && d.epochColor ? d.epochColor(band.epoch) : null;
+    if (band && bc) {
+      el.classList.add("uo-band");
+      if (band.odd) el.classList.add("uo-band-odd");
+      if (band.first) el.classList.add("uo-band-first");
+      el.style.setProperty("--ep-color", bc);
+      el.dataset.band = band.epoch;
+    }
+    // p.4 · the marks (LOD, alt, ⊥ epoch, warnings…) in one column before the fixed ones
+    const tail = document.createElement("span");
+    tail.className = "uo-marks";
     if (r.version) {
       el.classList.add("uo-version-row");
       if (r.version.drawn) el.classList.add("uo-drawn");
       const u = [r.version.level, ...(r.version.uses ?? [])].filter(Boolean).join(" · ");
-      if (u) { const x = document.createElement("span"); x.className = "uo-uses"; x.textContent = u; el.appendChild(x); }
-      if (r.version.auto) { const a = document.createElement("span"); a.className = "uo-auto"; a.textContent = "A"; el.appendChild(a); }
+      if (u) { const x = document.createElement("span"); x.className = "uo-uses"; x.textContent = u; tail.appendChild(x); }
+      if (r.version.auto) { const a = document.createElement("span"); a.className = "uo-auto"; a.textContent = "A"; tail.appendChild(a); }
     }
     if (r.alt) el.classList.add("uo-alt");
     if (r.ghost) el.classList.add("uo-ghost");
@@ -175,7 +241,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       n.dataset.note = "1";
       n.textContent = r.note;
       if (r.noteTitle) n.title = r.noteTitle;
-      el.appendChild(n);
+      tail.appendChild(n);
     }
     if (r.followGroup && d.follow) {
       const f = document.createElement("button");
@@ -183,7 +249,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       f.className = "uo-follow";
       f.dataset.follow = r.followGroup;
       f.textContent = d.followWord ?? "↩";
-      el.appendChild(f);
+      tail.appendChild(f);
     }
     if (r.warn) {
       const w = document.createElement("button");
@@ -192,7 +258,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       w.dataset.warn = "1";
       w.textContent = "⚠";
       w.title = r.warn;
-      el.appendChild(w);
+      tail.appendChild(w);
     }
     const S = d.space;
     if (S && (r.skey || r.kind === "node")) {
@@ -204,7 +270,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
         f.dataset.sp = "fail";
         f.textContent = "⚠";
         f.title = failed;
-        el.appendChild(f);
+        tail.appendChild(f);
       }
       const chip = S.chip(r);
       if (chip) {
@@ -213,7 +279,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
         c.className = "uo-chip";
         c.dataset.sp = "lod";
         c.textContent = `${chip} ▾`;
-        el.appendChild(c);
+        tail.appendChild(c);
       }
       const alt = S.alt(r);
       if (alt) {
@@ -222,7 +288,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
         c.className = "uo-chip uo-altchip";
         c.dataset.sp = "alt";
         c.textContent = `${alt} ▾`;
-        el.appendChild(c);
+        tail.appendChild(c);
       }
       if (r.skey && !r.skey.startsWith("x3d:")) {
         const iso = document.createElement("button");
@@ -237,9 +303,10 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
         fr.dataset.sp = "frame";
         fr.textContent = "⤢";
         fr.title = S.words.frame;
-        el.append(iso, fr);
+        tail.append(iso, fr);
       }
     }
+    el.appendChild(tail);
     const tip = r.desc ? `${r.label} — ${r.desc}` : r.label;
     el.title = r.absent ? `${tip} — ${d.word("absent")}` : r.title ? `${tip} — ${r.title}` : tip;
     if (r.ghost && S) el.title = `${tip} — ${S.words.ghost}`;
@@ -254,13 +321,13 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       b.textContent = d.word(r.badge);
       b.title = d.word(r.badge);
       if (r.badge === "active") b.setAttribute("aria-pressed", "true");
-      el.appendChild(b);
+      tail.appendChild(b);
     }
     if (r.count) {
       const c = document.createElement("span");
       c.className = "uo-count";
       c.textContent = r.count;
-      el.appendChild(c);
+      tail.appendChild(c);
     }
     // MICRO-TESTATE-COERENTI p.2 · the row of a category switched off: attenuated,
     // with a mark that says it and turns it back on
@@ -274,27 +341,48 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       m.textContent = "⊘";
       m.title = cOff.title;
       m.setAttribute("aria-label", cOff.title);
-      el.appendChild(m);
+      tail.appendChild(m);
     }
-    if (S && r.skey && !r.ghost) {
-      const lk = S.lockOpen(r.skey);
-      const a = document.createElement("button");
-      a.type = "button";
-      a.className = "uo-arrow" + (lk ? "" : " uo-arrow-off");
-      a.dataset.sp = "arrow";
-      a.textContent = "↖";
-      a.title = S.words.arrow;
-      el.appendChild(a);
+    // p.4 · the fixed columns, right-aligned, ALWAYS there (off, or empty when the
+    // row has nothing of the kind) so they stack in vertical lines: ↖ selectable,
+    // ◉ visible, 🔒 position locked (in the Space); the eye alone elsewhere
+    const cols = document.createElement("span");
+    cols.className = "uo-cols";
+    const blank = (k: string) => { const x = document.createElement("span"); x.className = `uo-col uo-col-${k} uo-col-none`; cols.appendChild(x); };
+    if (S) {
+      if (r.skey && !r.ghost) {
+        const lk = S.lockOpen(r.skey);
+        const a = document.createElement("button");
+        a.type = "button";
+        a.className = "uo-col uo-col-arrow uo-arrow" + (lk ? "" : " uo-arrow-off");
+        a.dataset.sp = "arrow";
+        a.textContent = "↖";
+        a.title = S.words.arrow;
+        cols.appendChild(a);
+      } else blank("arrow");
     }
     if (r.eye || r.gis) {
       const on = r.ghost && S ? S.forced(r.eye!) : r.eye ? d.eyeOpen(r.eye) : d.gisOpen(r.gis!);
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "uo-eye" + (on ? "" : " uo-eye-off");
+      b.className = "uo-col uo-col-eye uo-eye" + (on ? "" : " uo-eye-off");
       b.dataset.eye = r.eye ?? `gis:${r.gis}`;
       b.textContent = on ? "◉" : "○";
       b.title = d.word("eye");
-      el.appendChild(b);
+      cols.appendChild(b);
+    } else blank("eye");
+    if (S) {
+      if (r.skey && !r.ghost && S.pinned && S.togglePin) {
+        const pin = S.pinned(r.skey);
+        const k = document.createElement("button");
+        k.type = "button";
+        k.className = "uo-col uo-col-pin uo-pin" + (pin ? " uo-pin-on" : "");
+        k.dataset.sp = "pin";
+        k.textContent = pin ? "🔒" : "🔓";
+        k.title = pin ? S.pinWords?.on ?? "" : S.pinWords?.off ?? "";
+        k.setAttribute("aria-pressed", String(pin));
+        cols.appendChild(k);
+      } else blank("pin");
     }
     if (r.kind === "source" || r.kind === "graph" || r.kind === "aux") {
       const b = document.createElement("button");
@@ -303,8 +391,9 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       b.dataset.menu = "1";
       b.textContent = "⋯";
       b.title = d.word("menu");
-      el.appendChild(b);
+      tail.appendChild(b);
     }
+    el.appendChild(cols);
     return el;
   };
 
@@ -320,6 +409,8 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     const frag = document.createDocumentFragment();
     for (let i = from; i < to; i++) frag.appendChild(rowEl(rows[i], i, sel, keys));
     layer.replaceChildren(frag);
+    // the heading's columns over the rows' (a scrollbar that takes room shifts the rows)
+    colHead.style.paddingRight = `${Math.max(0, scroll.offsetWidth - scroll.clientWidth)}px`;
   };
 
   scroll.addEventListener("scroll", () => {
@@ -366,6 +457,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       const S = d.space;
       const what = sp.dataset.sp;
       if (what === "arrow" && r.skey) S.toggleLock(r.skey);
+      else if (what === "pin" && r.skey) S.togglePin?.(r.skey);
       else if (what === "lod") S.chipMenu(r, box(sp));
       else if (what === "alt") S.altMenu(r, box(sp));
       else if (what === "fail") S.failMenu(r, box(sp));
