@@ -1,5 +1,6 @@
+import { BASE_ROLES } from "./media";
 import { numField } from "./num-field";
-import { t } from "./i18n";
+import { t, getLocale } from "./i18n";
 import { helpGlyph } from "./help-glyph";
 import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
@@ -297,6 +298,13 @@ function renderEditorialStamps(root: HTMLElement, node: EmNode): void {
  *  the whole Inspector (a field being typed in keeps its focus) */
 const timeBoxes = new Set<{ box: HTMLElement; paint: () => void }>();
 /** MICRO-INSPECTOR-SEZIONI p.3 · the chronology answered: the time rows again */
+/** the label of a media role of the base vocabulary (em-media-role) in the
+ *  active language; a term of the project says its id */
+function mediaRoleLabel(id: string): string {
+  const r = BASE_ROLES.find((x) => x[0] === id);
+  return r ? (getLocale() === "it" ? r[1] : r[2]) : id;
+}
+
 export function repaintTimeRows(): void {
   for (const x of [...timeBoxes]) {
     if (!x.box.isConnected) { timeBoxes.delete(x); continue; }
@@ -602,6 +610,10 @@ export function renderInspector(
     const key = (rule.em_json ?? `data.${rule.field}`).replace(/^data\./, "");
     const raw = ((node.data ?? {}) as Record<string, unknown>)[key];
     if (raw === undefined || raw === null || raw === "") continue;
+    // MICRO-B-DOCUMENTI-MEDIA · a set's list of members, the set it draws
+    // from, a catalogue's stamp have their own place (the strip, the viewer,
+    // the catalogue's line): not a line of text here
+    if (typeof raw === "object" || rule.field === "members_from") continue;
     shownAbove.add(key);
     const labelKey = `insp.el.${rule.field}`;
     const title = t(labelKey);
@@ -626,7 +638,8 @@ export function renderInspector(
       // the genre reads in the active locale (translations `stratigraphic_kinds`),
       // any other value as the datamodel writes it
       row.appendChild(el("span", "insp-element-label",
-        rule.field === "stratigraphic_kind" ? stratigraphicKindLabel(String(raw)) : String(raw)));
+        rule.field === "stratigraphic_kind" ? stratigraphicKindLabel(String(raw))
+          : rule.field === "media_role" ? mediaRoleLabel(String(raw)) : String(raw)));
     }
     root.appendChild(row);
   }

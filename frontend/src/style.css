@@ -11782,6 +11782,60 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 .viewer-thumb.vw-in { box-shadow: inset 0 0 0 2px var(--accent, #2b6cb0); }
 .viewer-thumb.vw-sel { outline: 3px solid var(--warn, #d69e2e); outline-offset: -3px; }
 
+/* ── MICRO-B-DOCUMENTI-MEDIA ───────────────────────────────────────────────── */
+/* the strip, in every node, right after the title and the description */
+.insp-media-strip { margin: 4px 0 6px; }
+.insp-media-strip .ims-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 3px; }
+.insp-media-strip .ims-count { background: none; border: none; padding: 0; font-size: 11px; color: var(--brand-ink, #2b6cb0);
+  cursor: pointer; text-decoration: underline dotted; }
+.insp-media-strip .ims-row { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; }
+.ims-thumb, .ims-more { flex: none; width: 48px; height: 48px; padding: 0; border: 1px solid var(--border, #ccc);
+  background: var(--bg-hover, #f2f2f2); cursor: pointer; overflow: hidden; border-radius: 3px; }
+.ims-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ims-thumb.front { outline: 2px solid var(--brand-ink, #2b6cb0); outline-offset: -2px; }
+.ims-thumb .insp-ui-glyph { width: 100%; height: 100%; font-size: 15px; }
+.ims-more { font-size: 11px; color: var(--muted, #777); }
+.insp-catalogue { font-size: 11px; margin: 2px 0 6px; color: var(--muted, #777); }
+.insp-catalogue .insp-ui-bar { display: flex; gap: 6px; margin-top: 3px; }
+/* the image viewer: the tree on the left, the grid on the right */
+.mv-wrap { display: flex; height: 100%; width: 100%; min-height: 0; }
+.mv-tree { flex: none; width: 180px; overflow: auto; border-right: 1px solid var(--border, #ddd); padding: 4px 0;
+  display: flex; flex-direction: column; }
+.mv-node { text-align: left; background: none; border: none; padding: 2px 6px; font: inherit; font-size: 11px;
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.mv-node:hover { background: var(--bg-hover, #f2f2f2); }
+.mv-node.on { background: var(--brand-soft, #e6effa); font-weight: 600; }
+.mv-grid { flex: 1; overflow: auto; padding: 0 6px 8px; min-width: 0; }
+.mv-cells { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
+.mv-cell { padding: 4px; gap: 3px; }
+.mv-cell img { height: 76px; }
+.mv-cell .insp-ui-glyph { width: 100%; height: 76px; }
+.mv-cell.front { box-shadow: inset 0 0 0 2px var(--brand-ink, #2b6cb0); }
+.mv-tags { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; font-size: 9.5px; line-height: 1.3; }
+.mv-doc { padding: 0 4px; border-radius: 6px; background: var(--brand-soft, #e6effa); color: var(--brand-ink, #2b6cb0); }
+.mv-doc.none { background: var(--bg-hover, #f2f2f2); color: var(--muted, #777); }
+.mv-role { padding: 0 4px; border-radius: 6px; background: var(--warn-soft, #fdf3e1); color: var(--warn-ink, #8a5a00); }
+/* the right sector under the Inspector is narrow: the tree goes on top, in rows */
+.mv-wrap.narrow { flex-direction: column; }
+.mv-wrap.narrow > .mv-tree { width: auto; max-height: 64px; flex-direction: row; flex-wrap: wrap; border-right: none;
+  border-bottom: 1px solid var(--border, #ddd); padding: 2px; gap: 2px; }
+.mv-wrap.narrow > .mv-tree .mv-node { padding: 1px 6px !important; border: 1px solid var(--border, #ddd); border-radius: 8px; }
+.mv-wrap.narrow .mv-cells { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 4px; }
+.mv-wrap.narrow .mv-cell img, .mv-wrap.narrow .mv-cell .insp-ui-glyph { height: 56px; }
+.mv-wrap.narrow .mv-cell .viewer-thumb-label { display: none; }
+.mv-single { display: flex; flex-direction: column; height: 100%; width: 100%; outline: none; }
+.mv-single-bar { display: flex; gap: 6px; align-items: center; padding: 4px 6px; font-size: 12px; }
+.mv-single-cap { color: var(--muted, #777); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-big { flex: 1; min-height: 0; object-fit: contain; width: 100%; }
+.mv-dialog { display: flex; flex-direction: column; gap: 8px; min-width: 320px; }
+.mv-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.mv-field.inline { flex-direction: row; align-items: center; gap: 6px; }
+.mv-rolepick { display: flex; gap: 6px; }
+/* Archive › Documenti: the tree of the sets */
+.dv-table .dv-fold { display: inline-block; width: 12px; cursor: pointer; color: var(--muted, #777); }
+.dv-table tr.dv-row { cursor: default; }
+.dv-table tr.dv-row.sel { background: var(--brand-soft, #e6effa); }
+
 /* ── MICRO-TESTATE-COERENTI ─────────────────────────────────────────────────── */
 /* p.1 · «Visibilità ▾»: the button says when a category with something here is off */
 .scn-vis.vis-off { background: var(--warn-soft); color: var(--warn-ink); border-color: var(--warn-border); font-weight: 600; }

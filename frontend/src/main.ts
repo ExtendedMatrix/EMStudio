@@ -497,7 +497,9 @@ import { type Access, type ConnectionGestures, type ConnectionState, type NodeAp
 import { stateBadge, stateSign } from "./state-symbols";
 import * as alignment from "./alignment";
 import { buildCommand, type CommandVerb } from "./commands";
-import { addResource, fileCounts, foldFiles, makeBlendLocator, movePointers, packagingLabel, parseBlendLocator, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
+import { addMembers, addResource, fileCounts, foldFiles, makeBlendLocator, materializeMember, memberRows, membersBase, movePointers, packagingLabel, parseBlendLocator, refreshMembersDigest, removeMembers, replaceFile, resourceFiles, resourceLabel, rowsDigest, storeGraph, type MemberRow } from "./resources";
+import { catalogueState, cite, documentOf, groupItems, setTree, isCatalogue, itemIsOf, localRoleId, mediaIndex, mediaOf, mediaRoles, roleLabel, treeRows, unitItemKeys,
+         FRONTISPIECE as MEDIA_FRONTISPIECE, type CatalogueState, type MediaItem } from "./media";
 import { askWhichPointersMove } from "./resource-panel";
 import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
 import { foldForms, landPack, packTileset } from "./pack3tz";
@@ -2597,6 +2599,13 @@ window.__EM_SCENE__ = () => {
   selected: () => [...selectedIds],
   /** MICRO-FOTO-DOCUMENTI-BBOX · the unit thumbnails asked, and where they came from */
   thumbStats: () => ({ ...unitThumbStats, queued: unitThumbQueue.length, busy: unitThumbBusy }),
+  // MICRO-B-DOCUMENTI-MEDIA · the strip, the image viewer, the media of a node
+  openMediaViewer: (id: string, focus?: string) => openMediaViewer(id, focus)?.id ?? null,
+  mediaStats: () => ({ ...mediaStats }),
+  mediaOf: (id: string) => (store ? mediaOf(store.doc.graph as never, id).map((x) => ({ key: x.key, id: x.id, isNode: x.isNode, medium: x.medium, role: x.role, doc: x.doc, folder: x.folder, name: x.name })) : []),
+  mediaSelect: (winId: string, keys: string[]) => { const s = mediaSel.get(winId) ?? new Set<string>(); mediaSel.set(winId, s); s.clear(); for (const k of keys) s.add(k); renderViewer(); },
+  catalogueState: (id: string) => (store ? catalogueStateOf(store, id) : null),
+  placeInSpace: (id: string) => placeInSpace(null, id),
   /** MICRO-OUTLINER-UNICO · every Outliner rebuilt now (its cost, measured), its rows */
   uoRefresh: () => { for (const a of unifiedApis.values()) a.refresh(); },
   uoPaint: () => { for (const a of unifiedApis.values()) a.paintNow(); },
@@ -4420,7 +4429,8 @@ function renderInspectorInto(host: HTMLElement): void {
   if (selectedId) renderTraceBanner(host, owning, selectedId);   // FONTE · a trace, and «Ripristina»
   if (selectedId) {
     renderDocumentCard(host, owning, selectedId);        // MICRO-VIEWER-UNICO p.5 · the Doc's fields
-    renderUnitImages(host, owning, selectedId);          // E5 · its images
+    renderMediaStrip(host, owning, selectedId);          // MICRO-B-DOCUMENTI-MEDIA · its media, the strip
+    renderCatalogueLine(host, owning, selectedId);       // …and a catalogue's state
     renderAltLabels(host, owning, selectedId);           // A1 · its other labels
     renderChainSection(host, chainUi(owning), selectedId); // CATENA
     const chip = aiChipFor(selectedId);
@@ -4703,33 +4713,38 @@ function renderAltLabels(host: HTMLElement, st: DocumentStore, nodeId: string): 
   if (head?.nextSibling) host.insertBefore(sect, head.nextSibling); else host.appendChild(sect);
 }
 
-/** E5 · «Images of the unit» in the Inspector — MICRO-FOTO-DOCUMENTI-BBOX B:
- *  by the four roads the datamodel has (`unit-images.ts`): linked to the unit,
- *  from a document of it, from the sources its readings read, illustrating one
- *  of its properties — grouped by road with a line that says where they come
- *  from, each image once (its checksum). The thumbnails are LAZY (first seen)
- *  and queued: IIIF when the node has an image service, else the cache shared
- *  with EM Tools (`/fs/thumb`, keyed by sha256), else the file. A click opens
- *  the image in the Viewer (the same view, with ‹ › among the unit's images).
- *  For a unit: «Aggiungi immagini…», «Collega per nome…», and a drop target. */
-function renderUnitImages(host: HTMLElement, st: DocumentStore, nodeId: string): void {
+/** MICRO-B-DOCUMENTI-MEDIA §4 · THE STRIP — in EVERY node, right after its
+ *  title and description: a minimal row of thumbnails (the frontispiece
+ *  first) with the count; a click opens the image viewer under the Inspector
+ *  (`openMediaViewer`). What a node shows is `media.ts › mediaOf`: a set's
+ *  files listed or written, a catalogue's whole tree, a unit's pictures by
+ *  the four roads and its groups, the models as a glyph. For a unit the
+ *  strip keeps «Aggiungi immagini…», «Collega per nome…» and is a drop target
+ *  (MICRO-FOTO-DOCUMENTI-BBOX). Supersedes the grid «Immagini dell'unità». */
+const STRIP_MAX = 12;
+function renderMediaStrip(host: HTMLElement, st: DocumentStore, nodeId: string): void {
   const n = st.node(nodeId);
-  if (!n || ["resource", "resource_file", "document", "file", "extractor", "combiner"].includes(String(n.node_type))) return;
-  const groups = unitImages(st.doc.graph, nodeId);
-  const total = groups.reduce((k, g) => k + g.items.length, 0);
+  if (!n) return;
+  const items = mediaOf(st.doc.graph as never, nodeId);
   const isUnit = isStratigraphicType(n.node_type);
-  if (!total && !isUnit) return;
+  if (!items.length && !isUnit) return;
   const sect = document.createElement("div");
-  sect.className = "insp-unit-images";
-  sect.dataset.unitImages = String(total);
+  sect.className = "insp-media-strip";
+  sect.dataset.mediaStrip = String(items.length);
+  sect.dataset.unitImages = String(items.length);
   if (isUnit) { sect.dataset.unitDrop = nodeId; sect.dataset.unitDropName = String(n.name || nodeId); }
-  const h = document.createElement("h3");
-  h.className = "insp-sect";
-  h.textContent = t("insp.unitImages", { n: String(total) });
-  sect.appendChild(h);
+  const head = document.createElement("div");
+  head.className = "ims-head";
+  const count = document.createElement("button");
+  count.type = "button";
+  count.className = "ims-count";
+  count.dataset.mediaOpen = nodeId;
+  const pics = items.filter((x) => x.medium !== "3d").length;
+  count.textContent = t("ms.count", { n: fmtN(items.length) }) + (pics !== items.length ? ` · ${t("ms.models", { n: String(items.length - pics) })}` : "");
+  count.title = t("ms.openTitle");
+  count.addEventListener("click", () => openMediaViewer(nodeId));
+  head.appendChild(count);
   if (isUnit) {
-    const bar = document.createElement("div");
-    bar.className = "insp-ui-bar";
     const add = document.createElement("button");
     add.type = "button";
     add.className = "tv-act";
@@ -4743,40 +4758,117 @@ function renderUnitImages(host: HTMLElement, st: DocumentStore, nodeId: string):
     byName.textContent = t("insp.ui.byName");
     byName.title = t("insp.ui.byNameHint");
     byName.addEventListener("click", () => void linkImagesByName(null));
-    bar.append(add, byName);
-    sect.appendChild(bar);
+    head.append(add, byName);
   }
-  let index = 0;
-  for (const grp of groups) {
-    const line = document.createElement("div");
-    line.className = "insp-ui-route muted";
-    line.dataset.uiRoute = grp.route;
-    line.textContent = t(`ui.route.${grp.route}`, { x: grp.via?.name ?? "" });
-    sect.appendChild(line);
-    const row = document.createElement("div");
-    row.className = "insp-ui-grid";
-    for (const img of grp.items) {
-      const at = index++;
-      const fig = document.createElement("button");
-      fig.type = "button";
-      fig.className = "insp-unit-image";
-      fig.dataset.uiImage = img.id;
-      fig.title = img.name;
-      const pic = document.createElement("img");
-      pic.alt = img.name;
-      const cap = document.createElement("div");
-      cap.className = "insp-ui-cap";
-      cap.textContent = img.name;
-      fig.append(pic, cap);
-      fig.addEventListener("click", () => openUnitImage(nodeId, at));
-      row.appendChild(fig);
-      onFirstVisible(fig, () => loadUnitThumb(pic, fig, st, img));
-    }
-    sect.appendChild(row);
+  // «Colloca nello Spazio» — every document and its sub-resources, by hand
+  if (["document", "resource", "resource_file"].includes(String(n.node_type)) && items.some((x) => x.medium !== "3d")) {
+    const place = document.createElement("button");
+    place.type = "button";
+    place.className = "tv-act";
+    place.dataset.mediaPlace = nodeId;
+    place.textContent = t("mv.place");
+    place.title = t("mv.placeTitle");
+    place.addEventListener("click", () => placeInSpace(null, nodeId));
+    head.appendChild(place);
   }
-  // before the chain: what the unit looks like, then where it comes from
-  const head = host.querySelector(".insp-head");
-  if (head?.nextSibling) host.insertBefore(sect, head.nextSibling); else host.appendChild(sect);
+  sect.appendChild(head);
+  const row = document.createElement("div");
+  row.className = "ims-row";
+  for (const it of items.slice(0, STRIP_MAX)) {
+    const fig = document.createElement("button");
+    fig.type = "button";
+    fig.className = "ims-thumb" + (it.role === MEDIA_FRONTISPIECE ? " front" : "");
+    fig.dataset.msItem = it.key;
+    fig.title = [it.name, it.role ? roleLabel(st.doc.graph as never, it.role, getLocale()) : ""].filter(Boolean).join(" · ");
+    const pic = document.createElement("img");
+    pic.alt = it.name;
+    fig.appendChild(pic);
+    fig.addEventListener("click", () => openMediaViewer(nodeId, it.key));
+    row.appendChild(fig);
+    onFirstVisible(fig, () => loadMediaThumb(pic, fig, st, it));
+  }
+  if (items.length > STRIP_MAX) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "ims-more";
+    more.textContent = `+${fmtN(items.length - STRIP_MAX)}`;
+    more.addEventListener("click", () => openMediaViewer(nodeId));
+    row.appendChild(more);
+  }
+  if (items.length) sect.appendChild(row);
+  // right after the title and the description (and its languages)
+  const desc = host.querySelector(".insp-desc-input");
+  const langs = desc?.nextElementSibling as HTMLElement | null | undefined;
+  const after = desc && langs?.dataset.trField === "description" ? langs : desc;
+  if (after) after.after(sect);
+  else { const h = host.querySelector(".insp-head"); if (h) h.after(sect); else host.prepend(sect); }
+}
+
+/** Visible inside the box that scrolls it (the viewer's grid, the strip),
+ *  not only inside the window: `lazy.ts`'s fallback test reads the window,
+ *  and a cell scrolled past above the grid is still «in the window». */
+function seenInScroller(el: Element): boolean {
+  if (!el.isConnected) return false;
+  const r = el.getBoundingClientRect();
+  if (!r.width && !r.height) return false;
+  const box = el.closest(".mv-grid, .ims-row, .mv-single");
+  const b = box ? box.getBoundingClientRect() : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+  const M = 120;
+  return r.bottom > b.top - M && r.top < b.bottom + M && r.right > b.left - M && r.left < b.right + M;
+}
+/** the thumbnails put off because their cell was out of sight at their turn:
+ *  asked again when their box scrolls and they come into sight */
+const mediaDeferred = new Map<Element, () => void>();
+function retryMediaDeferred(): void {
+  for (const [el, run] of [...mediaDeferred]) {
+    if (!el.isConnected) { mediaDeferred.delete(el); continue; }
+    if (seenInScroller(el)) { mediaDeferred.delete(el); run(); }
+  }
+}
+
+/** One thumbnail of a media item: a node's (IIIF, the shared cache, the file
+ *  — `loadUnitThumb`), and a LISTED file's from its locator and its sha256 in
+ *  the cache shared with EM Tools — the one way to see a file that is not a
+ *  node yet (E.D.). A model, a drawing nobody rasterises: its glyph. */
+function loadMediaThumb(pic: HTMLImageElement, fig: HTMLElement, st: DocumentStore, it: MediaItem): void {
+  if (it.medium === "3d" || it.medium === "other" || (it.medium === "drawing" && !/\.svg$/i.test(it.locator))) {
+    fig.classList.add("glyph");
+    pic.remove();
+    const g = document.createElement("div");
+    g.className = "insp-ui-glyph";
+    g.textContent = it.medium === "3d" ? "⬡" : it.medium === "drawing" ? "✎" : "▧";
+    fig.prepend(g);
+    return;
+  }
+  if (it.isNode && st.node(it.id)) {
+    loadUnitThumb(pic, fig, st, { id: it.id, name: it.name, locator: it.locator, medium: it.medium === "pdf" ? "pdf" : "image", checksum: it.checksum });
+    return;
+  }
+  queueUnitThumb(async () => {
+    // asked when it is its turn AND still in sight: a fast scroll through
+    // thousands of files must not make the thumbnails of what it passed by
+    if (!seenInScroller(fig)) { mediaDeferred.set(fig, () => loadMediaThumb(pic, fig, st, it)); return; }
+    unitThumbStats.asked++;
+    const src = it.locator;
+    if (viewerIsFetchable(src)) { pic.src = src; unitThumbStats.file++; return; }
+    const path = studyLocalPath(src) ?? src;
+    try {
+      const sha = it.checksum ? it.checksum.replace(/^sha256:/i, "") : "";
+      const res = await fetch(`${await bridgeUrl()}/fs/thumb?path=${encodeURIComponent(path)}${sha ? `&sha256=${sha}` : ""}`);
+      if (res.ok) {
+        unitThumbStats[res.headers.get("X-EM-Thumb") === "cached" ? "cached" : "made"]++;
+        pic.src = URL.createObjectURL(await res.blob());
+        return;
+      }
+    } catch { /* no bridge: the glyph */ }
+    unitThumbStats.glyph++;
+    fig.classList.add("glyph");
+    pic.remove();
+    const g = document.createElement("div");
+    g.className = "insp-ui-glyph";
+    g.textContent = it.medium === "pdf" ? "PDF" : "▧";
+    fig.prepend(g);
+  });
 }
 
 /** The thumbnails are asked a few at a time (Basilica Iulia: thousands of
@@ -4845,15 +4937,676 @@ function loadUnitThumb(pic: HTMLImageElement, fig: HTMLElement, st: DocumentStor
   });
 }
 
-/** The image `at` of a unit, in the Viewer (‹ › among the unit's images). */
-function openUnitImage(unitId: string, at: number): void {
-  const w = requestDoc(unitId);
-  if (!w) return;
-  setWinCurrent(w, "viewer.on", unitId);
-  setWinCurrent(w, "item", at === 0 ? null : at);
-  setWinModeOf(w, "single");
+// ── MICRO-B-DOCUMENTI-MEDIA §4 · THE IMAGE VIEWER (multi-source) ─────────────
+//
+// The strip's click opens it in the right sector UNDER the Inspector (a
+// Viewer window of its own, which detaches like any window). It shows MIXED
+// types — photographs, a PDF's first page, orthophotos, drawings, models as a
+// glyph — each with «nel documento D.xx» or «non censito» and its role; a
+// tree by folder / group / role; the filter on the unit selected
+// (MICRO-FOTO-DOCUMENTI-BBOX, reused); ⌘/⇧-click selects; «Assegna a /
+// Togli da <unità>», «Fai un gruppo…», «Dai un nome…» (the file becomes a
+// node), «Censisci come documento…», «Colloca nello Spazio». A file that is
+// not a node yet is seen by its thumbnail only (the shared cache, by sha256).
+
+const mediaSel = new Map<string, Set<string>>();
+/** what the page measured: the last viewer's items and the time to draw it */
+const mediaStats = { items: 0, cells: 0, drawMs: 0, chunks: 0 };
+
+/** Open the viewer on a node's media (the strip's click): the service Viewer,
+ *  or one born UNDER the Inspector. `focus` opens one item at once. */
+function openMediaViewer(nodeId: string, focus?: string): Win | null {
+  if (!store || !store.node(nodeId)) return null;
+  let w = windowsOf().find((x) => x.type === "viewer" && typeof winCurrent(x, "media.on") === "string")
+    ?? docForRequests();
+  if (!w) {
+    const insp = windowsOf().find((x) => x.type === "inspector");
+    const anchor = insp ?? activeWin();
+    if (maximizedWin()) toggleMaximize(maximizedWin()!);
+    setActiveWin(anchor.id);
+    const made = splitWindow(anchor.id, insp ? "col" : "row", activeWorkspace(), 0.45, "b");
+    if (!made) return null;
+    for (const k of Object.keys(made.state)) delete made.state[k];
+    setWinType(made, "viewer");
+    setWinCurrent(made, "viewer.role", "service");
+    w = made;
+    renderTiles();
+  }
+  if (winCurrent(w, "media.on") !== nodeId) { mediaSel.get(w.id)?.clear(); setWinCurrent(w, "media.group", null); }
+  setWinCurrent(w, "media.on", nodeId);
+  setWinCurrent(w, "media.open", focus ?? null);
   renderViewer();
   renderAreaHeaders();
+  const area = winAreas.get(w.id);
+  area?.classList.add("flash");
+  setTimeout(() => area?.classList.remove("flash"), 900);
+  return w;
+}
+
+/** A row of `data.members` for an item (what a group copies of it). */
+function rowOfItem(it: MediaItem): MemberRow {
+  const r: MemberRow = { path: it.path ?? it.name };
+  if (it.checksum) r.digest = it.checksum;
+  if (it.sizeBytes != null) r.size_bytes = it.sizeBytes;
+  if (it.date) r.taken_at = it.date;
+  if (it.camera) r.camera_label = it.camera;
+  return r;
+}
+
+/** The node an item is, made when it is a listed member (a use). */
+function materializeItem(st: DocumentStore, it: MediaItem, name?: string): string | null {
+  if (it.isNode) return st.node(it.id) ? it.id : null;
+  if (!it.setId || !it.path) return null;
+  return materializeMember(storeGraph(st), it.setId, it.path, name ? { name } : {}).file_id;
+}
+
+function renderMediaViewer(win: Win, stage: HTMLElement, caption: HTMLElement, bar: HTMLElement, subject: string): void {
+  const st = store!;
+  const t0 = performance.now();
+  disposeViewerScene(win.id);
+  const g = st.doc.graph as never;
+  const ix = mediaIndex(g);
+  const all = mediaOf(ix, subject);
+  const name = (id: string) => String(st.node(id)?.name || id);
+  const lang = getLocale();
+  const sel = mediaSel.get(win.id) ?? new Set<string>();
+  mediaSel.set(win.id, sel);
+  for (const k of [...sel]) if (!all.some((x) => x.key === k)) sel.delete(k);
+  bar.classList.remove("hidden");
+  bar.textContent = "";
+  bar.classList.add("vw-bar");
+  const back = vwButton("win-act", "✕", t("mv.close"), () => { setWinCurrent(win, "media.on", null); renderViewer(); renderAreaHeaders(); });
+  back.dataset.mvClose = "1";
+  const title = document.createElement("span");
+  title.className = "vw-title";
+  title.dataset.mvTitle = subject;
+  title.textContent = cite(ix, subject);
+  bar.append(back, title);
+  // a catalogue says its state and its counts (live when open)
+  if (st.node(subject)?.node_type === "document" && isCatalogue(ix, subject)) {
+    const cs = catalogueStateOf(st, subject);
+    const line = document.createElement("span");
+    line.className = "vw-source mv-cat";
+    line.dataset.mvCatalogue = cs.state;
+    line.textContent = catalogueWords(cs);
+    bar.appendChild(line);
+  }
+  // the tree's axis
+  const by = (winCurrent(win, "media.by") as "folder" | "group" | "role" | null) ?? "folder";
+  const bysel = document.createElement("select");
+  bysel.dataset.mvBy = by;
+  for (const k of ["folder", "group", "role"] as const) { const o = document.createElement("option"); o.value = k; o.textContent = t(`mv.by.${k}`); bysel.appendChild(o); }
+  bysel.value = by;
+  bysel.addEventListener("change", () => { setWinCurrent(win, "media.by", bysel.value); setWinCurrent(win, "media.group", null); renderViewer(); });
+  bar.appendChild(bysel);
+  // the unit selected elsewhere: the filter and the two gestures
+  const unit = selectedId && selectedId !== subject && isStratigraphicType(st.node(selectedId)?.node_type) ? selectedId : null;
+  const mine = unit ? unitItemKeys(ix, unit) : null;
+  const only = !!unit && winCurrent(win, "gallery.only") === true;
+  const chosen = all.filter((x) => sel.has(x.key));
+  if (unit) {
+    const lab = document.createElement("label");
+    lab.className = "vw-only";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = only;
+    box.dataset.vwOnly = unit;
+    box.addEventListener("change", () => { setWinCurrent(win, "gallery.only", box.checked); renderViewer(); });
+    lab.append(box, ` ${t("vw.onlyUnit", { u: name(unit), n: String(all.filter((x) => itemIsOf(mine!, x)).length) })}`);
+    bar.appendChild(lab);
+  }
+  const act = (key: string, label: string, enabled: boolean, run: () => void | Promise<void>) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tv-act";
+    b.dataset.mvAct = key;
+    b.textContent = label;
+    b.disabled = !enabled;
+    b.addEventListener("click", () => { if (refuseReadOnly()) return; void run(); });
+    bar.appendChild(b);
+  };
+  if (unit) {
+    const toAdd = chosen.filter((x) => !itemIsOf(mine!, x) && x.medium !== "3d");
+    const toDrop = chosen.filter((x) => itemIsOf(mine!, x));
+    act("assign", t("vw.assign", { u: name(unit), n: String(toAdd.length) }), toAdd.length > 0, () => {
+      let n = 0;
+      st.batch(() => {
+        const ids = toAdd.map((x) => materializeItem(st, x)).filter((x): x is string => !!x);
+        n = linkPicturesToUnit(st, unit, ids);
+      });
+      sel.clear();
+      toastUndo(t("vw.assignDone", { u: name(unit), n: String(n) }), st);
+      refreshInspector(); renderViewer();
+    });
+    act("unassign", t("vw.unassign", { u: name(unit), n: String(toDrop.length) }), toDrop.length > 0, () => {
+      let n = 0;
+      st.batch(() => {
+        n += unlinkPicturesFromUnit(st, unit, toDrop.filter((x) => x.isNode).map((x) => x.id));
+        // a listed member in a group of the unit leaves that group
+        const groups = st.doc.graph.edges.filter((e) => e.source === unit && e.edge_type === "has_linked_resource").map((e) => e.target);
+        for (const gid of groups) {
+          const rows = memberRows(storeGraph(st), gid);
+          const base = membersBase(storeGraph(st), gid).resource;
+          const drop = toDrop.filter((x) => !x.isNode && x.path && (x.setId === base || x.setId === gid) && rows.some((r) => r.path === x.path)).map((x) => x.path!);
+          if (drop.length) n += removeMembers(storeGraph(st), gid, drop).removed;
+        }
+      });
+      sel.clear();
+      toastUndo(t("vw.unassignDone", { u: name(unit), n: String(n) }), st);
+      refreshInspector(); renderViewer();
+    });
+  }
+  act("group", t("mv.group", { n: String(chosen.length) }), chosen.length > 0, () => makeMediaGroup(st, subject, chosen, unit));
+  act("name", t("mv.name"), chosen.length === 1 && chosen[0].medium !== "3d", () => nameMediaItem(st, chosen[0]));
+  act("census", t("mv.census"), chosen.length > 0 || st.node(subject)?.node_type === "resource", () => censusAsDocument(st, subject, chosen));
+  act("place", t("mv.place"), chosen.length <= 1, () => placeInSpace(chosen.length === 1 ? chosen[0] : null, subject));
+
+  // the tree and the grid
+  const shown = all.filter((x) => !only || itemIsOf(mine!, x));
+  const groups = groupItems(ix, shown, by, { none: t("mv.none"), role: (id) => roleLabel(g, id, lang) });
+  const pick = winCurrent(win, "media.group");
+  const wrap = document.createElement("div");
+  wrap.className = "mv-wrap";
+  wrap.dataset.mvItems = String(shown.length);
+  const tree = document.createElement("div");
+  tree.className = "mv-tree";
+  const tall = document.createElement("button");
+  tall.type = "button";
+  tall.className = "mv-node" + (pick == null ? " on" : "");
+  tall.textContent = `${t("mv.all")} · ${fmtN(shown.length)}`;
+  tall.addEventListener("click", () => { setWinCurrent(win, "media.group", null); renderViewer(); });
+  tree.appendChild(tall);
+  for (const [key, list] of groups) {
+    const b = document.createElement("button");
+    b.type = "button";
+    const depth = by === "folder" ? key.split("/").length - 1 : 0;
+    b.className = "mv-node" + (pick === key ? " on" : "");
+    b.style.paddingLeft = `${6 + depth * 12}px`;
+    b.dataset.mvNode = key;
+    b.textContent = `${by === "folder" ? paths.basename(key) : key} · ${fmtN(list.length)}`;
+    b.title = key;
+    b.addEventListener("click", () => { setWinCurrent(win, "media.group", pick === key ? null : key); renderViewer(); });
+    tree.appendChild(b);
+  }
+  const grid = document.createElement("div");
+  grid.className = "mv-grid";
+  const visible = groups.filter(([k]) => pick == null || pick === k);
+  const flat = visible.flatMap(([, l]) => l);
+  // the single view: one item, ‹ › among those shown, Esc back to the grid
+  const open = winCurrent(win, "media.open");
+  const openAt = typeof open === "string" ? flat.findIndex((x) => x.key === open) : -1;
+  if (openAt >= 0) {
+    mediaSingle(win, stage, st, flat, openAt);
+    caption.textContent = `${cite(ix, subject)} — ${openAt + 1} / ${flat.length}`;
+    mediaStats.items = all.length;
+    return;
+  }
+  const cells: Array<[HTMLElement, MediaItem]> = [];
+  for (const [key, list] of visible) {
+    const head = document.createElement("div");
+    head.className = "viewer-gallery-group";
+    head.dataset.vwGroup = key;
+    head.textContent = `${key} · ${fmtN(list.length)}`;
+    grid.appendChild(head);
+    const box = document.createElement("div");
+    box.className = "viewer-gallery mv-cells";
+    grid.appendChild(box);
+    for (const it of list) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "viewer-thumb mv-cell" + (sel.has(it.key) ? " vw-sel" : "")
+        + (mine ? (itemIsOf(mine, it) ? " vw-in" : " vw-out") : "") + (it.role === MEDIA_FRONTISPIECE ? " front" : "");
+      cell.dataset.mvCell = it.key;
+      cell.dataset.mvKind = it.medium;
+      cell.dataset.mvNodeBacked = it.isNode ? "1" : "0";
+      cell.title = [it.name, it.path ?? "", it.camera, it.date].filter(Boolean).join(" · ");
+      const img = document.createElement("img");
+      img.alt = it.name;
+      const label = document.createElement("span");
+      label.className = "viewer-thumb-label";
+      label.textContent = it.name;
+      const tags = document.createElement("span");
+      tags.className = "mv-tags";
+      const doc = document.createElement("span");
+      doc.className = "mv-doc" + (it.doc ? "" : " none");
+      doc.dataset.mvDoc = it.doc ?? "";
+      doc.textContent = it.doc ? t("mv.inDoc", { d: name(it.doc) }) : t("mv.notCensused");
+      tags.appendChild(doc);
+      if (it.role) { const r = document.createElement("span"); r.className = "mv-role"; r.dataset.mvRole = it.role; r.textContent = roleLabel(g, it.role, lang); tags.appendChild(r); }
+      cell.append(img, label, tags);
+      cell.addEventListener("click", (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (sel.has(it.key)) sel.delete(it.key); else sel.add(it.key);
+          renderViewer();
+          return;
+        }
+        setWinCurrent(win, "media.open", it.key);
+        renderViewer();
+      });
+      cell.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || !it.isNode) return;
+        unitPointerDrag(e, sel.has(it.key) ? chosen.filter((x) => x.isNode).map((x) => x.id) : [it.id], it.name);
+      });
+      cells.push([cell, it]);
+    }
+  }
+  wrap.append(tree, grid);
+  // the right sector under the Inspector is narrow: the tree on top, in rows
+  if ((stage.clientWidth || winAreas.get(win.id)?.clientWidth || 0) < 520) wrap.classList.add("narrow");
+  let retry = 0;
+  grid.addEventListener("scroll", () => { if (!retry) retry = requestAnimationFrame(() => { retry = 0; retryMediaDeferred(); }); }, { passive: true });
+  stage.appendChild(wrap);
+  // the cells in chunks: thousands of files must not stall the frame
+  const boxes = [...grid.querySelectorAll<HTMLElement>(".mv-cells")];
+  const perBox: Array<Array<[HTMLElement, MediaItem]>> = [];
+  { let i = 0; for (const [, list] of visible) { perBox.push(cells.slice(i, i + list.length)); i += list.length; } }
+  const queue: Array<[HTMLElement, HTMLElement, MediaItem]> = [];
+  perBox.forEach((cs, bi) => { for (const [c, it] of cs) queue.push([boxes[bi], c, it]); });
+  const CHUNK = 400;
+  let at = 0;
+  mediaStats.chunks = 0;
+  const pump = (): void => {
+    if (!stage.isConnected && at > 0) return;
+    const end = Math.min(queue.length, at + CHUNK);
+    for (; at < end; at++) {
+      const [box, c, it] = queue[at];
+      box.appendChild(c);
+      onFirstVisible(c, () => loadMediaThumb(c.querySelector("img") ?? document.createElement("img"), c, st, it));
+    }
+    mediaStats.chunks++;
+    mediaStats.cells = at;
+    if (at < queue.length) requestAnimationFrame(pump);
+    else mediaStats.drawMs = Math.round(performance.now() - t0);
+  };
+  pump();
+  mediaStats.items = all.length;
+  caption.textContent = `${cite(ix, subject)} — ${fmtN(shown.length)}${shown.length !== all.length ? ` / ${fmtN(all.length)}` : ""}`
+    + (sel.size ? ` · ${t("vw.selected", { n: String(sel.size) })}` : "");
+}
+
+/** One item large: a picture (the file itself through the bridge), a PDF's
+ *  first page, a model's glyph; ‹ › and Esc. */
+function mediaSingle(win: Win, stage: HTMLElement, st: DocumentStore, list: MediaItem[], at: number): void {
+  const it = list[at];
+  const box = document.createElement("div");
+  box.className = "mv-single";
+  box.dataset.mvSingle = it.key;
+  box.tabIndex = 0;
+  const go = (k: number | null) => { setWinCurrent(win, "media.open", k == null ? null : list[k]?.key ?? null); renderViewer(); };
+  const nav = document.createElement("div");
+  nav.className = "mv-single-bar";
+  const prev = vwButton("viewer-nav", "‹", t("vw.prev"), () => go(at - 1));
+  const next = vwButton("viewer-nav", "›", t("vw.next"), () => go(at + 1));
+  const grid = vwButton("win-act", "▦", t("mv.backGrid"), () => go(null));
+  grid.dataset.mvGrid = "1";
+  prev.disabled = at === 0;
+  next.disabled = at === list.length - 1;
+  const cap = document.createElement("span");
+  cap.className = "mv-single-cap";
+  cap.textContent = `${it.name}${it.path && it.path !== it.name ? ` · ${it.path}` : ""} — ${it.doc ? t("mv.inDoc", { d: String(st.node(it.doc)?.name ?? it.doc) }) : t("mv.notCensused")}`;
+  nav.append(grid, prev, next, cap);
+  const pic = document.createElement("img");
+  pic.className = "mv-big";
+  pic.alt = it.name;
+  box.append(nav, pic);
+  stage.appendChild(box);
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); go(null); }
+    else if (e.key === "ArrowLeft" && at > 0) go(at - 1);
+    else if (e.key === "ArrowRight" && at < list.length - 1) go(at + 1);
+  });
+  queueMicrotask(() => box.focus());
+  if (it.medium !== "image") { loadMediaThumb(pic, box, st, it); return; }
+  void (async () => {
+    const src = it.isNode ? (viewerSourceOf(st.node(it.id) ?? null) ?? it.locator) : it.locator;
+    if (viewerIsFetchable(src)) { pic.src = src; return; }
+    try { pic.src = await bridgeBlobUrl(await fsUrlFor(studyLocalPath(src) ?? src)); }
+    catch { loadMediaThumb(pic, box, st, it); }
+  })();
+}
+
+/** the role picker of a dialog: the vocabulary, then «＋ nuovo ruolo…» */
+function rolePicker(st: DocumentStore, current: string | null): { el: HTMLElement; value: () => { id: string | null; newLabel: string | null } } {
+  const wrap = document.createElement("div");
+  wrap.className = "mv-rolepick";
+  const sel = document.createElement("select");
+  sel.className = "app-dialog-select";
+  sel.dataset.mvRolePick = "1";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = t("mv.noRole");
+  sel.appendChild(none);
+  for (const r of mediaRoles(st.doc.graph as never)) {
+    const o = document.createElement("option");
+    o.value = r.id;
+    o.textContent = (r.label[getLocale()] ?? r.label.en ?? r.id) + (r.origin === "local" ? ` · ${t("mv.localRole")}` : "");
+    sel.appendChild(o);
+  }
+  const nw = document.createElement("option");
+  nw.value = "__new";
+  nw.textContent = t("mv.newRole");
+  sel.appendChild(nw);
+  sel.value = current ?? "";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = t("mv.newRolePh");
+  input.dataset.mvRoleNew = "1";
+  input.hidden = true;
+  sel.addEventListener("change", () => { input.hidden = sel.value !== "__new"; if (!input.hidden) input.focus(); });
+  wrap.append(sel, input);
+  return { el: wrap, value: () => ({ id: sel.value === "__new" ? null : sel.value || null, newLabel: sel.value === "__new" ? input.value.trim() || null : null }) };
+}
+
+/** a term of the PROJECT for a role (s3Dgraphy `add_local_role`): on the graph
+ *  node, with who and when. Inside a batch. Returns its id. */
+function ensureLocalRole(st: DocumentStore, label: string): string {
+  const id = localRoleId(label);
+  if (!id.startsWith("local:")) return id;
+  const gn = st.liveNodes().find((x) => x.node_type === "graph");
+  if (!gn) return id;
+  const d = { ...((gn.data ?? {}) as Record<string, unknown>) };
+  const rows = Array.isArray(d.media_roles_local) ? [...(d.media_roles_local as Array<Record<string, unknown>>)] : [];
+  if (!rows.some((r) => r.id === id)) {
+    const who = identityForSigning()?.label;
+    rows.push({ id, label: { [getLocale()]: label }, added_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"), ...(who ? { added_by: who } : {}) });
+    d.media_roles_local = rows;
+    st.updateNode(gn.id, { data: d });
+  }
+  return id;
+}
+
+/** «Fai un gruppo…»: a LOGICAL group (the files stay where they are): name,
+ *  role, linked to the unit selected, part of the set shown. Its members
+ *  stay listed (paths inside the group) when they come from one set; from
+ *  several, they become nodes (a use). One undo. */
+async function makeMediaGroup(st: DocumentStore, subject: string, chosen: MediaItem[], unit: string | null): Promise<void> {
+  const body = document.createElement("div");
+  body.className = "mv-dialog";
+  const nameIn = document.createElement("input");
+  nameIn.type = "text";
+  nameIn.className = "app-dialog-input";
+  nameIn.dataset.mvGroupName = "1";
+  nameIn.value = unit ? `${String(st.node(unit)?.name ?? unit)} · ${t("mv.groupWord")}` : t("mv.groupWord");
+  const rp = rolePicker(st, null);
+  body.append(mvLabelled(t("mv.groupNameL"), nameIn), mvLabelled(t("mv.roleL"), rp.el));
+  let linkBox: HTMLInputElement | null = null;
+  if (unit) {
+    linkBox = document.createElement("input");
+    linkBox.type = "checkbox";
+    linkBox.checked = true;
+    linkBox.dataset.mvGroupLink = "1";
+    body.appendChild(mvLabelled(t("mv.groupLink", { u: String(st.node(unit)?.name ?? unit) }), linkBox, true));
+  }
+  let partBox: HTMLInputElement | null = null;
+  if (st.node(subject)?.node_type === "resource") {
+    partBox = document.createElement("input");
+    partBox.type = "checkbox";
+    partBox.checked = false;
+    partBox.dataset.mvGroupPart = "1";
+    body.appendChild(mvLabelled(t("mv.groupPart", { s: String(st.node(subject)?.name ?? subject) }), partBox, true));
+  }
+  const a = await openDialog({ kind: "media-group", title: t("mv.groupTitle", { n: String(chosen.length) }), body, ok: t("mv.groupOk") });
+  if (!a.ok || !nameIn.value.trim()) return;
+  const role = rp.value();
+  let gid = "";
+  st.batch(() => {
+    const g = storeGraph(st);
+    const roleId = role.newLabel ? ensureLocalRole(st, role.newLabel) : role.id;
+    gid = st.newId();
+    const sets = [...new Set(chosen.map((x) => x.setId).filter((x): x is string => !!x))];
+    const from = sets.length === 1 && chosen.every((x) => x.setId === sets[0] && x.path) ? sets[0] : null;
+    // a group's paths are those of the directory it draws from: an item of a
+    // group (itself drawing from a directory) points at that directory
+    addResource(g, { resourceId: gid, name: nameIn.value.trim(), packaging: "file_set",
+      data: { members: [], ...(from ? { members_from: membersBase(g, from).resource } : {}),
+              ...(roleId ? { media_role: roleId } : {}) } });
+    if (from) addMembers(g, gid, chosen.map(rowOfItem));
+    else {
+      for (const x of chosen) {
+        const id = materializeItem(st, x);
+        if (!id || st.node(id)?.node_type !== "resource_file") continue;
+        st.addEdge(gid, id, "has_file", { role: "member", path: x.path ?? x.name }, `${gid}__has_file__${id}`);
+      }
+      refreshMembersDigest(g, gid);
+    }
+    if (linkBox?.checked && unit) st.addEdge(unit, gid, "has_linked_resource", undefined, `${unit}__has_linked_resource__${gid}`);
+    if (partBox?.checked) st.addEdge(subject, gid, "has_sub_resource", undefined, `${subject}__has_sub_resource__${gid}`);
+  });
+  const msg = t("mv.groupDone", { name: nameIn.value.trim(), n: String(chosen.length) });
+  logInfo(msg, [gid]);
+  toastUndo(msg, st);
+  refreshInspector();
+  renderViewer();
+}
+
+function mvLabelled(text: string, el: HTMLElement, inline = false): HTMLElement {
+  const l = document.createElement("label");
+  l.className = "mv-field" + (inline ? " inline" : "");
+  const s = document.createElement("span");
+  s.textContent = text;
+  if (inline) l.append(el, s); else l.append(s, el);
+  return l;
+}
+
+/** «Dai un nome…»: the file becomes a node with its own name (and a
+ *  description); a node is renamed. One undo. */
+async function nameMediaItem(st: DocumentStore, it: MediaItem): Promise<void> {
+  const body = document.createElement("div");
+  body.className = "mv-dialog";
+  const nameIn = document.createElement("input");
+  nameIn.type = "text";
+  nameIn.className = "app-dialog-input";
+  nameIn.dataset.mvNameInput = "1";
+  nameIn.value = it.isNode ? it.name : "";
+  nameIn.placeholder = it.name;
+  const desc = document.createElement("textarea");
+  desc.rows = 2;
+  desc.dataset.mvNameDesc = "1";
+  body.append(mvLabelled(t("mv.nameL"), nameIn), mvLabelled(t("mv.descL"), desc));
+  const a = await openDialog({ kind: "media-name", title: t("mv.nameTitle", { f: it.path ?? it.name }), body, ok: t("mv.nameOk") });
+  if (!a.ok || !nameIn.value.trim()) return;
+  let id: string | null = null;
+  st.batch(() => {
+    id = materializeItem(st, it, nameIn.value.trim());
+    if (id) st.updateNode(id, { name: nameIn.value.trim(), ...(desc.value.trim() ? { description: desc.value.trim() } : {}) });
+  });
+  if (!id) return;
+  const msg = t("mv.nameDone", { name: nameIn.value.trim() });
+  logInfo(msg, [id]);
+  toastUndo(msg, st);
+  refreshInspector();
+  renderViewer();
+}
+
+/** «Censisci come documento…» (the second step, E.D.: a number D when the
+ *  thing is cited or published — an explicit gesture): the set shown, or the
+ *  selection made a group, linked by a new document D.nn. One undo. */
+async function censusAsDocument(st: DocumentStore, subject: string, chosen: MediaItem[]): Promise<void> {
+  const body = document.createElement("div");
+  body.className = "mv-dialog";
+  const nameIn = document.createElement("input");
+  nameIn.type = "text";
+  nameIn.className = "app-dialog-input";
+  nameIn.dataset.mvCensusName = "1";
+  nameIn.value = (initialName(st.doc, "document") ?? nextFreeName(st.doc, "document")) || "D.01";
+  const desc = document.createElement("textarea");
+  desc.rows = 2;
+  desc.dataset.mvCensusDesc = "1";
+  desc.value = chosen.length ? "" : String(st.node(subject)?.name ?? "");
+  body.append(mvLabelled(t("mv.nameL"), nameIn), mvLabelled(t("mv.descL"), desc));
+  const what = chosen.length ? t("mv.censusSel", { n: String(chosen.length) }) : String(st.node(subject)?.name ?? subject);
+  const a = await openDialog({ kind: "media-census", title: t("mv.censusTitle", { what }), body, ok: t("mv.censusOk") });
+  if (!a.ok || !nameIn.value.trim()) return;
+  const docId = st.newId();
+  st.batch(() => {
+    const g = storeGraph(st);
+    let target = subject;
+    if (chosen.length) {
+      target = st.newId();
+      const sets = [...new Set(chosen.map((x) => x.setId).filter((x): x is string => !!x))];
+      const from = sets.length === 1 && chosen.every((x) => x.setId === sets[0] && x.path) ? sets[0] : null;
+      addResource(g, { resourceId: target, name: desc.value.trim() || nameIn.value.trim(), packaging: "file_set",
+        data: { members: [], ...(from ? { members_from: membersBase(g, from).resource } : {}) } });
+      if (from) addMembers(g, target, chosen.map(rowOfItem));
+      else for (const x of chosen) {
+        const id = materializeItem(st, x);
+        if (id && st.node(id)?.node_type === "resource_file") st.addEdge(target, id, "has_file", { role: "member", path: x.path ?? x.name }, `${target}__has_file__${id}`);
+        else if (id && st.node(id)?.node_type === "resource") st.addEdge(target, id, "has_sub_resource", undefined, `${target}__has_sub_resource__${id}`);
+      }
+    }
+    st.addNode({ id: docId, name: nameIn.value.trim(), node_type: "document", description: desc.value.trim() });
+    st.addEdge(docId, target, "has_linked_resource", undefined, `${docId}__has_linked_resource__${target}`);
+  });
+  const msg = t("mv.censusDone", { d: nameIn.value.trim() });
+  logInfo(msg, [docId]);
+  toastUndo(msg, st);
+  refreshInspector();
+  renderViewer();
+}
+
+/** «Colloca nello Spazio» (E.D. 14 Nov: every document and its sub-resources,
+ *  by hand): an RMDoc — the instance of a movable document placed by an act
+ *  (datamodel 1.6.44) — at the 3D cursor (the origin without a Space), its
+ *  document by `has_representation_model_doc`, its resource by
+ *  `has_linked_resource`; a file of a set is said by its path
+ *  (`data.member_path`: a file node is not a target of has_linked_resource).
+ *  One undo. The calculated case (a photogrammetric campaign's cameras) is a
+ *  proposal of the report, not here. */
+function placeInSpace(it: MediaItem | null, subject: string): void {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  const ix = mediaIndex(st.doc.graph as never);
+  const sn = st.node(subject);
+  let res: string | null = null, path: string | null = null, label = "";
+  if (it) {
+    if (it.medium === "3d") { toast(t("mv.placeIsModel")); return; }
+    res = it.setId ?? (st.node(it.id)?.node_type === "resource" ? it.id : null);
+    if (!res && st.node(it.id)?.node_type === "resource_file")
+      res = st.doc.graph.edges.find((e) => e.target === it.id && e.edge_type === "has_file")?.source ?? null;
+    path = it.setId ? it.path : null;
+    label = it.name;
+  } else if (sn?.node_type === "resource") { res = subject; label = String(sn.name ?? subject); }
+  else if (sn?.node_type === "resource_file") {
+    const e = st.doc.graph.edges.find((x) => x.target === subject && x.edge_type === "has_file");
+    res = e?.source ?? null; path = String(((e as { attributes?: Record<string, unknown> })?.attributes ?? {}).path ?? sn.name ?? "");
+    label = String(sn.name ?? subject);
+  } else if (sn?.node_type === "document") {
+    res = st.doc.graph.edges.find((e) => e.source === subject && e.edge_type === "has_linked_resource")?.target ?? null;
+    label = String(sn.name ?? subject);
+  }
+  if (!res) { toast(t("mv.placeNoAsset")); return; }
+  const doc = sn?.node_type === "document" ? subject : documentOf(ix, res);
+  const at = spaceCursorData() ?? [0, 0, 0];
+  const id = st.newId();
+  st.batch(() => {
+    st.addNode({ id, name: label, node_type: "representation_model_doc", description: "",
+      data: { transform: { position: at, rotation: [0, 0, 0], scale: [1, 1, 1], rotation_order: "XYZ", angle_unit: "deg",
+                           up_axis: "Z", quaternion: [1, 0, 0, 0] }, ...(path ? { member_path: path } : {}) } });
+    if (doc) st.addEdge(doc, id, "has_representation_model_doc", undefined, `${doc}__has_representation_model_doc__${id}`);
+    st.addEdge(id, res!, "has_linked_resource", undefined, `${id}__has_linked_resource__${res}`);
+  });
+  const msg = t("mv.placeDone", { name: label, d: doc ? String(st.node(doc)?.name ?? doc) : t("mv.notCensused") });
+  logInfo(msg, [id]);
+  toastUndo(msg, st);
+  refreshInspector();
+}
+
+// ── the catalogue in the Inspector and the viewer ───────────────────────────
+
+/** s3Dgraphy `catalogue_state` with the dates of the resolver (own or
+ *  inherited, never the graph's). */
+function catalogueStateOf(st: DocumentStore, docId: string): CatalogueState {
+  const pix = provIndexOf(st);
+  const date = (rule: "absolute_time_start" | "absolute_time_end"): number | null => {
+    const r = resolveProvenance(pix, docId, rule);
+    return r.level && r.level !== "graph" && typeof r.value === "number" ? r.value : null;
+  };
+  return catalogueState(mediaIndex(st.doc.graph as never), docId, { start: date("absolute_time_start"), end: date("absolute_time_end") });
+}
+
+function catalogueWords(cs: CatalogueState): string {
+  const counts = t("mv.catCounts", { e: fmtN(cs.entries), s: fmtN(cs.sections), f: fmtN(cs.files), mb: fmtMB(cs.bytes) });
+  return `${t(`mv.cat.${cs.state}`)} · ${counts} · ${t(cs.live ? "mv.catLive" : "mv.catStamped")}`;
+}
+
+/** The Inspector of a document that is a catalogue: its state, its counts,
+ *  «Apri il catalogo…» / «Chiudi il catalogo…». */
+function renderCatalogueLine(host: HTMLElement, st: DocumentStore, docId: string): void {
+  const ix = mediaIndex(st.doc.graph as never);
+  if (st.node(docId)?.node_type !== "document" || !isCatalogue(ix, docId)) return;
+  const cs = catalogueStateOf(st, docId);
+  const box = document.createElement("div");
+  box.className = "insp-catalogue";
+  box.dataset.catalogue = cs.state;
+  box.dataset.catalogueFiles = String(cs.files);
+  const line = document.createElement("div");
+  line.textContent = catalogueWords(cs);
+  box.appendChild(line);
+  const bar = document.createElement("div");
+  bar.className = "insp-ui-bar";
+  if (cs.state === "undated") {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "tv-act"; b.dataset.catOpen = docId; b.textContent = t("mv.catOpen");
+    b.addEventListener("click", () => void openCatalogueFlow(st, docId));
+    bar.appendChild(b);
+  }
+  if (cs.state === "open" || cs.state === "ended_unstamped") {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "tv-act"; b.dataset.catClose = docId; b.textContent = t("mv.catClose");
+    b.addEventListener("click", () => void closeCatalogueFlow(st, docId));
+    bar.appendChild(b);
+  }
+  if (bar.childNodes.length) box.appendChild(bar);
+  const strip = host.querySelector(".insp-media-strip");
+  if (strip) strip.after(box); else host.querySelector(".insp-head")?.after(box);
+}
+
+/** a date property of a node (s3Dgraphy `catalog._set_date`), its id derived */
+function setOwnDate(st: DocumentStore, nodeId: string, rule: "absolute_time_start" | "absolute_time_end", value: string): void {
+  const have = st.doc.graph.edges.filter((e) => e.source === nodeId && e.edge_type === "has_property")
+    .map((e) => st.node(e.target)).find((p) => p && p.node_type === "property" && (String(p.name) === rule
+      || String(((p.data ?? {}) as Record<string, unknown>).property_type ?? "") === rule));
+  if (have) { st.updateNode(have.id, { description: value, data: { ...((have.data ?? {}) as Record<string, unknown>), value } }); return; }
+  const pid = st.newId();
+  st.addNode({ id: pid, name: rule, node_type: "property", description: value, data: { value, property_type: rule } });
+  st.addEdge(nodeId, pid, "has_property", undefined, `${nodeId}__has_property__${pid}`);
+}
+
+async function openCatalogueFlow(st: DocumentStore, docId: string): Promise<void> {
+  if (refuseReadOnly()) return;
+  const a = await openDialog({ kind: "catalogue-open", title: t("mv.catOpenTitle"), message: t("mv.catOpenHint"),
+    input: { value: String(new Date().getFullYear()), label: t("mv.catStartL") }, ok: t("mv.catOpenOk") });
+  if (!a.ok || !a.value?.trim()) return;
+  st.batch(() => setOwnDate(st, docId, "absolute_time_start", a.value!.trim()));
+  toastUndo(t("mv.catOpened", { d: String(st.node(docId)?.name ?? docId) }), st);
+  refreshInspector();
+}
+
+/** «Chiudi il catalogo…»: the end, and the STAMP (`data.catalog_stamp`): the
+ *  digest of the list of every file of its tree and the counts at that moment.
+ *  From then on the counts are the stamp's. One undo. */
+async function closeCatalogueFlow(st: DocumentStore, docId: string): Promise<void> {
+  if (refuseReadOnly()) return;
+  const before = catalogueStateOf(st, docId);
+  const a = await openDialog({ kind: "catalogue-close", title: t("mv.catCloseTitle"),
+    message: t("mv.catCloseHint", { counts: t("mv.catCounts", { e: fmtN(before.entries), s: fmtN(before.sections), f: fmtN(before.files), mb: fmtMB(before.bytes) }) }),
+    input: { value: String(new Date().getFullYear()), label: t("mv.catEndL") }, ok: t("mv.catCloseOk") });
+  if (!a.ok || !a.value?.trim()) return;
+  const ix = mediaIndex(st.doc.graph as never);
+  const rows = before.root ? treeRows(ix, before.root) : [];
+  const digest = rowsDigest(rows);
+  const who = identityForSigning()?.label;
+  st.batch(() => {
+    setOwnDate(st, docId, "absolute_time_end", a.value!.trim());
+    const n = st.node(docId)!;
+    const stamp: Record<string, unknown> = { entries: before.entries, sections: before.sections, files: before.files, bytes: before.bytes,
+      ...(digest ? { members_digest: digest } : { digest_missing: rows.filter((r) => !r.digest).length }),
+      at: new Date().toISOString().replace(/\.\d+Z$/, "Z"), ...(who ? { by: who } : {}) };
+    st.updateNode(docId, { data: { ...((n.data ?? {}) as Record<string, unknown>), catalog_stamp: stamp } });
+  });
+  toastUndo(t("mv.catClosed", { d: String(st.node(docId)?.name ?? docId) }), st);
+  refreshInspector();
+  renderViewer();
 }
 
 /** The unit's own photo resource («T15 · foto»), made when missing: its
@@ -39004,6 +39757,18 @@ function renderStorageInto(host: StorageHost): void {
     return;
   }
 
+  // MICRO-B-DOCUMENTI-MEDIA · Archive › Documenti: the tree of the sets
+  if (winModeOf(win) === "documents") {
+    if (crumb) crumb.textContent = t("dv.crumb");
+    up?.classList.add("hidden");
+    paintSurface(win, body, () => {
+      body.textContent = "";
+      body.classList.remove("storage-split");
+      body.appendChild(documentsView(win));
+    });
+    return;
+  }
+
   // MICRO-CODA-VISTA · Archive › Coda: the queue as a view
   if (winModeOf(win) === "queue") {
     if (crumb) crumb.textContent = t("al.qcrumb");
@@ -47493,6 +48258,109 @@ function queueSwitchWords(): string {
   return `${t("al.viewQueue")}${n ? ` (${n})` : ""}${bad ? ` ${AL.SIGNS.fail}${bad}` : ""}`;
 }
 
+// ── MICRO-B-DOCUMENTI-MEDIA §2 · Archive › Documenti: the tree of the sets ────
+//
+// Documents and their sets as Assets lays its groups out (the same table, the
+// same fold): a document (a catalogue says its state and counts) → the set it
+// links → its parts (category → piece) → …; the sets nobody censused at the
+// end. A click selects the node (the Inspector), a double click opens the
+// image viewer on it. The counts are live: files and bytes of the subtree.
+
+const docViewOpen = new Map<string, Set<string>>();
+function documentsView(win: Win): HTMLElement {
+  const host = document.createElement("div");
+  host.className = "al-view dv-view";
+  host.dataset.dvView = win.id;
+  if (!store) { host.appendChild(storageEmpty(t("storage.graphFilesNoGraph"))); return host; }
+  const st = store;
+  const ix = mediaIndex(st.doc.graph as never);
+  const lang = getLocale();
+  const open = docViewOpen.get(win.id) ?? new Set<string>();
+  docViewOpen.set(win.id, open);
+  const wrap = document.createElement("div");
+  wrap.className = "al-table-wrap";
+  const table = document.createElement("table");
+  table.className = "al-table dv-table";
+  table.dataset.dvTable = "1";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for (const k of ["name", "role", "files", "size", "state"]) { const th = document.createElement("th"); th.textContent = t(`dv.col.${k}`); hr.appendChild(th); }
+  thead.appendChild(hr);
+  const tbody = document.createElement("tbody");
+  table.append(thead, tbody);
+  const row = (key: string, id: string, depth: number, label: string, role: string, files: number | null, bytes: number | null,
+               state: string, kids: boolean): void => {
+    const tr = document.createElement("tr");
+    tr.className = depth === 0 ? "al-group dv-row" : "dv-row";
+    tr.dataset.dvRow = id;
+    tr.dataset.dvDepth = String(depth);
+    if (selectedId === id) tr.classList.add("sel");
+    const td = document.createElement("td");
+    td.style.paddingLeft = `${6 + depth * 14}px`;
+    const fold = document.createElement("span");
+    fold.className = "dv-fold";
+    fold.textContent = kids ? (open.has(key) ? "▾" : "▸") : "·";
+    if (kids) fold.addEventListener("click", (e) => { e.stopPropagation(); if (open.has(key)) open.delete(key); else open.add(key); renderStorage(); });
+    td.append(fold, ` ${label}`);
+    const c = (text: string) => { const x = document.createElement("td"); x.textContent = text; return x; };
+    tr.append(td, c(role), c(files == null ? "" : fmtN(files)), c(bytes == null ? "" : fmtMB(bytes)), c(state));
+    tr.addEventListener("click", () => select(id));
+    tr.addEventListener("dblclick", () => openMediaViewer(id));
+    tbody.appendChild(tr);
+  };
+  const setRows = (tree: ReturnType<typeof setTreeOf>, key: string, depth: number) => {
+    for (const k of tree.children) {
+      const kk = `${key}/${k.id}`;
+      row(kk, k.id, depth, cite(ix, k.id) === k.name ? k.name : k.name, k.role ? roleLabel(st.doc.graph as never, k.role, lang) : "",
+          k.files, k.bytes, "", k.children.length > 0);
+      if (open.has(kk)) setRows(k, kk, depth + 1);
+    }
+  };
+  const docs = st.liveNodes().filter((n) => n.node_type === "document")
+    .filter((d) => st.doc.graph.edges.some((e) => e.source === d.id && e.edge_type === "has_linked_resource" && isSetNode(ix, e.target)))
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { numeric: true }));
+  const censused = new Set<string>();
+  for (const d of docs) {
+    const sets = st.doc.graph.edges.filter((e) => e.source === d.id && e.edge_type === "has_linked_resource" && isSetNode(ix, e.target)).map((e) => e.target);
+    const trees = sets.map((r) => setTreeOf(ix, r));
+    for (const r of sets) censused.add(r);
+    const cat = isCatalogue(ix, d.id) ? catalogueStateOf(st, d.id) : null;
+    const files = trees.reduce((k, x) => k + x.files, 0), bytes = trees.reduce((k, x) => k + x.bytes, 0);
+    row(d.id, d.id, 0, String(d.name ?? d.id) + (d.description ? ` — ${String(d.description).slice(0, 60)}` : ""), "",
+        cat ? cat.files : files, cat ? cat.bytes : bytes, cat ? `${t(`mv.cat.${cat.state}`)} · ${t("mv.catEntries", { n: fmtN(cat.entries) })}` : t("dv.document"), true);
+    if (open.has(d.id))
+      for (const tr of trees) {
+        const kk = `${d.id}/${tr.id}`;
+        row(kk, tr.id, 1, tr.name, tr.role ? roleLabel(st.doc.graph as never, tr.role, lang) : "", tr.files, tr.bytes, "", tr.children.length > 0);
+        if (open.has(kk)) setRows(tr, kk, 2);
+      }
+  }
+  // the sets nobody censused (no document, no parent): the first gradino
+  const loose = st.liveNodes().filter((n) => isSetNode(ix, n.id) && !censused.has(n.id) && !ix.inn(n.id, "has_sub_resource").length
+    && !ix.inn(n.id, "has_linked_resource").some((s) => ix.byId.get(s)?.node_type === "document"));
+  if (loose.length) {
+    row("__loose", "__loose", 0, t("dv.loose"), "", null, null, t("mv.notCensused"), true);
+    if (open.has("__loose"))
+      for (const n of loose) {
+        const tr = setTreeOf(ix, n.id);
+        const kk = `__loose/${n.id}`;
+        const owner = ix.inn(n.id, "has_linked_resource").map((s) => String(ix.byId.get(s)?.name ?? s))[0];
+        row(kk, n.id, 1, tr.name + (owner ? ` · ${owner}` : ""), tr.role ? roleLabel(st.doc.graph as never, tr.role, lang) : "", tr.files, tr.bytes, "", tr.children.length > 0);
+        if (open.has(kk)) setRows(tr, kk, 2);
+      }
+  }
+  if (!tbody.childElementCount) host.appendChild(storageEmpty(t("dv.empty")));
+  else { wrap.appendChild(table); host.appendChild(wrap); }
+  return host;
+}
+const isSetNode = (ix: ReturnType<typeof mediaIndex>, id: string): boolean => {
+  const n = ix.byId.get(id);
+  if (n?.node_type !== "resource") return false;
+  const d = (n.data ?? {}) as Record<string, unknown>;
+  return d.packaging === "directory" || d.packaging === "file_set" || Array.isArray(d.members) || ix.out(id, "has_sub_resource").length > 0;
+};
+const setTreeOf = (ix: ReturnType<typeof mediaIndex>, id: string) => setTree(ix, id);
+
 /** Archive's view (MICRO-CODA-VISTA-2 p.4: its own tabs are the ONE way —
  *  the Mode of the window; «files» is the disk). MICRO-ASSETS-LIVELLI p.7
  *  (E.D., 13 Nov 2026): opening Asset or Coda no longer magnifies the window
@@ -54151,6 +55019,9 @@ function vwButton(cls: string, text: string, title: string, on: () => void): HTM
 function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, bar: HTMLElement): boolean {
   if (!store) return false;
   const st = store;
+  // MICRO-B-DOCUMENTI-MEDIA §4 · the image viewer a strip opened
+  const mediaOn = winCurrent(win, "media.on");
+  if (typeof mediaOn === "string" && st.node(mediaOn)) { renderMediaViewer(win, stage, caption, bar, mediaOn); return true; }
   askResident();
   const nodeId = viewerNodeOf(win);
   const target = viewerTargetOf(st.doc.graph, nodeId);

@@ -183,7 +183,9 @@ for (const [old, canon] of PAIRS) {
   }
   eq(fields("EpochNode"), [], "an epoch has no definition");
   eq(fields("property"), [], "a PropertyNode has no definition");
-  eq(fields("document"), [], "a document has no definition");
+  // 1.6.46 (MICRO-B-DOCUMENTI-MEDIA): a catalogue's stamp is an element of the
+  // document, not a definition (the Inspector says it in the catalogue's line)
+  eq(fields("document").filter((f) => f !== "catalog_stamp"), [], "a document has no definition");
 
   const cp = R.conceptParts;
   eq(cp({ concept: "https://x.invalid/c", label: "strato di crollo" }),

@@ -237,6 +237,164 @@ export interface ResourceFile {
   node: EmNode;
   implicit: boolean;
   edge_id: string | null;
+  /** MICRO-B-DOCUMENTI-MEDIA · a member LISTED in the set (`data.members`), not a node */
+  listed?: boolean;
+  member?: MemberRow;
+}
+
+// ── implicit members: the list inside the set (files.py, 14 Nov 2026) ──────
+
+/** A row of `data.members` (s3Dgraphy `MEMBER_KEYS`): the canonical list's
+ *  path · digest · size · role, and what a reading or a person said of it. */
+export interface MemberRow {
+  path: string;
+  digest?: string;
+  size_bytes?: number;
+  role?: FileRole;
+  media_type?: string;
+  media_role?: string;
+  name?: string;
+  description?: string;
+  taken_at?: string;
+  camera_label?: string;
+  sensor_label?: string;
+  enabled?: boolean;
+  aligned?: boolean;
+  missing?: boolean;
+}
+export const MEMBER_KEYS = ["path", "digest", "size_bytes", "role", "media_type", "media_role", "name",
+  "description", "taken_at", "camera_label", "sensor_label", "enabled", "aligned", "missing"] as const;
+const MEMBER_FACTS = ["media_role", "taken_at", "camera_label", "sensor_label", "enabled", "aligned", "missing"] as const;
+
+/** The rows of `data.members` of a resource ([] when none). */
+export function memberRows(g: ResourceGraph, resId: string): MemberRow[] {
+  const n = g.node(resId);
+  const rows = n ? dataOf(n).members : null;
+  return Array.isArray(rows) ? (rows as MemberRow[]).filter((r) => r && typeof r === "object" && r.path) : [];
+}
+
+/** Where a set's member paths are relative to: the directory a logical group
+ *  draws from (`data.members_from`), or the set itself. */
+export function membersBase(g: ResourceGraph, resId: string): { resource: string; url: string } {
+  const n = g.node(resId);
+  const src = n ? str(dataOf(n).members_from) : "";
+  const s = src && src !== resId ? g.node(src) : undefined;
+  if (s) return { resource: src, url: str(dataOf(s).url) };
+  return { resource: resId, url: n ? str(dataOf(n).url) : "" };
+}
+
+export function memberLocator(g: ResourceGraph, resId: string, path: string): string {
+  const base = membersBase(g, resId).url.replace(/\/+$/, "");
+  return base ? `${base}/${path}` : path;
+}
+
+/** The transient node of a listed member: its id is the one it gets when it
+ *  is materialized (from the digest: one file, one node). Never added. */
+export function listedNode(g: ResourceGraph, resId: string, row: MemberRow): EmNode {
+  const base = membersBase(g, resId).resource;
+  const n = fileNode(fileIdFor(base, row.path, row.digest ?? null), row.name || leaf(row.path),
+    { url: memberLocator(g, resId, row.path), checksum: row.digest, size_bytes: row.size_bytes, media_type: row.media_type });
+  const d = n.data as Record<string, unknown>;
+  for (const k of MEMBER_FACTS) if (row[k] !== undefined && row[k] !== null) d[k] = row[k];
+  if (row.description) n.description = row.description;
+  return n;
+}
+
+const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", tif: "image/tiff",
+  tiff: "image/tiff", webp: "image/webp", pdf: "application/pdf", glb: "model/gltf-binary", obj: "model/obj",
+  svg: "image/svg+xml", dxf: "image/vnd.dxf" };
+
+/** s3Dgraphy `add_members`: rows into `data.members`, a path updated never
+ *  duplicated; a file_set's digest follows. One setData. */
+export function addMembers(g: ResourceGraph, resId: string, rows: MemberRow[]): { added: number; updated: number; members: number } {
+  const res = mustResource(g, resId);
+  const d: Record<string, unknown> = { ...dataOf(res) };
+  const have: MemberRow[] = Array.isArray(d.members) ? (d.members as MemberRow[]).map((r) => ({ ...r })) : [];
+  const byPath = new Map(have.map((r) => [r.path, r]));
+  let added = 0, updated = 0;
+  for (const raw of rows) {
+    const unknown = Object.keys(raw).filter((k) => !(MEMBER_KEYS as readonly string[]).includes(k));
+    if (unknown.length) throw new Error(`unknown member key(s) ${pyList(unknown.sort())}`);
+    const row = dropNull({ ...raw, path: String(raw.path).replace(/\\/g, "/").replace(/^\/+/, "") }) as MemberRow;
+    if (!row.media_type) { const ext = row.path.split(".").pop()?.toLowerCase() ?? ""; if (MIME[ext]) row.media_type = MIME[ext]; }
+    const cur = byPath.get(row.path);
+    if (!cur) { have.push(row); byPath.set(row.path, row); added++; continue; }
+    const fresh = Object.entries(row).filter(([k, v]) => (cur as unknown as Record<string, unknown>)[k] !== v);
+    if (fresh.length) { Object.assign(cur, Object.fromEntries(fresh)); updated++; }
+  }
+  const enc = new TextEncoder();
+  const cmp = (x: Uint8Array, y: Uint8Array): number => {
+    for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] - y[i];
+    return x.length - y.length;
+  };
+  have.sort((a, b) => cmp(enc.encode(a.path), enc.encode(b.path)));
+  d.members = have;
+  return g.batch(() => {
+    g.setData(resId, d);
+    if (d.packaging === "file_set") refreshMembersDigest(g, resId);
+    return { added, updated, members: have.length };
+  });
+}
+
+/** s3Dgraphy `remove_members`: rows out by path, and the has_file of a member
+ *  already a node (the node stays when something else holds it). */
+export function removeMembers(g: ResourceGraph, resId: string, paths: string[]): { removed: number; edges: number } {
+  const want = new Set(paths);
+  return g.batch(() => {
+    const res = mustResource(g, resId);
+    const rows = memberRows(g, resId);
+    const kept = rows.filter((r) => !want.has(r.path));
+    if (Array.isArray(dataOf(res).members)) g.setData(resId, { ...dataOf(res), members: kept });
+    let edges = 0;
+    for (const e of fileEdges(g, resId))
+      if (want.has(str(((e.attributes ?? {}) as Record<string, unknown>).path))) { removeFile(g, resId, e.target); edges++; }
+    if (dataOf(g.node(resId)!).packaging === "file_set") refreshMembersDigest(g, resId);
+    return { removed: rows.length - kept.length, edges };
+  });
+}
+
+/** s3Dgraphy `materialize_member`: a listed member becomes a node because it
+ *  is USED (a reading, a region, a link to a unit, a name). The node takes the
+ *  row's digest, facts and role; `has_file` from the set and, for a logical
+ *  group, from the directory it draws from. The row stays (the list is the
+ *  index). Done once. */
+export function materializeMember(g: ResourceGraph, resId: string, path: string,
+  o: { name?: string; description?: string } = {}): { file_id: string; created: boolean } {
+  mustResource(g, resId);
+  const p = path.replace(/\\/g, "/").replace(/^\/+/, "");
+  return g.batch(() => {
+    const row = memberRows(g, resId).find((r) => r.path === p);
+    const written = resourceFiles(g, resId).find((f) => f.path === p && !f.implicit);
+    if (!row && !written) throw new Error(`'${p}' is not a member of '${resId}'`);
+    let node: EmNode;
+    let created = false;
+    let name = o.name;
+    if (written) node = written.node;
+    else {
+      const base = membersBase(g, resId).resource;
+      const spec: FileSpec = dropNull({ path: p, url: memberLocator(g, resId, p), checksum: row!.digest ?? null,
+        size_bytes: row!.size_bytes ?? null, media_type: row!.media_type ?? null });
+      if (!spec.checksum) spec.id = fileIdFor(base, p, null);
+      const want = spec.id ?? fileIdFor(base, p, spec.checksum ?? null);
+      created = !g.node(want) && !findFileByChecksum(g, spec.checksum ?? null);
+      node = writeFile(g, resId, spec, row!.role ?? "member");
+      if (base !== resId) writeFile(g, base, { id: node.id, path: p }, "member");
+      const d: Record<string, unknown> = { ...dataOf(g.node(node.id)!) };
+      for (const k of MEMBER_FACTS) if (row![k] !== undefined && row![k] !== null && d[k] === undefined) d[k] = row![k];
+      g.setData(node.id, d);
+      if (row!.name && !name) name = row!.name;
+    }
+    const cur = g.node(node.id)!;
+    const patch: Partial<EmNode> = {};
+    if (name) patch.name = name;
+    if (o.description !== undefined) patch.description = o.description;
+    if (Object.keys(patch).length) {
+      // a name lives on the node itself (the store's update), the plain graph's object in a test
+      Object.assign(cur, patch);
+      g.setData(node.id, { ...dataOf(cur) });
+    }
+    return { file_id: node.id, created };
+  });
 }
 
 /** The files of a resource, entry point first. With `has_file` edges, those;
@@ -245,7 +403,8 @@ export interface ResourceFile {
 export function resourceFiles(g: ResourceGraph, resId: string): ResourceFile[] {
   const res = mustResource(g, resId);
   const edges = fileEdges(g, resId);
-  if (edges.length) {
+  const listed = memberRows(g, resId);
+  if (edges.length || listed.length) {
     const out: ResourceFile[] = edges.map((e) => {
       const f = g.node(e.target) ?? { id: e.target, node_type: "resource_file" };
       const a = (e.attributes ?? {}) as Record<string, unknown>;
@@ -253,6 +412,15 @@ export function resourceFiles(g: ResourceGraph, resId: string): ResourceFile[] {
                path: str(a.path) || leaf(str(dataOf(f).url)),
                node: f, implicit: false, edge_id: e.id ?? null };
     });
+    // the members listed in the set and not yet nodes (each path once)
+    const written = new Set(out.map((r) => r.path));
+    const digests = new Set(out.map((r) => str(dataOf(r.node).checksum)).filter(Boolean));
+    for (const row of listed) {
+      if (written.has(row.path) || (row.digest && digests.has(row.digest))) continue;
+      written.add(row.path);
+      out.push({ role: row.role || "member", path: row.path, node: listedNode(g, resId, row),
+                 implicit: true, listed: true, member: row, edge_id: null });
+    }
     // Python sorts on (role != entry_point, path): a code-point order
     out.sort((a, b) => (Number(a.role !== "entry_point") - Number(b.role !== "entry_point"))
       || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
@@ -540,7 +708,7 @@ function resourceNode(id: string, o: AddResourceOptions, url: string, checksum: 
  *  twice, two entry points. */
 export function membersDigest(g: ResourceGraph, resId: string): string | null {
   const files = resourceFiles(g, resId);
-  if (!files.length || files.some((f) => f.implicit)) return null;
+  if (!files.length || files.some((f) => f.implicit && !f.listed)) return null;
   const enc = new TextEncoder();
   const rows: Array<{ role: string; path: string; digest: string; key: Uint8Array }> = [];
   const seen = new Set<string>();
@@ -550,7 +718,7 @@ export function membersDigest(g: ResourceGraph, resId: string): string | null {
     if (!path || seen.has(path) || /[\u0000-\u001f\u007f]/.test(path)
         || path.split("/").some((x) => x === "" || x === "." || x === "..")) return null;
     seen.add(path);
-    const m = /^sha256:([0-9a-f]{64})$/i.exec(str(dataOf(f.node).checksum).trim());
+    const m = /^sha256:([0-9a-f]{64})$/i.exec(str(f.listed ? f.member?.digest : dataOf(f.node).checksum).trim());
     if (!m) return null;
     entries += f.role === "entry_point" ? 1 : 0;
     rows.push({ role: f.role || "member", path, digest: `sha256:${m[1].toLowerCase()}`, key: enc.encode(path) });
@@ -562,6 +730,28 @@ export function membersDigest(g: ResourceGraph, resId: string): string | null {
   };
   rows.sort((a, b) => cmp(a.key, b.key));
   return `sha256:${sha256Hex(rows.map((r) => `${r.role}\u0000${r.path}\u0000${r.digest}\n`).join(""))}`;
+}
+
+/** s3Dgraphy `files.rows_digest`: the digest of a list of rows (every row
+ *  a member unless it says otherwise), null when a row has no sha256. */
+export function rowsDigest(rows: ReadonlyArray<{ path: string; digest?: string | null; role?: string }>): string | null {
+  if (!rows.length) return null;
+  const enc = new TextEncoder();
+  const out: Array<{ line: string; key: Uint8Array }> = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const m = /^sha256:([0-9a-f]{64})$/i.exec(str(r.digest).trim());
+    const path = r.path.normalize("NFC").replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!m || !path || seen.has(path)) return null;
+    seen.add(path);
+    out.push({ line: `${r.role || "member"}\u0000${path}\u0000sha256:${m[1].toLowerCase()}\n`, key: enc.encode(path) });
+  }
+  const cmp = (x: Uint8Array, y: Uint8Array): number => {
+    for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] - y[i];
+    return x.length - y.length;
+  };
+  out.sort((a, b) => cmp(a.key, b.key));
+  return `sha256:${sha256Hex(out.map((r) => r.line).join(""))}`;
 }
 
 /** s3Dgraphy `refresh_members_digest` (MICRO-SUITE-VERDE, 24 Oct: the port
@@ -741,7 +931,7 @@ export function replaceFile(g: ResourceGraph, resId: string, oldFileId: string |
     const files = resourceFiles(g, resId);
     let old: ResourceFile | undefined;
     if (oldFileId === null) {
-      old = files.find((f) => f.implicit);
+      old = files.find((f) => f.implicit && !f.listed);
       if (!old) throw new Error(`'${resId}' has no implicit file to replace`);
       const d = dataOf(res);
       const url = str(d.url);

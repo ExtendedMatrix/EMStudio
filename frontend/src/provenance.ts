@@ -31,7 +31,7 @@ import { t } from "./i18n";
 
 export type ProvRule = "absolute_time_start" | "absolute_time_end" | "author" | "license" | "embargo";
 export const PROV_RULES: ProvRule[] = ["absolute_time_start", "absolute_time_end", "author", "license", "embargo"];
-export type ProvLevel = "node" | "swimlane" | "life" | "members" | "master" | "publisher" | "container" | "graph";
+export type ProvLevel = "node" | "swimlane" | "life" | "members" | "master" | "set" | "publisher" | "container" | "graph";
 
 export interface Prov {
   value: number | string | null;
@@ -377,6 +377,18 @@ function walk(ix: ProvIndex, n: EmNode, id: string, rule: ProvRule, seen: Set<st
       if (rc) return rc;
     }
     return graphLevel();
+  }
+  // resources and their files: the set they are part of, then the document
+  // that links them (an entry of a catalogue inherits the catalogue's) —
+  // provenance.py RESOURCE_TYPES (MICRO-B-DOCUMENTI-MEDIA)
+  if (nt === "resource" || nt === "resource_file") {
+    const r = swimlane(ix, rule, id, laneEpochs(ix, id));
+    if (r) return r;
+    const ups = ix.sources(id, nt === "resource_file" ? "has_file" : "has_sub_resource");
+    const rs = combine(rule, id, "set", ups.map(sub), ups.map((u) => [id, u]));
+    if (rs) return rs;
+    const pubs = ix.sources(id, "has_linked_resource").filter((s) => ix.nt(s) === "document");
+    return combine(rule, id, "publisher", pubs.map(sub), pubs.map((p) => [id, p])) ?? graphLevel();
   }
   if (rule === "absolute_time_end" && isLifeBearing(n)) {
     const life = unitLife(ix, id);

@@ -7,6 +7,33 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **Documents and media: the strip, the image viewer, the catalogue**
+  (MICRO-B-DOCUMENTI-MEDIA, E.D., 14 November 2026). New `media.ts` (the page's
+  reading of s3Dgraphy's `resources.sets`, `catalog`, `media_roles`:
+  `check-media.mjs`, 37 checks, PARITY with s3Dgraphy on a lapidary built in
+  Python) and the implicit members in `resources.ts` (`memberRows`,
+  `addMembers`, `removeMembers`, `materializeMember`, `rowsDigest`; a listed
+  member is a file of its set). In EVERY node, right after its title and
+  description, a STRIP of thumbnails with the count, the frontispiece first
+  (supersedes the grid «Immagini dell'unità»: its «Aggiungi immagini…» and
+  «Collega per nome…» stay on the strip); its click opens the IMAGE VIEWER in
+  the right sector under the Inspector, a Viewer window that detaches like any
+  window: mixed types (photographs, a PDF's first page, drawings, models as a
+  glyph), «nel documento D.xx» or «non censito» and the role on each, a tree
+  by folder / group / role, the filter on the unit selected, ⌘/⇧-click, «Assegna
+  a / Togli da <unità>», «Fai un gruppo…» (a logical group with a role of the
+  vocabulary or a new term of the project), «Dai un nome…» (the file becomes a
+  node), «Censisci come documento…», «Colloca nello Spazio» (an RMDoc at the 3D
+  cursor, for a document and its sub-resources); one undo each. Thumbnails of
+  the files that are not nodes from their locator and sha256 in the cache
+  shared with EM Tools, lazy and queued, asked only when their cell is in its
+  box (a fast scroll through 3.000 files asks ~40, not ~900). A catalogue says
+  its state and counts in the Inspector and the viewer (open: live; closed: its
+  stamp) with «Apri il catalogo…» / «Chiudi il catalogo…». Archive › Documenti:
+  the documents and their sets as a tree (category → piece), the sets not
+  censused at the end. `provenance.ts` reads the level `set`; the Inspector's elements of a node skip a
+  set's list of members and a catalogue's stamp and say a role by its label.
+  Datamodels synced (nodes 1.6.46, connections 1.6.55).
 - **Own or inherited, and from which node** (MICRO-A-PROPRIO-EREDITATO, E.D., 14
   November 2026). New `provenance.ts`, the page's reading of s3Dgraphy's rules
   (`resolvers.provenance`, `unit_life`, `attribution`; `check-provenance.mjs`:
