@@ -111,7 +111,9 @@ const labels = (rows) => rows.map((r) => `${"  ".repeat(r.depth)}${r.label}${r.c
 // 7b · an epoch with no unit of its own stays as the heading of a sub-epoch that has some
 {
   const d2 = { graph: { graph_id: "g2", nodes: [N("M", "EpochNode", "Medioevo", { start_time: 600 }), N("Ma", "EpochNode", "Alto Medioevo", { start_time: 600 }),
-    N("Z", "EpochNode", "Vuota", { start_time: 1900 }), N("U", "US", "US20")],
+    // (a VIRTUAL unit: it lives in its epoch only — a real one, with no
+    // continuity, would be still existing in «Vuota» too, MICRO-A-PROPRIO-EREDITATO)
+    N("Z", "EpochNode", "Vuota", { start_time: 1900 }), N("U", "USVn", "US20")],
     edges: [E("M", "Ma", "has_sub_epoch"), E("U", "Ma", "has_first_epoch")] } };
   const src = [{ id: "f", name: "x", kind: "file", graphs: [{ slot: "s", name: "g", active: true, doc: () => d2, facts, aux: [] }] }];
   const rows = O.flattenOutliner({ sources: src, opts: O.DEFAULT_OPTS, texts, toggled: new Set() });

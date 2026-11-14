@@ -11,7 +11,7 @@
  * and the Properties follow it, and a row follows them (`setSelected`).
  */
 import {
-  DEFAULT_OPTS, DIMS, flattenOutliner, opensForNode, paradataShown,
+  DEFAULT_OPTS, DIMS, flattenOutliner, isTemporalHierarchy, opensForNode, paradataShown,
   type Dim, type Hierarchy, type OutlinerOpts, type OutlinerSourceIn, type Texts, type URow,
 } from "./outliner-tree";
 
@@ -167,7 +167,11 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   let queued = false;
 
   const build = (): void => {
-    rows = flattenOutliner({ sources: d.sources(), opts: d.opts(), texts: d.texts(), toggled: d.toggled() });
+    const opts = d.opts();
+    rows = flattenOutliner({ sources: d.sources(), opts, texts: d.texts(), toggled: d.toggled() });
+    // MICRO-A-PROPRIO-EREDITATO · the epochs' colours only when the Outliner is
+    // organised in time (by epoch; tomorrow by computed horizons)
+    const temporal = isTemporalHierarchy(opts.hierarchy);
     // p.5 · the branch of an epoch (its row and everything under it, until a
     // row at its depth or above); a phase opens a band of its own inside it
     bands = [];
@@ -175,7 +179,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     let n = 0;
     for (const r of rows) {
       while (stack.length && stack[stack.length - 1].depth >= r.depth) stack.pop();
-      const isEp = r.glyph === "EpochNode" && !!r.id && !!d.epochColor;
+      const isEp = temporal && r.glyph === "EpochNode" && !!r.id && !!d.epochColor;
       if (isEp) stack.push({ depth: r.depth, id: r.id!, odd: n++ % 2 === 1 });
       const top = stack[stack.length - 1];
       bands.push(top ? { epoch: top.id, odd: top.odd, first: isEp } : null);

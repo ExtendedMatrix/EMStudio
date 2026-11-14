@@ -562,7 +562,9 @@ import {
 } from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
 import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
-import { BADGE_RULES, funnelIndex, resolveEffective, sourceLabel } from "./funnel";
+import { BADGE_RULES } from "./funnel";
+import { cleanRedundant, provIndexOf, provTitle, renderInheritedEpochs } from "./provenance-ui";
+import { datingWarnings, epochAttribution, provIndex, redundancyReport, resolveProvenance } from "./provenance";
 import { type Qualia, vocabularyFor } from "./vocab";
 import { versionBreakdown } from "./versions";
 import {
@@ -967,11 +969,17 @@ function buildGraphLiquid(doc: EmDocument, v: ReturnType<typeof filteredView>): 
         sn.y = o.y;
       }
     }
-  // the epochs of every node, for the panel's epoch filter
+  // the epochs of every node, for the panel's epoch filter — MICRO-A-PROPRIO-EREDITATO
+  // (E.D., 14 Nov 2026: «ogni nodo compare nelle sue epoche di attribuzione»): its
+  // own or inherited, by s3Dgraphy's rule (a unit by its life, a servile node by
+  // its master, a model by the epoch reaching it / its document / its container,
+  // an activity by its members) — not only the epoch edges written on it
   liquidEpochOf = new Map();
-  for (const e of doc.graph.edges)
-    if (e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch")
-      (liquidEpochOf.get(e.source) ?? liquidEpochOf.set(e.source, []).get(e.source)!).push(e.target);
+  const pix = provIndex(doc);
+  for (const n of sc.nodes) {
+    const eps = epochAttribution(pix, n.id).epochs;
+    if (eps.length) liquidEpochOf.set(n.id, eps);
+  }
   return sc;
 }
 const graphOverrides = new Map<string, { x: number; y: number }>();
@@ -6185,16 +6193,18 @@ function filteredView(opts: { wholeGraph?: boolean;
   // resolves per node — em.json is untouched (nothing materialised).
   const normRule = (kind: string): string =>
     kind === "author_ai" ? "author" : kind;
-  const fix = funnelIndex(doc); // one index for the whole pass (GRAFO REATTIVO)
+  // MICRO-A-PROPRIO-EREDITATO · the inherited badge says from WHICH node, in
+  // the words of the Inspector (s3Dgraphy's rules, `provenance.ts`)
+  const pix = provIndex(doc); // one index for the whole pass (GRAFO REATTIVO)
   for (const n of vNodes) {
     if (!isStratigraphicType(n.node_type)) continue;
     const own = new Set((adornments.get(n.id) ?? []).map((b) => normRule(b.kind)));
     for (const rule of BADGE_RULES) {
       if (own.has(rule)) continue; // declared on the node → explicit badge exists
-      const eff = resolveEffective(doc, n.id, rule, fix);
-      if (eff.value == null || eff.explicit) continue;
+      const p = resolveProvenance(pix, n.id, rule);
+      if (p.value == null || p.level === "node") continue;
       const arr = adornments.get(n.id) ?? [];
-      arr.push({ ornamentId: "", kind: rule, label: `${eff.value} · ${sourceLabel(eff.source)}`, inherited: true });
+      arr.push({ ornamentId: "", kind: rule, label: provTitle(pix, rule, p), inherited: true });
       adornments.set(n.id, arr);
     }
   }
@@ -12269,6 +12279,12 @@ function renderEpochMoves(id: string): HTMLElement | null {
   const st = store;
   const n = st?.node(id);
   if (!st || !n) return null;
+  // MICRO-A-PROPRIO-EREDITATO · a servile node shows its master's epochs,
+  // inherited, without Move / Extend; a unit the epochs of its LIFE (the
+  // continuity rule), read-only, with «perché» — both with «Pulisci» for the
+  // epoch edges the rule makes redundant
+  const inherited = renderInheritedEpochs(st, id, (x) => jumpTo(x));
+  if (inherited) return inherited;
   const kind = epochKind(n);
   if (!kind) return null;
   const outline = buildOutline(st.doc, st.liveNodes(), () => false);
@@ -12384,10 +12400,13 @@ interface PyEdge { source: string; target: string; edge_type: string }
 interface PyEpochPlan {
   epoch: string; mode: "move" | "extend"; with_own: boolean;
   items: { id: string; name: string; node_type: string; from: string[]; to: string[] }[];
-  excluded: { id: string; name: string; node_type: string; reason: string }[];
+  excluded: { id: string; name: string; node_type: string; reason: string; master?: string }[];
   counts: Record<string, number>; following: string[]; own_choice: string[];
   warnings: { code: string; text: string }[]; add: PyEdge[]; remove: PyEdge[];
 }
+
+/** the words of an exclusion: a servile node names its master */
+const exVars = (x: { master?: string }): Record<string, string> => ({ master: x.master ?? "—" });
 
 /** the selection the command acts on: every selected node of the graph */
 function epochSelection(): string[] {
@@ -12474,7 +12493,8 @@ function epochPlanBody(st: DocumentStore, plan: PyEpochPlan, onOwn: (on: boolean
     lab.append(cb, " ", t("em.withOwn", { n: String(plan.own_choice.length) }));
     box.appendChild(lab);
   }
-  for (const x of plan.excluded) p("em-plan-excl", `${x.name} — ${t(`em.ex.${x.reason}`)}`).dataset.planExcluded = x.reason;
+  const exWord = (x: PyEpochPlan["excluded"][number]): string => t(`em.ex.${x.reason}`, exVars(x));
+  for (const x of plan.excluded) p("em-plan-excl", `${x.name} — ${exWord(x)}`).dataset.planExcluded = x.reason;
   for (const w of plan.warnings.slice(0, 8)) p("em-plan-warn", `⚠ ${w.text}`).dataset.planWarning = w.code;
   if (plan.warnings.length > 8) p("em-plan-warn", t("al.removeMore", { n: String(plan.warnings.length - 8) }));
   return box;
@@ -12504,7 +12524,7 @@ async function epochMoveSelection(ids: string[], epoch: string, mode: "move" | "
   let plan = j.plan;
   const ep = String(st.node(epoch)?.name ?? epoch);
   if (!plan.items.length && !plan.own_choice.length) {
-    toast(plan.excluded.length ? `${t("em.nothing", { epoch: ep })} — ${plan.excluded.map((x) => `${x.name}: ${t(`em.ex.${x.reason}`)}`).join(" · ")}` : t("em.nothing", { epoch: ep }));
+    toast(plan.excluded.length ? `${t("em.nothing", { epoch: ep })} — ${plan.excluded.map((x) => `${x.name}: ${t(`em.ex.${x.reason}`, exVars(x))}`).join(" · ")}` : t("em.nothing", { epoch: ep }));
     return false;
   }
   const simple = o.quiet && ids.length === 1 && plan.items.length === 1 && !plan.own_choice.length && !plan.warnings.length && !plan.excluded.length;
@@ -12825,10 +12845,9 @@ function extractorMarks(winId?: string): SceneMark[] {
   // asked BEFORE the memory (MICRO-RITOCCHI-CHIARI p.7: the memory answered first,
   // and the marks stayed in the scene with the category off), per window
   if (!space3dShown("s3_x3d", winId ?? spaceWinId())) return [];
-  const key = `${winId ?? ""}|${st.rev}|${spaceVersion}|${cur}|${p.hidden.length}:${p.hidden.join(",").length}|${(p.forced ?? []).join(",")}|${selectedId ?? ""}`;
+  const key = `${winId ?? ""}|${visModeOf(winId)}|${st.rev}|${spaceVersion}|${cur}|${p.hidden.length}:${p.hidden.join(",").length}|${(p.forced ?? []).join(",")}|${selectedId ?? ""}`;
   if (x3dMarksMemo?.key === key) return x3dMarksMemo.marks;
-  const hidden = new Set(p.hidden);
-  const forced = new Set(p.forced ?? []);
+  const { hidden, forced } = eyesOf(winId);
   const marks: SceneMark[] = [];
   for (const [docId, xs] of extractors3d(st.doc)) {
     const lit = !!cur && docLitIn(docId, cur);
@@ -21410,6 +21429,21 @@ function winById(id: string | null | undefined): Win | undefined {
 function overlaysOfWin(winId: string | null | undefined, v: OverlayView): OverlayState {
   return ownOverlays(winById(winId)?.state, v) ?? overlaysOf(v);
 }
+/** MICRO-A-PROPRIO-EREDITATO (E.D., 14 Nov 2026: «come Blender, più un
+ *  selettore nel menu della singola vista») · a 3D window either FOLLOWS the
+ *  Outliner (its eyes hide and force objects here, the default) or is
+ *  PERSONALISED (the Outliner's eyes do not reach it: it shows what its own
+ *  categories of «Visibilità ▾» let through). The window's state, never em.json */
+export type VisMode = "outliner" | "custom";
+function visModeOf(winId: string | null | undefined): VisMode {
+  return winById(winId)?.state["current.visMode"] === "custom" ? "custom" : "outliner";
+}
+/** the Outliner's eyes as a 3D window applies them: none when it is personalised */
+function eyesOf(winId: string | null | undefined): { hidden: Set<string>; forced: Set<string> } {
+  if (visModeOf(winId) === "custom") return { hidden: new Set(), forced: new Set() };
+  const p = space3dPrefs();
+  return { hidden: new Set(p.hidden), forced: new Set(p.forced ?? []) };
+}
 /** the windows that draw a view's overlays (the Space's: the 3D windows) */
 const drawsOverlaysOf = (w: Win, v: OverlayView): boolean => (v === "space" ? w.type === "scene" : w.type === "graph");
 /** the window a change of a view's overlays is for when nobody names one: the
@@ -22435,11 +22469,43 @@ function refreshIssues(): void {
     relayout: { label: t("issues.fixRelayout"), run: () => void runLayout(false) },
     // the continuity node's name is the importer's, the same for every one
     namedByConstruction: (nt) => ancestorsOf(nt).includes("ContinuityNode"),
+    inheritance: inheritanceSources(s),
     t: (k, v) => t(k, v),
   });
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
   warnedNodes = new Set(currentIssues.filter((i) => i.sev === "warn" && i.node).map((i) => i.node));
   renderWarningsPill();
+}
+
+/** MICRO-A-PROPRIO-EREDITATO · the own/inherited rows of the warnings: the
+ *  redundant epoch edges (a servile follows its master, a unit lives by its
+ *  continuity), the contradicting survivals, the dating warnings — and their
+ *  bulk cures, each one step of undo (`cleanRedundant`, the epoch command,
+ *  «Segui il container») */
+function inheritanceSources(st: DocumentStore): IssueSources["inheritance"] {
+  const ix = provIndexOf(st);
+  const rep = redundancyReport(ix);
+  const dating = datingWarnings(ix);
+  const all = [...rep.servile.map((r) => ({ ...r, kind: "servile" as const })), ...rep.servile_differs.map((r) => ({ ...r, kind: "servile_differs" as const })),
+    ...rep.survive.map((r) => ({ ...r, kind: "survive" as const })), ...rep.survive_contradicting.map((r) => ({ ...r, kind: "survive_contradicting" as const }))];
+  return {
+    redundant: all,
+    dating,
+    epochName: (id) => ix.name(id),
+    attributed: (id) => epochAttribution(ix, id).epochs,
+    clean: (ids) => {
+      const want = new Set(ids);
+      const recs = [...rep.servile, ...rep.servile_differs, ...rep.survive].filter((r) => want.has(r.id));
+      void cleanRedundant(st, recs).then((done) => { if (done) refreshIssues(); });
+    },
+    moveToDocumentEpoch: (ids) => {
+      // one plan per target epoch (each model to its own document's epoch)
+      const byEpoch = new Map<string, string[]>();
+      for (const w of dating) if (ids.includes(w.id) && w.epoch) (byEpoch.get(w.epoch) ?? byEpoch.set(w.epoch, []).get(w.epoch)!).push(w.id);
+      for (const [ep, xs] of byEpoch) void epochMoveSelection(xs, ep, "move");
+    },
+    followContainer: (ids) => { for (const id of ids) followContainer(id); },
+  };
 }
 
 /** TIPS · the texts with no language at all (no `data.lang`, and a study that
@@ -30902,7 +30968,7 @@ function spaceDecorators(st: DocumentStore, sp: Space, units: string[]): (u: str
   const doc = st.doc;
   const ids = new Set(units);
   const orn = adornmentBadges(doc.graph.nodes, doc.graph.edges, ids);
-  const fix = funnelIndex(doc);
+  const pix = provIndex(doc);
   const pd = propertyBadges(doc);
   return (u) => {
     const out: NonNullable<SceneItem["decor"]> = [];
@@ -30911,9 +30977,9 @@ function spaceDecorators(st: DocumentStore, sp: Space, units: string[]): (u: str
     const has = new Set(own.map((b) => (b.kind === "author_ai" ? "author" : b.kind)));
     for (const rule of BADGE_RULES) {
       if (has.has(rule)) continue;
-      const eff = resolveEffective(doc, u, rule, fix);
-      if (eff.value == null || eff.explicit) continue;
-      out.push({ group: "rights", kind: rule, title: `${rule}: ${eff.value} · ${sourceLabel(eff.source)}`, inherited: true });
+      const p = resolveProvenance(pix, u, rule);
+      if (p.value == null || p.level === "node") continue;
+      out.push({ group: "rights", kind: rule, title: provTitle(pix, rule, p), inherited: true });
     }
     const g = pd.get(u);
     if (g) out.push({ group: "pd", text: `PD ${g.count}`, title: t("compact.badge", { n: String(g.count) }) });
@@ -34204,7 +34270,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // MICRO-RITOCCHI-CHIARI p.4 · the padlock of the Outliner: no G / R / S on them
     pinned: () => new Set(space3dPrefs().pinned ?? []),
     onPinned: (k: string) => toast(t("uo.pinRefused", { name: spaceKeyName(k) })),
-    sketchVisible: (id) => { const k = `sketch:${id}`; return !space3dPrefs().hidden.includes(k) && (!spaceIsolated || spaceIsolated === k); },
+    sketchVisible: (id) => { const k = `sketch:${id}`; return !eyesOf(win.id).hidden.has(k) && (!spaceIsolated || spaceIsolated === k); },
     epochLabel: () => { const sp = currentSpace(); const e = sp ? spaceEpochOf(sp) : null;
       return e ? String(store?.node(e)?.name ?? sp?.epochs.find((x) => x.id === e)?.name ?? e) : ""; },
     // MICRO-SPAZIO-3D · ⌘-click selects the model; opening it is the menu's
@@ -34343,6 +34409,29 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       });
       return b;
     };
+    // MICRO-A-PROPRIO-EREDITATO · first, the view's mode: follow the Outliner
+    // (its eyes reach this view) or a visibility of its own
+    const mode = document.createElement("div");
+    mode.className = "vis-mode";
+    mode.dataset.visMode = visModeOf(win.id);
+    for (const m of ["outliner", "custom"] as const) {
+      const lab = document.createElement("label");
+      const rb = document.createElement("input");
+      rb.type = "radio";
+      rb.name = `vis-mode-${win.id}`;
+      rb.value = m;
+      rb.checked = visModeOf(win.id) === m;
+      rb.addEventListener("change", () => {
+        if (!rb.checked) return;
+        setWinCurrent(win, "visMode", m === "custom" ? "custom" : null);   // persisted with the windows
+        x3dMarksMemo = null;
+        redrawVis();
+      });
+      lab.title = t(m === "outliner" ? "vis.mode.outlinerTitle" : "vis.mode.customTitle");
+      lab.append(rb, document.createTextNode(` ${t(m === "outliner" ? "vis.mode.outliner" : "vis.mode.custom")}`));
+      mode.appendChild(lab);
+    }
+    box.appendChild(mode);
     head.append(all(true), all(false), helpGlyph(t("vis.help"), "visibility"));
     box.appendChild(head);
     for (const k of VISIBILITY_KEYS) {
@@ -34826,7 +34915,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         : (sp.rms.find((r) => r.id === alts.find((a) => a.group === x.group)!.tileset)?.name ?? "") }]));
     recomputeSubstituted();
     const isSel = (k: string) => ssel.keys.includes(k);
-    const hidden = new Set(prefs.hidden);
+    const hidden = eyesOf(win.id).hidden;
     const shown = (key: string) => !hidden.has(key) && (!spaceIsolated || spaceIsolated === key);
     const items: SceneItem[] = [];
     // MICRO-SPAZIO-CONTAINER p.9 · why a model is not drawn, for the line of an empty scene

@@ -47,7 +47,9 @@ eq(ids("E13"), ["S13"], "2013: only its survey");
 eq(ids("E15"), ["S15", "S15b"], "2015: its survey and its own sub-epoch's");
 eq(ids("E15a"), ["S15b"], "a sub-sub-epoch: only its own");
 eq(sp.summary("E13")?.epoch.name, "2013", "the summary of a sub-epoch says the sub-epoch");
-eq(sp.summary("E13")?.units, ["U1"], "the units of a sub-epoch: those it holds");
+// MICRO-A-PROPRIO-EREDITATO · SU002, a real unit born in XX sec with no
+// continuity, is still existing: 2013 holds it too
+eq(sp.summary("E13")?.units, ["U1", "U2"], "the units of a sub-epoch: those it holds (born there, or alive there)");
 eq([...(sp.summary("XX")?.units ?? [])].sort(), ["U1", "U2"], "…and the epoch all of them");
 eq(sp.topOf("E15a"), "XX", "a sub-sub-epoch's top");
 const main = readFileSync(`${SRC}main.ts`, "utf8");

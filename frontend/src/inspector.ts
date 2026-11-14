@@ -6,7 +6,7 @@ import { edgeStyle, nodeStyle } from "./palette";
 import { dataGlyphLabel, glyphFor, glyphSvg } from "./glyphs";
 import { activeTheme, canvasTheme } from "./theme";
 import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf, typeDescription, typeLabel } from "./rules";
-import { BADGE_RULES, resolveEffective, sourceLabel } from "./funnel";
+import { renderProvenance } from "./provenance-ui";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
 import { qualiaList } from "./vocab";
 import { getSettings } from "./settings";
@@ -1417,48 +1417,24 @@ export function renderInspector(
     root.appendChild(panel);
   }
 
-  // FUNNEL1 · "Propagative metadata" — the value + provenance of each propagative
-  // property (author/license/embargo), resolved Node → Activity → Epoch → Canvas
-  // (first non-null, substitutive). Mirrors EMtools' draw_propagative_metadata:
-  // it is a PRESENTATION of the resolver — nothing is written to em.json. Shown
-  // for stratigraphic referents (the nodes that inherit down the funnel).
+  // MICRO-A-PROPRIO-EREDITATO (E.D., 14 Nov 2026) · for EVERY node: start,
+  // end, author, licence, embargo — own in plain ink, inherited in orange with
+  // «da <nodo>» (s3Dgraphy's rules, `provenance.ts`). It replaces the funnel's
+  // rows (FUNNEL1), which read another chain (activity tier, PDG members).
+  if (nodeId && node.node_type !== "EpochNode") renderProvenance(root, store, nodeId, cb.onJump);
+  // the CHRONOLOGY of a unit (TPQ / TAQ through its relations, the bridge's
+  // answer) stays, under its own title
   if (nodeId && isStratigraphicType(node.node_type)) {
-    const rows: { rule: string; value: string; src: string; own: boolean }[] = [];
-    for (const rule of BADGE_RULES) {
-      const eff = resolveEffective(store.doc, nodeId, rule);
-      if (eff.value == null) continue;
-      rows.push({
-        rule,
-        value: eff.value,
-        src: sourceLabel(eff.source),
-        own: eff.explicit,
-      });
-    }
     const chron = cb.chronologyOf?.(nodeId) ?? null;
-    if (rows.length || chron) {
-      // MICRO-PULIZIA p.6 · a section like the others (its triangle is theirs)
-      root.appendChild(el("h3", "insp-sect", t("insp.propagative")));
+    if (chron) {
+      root.appendChild(el("h3", "insp-sect", t("pv.chronSect")));
       const details = el("div", "insp-propagative");
-      for (const r of rows) {
-        const row = el("div", `insp-prop-row${r.own ? " insp-prop-own" : " insp-prop-inherited"}`);
-        row.appendChild(el("span", "insp-prop-rule", r.rule));
-        row.appendChild(el("span", "insp-prop-value", r.value));
-        // provenance: "proprio" when declared on the node, else "da Epoca …"
-        const from = el("span", "insp-prop-source",
-                        r.own ? t("insp.own") : r.src);
-        from.title = r.own ? t("insp.ownTitle")
-                           : t("insp.inheritedTitle", { src: r.src });
-        row.appendChild(from);
-        details.appendChild(row);
-      }
-      if (chron) {
-        const box = el("div", "insp-time");
-        box.dataset.node = nodeId;
-        details.appendChild(box);
-        renderTimeRows(box, store, chron, cb.onJump);
-        const get = cb.chronologyOf!;
-        timeBoxes.add({ box, paint: () => renderTimeRows(box, store, get(nodeId), cb.onJump) });
-      }
+      const box = el("div", "insp-time");
+      box.dataset.node = nodeId;
+      details.appendChild(box);
+      renderTimeRows(box, store, chron, cb.onJump);
+      const get = cb.chronologyOf!;
+      timeBoxes.add({ box, paint: () => renderTimeRows(box, store, get(nodeId), cb.onJump) });
       root.appendChild(details);
     }
   }

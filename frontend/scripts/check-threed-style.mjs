@@ -76,7 +76,8 @@ try {
 } catch { console.log("  (s3Dgraphy 850c7d1 not reachable: the before/after table is skipped)"); }
 const table = [];
 if (before) {
-  ok(before.version === "1.6.44" && rules.version === "1.6.45", `1.6.44 → ${rules.version}`);
+  // 1.6.46 (MICRO-A-PROPRIO-EREDITATO) changed one `_comment` only
+  ok(before.version === "1.6.44" && ["1.6.45", "1.6.46"].includes(rules.version), `1.6.44 → ${rules.version}`);
   // the 1.6.44 reading, as palette.ts read it then (edges show false = the contour)
   const was = (k) => {
     const st = before.node_styles[k]?.style; const m = st?.material?.rgba_color; if (!m) return null;

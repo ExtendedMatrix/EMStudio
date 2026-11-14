@@ -31,6 +31,7 @@ import {
   buildTable,
   deleteRow,
   type Column,
+  type CellMeta,
   type SheetKey,
   type VolatileProvider,
 } from "./em-data";
@@ -714,7 +715,7 @@ function emdbTableHtml(store: DocumentStore, sheet: SheetKey,
   const rowsHtml = rows.map((row) => {
     const cells = table.columns.map((col, ci) =>
       renderCell(row.readonly ? { ...col, editor: { kind: "readonly" } } : col,
-                 row.id, row.cells[col.key] ?? "", ci === 0 ? row.depth ?? 0 : 0)).join("");
+                 row.id, row.cells[col.key] ?? "", ci === 0 ? row.depth ?? 0 : 0, row.meta?.[col.key])).join("");
     const del = row.readonly ? `<td class="emdata-rowop"></td>`
       : `<td class="emdata-rowop"><button data-del="${escapeAttr(row.id)}" title="${escapeAttr(t("table.delete"))}">✕</button></td>`;
     const cur = row.id === currentRowOf() ? " emdata-current" : "";
@@ -1210,11 +1211,14 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
   });
 }
 
-function renderCell(col: Column, rowId: string, value: string, depth = 0): string {
+function renderCell(col: Column, rowId: string, value: string, depth = 0, meta?: CellMeta): string {
   const e = col.editor;
   const pad = depth ? ` style="padding-left:${10 + depth * 20}px"` : "";
   const lead = depth ? `<span class="tv-d">└ </span>` : "";
   const common = `data-edit data-row="${escapeAttr(rowId)}" data-col="${escapeAttr(col.key)}"`;
+  // MICRO-A-PROPRIO-EREDITATO · own in plain ink, inherited in orange with «da <nodo>»
+  if (meta)
+    return `<td class="emdata-ro tv-prov${meta.inherited ? " tv-prov-inherited" : ""}" title="${escapeAttr(meta.title)}" data-prov-level="${escapeAttr(meta.level)}" data-prov-origin="${escapeAttr(meta.origin)}">${escapeHtml(value)}${meta.inherited && value ? ` <span class="tv-prov-from">${escapeHtml(meta.from)}</span>` : ""}</td>`;
   if (e.kind === "readonly")
     return `<td class="emdata-ro"${pad}>${lead}${escapeHtml(value)}</td>`;
   if (e.kind === "select") {

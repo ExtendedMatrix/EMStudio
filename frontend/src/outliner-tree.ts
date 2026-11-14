@@ -42,6 +42,13 @@ export type Dim = "units" | "documents" | "authors" | "epochs" | "models" | "pro
 /** every dimension, in the order the graph shows them */
 export const DIMS: readonly Dim[] = ["units", "documents", "authors", "epochs", "models", "proxies", "gis", "paradata", "other", "aux"];
 export type Hierarchy = "epoch" | "alpha" | "type";
+/** MICRO-A-PROPRIO-EREDITATO (E.D., 14 Nov 2026) · the TEMPORAL organisations:
+ *  only in these the Outliner paints each branch on its epoch's colour (in the
+ *  others a colour behind a row would say a time the row is not grouped by).
+ *  Prepared for the multigraph: an organisation by COMPUTED chronological
+ *  horizons will join this list (its bands the horizons', not the epochs') */
+export const TEMPORAL_HIERARCHIES: readonly Hierarchy[] = ["epoch"];
+export const isTemporalHierarchy = (h: Hierarchy): boolean => TEMPORAL_HIERARCHIES.includes(h);
 export type Absent = "grey" | "filter";
 
 export interface OutlinerOpts {

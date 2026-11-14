@@ -67,6 +67,9 @@ print(json.dumps(out))`, V9], { env: { ...process.env, PYTHONPATH: S3D }, maxBuf
   const nm = (id) => g.nodes.find((n) => n.id === id)?.name;
   const s13 = PV(byName.get("2013")).survive.map((x) => nm(x.id));
   eq(["SU001", "SU002", "SU003", "SU004"].every((x) => s13.includes(x)), true, "v9 2013: SU001–SU004 survive there");
-  eq(PV(byName.get("XX sec")).survive.map((x) => nm(x.id)).sort(), s13.sort(), "v9 XX sec gathers 2013's survivors");
+  // MICRO-A-PROPRIO-EREDITATO: a unit is where its life is — a survivor of 2013
+  // born in a phase of XX sec (SU020, Fine XX) is BORN in XX sec, not a survivor
+  const bornXX = PV(byName.get("XX sec")).born.map(nm);
+  eq(PV(byName.get("XX sec")).survive.map((x) => nm(x.id)).sort(), s13.filter((x) => !bornXX.includes(x)).sort(), "XX sec gathers 2013's survivors (those not born in its phases)");
   console.log(`epoch-presence: ${checks} checks passed (v9: ${Object.keys(want).length} epochs = s3Dgraphy)`);
 }

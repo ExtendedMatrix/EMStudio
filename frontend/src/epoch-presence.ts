@@ -3,7 +3,8 @@
  * «I proxy di un'epoca sono quelli che nascono lì E quelli che ci sopravvivono».
  *
  * The rule is s3Dgraphy's `epoch_scope.epoch_presence` (born: `has_first_epoch`,
- * survived: `survive_in_epoch`; a mother epoch the union of its sub-epochs by
+ * survived: a unit by its computed life — `provenance.ts › unitLife`, the
+ * continuity rule —, any other node by `survive_in_epoch`; a mother epoch the union of its sub-epochs by
  * `has_sub_epoch`; the models an epoch of the family reaches with
  * `has_representation_model`). This is its reading in the page — the ONE every
  * view by epoch uses (the Outliner's Space tree, the scene's summary «proxies n
@@ -15,6 +16,7 @@
  * from a node that is not an epoch counts as born (s3Dgraphy reads it the same).
  */
 import type { EmDocument, EmEdge, EmNode } from "./types";
+import { isLifeBearing, provIndex, unitLife } from "./provenance";
 
 export interface Presence {
   /** the epoch and its sub-epochs, deep, the epoch first */
@@ -63,8 +65,17 @@ export function presenceIndex(doc: EmDocument, rev = -1): PresenceIndex {
     else if ((e.edge_type === "has_first_epoch" || (e.edge_type === "is_in_epoch" && !isEp(e.source))) && isEp(e.target)) {
       if (!firstOf.has(e.source)) firstOf.set(e.source, e.target);
       push(bornAt, e.target, e.source);
-    } else if (e.edge_type === "survive_in_epoch" && isEp(e.target)) push(survAt, e.target, e.source);
+    } else if (e.edge_type === "survive_in_epoch" && isEp(e.target) && !isLifeBearing(byId.get(e.source))) push(survAt, e.target, e.source);
     else if (e.edge_type === "has_representation_model" && isEp(e.source)) push(modelsAt, e.source, e.target);
+  }
+  // MICRO-A-PROPRIO-EREDITATO (E.D. 14 Nov 2026) · a unit is where its LIFE is
+  // (s3Dgraphy's unit_life: a real unit until a continuity closes it, any other
+  // in its epoch extended by a continuity), not where survive_in_epoch was
+  // ticked — a new phase between birth and end holds it without a new edge
+  const pix = provIndex(doc);
+  for (const id of firstOf.keys()) {
+    if (!isLifeBearing(byId.get(id)) || removedNode(byId.get(id))) continue;
+    for (const ep of unitLife(pix, id).epochs) push(survAt, ep, id);
   }
   const family = (epochId: string): string[] => {
     const out: string[] = [];

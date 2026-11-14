@@ -7,6 +7,39 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **Own or inherited, and from which node** (MICRO-A-PROPRIO-EREDITATO, E.D., 14
+  November 2026). New `provenance.ts`, the page's reading of s3Dgraphy's rules
+  (`resolvers.provenance`, `unit_life`, `attribution`; `check-provenance.mjs`:
+  15 313 comparisons on Templu Mare v10, every node × start, end, author,
+  licence, embargo — value, level, origin node —, every life, every attribution,
+  the redundant edges, the dating warnings). The Inspector of EVERY node has
+  «Proprio / ereditato»: the own value in plain ink, the inherited one in orange
+  with «da <nodo>» and «via <nodo>» (a click goes there), «Rendi proprio…»
+  (copied on the node after a question, one undo; none where it cannot be: a
+  servile's date, a unit's end, an edge the datamodel refuses), the ACT of an
+  extractor / a combiner (`data.act_start`, «non indicato» when not said); the
+  funnel's rows (activity tier, PDG members) are gone, the bridge's TPQ/TAQ stay
+  under «Cronologia calcolata». Its «Epoche»: a servile node (paradata group,
+  property, extractor, combiner, proxy, annotated region) shows its master's
+  epochs, inherited, without Move / Extend; a unit the epochs of its LIFE
+  (continuity rule, read-only, with «perché»: «viva da II A.D., nessun continuity
+  → still existing»); the epoch edges the rule makes redundant are said, with
+  «Pulisci» (a preview, one undo). The same words in the Tabular (Units and
+  Documents: Start, End, Author computed, inherited in orange with «da …») and
+  in the inherited badges of the Matrix and of the scene. The Warnings table:
+  rows «proprio / ereditato» (redundant, out of step, contradicting — never
+  cleaned by themselves) with «Pulisci (n)» in bulk, rows «datazione» (a survey
+  dated otherwise than its document → «Sposta nell'epoca del documento», a
+  container member outside it → «Segui il container», a node drawn in a lane
+  that is none of its epochs → «Layout»). M / Alt+M exclude the servile nodes
+  and say whom they follow. A unit is where its life is: the Outliner, the
+  scene's counts, the Tabular by epoch (`epoch-presence.ts`) and the Graph's
+  epoch filter (every node by its epochs of attribution, own or inherited).
+  The Outliner paints the epochs' colours only when organised by epoch
+  (`TEMPORAL_HIERARCHIES`, ready for computed horizons). «Visibilità ▾» of
+  each 3D view opens with «Segui l'Outliner» / «Personalizzata» (the
+  Outliner's eyes reach it or not; the window's state). Datamodels synced
+  (nodes 1.6.45, visual rules 1.6.46).
 - **The clear touches of the dev.123 trial** (MICRO-RITOCCHI-CHIARI, E.D., 14
   November 2026). The search of every window is a FIELD in its head, always
   there, grey «Cerca / Search», typed into directly («/» focuses it, Esc empties

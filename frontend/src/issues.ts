@@ -172,6 +172,19 @@ export interface IssueSources {
   drawnLane?: (id: string) => string | null;
   /** …and «Layout» (from the sketch): em-core places the documents again */
   relayout?: { label: string; run: () => void };
+  /** MICRO-A-PROPRIO-EREDITATO · s3Dgraphy's own/inherited rules read in the
+   *  page (`provenance.ts`): the epoch edges they make redundant, the unit
+   *  survivals they contradict, the dating warnings — and the bulk cures */
+  inheritance?: {
+    redundant: Array<{ id: string; name: string; epochs: string[]; kind: "servile" | "survive" | "servile_differs" | "survive_contradicting"; master_name?: string }>;
+    dating: Array<{ rule: string; id: string; message: string; fix: string; epoch?: string | null; other: string }>;
+    epochName: (id: string) => string;
+    /** the epochs a node is attributed to, own or inherited (`epochAttribution`) */
+    attributed?: (id: string) => string[];
+    clean?: (nodes: string[]) => void;
+    moveToDocumentEpoch?: (nodes: string[]) => void;
+    followContainer?: (nodes: string[]) => void;
+  };
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
 }
@@ -504,6 +517,57 @@ export function issues(src: IssueSources): Issue[] {
              txt: t("issues.noAuthor", { n: name(n.id) }),
              ...(fx.itsMe ? { fix: { kind: "button" as const, label: fx.itsMe.label,
                                      run: () => fx.itsMe!.run(n.id) } } : {}) });
+  }
+
+  // ── MICRO-A-PROPRIO-EREDITATO · own or inherited ─────────────────────────
+  // an epoch edge the rule makes useless (a servile follows its master, a unit
+  // lives by its continuity): said, with «Pulisci» for many at once; a unit's
+  // survival the rule does not reach is to be READ, never cleaned by itself
+  if (src.inheritance) {
+    const ih = src.inheritance;
+    const eps = (xs: string[]): string => xs.map(ih.epochName).join(", ");
+    for (const r of ih.redundant) {
+      const contra = r.kind === "survive_contradicting";
+      const vars = { epochs: eps(r.epochs) };
+      const said = t(contra ? "pv.contradicting" : r.kind === "servile_differs" ? "pv.servileDiffers" : "pv.redundant", vars);
+      const follows = !contra && r.kind !== "servile_differs" && r.master_name ? " — " + t("pv.followsMaster", { master: r.master_name }) : "";
+      push({ node: r.id, sev: contra || r.kind === "servile_differs" ? "warn" : "info", rule: "inherit",
+             txt: r.name + ": " + said + follows,
+             ...(!contra && ih.clean ? {
+               fix: { kind: "button" as const, label: t("pv.clean"), run: () => ih.clean!([r.id]) },
+               bulk: { key: "inherit-clean", label: (n: number) => `${t("pv.clean")} (${n})`, run: (ids: string[]) => ih.clean!(ids) } } : {}) });
+    }
+    // the Matrix with every node on: a node drawn in a lane that is none of the
+    // epochs it is attributed to (own or inherited) — the positions are intent,
+    // the cure is the Layout
+    if (src.drawnLane && ih.attributed) {
+      // models, containers and proxy shapes are not put in a lane by the Matrix
+      // (their stored position is the engine's trailing row): not judged here
+      const offLane = new Set(["EpochNode", "representation_model", "representation_model_doc", "representation_model_sf",
+                               "RepresentationModelNodeGroup", "semantic_shape"]);
+      for (const n of nodes) {
+        if (offLane.has(n.node_type)) continue;
+        const drawn = src.drawnLane(n.id);
+        if (!drawn) continue;
+        const eps = ih.attributed(n.id);
+        if (!eps.length) continue;
+        const tops = new Set(eps.map((e) => topEpochOf(doc, e)));
+        if (tops.has(topEpochOf(doc, drawn))) continue;
+        push({ node: n.id, sev: "info", rule: "dating",
+               txt: t("pv.w.lane", { n: name(n.id), d: name(drawn), e: eps.map(ih.epochName).join(", ") }),
+               ...(src.relayout ? { fix: { kind: "button" as const, label: src.relayout.label, run: src.relayout.run } } : {}) });
+      }
+    }
+    for (const w of ih.dating) {
+      const cure = w.fix === "move_to_document_epoch" && w.epoch && ih.moveToDocumentEpoch
+        ? { label: t("pv.w.fixDocEpoch"), key: "dating-doc", run: (ids: string[]) => ih.moveToDocumentEpoch!(ids) }
+        : w.fix === "follow_container" && ih.followContainer
+          ? { label: t("pv.w.fixFollow"), key: "dating-follow", run: (ids: string[]) => ih.followContainer!(ids) }
+          : w.fix === "clean" && ih.clean ? { label: t("pv.clean"), key: "inherit-clean", run: (ids: string[]) => ih.clean!(ids) } : null;
+      push({ node: w.id, sev: "warn", rule: "dating", txt: t("pv.w." + w.rule) + ": " + w.message,
+             ...(cure ? { fix: { kind: "button" as const, label: cure.label, run: () => cure.run([w.id]) },
+                          bulk: { key: cure.key, label: (n: number) => `${cure.label} (${n})`, run: cure.run } } : {}) });
+    }
   }
 
   // ── G1 · cycles: the order of the Matrix cannot be drawn ─────────────────

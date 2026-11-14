@@ -47,8 +47,12 @@ const isUnit = (t) => UNITS.has(t);
   eq([px("US104"), px("SF100")], [undefined, undefined], "US104 and SF100 have no proxy");
 
   const mod = sp.summary("EP_MOD"), med = sp.summary("EP_MED"), rom = sp.summary("EP_ROM");
+  // MICRO-A-PROPRIO-EREDITATO (E.D., 14 Nov 2026) · a real unit lives until a
+  // continuity closes it: the medieval US103, US104, USM101 (no continuity) are
+  // still there in Età moderna, beside US102 born there
   eq([mod.rms.map((r) => r.id), mod.units, mod.withProxy, mod.rmReference],
-     [["RM01", "RM02"], ["US102"], ["US102"], ["RM02"]], "Età moderna: two RMs, one unit with its proxy");
+     [["RM01", "RM02"], ["US102", "USM101", "US103", "US104"], ["US102", "USM101", "US103"], ["RM02"]],
+     "Età moderna: two RMs, the unit born there and the medieval ones still existing");
   eq([med.rms.length, med.units.sort(), med.without, med.reference, med.missing],
      [0, ["RSF100b", "US103", "US104", "USM101", "USV106"], ["US104"], ["RSF100b"], []],
      "Medioevo: no RM, five units, one without a proxy, one referenced");

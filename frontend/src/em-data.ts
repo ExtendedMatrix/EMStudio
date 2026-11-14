@@ -21,6 +21,8 @@ import { isStratigraphicType, nodeLabel, propertyLabel, typesOfClass } from "./r
 import { RELATION_CLAIMS } from "./table-views";
 import { sha1 } from "./sha1";
 import { epochsInTreeOrder } from "./outline";
+import { provIndex, resolveProvenance, type ProvRule } from "./provenance";
+import { t } from "./i18n";
 
 // ── deterministic identity (mirror of UnifiedXLSXImporter._mint) ────────────
 // Fixed namespace, copied verbatim from s3Dgraphy so ids computed here match the
@@ -85,6 +87,10 @@ export interface Column {
   provenance?: boolean;
 }
 
+/** MICRO-A-PROPRIO-EREDITATO · a computed cell that says own or inherited, and
+ *  from which node (the Inspector's words, `provenance.ts`) */
+export interface CellMeta { title: string; inherited: boolean; level: string; origin: string; from: string }
+
 export interface Row {
   /** the anchor node id this row maps to (or a synthetic key for Claims rows) */
   id: string;
@@ -95,6 +101,8 @@ export interface Row {
   readonly?: boolean;
   /** STRUTTURA · nesting of the first cell (sub-epochs under their mother) */
   depth?: number;
+  /** MICRO-A-PROPRIO-EREDITATO · the computed own / inherited cells */
+  meta?: Record<string, CellMeta>;
 }
 
 export interface Table {
@@ -158,6 +166,26 @@ export function buildTable(
     return firstEpoch.get(unitId) ?? "";
   };
 
+  // MICRO-A-PROPRIO-EREDITATO · Start, End, Author: own in plain ink, inherited
+  // in orange with «da <nodo>» — computed, read-only (s3Dgraphy's rules)
+  const PV: Array<[string, ProvRule]> = [["PV_START", "absolute_time_start"], ["PV_END", "absolute_time_end"], ["PV_AUTHOR", "author"]];
+  const pvColumns = (): Column[] => PV.map(([key, rule]) => ({ key, label: t(`pv.rule.${rule}`), editor: { kind: "readonly" } }));
+  let pix: ReturnType<typeof provIndex> | null = null;
+  const pvCells = (id: string): { cells: Record<string, string>; meta: Record<string, CellMeta> } => {
+    pix ??= provIndex(store.doc);
+    const cells: Record<string, string> = {};
+    const meta: Record<string, CellMeta> = {};
+    for (const [key, rule] of PV) {
+      const p = resolveProvenance(pix, id, rule);
+      cells[key] = p.value == null ? "" : typeof p.value === "number" ? String(Math.round(p.value * 1000) / 1000) : p.value;
+      const from = p.level && p.level !== "node" ? t("pv.from", { node: pix.name(p.origin) }) : "";
+      meta[key] = { inherited: !!p.level && p.level !== "node", level: p.level ?? "", origin: p.origin ?? "", from,
+        title: p.value == null ? `${t(`pv.rule.${rule}`)}: ${t("pv.none")}`
+          : `${t(`pv.rule.${rule}`)}: ${cells[key]} — ${p.level === "node" ? t("pv.own") : `${from} (${t(`pv.level.${p.level}`)})`}` };
+    }
+    return { cells, meta };
+  };
+
   if (sheet === "Units") {
     const units = nodes.filter((n) => isStratigraphicType(n.node_type));
     const columns: Column[] = [
@@ -175,15 +203,18 @@ export function buildTable(
         label: "First epoch",
         editor: { kind: "select", options: epochOptions() },
       },
+      ...pvColumns(),
     ];
     const rows: Row[] = units.map((n) => {
+      const pv = pvCells(n.id);
       const cells: Record<string, string> = {
         ID: str(n.name) || n.id,
         TYPE: n.node_type,
         NAME: str(n.description),
         EPOCH: firstEpochIdOf(n.id),
+        ...pv.cells,
       };
-      return { id: n.id, cells, volatile: V(n.id) };
+      return { id: n.id, cells, volatile: V(n.id), meta: pv.meta };
     });
     return { sheet, columns, rows, canAdd: true };
   }
@@ -290,6 +321,7 @@ export function buildTable(
         editor: { kind: "readonly" },
         provenance: true,
       },
+      ...pvColumns(),
     ];
     const authorsOf = (docId: string): string =>
       edges
@@ -308,8 +340,10 @@ export function buildTable(
             TITLE: str(d.title ?? n.description ?? ""),
             YEAR: str(d.year ?? ""),
             AUTHOR_IDS: authorsOf(n.id),
+            ...pvCells(n.id).cells,
           },
           volatile: V(n.id),
+          meta: pvCells(n.id).meta,
         };
       });
     return { sheet, columns, rows, canAdd: true };
