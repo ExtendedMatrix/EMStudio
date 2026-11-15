@@ -96,7 +96,9 @@ export interface ThreeFacts {
   /** model → the epochs it depicts */
   rmEpochs: Map<string, string[]>;
   /** the GIS layers and surfaces of the graph */
-  gis: Array<{ id: string; name: string; kind: "layer" | "raster" | "surface" }>;
+  gis: Array<{ id: string; name: string; kind: "layer" | "raster" | "surface";
+    /** MICRO-D-GIS-DOCUMENTI · a sheet: the document it is under, and «solo studio» */
+    doc?: { id: string; name: string } | null; studyOnly?: boolean }>;
   /** MICRO-SPAZIO-CONTAINER p.8 · model → the container it is in (the first) */
   rmGroup?: Map<string, string>;
   /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · a model's versions as the Space draws
@@ -154,6 +156,8 @@ export interface Texts {
   empty: string;
   /** the one line when nothing is open */
   noSources?: string;
+  /** MICRO-D-GIS-DOCUMENTI · the mark of a GIS sheet «uso di studio, non pubblicabile» */
+  studyOnly?: string;
   /** MICRO-SPAZIO-CONTAINER p.8 · the 3D's dimensions under an epoch (the Space) */
   space?: { proxies: string; models: string; rmdoc: string; rmsf: string; gis: string;
     /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 */
@@ -567,11 +571,28 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     return grouped("proxies", units, (n) => leaf(n, `proxies/${n.id}`, true, { eye: `proxy:${n.id}`, glyphText: "◆" }), epochOf);
   };
 
-  const gisKids = (): TNode[] => facts.gis.map((x) => {
-    const n = byId.get(x.id);
-    return { row: { key: k(`gis/${x.id}`), kind: "gis" as const, label: x.name, id: n ? x.id : undefined, slot: g.slot,
-      glyphText: x.kind === "surface" ? "⛰" : x.kind === "raster" ? "▦" : "◇", gis: x.id }, present: true, match: x.name.toLowerCase() };
-  });
+  /** MICRO-D-GIS-DOCUMENTI · the GIS rows: a sheet under its DOCUMENT (a
+   *  branch selecting the document), «solo studio» in the note */
+  const gisRows = (prefix: string): TNode[] => {
+    const leafOf = (x: ThreeFacts["gis"][number]): TNode => ({ row: { key: k(`${prefix}${x.id}`), kind: "gis" as const, label: x.name,
+      id: byId.has(x.id) ? x.id : undefined, slot: g.slot, glyphText: x.kind === "surface" ? "⛰" : x.kind === "raster" ? "▦" : "◇", gis: x.id,
+      ...(x.studyOnly ? { note: texts.studyOnly ?? "solo studio" } : {}) }, present: true, match: x.name.toLowerCase() });
+    const out2: TNode[] = [];
+    const docs = new Map<string, TNode>();
+    for (const x of facts.gis) {
+      if (!x.doc) { out2.push(leafOf(x)); continue; }
+      let d = docs.get(x.doc.id);
+      if (!d) {
+        d = { row: { key: k(`${prefix}doc/${x.doc.id}`), kind: "gis" as const, label: x.doc.name, id: byId.has(x.doc.id) ? x.doc.id : undefined,
+          slot: g.slot, glyph: "document", ...(x.studyOnly ? { note: texts.studyOnly ?? "solo studio" } : {}) }, kids: [], def: true, present: true, match: x.doc.name.toLowerCase() };
+        docs.set(x.doc.id, d);
+        out2.push(d);
+      }
+      d.kids!.push(leafOf(x));
+    }
+    return out2;
+  };
+  const gisKids = (): TNode[] => gisRows("gis/");
 
   const plain = (dim: Dim) => () => grouped(dim, lists.get(dim) ?? [], (n) => leaf(n, `${dim}/${n.id}`, false));
 
@@ -668,9 +689,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
       ...typeGroup(at, "models", W.models, modelsIn(at, inEp), "representation_model"),
       ...typeGroup(at, "rmdoc", W.rmdoc, subOf(at, rmdocMap, docs, inEp, "representation_model_doc"), "representation_model_doc"),
       ...typeGroup(at, "rmsf", W.rmsf, subOf(at, facts.rmsf, finds, inEp, "representation_model_sf"), "representation_model_sf"),
-      ...(gis ? typeGroup(at, "gis", W.gis, facts.gis.map((x) => ({ row: { key: k(`sp/${at}/gis/${x.id}`), kind: "gis" as const, label: x.name,
-        id: byId.has(x.id) ? x.id : undefined, slot: g.slot, glyphText: x.kind === "surface" ? "⛰" : x.kind === "raster" ? "▦" : "◇", gis: x.id },
-        present: true, match: x.name.toLowerCase() }))) : []),
+      ...(gis ? typeGroup(at, "gis", W.gis, gisRows(`sp/${at}/gis/`)) : []),
       ...(W.x3d ? typeGroup(at, "x3d", W.x3d, x3dIn(at), "extractor") : []),
     ];
     const out: TNode[] = [];

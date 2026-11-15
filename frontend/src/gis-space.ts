@@ -10,7 +10,8 @@
  */
 import { basename } from "./paths";
 import { helpGlyph, lineWithHelp } from "./help-glyph";
-import { createGisDriver, frameOf, gisLayersOf, surfacesOf, type GisDriver } from "./gis-scene";
+import { createGisDriver, frameOf, gisLayersOf, isPictureSheet, surfacesOf, type GisDriver, type GisLayerRef } from "./gis-scene";
+import { STUDY_ONLY, studyOnlyNodes } from "./study-only";
 import type { SpaceSceneHandle } from "./scene3d";
 
 type T = (k: string, v?: Record<string, string>) => string;
@@ -31,6 +32,39 @@ export interface GisSpaceDeps {
   ingest: (path: string, layer: string | null) => Promise<string | null>;
   surface: (demId: string, imageId: string | null) => Promise<string | null>;
   contours: (demId: string, interval: number) => Promise<string | null>;
+  /** MICRO-D-GIS-DOCUMENTI · files brought in as the SHEETS of one document */
+  ingestDocument?: (req: GisDocumentAsk) => Promise<string | null>;
+}
+
+/** MICRO-D-GIS-DOCUMENTI · what «Porta dentro…» asks the bridge (`/graph/gis-document`) */
+export interface GisDocumentAsk {
+  paths: string[];
+  documentId: string | null;
+  name: string;
+  date: string;
+  license: string | null;
+  crs: Record<string, string>;
+  shift: Record<string, [number, number, number]>;
+}
+
+/** the study's next D.nn (s3Dgraphy `gis.next_document_name`) */
+export function nextDocumentName(doc: Parameters<typeof gisLayersOf>[0]): string {
+  let best = 0;
+  for (const n of doc?.graph?.nodes ?? []) {
+    if (n.node_type !== "document") continue;
+    const m = /^\s*D\.?\s*(\d+)\s*$/.exec(String(n.name ?? ""));
+    if (m) best = Math.max(best, Number(m[1]));
+  }
+  return `D.${String(best + 1).padStart(2, "0")}`;
+}
+
+/** the words of a sheet in another grid: «convertito da EPSG:3004 a EPSG:32633» */
+export function convertedSaid(t: T, layerCrs: string | null, epsg: number | null): string {
+  if (!layerCrs || !epsg) return "";
+  const a = layerCrs.toUpperCase(), b = `EPSG:${epsg}`;
+  if (a === b) return "";
+  const same = [["EPSG:3844", "EPSG:31700"]].some((f) => f.includes(a) && f.includes(b));
+  return same ? t("gis.sameGrid", { a, b }) : t("gis.converted", { a, b });
 }
 
 export interface GisSpace {
@@ -59,6 +93,8 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
   let driverSig = "";
   let bridge: string | null = null;
   let inspect: Record<string, any> | null = null;
+  /** MICRO-D-GIS-DOCUMENTI · the files inspected for «Porta dentro…» (several = sheets of one document) */
+  let inspects: Array<Record<string, any>> = [];
   let busy = "";
   const key = () => `emstudio.gis.${d.person() ?? "anon"}.${d.docPath() ?? String(d.doc()?.graph?.graph_id ?? "unsaved")}`;
   const load = (): Saved => {
@@ -83,7 +119,8 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     const all = gisLayersOf(d.doc());
     const surfaces = surfacesOf(d.doc()).filter((x) => !s.hidden.includes(x.id));
     // a GeoTIFF is a raster: it is drawn as the ground of a surface, not as features
-    const layers = all.filter((l) => l.format !== "geotiff" && !s.hidden.includes(l.id));
+    // (MICRO-D-GIS-DOCUMENTI · a picture SHEET of a document is drawn: its frame converted)
+    const layers = all.filter((l) => (l.format !== "geotiff" || isPictureSheet(l)) && !(l.sheet && l.raster === "dem") && !s.hidden.includes(l.id));
     return { all, layers, surfaces };
   };
 
@@ -169,8 +206,54 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
       list.appendChild(r);
     };
     for (const sf of surfaces) row(sf.id, `⛰ ${sf.name}`, t("gis.surfaceWhat", { dem: all.find((x) => x.id === sf.dem)?.name ?? "—", img: all.find((x) => x.id === sf.image)?.name ?? "—" }));
-    const images = all.filter((l) => l.format === "geotiff" && l.raster === "image");
+    const images = all.filter((l) => l.format === "geotiff" && l.raster === "image" && !l.sheet);
+    // MICRO-D-GIS-DOCUMENTI · the sheets under their document, «solo studio» when its licence says so
+    const held = studyOnlyNodes(d.doc() as never);
+    const epsgNow = f ? Number(f.epsg) : null;
+    const docs = new Map<string, GisLayerRef[]>();
+    for (const l of all) if (l.sheet && l.docId) (docs.get(l.docId) ?? docs.set(l.docId, []).get(l.docId)!).push(l);
+    for (const [docId, sheets] of docs) {
+      const hd = document.createElement("div");
+      hd.className = "gis-doc";
+      hd.dataset.gisDoc = docId;
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = sheets.some((x) => !s.hidden.includes(x.id));
+      cb.dataset.gisShowDoc = docId;
+      const nm = document.createElement("b");
+      nm.textContent = `📄 ${sheets[0].docName ?? docId}`;
+      hd.append(cb, nm, ` · ${t("gis.sheets", { n: String(sheets.length) })}`, btn("⤢", "frame-doc", t("gis.frameDoc"), { id: docId }));
+      const so = held.get(docId);
+      if (so) {
+        const mk = document.createElement("span");
+        mk.className = "gis-study-only";
+        mk.dataset.studyOnly = docId;
+        mk.textContent = t("gis.studyOnly");
+        mk.title = t("gis.studyOnlyHint");
+        hd.appendChild(mk);
+      }
+      list.appendChild(hd);
+      for (const l of sheets) {
+        const said = String(st.find((x) => x.id === l.id)?.said ?? "") || convertedSaid(t, l.crs, epsgNow);
+        const what = `${l.format === "worldfile_image" ? t("gis.fmtWorldfile") : l.format}${l.shift ? ` · shift ${l.shift.map((v) => v.toFixed(0)).join(", ")}` : ""} · ${l.crs ?? t("gis.noCrs")}${said ? ` · ${said}` : ""}`;
+        const before = list.childElementCount;
+        row(l.id, `${isPictureSheet(l) ? "▦" : l.format === "dxf" ? "⌗" : "◇"} ${l.name}`, what);
+        const r = list.children[before] as HTMLElement | undefined;
+        if (r) {
+          r.classList.add("gis-sheet");
+          if (held.has(l.id)) {
+            const mk = document.createElement("span");
+            mk.className = "gis-study-only";
+            mk.dataset.studyOnly = l.id;
+            mk.textContent = t("gis.studyOnly");
+            mk.title = t("gis.studyOnlyInherited", { doc: held.get(l.id)!.originName });
+            r.querySelector("label")?.appendChild(mk);
+          }
+        }
+      }
+    }
     for (const l of all) {
+      if (l.sheet) continue;
       const what = `${l.format}${l.layer ? ` · ${l.layer}` : ""} · ${l.crs ?? t("gis.noCrs")}${l.derived ? ` · ${t("gis.derived")}` : ""}`;
       if (l.format === "geotiff" && l.raster === "dem") {
         // the DEM: a surface (with an image), its contours at an interval
@@ -205,6 +288,7 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     inp.value = typed;
     add.append(inp, btn(t("gis.inspect"), "inspect"));
     panel.appendChild(add);
+    if (inspects.length) panel.appendChild(documentBox());
     if (inspect) {
       const box = document.createElement("div");
       box.className = "gis-inspect";
@@ -233,6 +317,79 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     if (busy) { const p = document.createElement("p"); p.className = "xf-note"; p.textContent = busy; panel.appendChild(p); }
   };
 
+  /** MICRO-D-GIS-DOCUMENTI · «Porta dentro…»: what each file is, the document
+   *  (a new D.nn with its name and date, or one already there), the licence
+   *  «uso di studio, non pubblicabile», and for a file that declares no CRS (a
+   *  DXF) the little window CRS + shift — as 3D Survey Collection's georadar
+   *  import asks it: the study's CRS and shift proposed */
+  const documentBox = (): HTMLElement => {
+    const box = document.createElement("div");
+    box.className = "gis-inspect gis-docbox";
+    box.dataset.gisDocbox = "1";
+    const f = frameOf(d.doc());
+    for (const ins of inspects) {
+      const p = document.createElement("p");
+      p.dataset.gisInspected = String(ins.path);
+      if (!ins.ok) { p.textContent = `⚠ ${basename(String(ins.path))}: ${String(ins.error ?? "")}`; box.appendChild(p); continue; }
+      const said = convertedSaid(t, ins.crs ?? null, f ? Number(f.epsg) : null);
+      p.textContent = `${basename(String(ins.path))} · ${ins.gis_format === "worldfile_image" ? t("gis.fmtWorldfile") : ins.gis_format} · ${ins.crs ?? t("gis.noCrs")}${said ? ` · ${said}` : ""}`;
+      box.appendChild(p);
+      if (!ins.crs) {
+        // the little window: CRS + shift, the study's proposed
+        const win = document.createElement("fieldset");
+        win.className = "gis-crs-win";
+        win.dataset.gisCrsWin = String(ins.path);
+        const lg = document.createElement("legend");
+        lg.textContent = t("gis.crsWinTitle", { name: basename(String(ins.path)) });
+        const crs = document.createElement("input");
+        crs.type = "text";
+        crs.value = f ? `EPSG:${f.epsg}` : "";
+        crs.placeholder = "EPSG:32633";
+        crs.dataset.gisCrs = String(ins.path);
+        const shiftRow = document.createElement("div");
+        shiftRow.className = "gis-shift";
+        const sh = f ? [f.x, f.y, f.z] : [0, 0, 0];
+        ["X", "Y", "Z"].forEach((ax, i) => {
+          const lab = document.createElement("label");
+          const inp = document.createElement("input");
+          inp.type = "number"; inp.step = "any"; inp.value = String(sh[i] ?? 0);
+          inp.dataset.gisShift = `${ins.path}|${i}`;
+          lab.append(`${ax} `, inp);
+          shiftRow.appendChild(lab);
+        });
+        const hint = document.createElement("small");
+        hint.textContent = t("gis.crsWinHint");
+        win.append(lg, crs, shiftRow, hint);
+        box.appendChild(win);
+      }
+    }
+    const ok = inspects.filter((x) => x.ok);
+    if (!ok.length) return box;
+    const h = document.createElement("div");
+    h.className = "sol-lay-sub";
+    h.textContent = ok.length > 1 ? t("gis.docSheetsOf", { n: String(ok.length) }) : t("gis.docOf");
+    box.appendChild(h);
+    const sel = document.createElement("select");
+    sel.dataset.gisDocChoice = "1";
+    const o0 = document.createElement("option"); o0.value = ""; o0.textContent = t("gis.docNew"); sel.appendChild(o0);
+    for (const n of (d.doc()?.graph?.nodes ?? []).filter((x) => x.node_type === "document")) {
+      const o = document.createElement("option"); o.value = String(n.id); o.textContent = String(n.name ?? n.id); sel.appendChild(o);
+    }
+    const name = document.createElement("input");
+    name.type = "text"; name.dataset.gisDocName = "1"; name.value = nextDocumentName(d.doc()); name.title = t("gis.docName");
+    const date = document.createElement("input");
+    date.type = "text"; date.dataset.gisDocDate = "1"; date.placeholder = t("gis.docDatePh"); date.title = t("gis.docDateHint");
+    const lic = document.createElement("label");
+    const lcb = document.createElement("input");
+    lcb.type = "checkbox"; lcb.dataset.gisStudyOnly = "1";
+    lic.append(lcb, ` ${t("gis.licStudyOnly")}`);
+    lic.title = t("gis.studyOnlyHint");
+    const row1 = document.createElement("div"); row1.className = "gis-acts"; row1.append(sel, name, date);
+    box.append(row1, lic, btn(t("gis.ingestDoc"), "ingest-doc", t("gis.ingestDocHint")));
+    sel.addEventListener("change", () => { const nw = !sel.value; name.disabled = !nw; date.disabled = !nw; });
+    return box;
+  };
+
   panel.addEventListener("input", (e) => {
     const el = e.target as HTMLInputElement;
     if (!el.dataset.gisOpacity) return;
@@ -243,7 +400,13 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
   });
   panel.addEventListener("change", (e) => {
     const el = e.target as HTMLElement;
-    if (el.dataset.gisShow) {
+    if (el.dataset.gisShowDoc) {
+      const ids = gisLayersOf(d.doc()).filter((x) => x.docId === el.dataset.gisShowDoc).map((x) => x.id);
+      const on = (el as HTMLInputElement).checked;
+      s.hidden = on ? s.hidden.filter((x) => !ids.includes(x)) : [...new Set([...s.hidden, ...ids])];
+      save();
+      void sync().then(draw);
+    } else if (el.dataset.gisShow) {
       const id = el.dataset.gisShow;
       s.hidden = (el as HTMLInputElement).checked ? s.hidden.filter((x) => x !== id) : [...s.hidden, id];
       save();
@@ -263,6 +426,16 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     if (inspect && !inspect.path) inspect.path = path;
     draw();
   };
+  const inspectAll = async (list: string[]) => {
+    bridge = await d.bridge().catch(() => null);
+    if (!bridge) { d.toast(t("geo.needBridge")); return; }
+    inspect = null;
+    inspects = await Promise.all(list.map(async (path) => {
+      const j = await fetch(`${bridge}/gis/inspect?${new URLSearchParams({ path })}`).then((r) => r.json(), () => ({ ok: false, error: t("geo.noBridgeShort") }));
+      return { ...j, path: j?.path ?? path };
+    }));
+    draw();
+  };
   const run = async (what: string, p: Promise<string | null>) => {
     busy = what;
     draw();
@@ -278,7 +451,32 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     const act = b.dataset.gisAct;
     if (act === "inspect") {
       const v = panel.querySelector<HTMLInputElement>("[data-gis-path]")?.value.trim() ?? "";
-      if (v) void doInspect(v);
+      // MICRO-D-GIS-DOCUMENTI · several files (separated by «;») = the sheets of one document
+      const many = v.split(/\s*;\s*/).filter(Boolean);
+      // a GeoPackage alone keeps the door of before (its layer chosen, a layer of the graph)
+      if (many.length === 1 && /\.gpkg$/i.test(many[0])) { inspects = []; void doInspect(many[0]); return; }
+      if (many.length) void inspectAll(many);
+      return;
+    }
+    if (act === "ingest-doc" && inspects.some((x) => x.ok) && d.ingestDocument) {
+      const ok = inspects.filter((x) => x.ok);
+      const docId = panel.querySelector<HTMLSelectElement>("[data-gis-doc-choice]")?.value || null;
+      const crs: Record<string, string> = {};
+      const shift: Record<string, [number, number, number]> = {};
+      for (const x of ok) {
+        if (x.crs) continue;
+        const c = panel.querySelector<HTMLInputElement>(`[data-gis-crs="${CSS.escape(String(x.path))}"]`)?.value.trim() ?? "";
+        if (!c) { d.toast(t("gis.crsWanted", { name: basename(String(x.path)) })); return; }
+        crs[String(x.path)] = /^\d+$/.test(c) ? `EPSG:${c}` : c;
+        shift[String(x.path)] = [0, 1, 2].map((i) => Number(panel.querySelector<HTMLInputElement>(`[data-gis-shift="${CSS.escape(`${x.path}|${i}`)}"]`)?.value) || 0) as [number, number, number];
+      }
+      const req: GisDocumentAsk = {
+        paths: ok.map((x) => String(x.path)), documentId: docId,
+        name: panel.querySelector<HTMLInputElement>("[data-gis-doc-name]")?.value.trim() || nextDocumentName(d.doc()),
+        date: panel.querySelector<HTMLInputElement>("[data-gis-doc-date]")?.value.trim() ?? "",
+        license: panel.querySelector<HTMLInputElement>("[data-gis-study-only]")?.checked ? STUDY_ONLY : null, crs, shift };
+      inspects = [];
+      void run(t("gis.ingesting"), d.ingestDocument(req));
       return;
     }
     if (act === "ingest" && inspect?.ok) {
@@ -286,6 +484,12 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
       const path = String(inspect.path);
       inspect = null;
       void run(t("gis.ingesting"), d.ingest(path, layer));
+      return;
+    }
+    if (act === "frame-doc" && b.dataset.id) {
+      // MICRO-D-GIS-DOCUMENTI · the camera on the document's sheets
+      const keys = gisLayersOf(d.doc()).filter((x) => x.docId === b.dataset.id).map((x) => `gis:${x.id}`);
+      if (!d.handle.frameKeys(keys, true)) d.toast(t("gis.frameNone"));
       return;
     }
     if (act === "surface" && b.dataset.id) {
@@ -308,7 +512,7 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     onBar() { return false; },
     refresh() { void sync().then(draw); },
     destroy() { d.handle.setGis(null); driver = null; panel.remove(); },
-    state() { return { panel: s.panel, hidden: s.hidden, driver: driver?.state() ?? null, layers: gisLayersOf(d.doc()), surfaces: surfacesOf(d.doc()) }; },
+    state() { return { panel: s.panel, hidden: s.hidden, driver: driver?.state() ?? null, layers: gisLayersOf(d.doc()), surfaces: surfacesOf(d.doc()), inspects }; },
     shown(id) { if (key() !== loadedFor) { s = load(); loadedFor = key(); } return !s.hidden.includes(id); },
     setShown(id, on) {
       s.hidden = on ? s.hidden.filter((x) => x !== id) : [...new Set([...s.hidden, id])];

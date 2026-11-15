@@ -49,7 +49,15 @@ const E = (source, target, edge_type) => ({ id: `${source}__${edge_type}__${targ
   eq(R("X1", "author"), ["Giulia Rossi", "master", "II"], "the author by the master");
   eq(R("ACT", "absolute_time_start"), [100, "members", "II"], "an activity from its earliest member");
   eq(R("M1", "absolute_time_start"), [2013, "publisher", "E13"], "a model from its Document");
-  eq(R("M2", "absolute_time_start"), [2013, "container", "E13"], "a member from its container");
+  // MICRO-D-GIS-DOCUMENTI p.6 · the Document's date never passes to the container
+  eq(R("G", "absolute_time_start")[1] === "publisher", false, "a container takes no date from its Document");
+  eq(R("M2", "absolute_time_start"), [null, null, null], "…nor its member through it");
+  doc.graph.edges.push(E("E13", "G", "has_representation_model"));
+  {
+    const ixG = M.provIndex(doc);
+    const p = M.resolveProvenance(ixG, "M2", "absolute_time_start");
+    eq([p.value, p.level, p.origin], [2013, "container", "E13"], "a member from its container (an epoch reaching it)");
+  }
   eq([M.unitLife(ix, "SU1").status, M.unitLife(ix, "SU1").epochs], ["still_existing", ["II", "PA", "XX", "E13"]], "still existing");
   eq(R("SU1", "absolute_time_end"), [2026, "life", "XX"], "the end from the life");
   doc.graph.edges.push(E("BR", "SU1", "is_after"), E("BR", "E13", "has_first_epoch"));

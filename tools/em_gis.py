@@ -53,14 +53,28 @@ def transformer(src, dst):
 
 
 def features_in(path: str, scene_crs, *, layer: Optional[str] = None, z_field: Optional[str] = None,
-                feature_key: Optional[str] = None, crs: Optional[str] = None) -> Dict[str, Any]:
+                feature_key: Optional[str] = None, crs: Optional[str] = None,
+                shift: Optional[Sequence[float]] = None, group_key: Optional[str] = None) -> Dict[str, Any]:
     """The features of a vector layer in the scene's CRS: ``{ok, crs, how,
-    count, vertices, truncated, features: [{type, label, coords}]}`` —
-    ``coords`` ``[X, Y, Z|None]`` for a point, a list of parts otherwise."""
+    count, vertices, truncated, features: [{type, label, group, coords}]}`` —
+    ``coords`` ``[X, Y, Z|None]`` for a point, a list of parts otherwise.
+
+    MICRO-D-GIS-DOCUMENTI · ``shift``: the frame's shift (a DXF drawn with
+    one: its numbers are CRS X minus S), added before the conversion;
+    ``group_key``: the attribute each feature's ``group`` is read from (a
+    DXF's ``layer``); ``said`` «convertito da EPSG:a a EPSG:b» when PROJ
+    converted the points."""
     from s3dgraphy.gis import read_features
     got = read_features(path, layer=layer, z_field=z_field)
     src = _norm(crs) or got["crs"]
-    fn, how = transformer(src, scene_crs)
+    fn0, how = transformer(src, scene_crs)
+    sx, sy, sz = (list(shift or []) + [0.0, 0.0, 0.0])[:3]
+    sx, sy, sz = float(sx or 0), float(sy or 0), float(sz or 0)
+    if sx or sy:
+        def fn(xs, ys, _f=fn0):
+            return _f([x + sx for x in xs], [y + sy for y in ys])
+    else:
+        fn = fn0
     out: List[Dict[str, Any]] = []
     nv = 0
     truncated = False
@@ -72,11 +86,16 @@ def features_in(path: str, scene_crs, *, layer: Optional[str] = None, z_field: O
         label = None
         if feature_key:
             v = (f.get("attributes") or {}).get(feature_key)
-            label = None if v is None else str(v)
+            label = None if v in (None, "") else str(v)
+        group = None
+        if group_key:
+            v = (f.get("attributes") or {}).get(group_key)
+            group = None if v is None else str(v)
+        zf = (lambda z: None if z is None else z + sz) if sz else (lambda z: z)
         if c and isinstance(c[0], (int, float)):
             X, Y = fn([c[0]], [c[1]])
-            out.append({"type": "Point", "label": label,
-                        "coords": [X[0], Y[0], c[2] if len(c) > 2 else None]})
+            out.append({"type": "Point", "label": label, "group": group,
+                        "coords": [X[0], Y[0], zf(c[2]) if len(c) > 2 else None]})
             nv += 1
             continue
         parts = []
@@ -84,13 +103,60 @@ def features_in(path: str, scene_crs, *, layer: Optional[str] = None, z_field: O
             if not part:
                 continue
             X, Y = fn([p[0] for p in part], [p[1] for p in part])
-            parts.append([[X[i], Y[i], part[i][2] if len(part[i]) > 2 else None] for i in range(len(part))])
+            parts.append([[X[i], Y[i], zf(part[i][2]) if len(part[i]) > 2 else None] for i in range(len(part))])
             nv += len(part)
         kind = f.get("type") or got.get("geometry_type") or "LineString"
         out.append({"type": kind.replace("Multi", "") if kind != "MultiPoint" else "MultiPoint",
-                    "label": label, "coords": parts})
+                    "label": label, "group": group, "coords": parts})
     return {"ok": True, "crs": _norm(scene_crs), "layer_crs": src, "how": how, "count": len(out),
-            "vertices": nv, "truncated": truncated, "features": out}
+            "vertices": nv, "truncated": truncated, "features": out, "said": converted_said(src, scene_crs, how)}
+
+
+def converted_said(src, dst, how: str) -> str:
+    """MICRO-D-GIS-DOCUMENTI · what the program always writes of a layer in
+    another grid: «convertito da EPSG:3004 a EPSG:32633» (or the same grid)."""
+    a, b = _norm(src), _norm(dst)
+    if how == "reprojected":
+        return f"convertito da {a} a {b}"
+    if how == "same grid":
+        return f"stessa griglia: {a} = {b}"
+    return ""
+
+
+def raster_grid(path: str, scene_crs, *, crs: Optional[str] = None, n: int = 16) -> Dict[str, Any]:
+    """MICRO-D-GIS-DOCUMENTI · a georeferenced picture (a GeoTIFF, a JPEG /
+    PNG with its world file) laid in the scene's CRS: a grid of ``n``×``n``
+    cells over its pixels, each node CONVERTED by PROJ (or the same numbers
+    for the same grid), with its texture coordinate. The scene draws it as a
+    mesh: the sheet's frame reprojected point by point at the nodes and
+    linear between them — no pixel is resampled (a full warp is not done:
+    within a cell of a 400 m sheet the difference is centimetres).
+
+    ``{ok, how, said, from, to, n, width, height, xs, ys, uv, bbox}``; nodes
+    row-major from the top row (v = 1) to the bottom (v = 0)."""
+    from s3dgraphy.gis import format_of, read_geotiff_info, read_worldfile_image_info
+    fmt = format_of(path)
+    info = read_worldfile_image_info(path) if fmt == "worldfile_image" else read_geotiff_info(path)
+    aff = info.get("affine")
+    if not aff:
+        raise ValueError("the picture has no georeference (no GeoTIFF tags, no world file)")
+    src = _norm(crs) or info.get("crs")
+    fn, how = transformer(src, scene_crs)
+    n = max(1, min(64, int(n)))
+    W, H = info["width"], info["height"]
+    x0, a, b, y0, d, e = aff
+    px, py, uv = [], [], []
+    for j in range(n + 1):
+        r = H * j / n
+        for i in range(n + 1):
+            c = W * i / n
+            px.append(x0 + a * c + b * r)
+            py.append(y0 + d * c + e * r)
+            uv += [i / n, 1.0 - j / n]
+    X, Y = fn(px, py)
+    return {"ok": True, "how": how, "said": converted_said(src, scene_crs, how), "from": src,
+            "to": _norm(scene_crs), "n": n, "width": W, "height": H, "xs": X, "ys": Y, "uv": uv,
+            "bbox": [min(X), min(Y), max(X), max(Y)]}
 
 
 # ── the ground: a DEM's heights on a grid of the scene ──────────────────────

@@ -9214,6 +9214,16 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-strips { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
 .scn-strips .v3d-strip { pointer-events: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding-right: 8px; }
 .scn-strips .v3d-strip b { font-weight: 600; }
+/* MICRO-D-GIS-DOCUMENTI p.9 · the models held back: one band that folds, the reason on each row */
+.scn-gates { pointer-events: auto; display: flex; flex-direction: column; gap: 3px; align-self: flex-start; max-width: min(760px, 100%);
+  background: var(--bg-panel); border: 1px solid var(--warn-border); border-radius: var(--radius-sm); padding: 2px 4px; }
+.scn-gates.hidden { display: none; }
+.scn-gates-head { border: 0; background: none; color: var(--warn-ink); font: inherit; font-size: 0.74rem; font-weight: 600; text-align: left; cursor: pointer; padding: 1px 2px; }
+.scn-gates-rows { display: flex; flex-direction: column; gap: 3px; max-height: 30vh; overflow: auto; }
+.scn-gates.folded .scn-gates-rows { display: none; }
+.scn-gates .v3d-strip { border: 1px solid var(--border); border-radius: var(--radius-sm); padding-right: 8px; }
+.v3d-gate-why { color: var(--warn-ink); font-size: 0.74rem; }
+.v3d-strip.folded .v3d-gate-why { display: inline; }
 
 /* RISORSA-FILE · the files of a resource, and the question of a replacement */
 .res-files { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
@@ -11509,6 +11519,18 @@ td.al-cloud { color: var(--accent-ink); }
 .gis-row { display: flex; flex-direction: column; gap: 2px; padding: 3px 4px; border-bottom: 1px solid rgba(127, 127, 127, 0.2); }
 .gis-row label { display: flex; gap: 6px; align-items: center; }
 .gis-row small { opacity: 0.75; }
+/* MICRO-D-GIS-DOCUMENTI · the sheets under their document, «solo studio», the little window CRS + shift */
+.gis-doc { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 4px 4px 2px; border-bottom: 1px solid var(--border); color: var(--text); }
+.gis-row.gis-sheet { padding-left: 18px; }
+.gis-study-only { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 0.7rem; font-weight: 600;
+  background: var(--warn-soft); color: var(--warn-ink); border: 1px solid var(--warn-border); white-space: nowrap; }
+.gis-docbox p { margin: 2px 0; font-size: 0.78rem; }
+.gis-crs-win { border: 1px solid var(--warn-border); border-radius: var(--radius); padding: 4px 6px 6px; margin: 4px 0; background: var(--bg-sunken); }
+.gis-crs-win legend { font-size: 0.74rem; font-weight: 600; color: var(--warn-ink); padding: 0 4px; }
+.gis-crs-win input[type="text"] { width: 120px; }
+.gis-shift { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+.gis-shift input { width: 104px; }
+.gis-crs-win small { display: block; color: var(--text-muted); }
 .gis-acts { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .gis-acts input[type="number"] { width: 5em; }
 .gis-inspect { margin-top: 6px; font-size: 12px; }
@@ -11878,19 +11900,26 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 .win-search .win-search-q:focus { outline: none; border-color: var(--accent); }
 .scn-bar-tail { display: inline-flex; align-items: center; gap: 4px; }
 /* p.9 · the card «Completa il container» (not modal) */
+/* MICRO-D-GIS-DOCUMENTI p.8 · the card on the theme's tokens, light and dark
+   (it read `--panel`, a token nobody defines: a white card with the dark
+   theme's light ink — grey titles, white chips on white, an invisible ✕) */
 .ccard { position: fixed; left: calc(50% - 190px); top: 110px; width: 380px; max-height: calc(100vh - 160px); overflow: auto; z-index: 900;
-  background: var(--panel, #fff); color: inherit; border: 1px solid var(--border, #ccc); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.25); padding: 10px 12px; }
-.ccard-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.ccard-head .ccard-x { margin-left: auto; border: 0; background: none; cursor: pointer; }
-.ccard-line { font-size: 12px; margin: 2px 0 8px; }
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: 0 8px 28px rgba(0,0,0,.35); padding: 10px 12px; }
+.ccard-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--text); }
+.ccard-head .ccard-x { margin-left: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--text); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 3px 6px; }
+.ccard-head .ccard-x:hover, .ccard-head .ccard-x:focus-visible { background: var(--bg-hover); border-color: var(--border-strong); }
+.ccard-line { font-size: 12px; margin: 2px 0 8px; color: var(--text-muted); }
 .ccard-line .ccard-missing { color: var(--warn-ink); font-weight: 600; }
-.ccard-box { border-top: 1px solid var(--border, #ddd); padding: 6px 0; }
-.ccard-box-head { font-weight: 600; margin-bottom: 3px; }
-.ccard-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px; margin: 1px 3px 1px 0; border-radius: 10px; background: var(--chip, rgba(127,127,127,.15)); font-size: 12px; }
-.ccard-chip-x { border: 0; background: none; cursor: pointer; padding: 0 2px; }
-.ccard-sugg { margin: 4px 0; padding: 4px 6px; border-radius: 6px; background: var(--warn-soft); color: var(--warn-ink); font-size: 12px; }
-.ccard-none { opacity: .6; font-style: italic; }
-.ccard-foot { display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid var(--border, #ddd); padding-top: 8px; margin-top: 4px; }
+.ccard-box { border-top: 1px solid var(--border); padding: 6px 0; }
+.ccard-box-head { font-weight: 600; margin-bottom: 3px; color: var(--text); }
+.ccard-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px; margin: 1px 3px 1px 0; border-radius: 10px;
+  background: var(--bg-sunken); color: var(--text); border: 1px solid var(--border); font-size: 12px; }
+.ccard-chip-x { border: 0; background: none; color: var(--text-muted); cursor: pointer; padding: 0 2px; }
+.ccard-chip-x:hover { color: var(--danger); }
+.ccard-sugg { margin: 4px 0; padding: 4px 6px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn-ink); border: 1px solid var(--warn-border); font-size: 12px; }
+.ccard-none { color: var(--text-muted); font-style: italic; }
+.ccard-foot { display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; }
 .scn-vis { white-space: nowrap; }
 /* MICRO-RITOCCHI-CHIARI p.2b · the Warnings table: rows picked by hand, verbs over them */
 .tv-issues .tv-pick { width: 22px; text-align: center; padding-left: 2px; padding-right: 2px; }
@@ -11974,3 +12003,4 @@ button.uo-col { cursor: pointer; }
 .insp-prov-src .insp-prov-from, .insp-ep-follows .insp-prov-from { display: inline-block; width: auto; text-align: center; padding: 1px 6px; font-size: 10.5px; }
 .insp-prov-src .insp-prov-from:hover { background: var(--inherit-soft); text-decoration: underline; }
 .insp-epochs-inherited .insp-ep-name.insp-link { display: inline-block; width: auto; }
+.gis-doc button[data-gis-act="frame-doc"] { width: auto; flex: none; padding: 0 6px; line-height: 1.4; }

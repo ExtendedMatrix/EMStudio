@@ -45,18 +45,46 @@ export interface GisLayerRef {
   layer: string | null;
   raster: string | null;
   derived: boolean;
+  /** MICRO-D-GIS-DOCUMENTI · a SHEET of a document (a ResourceFileNode of its
+   *  GIS set): the document it is under, the frame's shift (a DXF's) */
+  sheet?: boolean;
+  docId?: string | null;
+  docName?: string | null;
+  shift?: [number, number, number] | null;
 }
 export interface SurfaceRef { id: string; name: string; dem: string | null; image: string | null; step: number | null }
 export interface SceneFrame { epsg: number; x: number; y: number; z: number; rotation: number }
 
 const dataOf = (n: Record<string, any> | undefined): Record<string, any> => (n && typeof n.data === "object" && n.data ? n.data : {});
 
-/** The GIS layers of the graph, in the graph's order. */
+/** The GIS layers of the graph, in the graph's order: the layers of before
+ *  (a `gis_layer` resource) and the SHEETS of the GIS documents
+ *  (MICRO-D-GIS-DOCUMENTI: Document → set → `has_file` → a file node with its
+ *  `gis_format` and frame), each sheet with its document. */
 export function gisLayersOf(doc: Doc): GisLayerRef[] {
   const nodes = doc?.graph?.nodes ?? [];
   const edges = doc?.graph?.edges ?? [];
   const derived = new Set(edges.filter((e) => e.edge_type === "dtc_derived_from").map((e) => String(e.source)));
-  return nodes.filter((n) => n.node_type === "resource" && dataOf(n).url_type === "gis_layer").map((n) => {
+  const byId = new Map(nodes.map((n) => [String(n.id), n]));
+  const sheets: GisLayerRef[] = [];
+  for (const set of nodes) {
+    if (set.node_type !== "resource" || !dataOf(set).gis_document) continue;
+    const docE = edges.find((e) => e.edge_type === "has_linked_resource" && e.target === set.id && byId.get(String(e.source))?.node_type === "document");
+    const dn = docE ? byId.get(String(docE.source)) : undefined;
+    for (const e of edges) {
+      if (e.edge_type !== "has_file" || e.source !== set.id) continue;
+      const f = byId.get(String(e.target));
+      const d = dataOf(f);
+      if (!f || !d.gis_format || d.removed) continue;
+      const sh = Array.isArray(d.frame?.shift) ? (d.frame.shift as number[]).map(Number) : null;
+      sheets.push({ id: String(f.id), name: String(f.name ?? f.id), format: String(d.gis_format), crs: d.crs ? String(d.crs) : (d.frame?.crs ? String(d.frame.crs) : null),
+        url: String(d.url ?? ""), featureKey: d.feature_key ? String(d.feature_key) : null, zField: d.z_field ? String(d.z_field) : null,
+        layer: d.layer ? String(d.layer) : null, raster: d.raster?.kind ? String(d.raster.kind) : null, derived: false,
+        sheet: true, docId: dn ? String(dn.id) : null, docName: dn ? String(dn.name ?? dn.id) : null,
+        shift: sh && sh.some((v) => v) ? [sh[0] || 0, sh[1] || 0, sh[2] || 0] : null });
+    }
+  }
+  return nodes.filter((n) => n.node_type === "resource" && dataOf(n).url_type === "gis_layer" && !dataOf(n).gis_document).map((n): GisLayerRef => {
     const d = dataOf(n);
     let url = String(d.url ?? "");
     if (!url) {
@@ -72,8 +100,11 @@ export function gisLayersOf(doc: Doc): GisLayerRef[] {
     return { id: String(n.id), name: String(n.name ?? n.id), format: String(d.gis_format ?? ""), crs: d.crs ? String(d.crs) : null,
       url, featureKey: d.feature_key ? String(d.feature_key) : null, zField: d.z_field ? String(d.z_field) : null,
       layer: d.layer ? String(d.layer) : null, raster: d.raster?.kind ? String(d.raster.kind) : null, derived: derived.has(String(n.id)) };
-  });
+  }).concat(sheets);
 }
+
+/** MICRO-D-GIS-DOCUMENTI · a sheet drawn as a picture (a GeoTIFF image, a JPEG / PNG with its world file) */
+export const isPictureSheet = (l: GisLayerRef): boolean => !!l.sheet && (l.format === "worldfile_image" || (l.format === "geotiff" && l.raster === "image"));
 
 /** The grounds of the landscape (LandscapeSurfaceNode): their DEM and image layers. */
 export function surfacesOf(doc: Doc): SurfaceRef[] {
@@ -228,40 +259,95 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
     return el;
   };
 
-  const drawLayer = async (l: GisLayerRef, color: number) => {
-    const sig = `${l.id}|${l.url}|${o.frame.epsg}|${o.frame.x}|${o.frame.y}|${o.frame.rotation}`;
+  /** MICRO-D-GIS-DOCUMENTI · a picture sheet: its grid of nodes converted by
+   *  the bridge (PROJ), drawn as a mesh at the ground, the picture on it */
+  const drawPicture = async (l: GisLayerRef) => {
+    const sig = `${l.id}|${l.url}|${l.crs}|${o.frame.epsg}|${o.frame.x}|${o.frame.y}|${o.frame.rotation}`;
     if (drawn.get(l.id)?.sig === sig || !ctx) return;
     const path = fileOf(l.url, o.docPath);
-    const j = await post("/gis/features", { path, scene_crs: sceneCrs, layer: l.layer, z_field: l.zField, feature_key: l.featureKey, crs: l.crs });
+    const j = await post("/gis/raster-grid", { path, scene_crs: sceneCrs, crs: l.crs, n: 16 });
     if (!ctx || !group) return;
     if (!j.ok) { o.log?.(`GIS: ${l.name} — ${j.error ?? j.status}`); drawn.set(l.id, { obj: null, labels: [], sig, info: { error: j.error ?? j.status } }); return; }
     drop(l.id);
     const { THREE } = ctx;
-    const geo = geometryOf(o.frame, j.features, ground);
+    const n = Number(j.n);
+    const pos = new Float32Array((n + 1) * (n + 1) * 3);
+    for (let k = 0; k < (n + 1) * (n + 1); k++) pos.set(toThree(o.frame, j.xs[k], j.ys[k], ground(j.xs[k], j.ys[k]) + 0.02), k * 3);
+    const idx: number[] = [];
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const a = r * (n + 1) + c, b = a + 1, d = a + n + 1, e = d + 1;
+      idx.push(a, d, b, b, d, e);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(j.uv, 2));
+    g.setIndex(idx);
+    let map = null;
+    try {
+      map = await new THREE.TextureLoader().loadAsync(`${o.bridge}/geo/raster-preview?path=${encodeURIComponent(path)}&max=4096`);
+      map.colorSpace = THREE.SRGBColorSpace;
+    } catch { map = null; o.log?.(`GIS: ${l.name} — the picture did not come`); }
+    if (!ctx || !group) return;
+    const m = new THREE.MeshBasicMaterial({ color: map ? 0xffffff : 0xd8c9a0, map, side: THREE.DoubleSide, transparent: true, opacity: 0.95,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    const mesh = new THREE.Mesh(g, m);
+    mesh.userData.gisLayer = l.id;
+    mesh.userData.helper = true;
+    mesh.renderOrder = 4;
+    group.add(mesh);
+    queueMicrotask(() => applyOpacity(l.id));
+    drawn.set(l.id, { obj: mesh, labels: [], sig, info: { picture: true, cells: n * n, how: j.how, said: j.said, layer_crs: j.from, textured: !!map, bbox: j.bbox } });
+  };
+
+  const drawLayer = async (l: GisLayerRef, color: number) => {
+    if (isPictureSheet(l)) { await drawPicture(l); return; }
+    const sig = `${l.id}|${l.url}|${l.crs}|${(l.shift ?? []).join(",")}|${o.frame.epsg}|${o.frame.x}|${o.frame.y}|${o.frame.rotation}`;
+    if (drawn.get(l.id)?.sig === sig || !ctx) return;
+    const path = fileOf(l.url, o.docPath);
+    const dxf = l.format === "dxf";
+    const j = await post("/gis/features", { path, scene_crs: sceneCrs, layer: l.layer, z_field: l.zField, feature_key: l.featureKey, crs: l.crs,
+      ...(l.shift ? { shift: l.shift } : {}), ...(dxf ? { group_key: "layer" } : {}) });
+    if (!ctx || !group) return;
+    if (!j.ok) { o.log?.(`GIS: ${l.name} — ${j.error ?? j.status}`); drawn.set(l.id, { obj: null, labels: [], sig, info: { error: j.error ?? j.status } }); return; }
+    drop(l.id);
+    const { THREE } = ctx;
     const holder = new THREE.Group();
     holder.userData.gisLayer = l.id;
     holder.userData.helper = true;
-    if (geo.segments.length) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute(geo.segments, 3));
-      const m = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: true });
-      const ls = new THREE.LineSegments(g, m);
-      ls.renderOrder = 5;
-      holder.add(ls);
-    }
-    if (geo.points.length) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute(geo.points, 3));
-      const m = new THREE.PointsMaterial({ color, size: 7, sizeAttenuation: false, depthTest: false, transparent: true });
-      const ps = new THREE.Points(g, m);
-      ps.renderOrder = 6;
-      holder.add(ps);
-    }
+    // MICRO-D-GIS-DOCUMENTI · a DXF's layers are groups: one colour each
+    const groups = dxf ? [...new Set((j.features as Array<{ group?: string | null }>).map((f) => f.group ?? "0"))].sort() : [null];
+    const allLabels: Array<{ at: V3; text: string; el: HTMLElement }> = [];
+    let nSeg = 0, nPts = 0;
+    groups.forEach((gname, gi) => {
+      const feats = dxf ? (j.features as Array<{ group?: string | null; type: string; label: string | null; coords: any }>).filter((f) => (f.group ?? "0") === gname) : j.features;
+      const col = dxf ? PALETTE[(gi + 1) % PALETTE.length] : color;
+      const geo = geometryOf(o.frame, feats, ground);
+      const sub = new THREE.Group();
+      sub.userData.dxfLayer = gname;
+      sub.userData.helper = true;
+      if (geo.segments.length) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(geo.segments, 3));
+        const ls = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.95, depthTest: true }));
+        ls.renderOrder = 5;
+        sub.add(ls);
+      }
+      if (geo.points.length && !(dxf && geo.labels.length === geo.points.length / 3)) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(geo.points, 3));
+        const ps = new THREE.Points(g, new THREE.PointsMaterial({ color: col, size: 7, sizeAttenuation: false, depthTest: false, transparent: true }));
+        ps.renderOrder = 6;
+        sub.add(ps);
+      }
+      holder.add(sub);
+      nSeg += geo.segments.length / 6;
+      nPts += geo.points.length / 3;
+      for (const x of geo.labels.slice(0, 5000)) allLabels.push({ ...x, el: label(x.text, col) });
+    });
     group.add(holder);
     queueMicrotask(() => applyOpacity(l.id));
-    const labels = geo.labels.slice(0, 5000).map((x) => ({ ...x, el: label(x.text, color) }));
-    drawn.set(l.id, { obj: holder, labels, sig, info: { features: j.count, vertices: j.vertices, how: j.how, layer_crs: j.layer_crs,
-      truncated: j.truncated, points: geo.points.length / 3, segments: geo.segments.length / 6 } });
+    drawn.set(l.id, { obj: holder, labels: allLabels, sig, info: { features: j.count, vertices: j.vertices, how: j.how, said: j.said, layer_crs: j.layer_crs,
+      truncated: j.truncated, points: nPts, segments: nSeg, ...(dxf ? { groups } : {}) } });
   };
 
   const drawSurface = async (s: SurfaceRef) => {
@@ -367,7 +453,14 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
       });
     },
     ownsPointer: () => false,
-    far: () => null,
+    // MICRO-D-GIS-DOCUMENTI · the far plane reaches the layers drawn (a sheet a km away)
+    far: () => {
+      if (!ctx || !group || !group.children.length) return null;
+      const b = new ctx.THREE.Box3().setFromObject(group);
+      if (b.isEmpty()) return null;
+      const cam = ctx.camera();
+      return cam.position.distanceTo(b.getCenter(new ctx.THREE.Vector3())) + b.getSize(new ctx.THREE.Vector3()).length();
+    },
     setCamera() { /* the labels read the camera each frame */ },
     set(layers, surfaces, all) {
       want = { layers, surfaces, all };
@@ -380,7 +473,9 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
       applyOpacity(id);
     },
     state() {
-      return { epsg: o.frame.epsg, drawn: [...drawn.entries()].map(([id, d]) => ({ id, ...d.info, labels: d.labels.length,
+      const box = ctx && group?.children.length ? new ctx.THREE.Box3().setFromObject(group) : null;
+      return { epsg: o.frame.epsg, inScene: !!group?.parent, visible: group?.visible ?? false,
+        box: box && !box.isEmpty() ? [box.min.toArray(), box.max.toArray()] : null, drawn: [...drawn.entries()].map(([id, d]) => ({ id, ...d.info, labels: d.labels.length,
         shownLabels: d.labels.filter((l) => l.el.style.display !== "none").length })) };
     },
   };

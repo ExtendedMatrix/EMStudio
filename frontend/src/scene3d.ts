@@ -166,6 +166,11 @@ export interface SceneTexts {
   /** MICRO-MEMORIA-SESSIONE p.1 · a model the memory has no room for: its
    *  estimate, the room left, which one decided (the ceiling, the machine) */
   memoryOver?: (name: string, need: string, room: string, by: "ceiling" | "machine") => string;
+  /** MICRO-D-GIS-DOCUMENTI p.9 · the reason ON the row of a model held back
+   *  (over the threshold, too many points, no room in memory), and the head
+   *  of the band that gathers those rows */
+  gateWhy?: (kind: "bytes" | "points" | "memory", x: string, lim: string) => string;
+  gatesHead?: (n: number) => string;
   /** …«Carica <versione> (≈ n MB)» */
   useVersion?: (label: string, mb: string) => string;
   /** MICRO-SPAZIO-3D · the box zoom armed, the modal's hint */
@@ -854,6 +859,51 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       tchip.dataset.tchip = "1";
       for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) tchip.addEventListener(ev, (e) => e.stopPropagation());
       for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) strips.addEventListener(ev, (e) => e.stopPropagation());
+      // MICRO-D-GIS-DOCUMENTI p.9 · the rows of the models held back («Carica
+      // comunque») gathered in ONE band that folds: folded, one line at the
+      // foot of the scene (how many, why on each row when open); it never
+      // covers the scene with a column of strips
+      const gates = document.createElement("div");
+      gates.className = "scn-gates";
+      gates.dataset.gates = "1";
+      const gatesHead = document.createElement("button");
+      gatesHead.type = "button";
+      gatesHead.className = "scn-gates-head";
+      gatesHead.dataset.gatesHead = "1";
+      const gatesRows = document.createElement("div");
+      gatesRows.className = "scn-gates-rows";
+      gates.append(gatesHead, gatesRows);
+      // folded unless the person opened it (the key says OPEN: a key never written reads false)
+      const gatesFolded = () => !opts.panelFolded?.("gates-open");
+      const gatesPaint = () => {
+        const n = gatesRows.children.length;
+        gates.classList.toggle("hidden", !n);
+        const folded = gates.classList.contains("folded");
+        gatesHead.textContent = `${folded ? "▸" : "▾"} ⚠ ${opts.texts.gatesHead?.(n) ?? `${n} not loaded`}`;
+        gatesHead.setAttribute("aria-expanded", String(!folded));
+      };
+      gates.classList.toggle("folded", gatesFolded());
+      gatesHead.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const c = !gates.classList.contains("folded");
+        gates.classList.toggle("folded", c);
+        opts.onPanelFold?.("gates-open", !c);
+        gatesPaint();
+      });
+      /** a strip that asks for a decision goes into the band, its reason on the row itself */
+      const toGates = (el: HTMLElement, why: string) => {
+        el.classList.add("v3d-gated");
+        if (!el.querySelector(".v3d-gate-why")) {
+          const w = document.createElement("span");
+          w.className = "v3d-gate-why";
+          w.dataset.gateWhy = "1";
+          w.textContent = why;
+          el.querySelector(":scope > b")?.after(w);
+        }
+        if (el.parentElement !== gatesRows) gatesRows.appendChild(el);
+        if (gates.parentElement !== strips) strips.appendChild(gates);
+        gatesPaint();
+      };
       const popover = (open?: boolean): boolean => {
         const on = open ?? !strips.classList.contains("open");
         strips.classList.toggle("open", on);
@@ -1236,7 +1286,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (isOrtho || geo?.ownsPointer()) return;
         const { near, far: f0 } = clipPlanes(camera.position.distanceTo(controls.target), span());
         // MICRO-GEOGLOBO · with the globe, as far as the horizon
-        const far = Math.max(f0, geo?.far() ?? 0);
+        // MICRO-D-GIS-DOCUMENTI · …and as far as the GIS layers drawn (a cadastre of a km)
+        const far = Math.max(f0, geo?.far() ?? 0, gis?.far() ?? 0);
         if (Math.abs(camera.near - near) / near > 0.05 || camera.far !== far) {
           camera.near = near;
           camera.far = far;
@@ -1685,6 +1736,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (kind === "sketch") {
           const m = sketchMeshes.get(id);
           if (m) b.expandByObject(m);
+        } else if (kind === "gis") {
+          // MICRO-D-GIS-DOCUMENTI · a GIS layer drawn by the GIS driver (its group «gis»)
+          const gisGroup = scene.getObjectByName("gis");
+          gisGroup?.updateMatrixWorld(true);
+          gisGroup?.traverse((o: any) => { if (o.userData.gisLayer === id || o.userData.gisSurface === id) b.expandByObject(o); });
         } else {
           content.updateMatrixWorld(true);
           content.traverse((o: any) => {
@@ -1878,6 +1934,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const lighter = lighterThatFits((item.lighter ?? []).map((v) => ({ ...v, est: estimateMb(v) })), r.room);
         const strip = el ?? stripOf(item);
         strip.dataset.memGate = "1";
+        toGates(strip, opts.texts.gateWhy?.("memory", mbSay(need), mbSay(r.room)) ?? `~${mbSay(need)} > ${mbSay(r.room)}`);
         if (lighter && opts.onLighter) {
           const b = document.createElement("button");
           b.type = "button"; b.className = "scn-tg"; b.dataset.gate = "lighter";
@@ -1921,6 +1978,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         strips.textContent = "";
         strips.appendChild(flowStrip);
         strips.appendChild(altStrip);
+        gatesRows.textContent = "";
+        strips.appendChild(gates);
+        gatesPaint();
         const pending: Promise<void>[] = [];
         // MICRO-MEMORIA-SESSIONE p.1 · the tilesets take their room AFTER the
         // models are decided (a model cannot shrink, a tileset can: its ceiling
@@ -1933,8 +1993,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const key = `${item.kind}:${item.id}`;
           // MICRO-3DTILES · a tileset (the item's own, or the one chosen over
           // a glb past the threshold)
+          // MICRO-D-GIS-DOCUMENTI p.9 · a zip of a tileset (TempluMare's master,
+          // «Cesium 3D Tiles tileset», ../RB/cesium/TempluMare.zip) is never
+          // a mesh to load: its tileset is drawn, never gated
+          const zipOfTiles = !!item.tileset && /\.zip(\?|#|$)/i.test(item.url ?? "");
           const tsUrl = item.state === "resident" && item.url
-            ? (isTilesetUrl(item.url) || item.tiles ? item.url : useTileset.has(key) && item.tileset ? item.tileset : null) : null;
+            ? (isTilesetUrl(item.url) || item.tiles ? item.url : (useTileset.has(key) || zipOfTiles) && item.tileset ? item.tileset : null) : null;
           // MICRO-TILESET-CONTENITORE p.3 · a container's tileset released while
           // the members are drawn: not built again until the distance asks for it
           if (tsUrl && item.alt && altReleased.has(item.alt.group) && !layers.has(tsUrl)) {
@@ -1955,7 +2019,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (opts.memory && fresh && gen === generation && !disposed) {
                 const m = opts.memory();
                 tsMb = Math.min(tilesMb, roomFor(memUsed, 0, m.ceilingMb, m.availableMb).room);
-                if (tsMb < 64 && memGate(key, item, tsUrl, { bytes: Math.ceil(64 * 1024 * 1024 / 3) }, el, later)) return "held";
+                // MICRO-D-GIS-DOCUMENTI p.9 · a tileset arrives in pieces: never
+                // held at the gate («Carica comunque» on «TempluMare (Cesium 3D
+                // Tiles tileset)»); with little room it starts at 64 MB and adapts
                 tsMb = Math.max(64, tsMb);
                 if (!memForced.has(tsUrl)) memUsed += tsMb;
               }
@@ -2092,7 +2158,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               const lim = opts.limit;
               // MICRO-MEMORIA-SESSIONE p.1 · the size the guard weighs too (the graph's, else the HEAD's)
               let sized: number | null = (u === base ? item.bytes : null) ?? chosen?.bytes ?? null;
-              if (lim && !forced.has(u)) {
+              if (lim && !forced.has(u) && !isTilesetUrl(u)) {
                 const bytes = sized ?? (item.obj ? null : await headBytes(u));
                 sized = bytes ?? null;
                 const pts = u === base ? item.points ?? null : null;
@@ -2101,6 +2167,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                   drawn.set(key, { item, as: "gated", url: u });
                   later.push({ ...item, state: "missing", label: opts.texts.overLimit(item.label, formatBytes(bytes ?? 0), formatBytes(lim.bytes)) });
                   if (el) {
+                    const overPts = !(bytes != null && bytes > lim.bytes) && pts != null;
+                    toGates(el, overPts
+                      ? opts.texts.gateWhy?.("points", String(pts), String(lim.points)) ?? `${pts} > ${lim.points} points`
+                      : opts.texts.gateWhy?.("bytes", formatBytes(bytes ?? 0), formatBytes(lim.bytes)) ?? `${formatBytes(bytes ?? 0)} > ${formatBytes(lim.bytes)}`);
                     if (item.tileset) {
                       const b = document.createElement("button");
                       b.type = "button"; b.className = "scn-tg"; b.dataset.gate = "tileset";

@@ -1123,7 +1123,8 @@ def read_georef(path, epsg_override=None) -> dict:
         affine = (X - i * sc[0], sc[0], 0.0, Y + j * sc[1], 0.0, -sc[1])
     else:
         stem = os.path.splitext(path)[0]
-        for ext in (".tfw", ".tifw", ".wld"):
+        # MICRO-D-GIS-DOCUMENTI · a JPEG / PNG sheet's world file too
+        for ext in (".tfw", ".tifw", ".wld", ".jgw", ".jpgw", ".pgw", ".pngw"):
             if os.path.exists(stem + ext):
                 v = [float(s) for s in open(stem + ext).read().split()[:6]]
                 # world file: centre of the top-left pixel

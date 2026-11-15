@@ -85,9 +85,16 @@ if (existsSync(F)) {
 //     took the epochs of the meshes it covers (none) and was nowhere
 {
   const raw = JSON.parse(readFileSync(new URL("../testdata/tiles-frame.em.json", import.meta.url), "utf8"));
+  // MICRO-D-GIS-DOCUMENTI p.6 (E.D. 15 Nov 2026) · the Document's epoch never passes
+  // to the container: with only D.1 in Epoch 1 the container lies in no epoch…
+  const sp0 = M.buildSpace(raw, { isUnit: (t) => t === "US" });
+  eq(sp0.rms.find((r) => r.id === "rmgroup_tls")?.epochs, [], "the container takes no epoch from its Document");
+  // …its own epoch is the one reaching it
+  const g0 = raw.graph ?? Object.values(raw.graphs ?? {})[0];
+  g0.edges.push({ id: "EP1_rm_tls", source: "EP1", target: "rmgroup_tls", edge_type: "has_representation_model" });
   const sp = M.buildSpace(raw, { isUnit: (t) => t === "US" });
   const tls = sp.rms.find((r) => r.id === "rmgroup_tls");
-  eq(tls?.epochs, ["EP1"], "the container without meshes: its alternative lies in its own epoch (its Document's), Epoch 1");
+  eq(tls?.epochs, ["EP1"], "the container without meshes: its alternative lies in its own epoch (the one reaching it), Epoch 1");
   eq(tls?.altOf, "rmgroup_tls", "…drawn as the container's alternative");
   ok(tls?.resource?.tiles === "directory", "…a tileset");
   eq(sp.summary("EP1")?.rms.map((r) => r.id), ["rmgroup_tls"], "…Epoch 1's models (the table «Modelli e proxy» and the scene read them)");

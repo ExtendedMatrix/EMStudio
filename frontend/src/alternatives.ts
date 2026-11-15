@@ -33,7 +33,8 @@ export interface AlternativesRule {
   epoch_types: string[];
   /** em_visual_rules 1.6.40 · the epochs a container states of ITSELF, read
    *  when its members have none (a tileset of the whole survey, no mesh yet) */
-  container_epochs?: { wrapper_edge: string; wrapper_types: string[]; epoch_edges: string[] };
+  /** 1.6.47 (MICRO-D-GIS-DOCUMENTI p.6): no wrapper any more — a 1.6.46 file's wrapper fields are ignored */
+  container_epochs?: { document_epochs?: boolean; wrapper_edge?: string; wrapper_types?: string[]; epoch_edges?: string[] };
   file_types: string[];
   tileset: { media_types: string[]; packaging: string[]; url_patterns: string[] };
   reasons: string[];
@@ -143,19 +144,13 @@ export function membersOf(g: DocGraph, groupId: string, rule: AlternativesRule):
 }
 
 /** The epochs a container states of ITSELF — s3Dgraphy's
- *  `container_own_epochs` (em_visual_rules 1.6.40, `alternatives.container_epochs`):
- *  an epoch reaching it with `epoch_edge`, and the epochs of the Document that
- *  wraps it (`wrapper_edge` from a `wrapper_types` node, `epoch_edges` from the
- *  Document to the epoch) — EM Tools' «Epochs of this set». */
+ *  `container_own_epochs` (em_visual_rules 1.6.47, `alternatives.container_epochs`):
+ *  an epoch reaching it with `epoch_edge`, nothing else. The Document that
+ *  publishes it gives it neither its epochs nor its date (MICRO-D-GIS-DOCUMENTI
+ *  p.6, E.D. 15 Nov 2026; 1.6.46 read the wrapping Document's epochs). */
 function containerOwnEpochs(ix: ReturnType<typeof index>, gid: string, rule: AlternativesRule): string[] {
   const isEpoch = (id: string) => rule.epoch_types.includes(String(ix.byId.get(id)?.node_type ?? ""));
-  const out = new Set(ix.inOf(gid, rule.epoch_edge).filter(isEpoch));
-  const ce = rule.container_epochs;
-  if (ce) {
-    const wrappers = ix.inOf(gid, ce.wrapper_edge).filter((w) => ce.wrapper_types.includes(String(ix.byId.get(w)?.node_type ?? "")));
-    for (const w of wrappers) for (const t of ce.epoch_edges) for (const ep of ix.outOf(w, t)) if (isEpoch(ep)) out.add(ep);
-  }
-  return sortU(out);
+  return sortU(new Set(ix.inOf(gid, rule.epoch_edge).filter(isEpoch)));
 }
 
 /**

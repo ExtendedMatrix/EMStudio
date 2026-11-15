@@ -505,7 +505,14 @@ export function buildSpace(
   };
 
   // representation models
-  const rms: SpaceRM[] = nodes.filter((n) => RM_TYPES.has(n.node_type)).map((rm) => {
+  // MICRO-D-GIS-DOCUMENTI · the RMDoc of a GIS document (its resources all GIS
+  // layers) is drawn by the GIS driver (gis-scene.ts), not as a 3D model
+  const gisRmDoc = (rm: EmNode): boolean => {
+    if (rm.node_type !== "representation_model_doc") return false;
+    const linked = resourcesOf(rm.id);
+    return linked.length > 0 && linked.every((r) => str(dataOf(r).url_type) === "gis_layer");
+  };
+  const rms: SpaceRM[] = nodes.filter((n) => RM_TYPES.has(n.node_type) && !gisRmDoc(n)).map((rm) => {
     const from = inOf(rm.id, "has_representation_model");
     const eps = new Set<string>();
     const exact = new Set<string>();

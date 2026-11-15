@@ -378,7 +378,9 @@ function walk(ix: ProvIndex, n: EmNode, id: string, rule: ProvRule, seen: Set<st
   if (MODEL_TYPES.has(nt) || nt === CONTAINER) {
     const r = swimlane(ix, rule, id, modelEpochs(ix, id));
     if (r) return r;
-    const pubs = [...new Set(["has_representation_model", "has_representation_model_doc"].flatMap((et) => ix.sources(id, et)).filter((s) => ix.nt(s) === "document"))];
+    // MICRO-D-GIS-DOCUMENTI p.6 · the Document's date never passes to the container (its author and licence do)
+    const pubs = nt === CONTAINER && TEMPORAL.has(rule) ? []
+      : [...new Set(["has_representation_model", "has_representation_model_doc"].flatMap((et) => ix.sources(id, et)).filter((s) => ix.nt(s) === "document"))];
     const rp = combine(rule, id, "publisher", pubs.map(sub), pubs.map((p) => [id, p]));
     if (rp) return rp;
     if (nt !== CONTAINER) {
@@ -549,7 +551,8 @@ export function epochAttribution(ix: ProvIndex, id: string, seen: Set<string> = 
     const own = modelEpochs(ix, id);
     if (own.length) out = { epochs: own, level: "node", origin: id, chain: [id], why: "" };
     else {
-      const pubs = ["has_representation_model", "has_representation_model_doc"].flatMap((et) => ix.sources(id, et)).filter((s) => ix.nt(s) === "document");
+      // MICRO-D-GIS-DOCUMENTI p.6 · never the Document's epoch for a container
+      const pubs = nt === CONTAINER ? [] : ["has_representation_model", "has_representation_model_doc"].flatMap((et) => ix.sources(id, et)).filter((s) => ix.nt(s) === "document");
       const steps: ["publisher" | "container", string[]][] = [["publisher", [...new Set(pubs)]], ["container", nt !== CONTAINER ? ix.targets(id, "is_in_representation_model_group") : []]];
       outer: for (const [level, ups] of steps)
         for (const u of ups) { const a = sub(u); if (a.epochs.length) { out = { epochs: a.epochs, level, origin: u, chain: [id, u], why: t("pv.why.follows", { node: ix.name(u) }) }; break outer; } }
@@ -639,11 +642,9 @@ export function acquisitionDates(ix: ProvIndex, modelId: string): { start: numbe
 }
 
 /** the container's declared epochs (alternatives.container_own_epochs): an
- *  epoch reaching it, the epochs of the Document publishing it */
+ *  epoch reaching it — never the Document publishing it (MICRO-D-GIS-DOCUMENTI p.6) */
 function containerOwnEpochs(ix: ProvIndex, gid: string): string[] {
-  const out = new Set(ix.sources(gid, "has_representation_model").filter((s) => ix.isEpoch(s)));
-  for (const w of ix.sources(gid, "has_representation_model")) if (ix.nt(w) === "document") for (const e of laneEpochs(ix, w)) out.add(e);
-  return [...out];
+  return [...new Set(ix.sources(gid, "has_representation_model").filter((s) => ix.isEpoch(s)))];
 }
 
 export function datingWarnings(ix: ProvIndex): DatingWarning[] {

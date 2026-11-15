@@ -49,9 +49,12 @@ eq(G.lighterThatFits(vs, 40)?.id, "mobile", "40 MB left: the mobile one");
 eq(G.lighterThatFits(vs, 10), null, "10 MB left: none fits — only «Carica comunque»");
 eq([G.mbSay(669), G.mbSay(2048), G.mbSay(1536)], ["669 MB", "2.0 GB", "1.5 GB"], "the sizes said");
 
-// the scene asks the guard before every fetch: the three doors (a model, a flow, a tileset)
+// the scene asks the guard before every fetch: two doors (a model, a flow). A
+// tileset is NEVER held at the gate (MICRO-D-GIS-DOCUMENTI p.9: it arrives in
+// pieces; with little room it starts at 64 MB and adapts)
 const scene = readFileSync(`${SRC}scene3d.ts`, "utf8");
-eq((scene.match(/memGate\(key, item,/g) ?? []).length, 3, "scene3d: the guard before a model's file, a flow's first version and a new tileset");
+eq((scene.match(/memGate\(key, item,/g) ?? []).length, 2, "scene3d: the guard before a model's file and a flow's first version");
+eq(/memGate\(key, item, tsUrl/.test(scene), false, "…never before a tileset");
 eq(/memoryMB \?\? opts\.tilesMemoryMB/.test(scene), true, "a tileset's ceiling is what is left of the scene's, when smaller");
 const main = readFileSync(`${SRC}main.ts`, "utf8");
 // MICRO-NARRATIVE-MODULI · …and a story's 3D scene (the stage of a module) mounts it too

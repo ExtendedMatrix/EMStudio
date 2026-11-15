@@ -292,7 +292,8 @@ import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type
 import { chooseForHardware, chooseVersion, HARDWARE, SCENE_USES, USES, type Hardware, type HardwareEntry } from "./asset-versions";
 import { ERROR_MANUAL_MIN, ERROR_PROFILES, normaliseErrorChoice, type ErrorChoice } from "./tiles-error";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
-import { mountGisSpace, type GisSpace, type GisSpaceDeps } from "./gis-space";
+import { mountGisSpace, type GisDocumentAsk, type GisSpace, type GisSpaceDeps } from "./gis-space";
+import { STUDY_ONLY, studyOnlyNodes } from "./study-only";
 import { epsgOf, georefSummary, parseShiftTxt } from "./georef";
 import {
   actFor, documentNode, documentsOf, effective, entering, frameData, newIngress, stampParameters,
@@ -12943,7 +12944,11 @@ function unifiedFacts(): ThreeFacts {
   if (!sp) for (const e of doc.graph.edges)
     if (e.edge_type === "has_representation_model") { const l = v.rmEpochs.get(e.target); if (l) l.push(e.source); else v.rmEpochs.set(e.target, [e.source]); }
   for (const s of surfacesOf(doc as Parameters<typeof surfacesOf>[0])) v.gis.push({ id: s.id, name: s.name, kind: "surface" });
-  for (const l of gisLayersOf(doc as Parameters<typeof gisLayersOf>[0])) v.gis.push({ id: l.id, name: l.name, kind: l.format === "geotiff" ? "raster" : "layer" });
+  // MICRO-D-GIS-DOCUMENTI · a sheet under its document, «solo studio» by the licence (own or inherited)
+  const held = studyOnlyNodes(doc as Parameters<typeof studyOnlyNodes>[0]);
+  for (const l of gisLayersOf(doc as Parameters<typeof gisLayersOf>[0])) v.gis.push({ id: l.id, name: l.name,
+    kind: l.format === "geotiff" || l.format === "worldfile_image" ? "raster" : "layer",
+    doc: l.docId ? { id: l.docId, name: l.docName ?? l.docId } : null, studyOnly: held.has(l.id) });
   // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the rows of the old Outliner of the
   // scene: a model's versions, the extractors anchored in 3D under their
   // document, the documents lit, the sketches (read live, below)
@@ -14051,6 +14056,7 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     sources: unifiedSources,
     texts: () => ({ dim: uoDimWords(), noEpoch: t("uo.noEpoch"), typeLabel: unitTypeLabel, sourceNone: t("uo.noFile"), empty: t("uo.empty"),
                     noSources: t("uo.noSources"),
+                    studyOnly: t("gis.studyOnly"),
                     space: { proxies: t("uo.sp.proxies"), models: t("uo.sp.models"), rmdoc: t("uo.sp.rmdoc"), rmsf: t("uo.sp.rmsf"), gis: t("uo.sp.gis"),
                              x3d: t("uo.sp.x3d"), sketches: t("s3.sketches"), x3dOff: t("uo.x3dGhost"),
                              survives: (from) => t("uo.sp.survives", { from }), survivesMark: "⟲" },
@@ -17740,7 +17746,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 69;   // 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 70;   // 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -20964,10 +20970,17 @@ function publishToStratiGraph(): void {
   const btn = document.getElementById("ns-publish");
   // MICRO-CHIP-UNICO p.2 · the pair first: what is missing, and a click leads
   // to that step of the chip's menu; complete, the phase 2 sentence
+  // MICRO-D-GIS-DOCUMENTI · first of all, what may only be studied never goes out: the nodes
+  // whose licence — own or inherited from their document — is «uso di studio,
+  // non pubblicabile», said by name (the same resolver as the Inspector's)
+  const held = [...studyOnlyNodes(store?.doc).values()];
+  const heldSay = held.length ? t("publish.withheld", { n: String(held.length),
+    names: held.slice(0, 6).map((x) => x.name).join(", ") + (held.length > 6 ? "…" : "") }) : "";
+  if (heldSay) logInfo(heldSay, held.map((x) => x.id));
   const missing = who.pairMissing("publish", pairFacts());
   if (missing.length) { goToPairStep(missing); return; }
   if (btn?.getAttribute("aria-disabled") === "true") {
-    toast(t("strip.publishPhase2"));
+    toast(t("strip.publishPhase2") + (heldSay ? ` · ${heldSay}` : ""));
     return;
   }
   // MICRO-TESTATA-CLOUD · publishing is written on a node: the author and the
@@ -20978,7 +20991,7 @@ function publishToStratiGraph(): void {
   // Verified, and still nothing to publish TO: the StratiGraph delivery
   // endpoint is phase 2. Saying so is the honest end of this path — the gate is
   // real and measurable today, the destination is not there yet.
-  toast(t("identity.publishNotConnected"));
+  toast(t("identity.publishNotConnected") + (heldSay ? ` · ${heldSay}` : ""));
 }
 (document.getElementById("settings-close") as HTMLButtonElement).addEventListener(
   "click",
@@ -26952,6 +26965,7 @@ const narrativeSceneFactory: SceneFactory = (stage, spec) => {
         refused: (name) => t("space.fileRefused", { x: name }),
         overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
         openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
+      gateWhy: (k: "bytes" | "points" | "memory", x: string, lim: string) => t(`lod.why.${k}`, { x, lim }), gatesHead: (n: number) => t("lod.gatesHead", { n: String(n) }),
         lodNote: (n) => t("lod.note", { n: String(n) }),
         viewName, centreEmpty: t("s3.centreEmpty"), stats: sceneStatsWords,
       },
@@ -34944,6 +34958,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       refused: (name) => t("space.fileRefused", { x: name }),
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
+      gateWhy: (k: "bytes" | "points" | "memory", x: string, lim: string) => t(`lod.why.${k}`, { x, lim }), gatesHead: (n: number) => t("lod.gatesHead", { n: String(n) }),
       lodNote: (n) => t("lod.note", { n: String(n) }),
       memoryOver: (name, need, room, by) => t("mem.over", { x: name, need, room, by: t(by === "machine" ? "mem.byMachine" : "mem.byCeiling") }),
       useVersion: (label, mb) => t("mem.useVersion", { v: label, mb }),
@@ -35129,6 +35144,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     log: (m) => logWarn(m),
     redrawBar: () => refresh(),
     ingest: (path, layer) => gisIngest(path, layer),
+    ingestDocument: (req) => gisIngestDocument(req),
     surface: (dem, image) => gisSurface(dem, image),
     contours: (dem, interval) => gisContours(dem, interval),
   });
@@ -35686,7 +35702,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       e.stopPropagation();
       openProxyFolderPreview(sum.without);
     });
-    const nothing = !sum.rms.length && !sum.withProxy.length && !previewItem && !listSketches().length;
+    // MICRO-D-GIS-DOCUMENTI · GIS layers shown are something: the empty state
+    // (its gradient over the canvas) would hide a cadastre drawn alone
+    const gisShown = gisLayersOf(st.doc as Parameters<typeof gisLayersOf>[0]).some((l) => gisSpace.shown(l.id));
+    const nothing = !sum.rms.length && !sum.withProxy.length && !previewItem && !listSketches().length && !gisShown;
     empty.classList.toggle("hidden", !nothing);
     if (nothing) {
       // MICRO-OUTLINER-UNICO · an empty state is one line: the title; how a
@@ -50020,6 +50039,20 @@ function containerLinksLine(l: CardLinks): HTMLElement {
 }
 
 let ccardEl: HTMLElement | null = null;
+/** MICRO-D-GIS-DOCUMENTI p.8 · the card closes with its ✕, Esc and a click
+ *  outside it (a dialog the card opened is not «outside») */
+function closeContainerCard(): void { ccardEl?.remove(); ccardEl = null; }
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !ccardEl || document.querySelector(".modal.app-dialog")) return;
+  e.preventDefault();
+  e.stopPropagation();
+  closeContainerCard();
+}, true);
+document.addEventListener("pointerdown", (e) => {
+  const tgt = e.target as Element | null;
+  if (!ccardEl || !tgt || ccardEl.contains(tgt) || tgt.closest?.(".modal, .app-dialog, .ctx-menu")) return;
+  closeContainerCard();
+}, true);
 async function containerLinksOf(gid: string): Promise<CardLinks | null> {
   const st = store;
   if (!st) return null;
@@ -50061,7 +50094,8 @@ async function openContainerCard(gid: string): Promise<void> {
   x.dataset.ccardClose = "1";
   x.textContent = "✕";
   x.title = t("cc.close");
-  x.addEventListener("click", () => { card.remove(); ccardEl = null; });
+  x.setAttribute("aria-label", t("cc.close"));
+  x.addEventListener("click", () => { closeContainerCard(); });
   head.append(h, helpGlyph(t("cc.help"), "container-card"), x);
   card.append(head, containerLinksLine(l));
   const sug = l.suggestions;
@@ -52822,6 +52856,24 @@ async function gisIngest(path: string, layer: string | null): Promise<string | n
   refreshSurfaces("scene");
   return null;
 }
+/** MICRO-D-GIS-DOCUMENTI · files brought in as the SHEETS of one document
+ *  (`/graph/gis-document`): a new D.nn or one already there, its RMDoc, the
+ *  licence on the document; one undo step. The bridge says, sheet by sheet,
+ *  «convertito da EPSG:a a EPSG:b». */
+async function gisIngestDocument(req: GisDocumentAsk): Promise<string | null> {
+  const st = store;
+  if (!st || refuseReadOnly()) return null;
+  const j = await postGraph<{ document_id?: string; document_name?: string; sheets?: Array<{ id: string; name: string; said?: string }>; warnings?: string[]; delta?: GraphDelta }>("/graph/gis-document",
+    { doc: st.doc, doc_path: currentFilePath ?? "", paths: req.paths, document_id: req.documentId, name: req.name, date: req.date,
+      license: req.license, crs: req.crs, shift: req.shift });
+  if (!j.ok || !j.delta) return t("gis.failed", { why: String(j.error ?? j.status) });
+  applyBlendDelta(j.delta, "gis.deltaApplied");
+  for (const w of j.warnings ?? []) logWarn(`GIS · ${w}`, [j.document_id ?? ""]);
+  for (const sh of j.sheets ?? []) logInfo(`GIS · ${sh.name}${sh.said ? ` · ${sh.said}` : ""}`, [sh.id]);
+  logInfo(t("gis.docIngested", { n: String(j.sheets?.length ?? 0), doc: String(j.document_name ?? "") }), [j.document_id ?? ""]);
+  refreshSurfaces("scene");
+  return null;
+}
 /** EXPERIMENTAL · the site's door: the same ingest, with the fields the person
  *  chose, the capture that stamps the layer and — the graph without a site —
  *  the site made in the same delta (one undo step) */
@@ -53824,7 +53876,8 @@ async function openIngressOn(assets: IngressAsset[], folder: string, masters: Re
       return out;
     },
     takenNames: ingressTakenNames,
-    licenses: () => ["CC-BY-4.0", "CC-BY-SA-4.0", "CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC0-1.0"],
+    // MICRO-D-GIS-DOCUMENTI · s3Dgraphy rights.LICENSE_VOCABULARY: the five CC codes and the study's own
+    licenses: () => ["CC-BY-4.0", "CC-BY-SA-4.0", "CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC0-1.0", STUDY_ONLY],
     enter: (s) => runIngress(s),
     hasGraph: () => !!store,
     onClose: () => { renderStorage(); },
@@ -54845,6 +54898,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
       refused: (name) => t("space.fileRefused", { x: name }),
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
+      gateWhy: (k: "bytes" | "points" | "memory", x: string, lim: string) => t(`lod.why.${k}`, { x, lim }), gatesHead: (n: number) => t("lod.gatesHead", { n: String(n) }),
       lodNote: (n) => t("lod.note", { n: String(n) }),
       memoryOver: (name, need, room, by) => t("mem.over", { x: name, need, room, by: t(by === "machine" ? "mem.byMachine" : "mem.byCeiling") }),
       useVersion: (label, mb) => t("mem.useVersion", { v: label, mb }),

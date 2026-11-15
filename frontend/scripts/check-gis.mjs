@@ -196,6 +196,50 @@ try {
   ok(ct2.path.endsWith("dem_contours_2_5m-2.geojson"), "again: beside, never over the first");
   const fc = await post("/gis/features", { path: ct.path, scene_crs: "EPSG:3844", feature_key: "elev" });
   ok(fc.features.every((x) => x.coords[0].every((p) => p[2] === Number(x.label))), "a contour's vertices at its level");
+  // ── 3 · MICRO-D-GIS-DOCUMENTI · the synthetic data (s3Dgraphy tests/fixtures/gis_synth.py):
+  // a cadastre of three sheets in 3004, a DXF without a CRS, a graph in 32633
+  const SYN = `${dir}/SYN`;
+  const g2 = spawnSync(PY, [`${S3D}tests/fixtures/gis_synth.py`, SYN], { encoding: "utf8", env: { ...process.env, PYTHONPATH: `${S3D}src` } });
+  ok(g2.status === 0, `the synthetic data generated — ${g2.stderr.slice(-400)}`);
+  const truth = JSON.parse(readFileSync(`${SYN}/truth.json`, "utf8"));
+  const sd = JSON.parse(readFileSync(`${SYN}/EM/gis_sintetico.em.json`, "utf8"));
+  const sdPath = `${SYN}/EM/gis_sintetico.em.json`;
+  const cat = ["foglio_01.tif", "foglio_02.tif", "foglio_03.jpg"].map((f) => `${SYN}/GIS/catasto/${f}`);
+  const ij = await get(`/gis/inspect?path=${encodeURIComponent(cat[2])}`);
+  eq([ij.gis_format, ij.crs, ij.raster?.width], ["worldfile_image", "EPSG:3004", 200], "a JPEG and its world file: a sheet, its CRS from the .prj");
+  const idx = await get(`/gis/inspect?path=${encodeURIComponent(`${SYN}/GIS/dxf/rilievo_cad.dxf`)}`);
+  eq([idx.gis_format, idx.crs, idx.dxf_layers?.map((x) => x.name)], ["dxf", null, ["ASSI", "MURI", "TESTI"]], "a DXF: no CRS, its layers");
+  const gd = await post("/graph/gis-document", { doc: sd, doc_path: sdPath, paths: cat, name: "Catasto 1835", date: "1835", license: "EM-STUDY-ONLY" });
+  ok(gd.ok && gd.delta, `the cadastre as a document — ${JSON.stringify(gd).slice(0, 300)}`);
+  apply(sd, gd.delta);
+  eq(gd.sheets.map((x) => x.said), Array(3).fill("convertito da EPSG:3004 a EPSG:32633"), "each sheet: «convertito da EPSG:3004 a EPSG:32633»");
+  ok(!gd.delta.edges_added?.some?.((e) => sd.graph.nodes.find((n) => n.id === e.target || n.id === e.source)?.node_type === "EpochNode"), "the date never an epoch");
+  const ls = G.gisLayersOf(sd);
+  const sheets = ls.filter((l) => l.sheet);
+  eq([sheets.length, [...new Set(sheets.map((l) => l.docName))]], [3, ["Catasto 1835"]], "the Space reads three sheets under their document");
+  eq(sheets.map((l) => G.isPictureSheet(l)), [true, true, true], "…drawn as pictures");
+  eq(ls.some((l) => !l.sheet && l.name.includes("GIS")), false, "the set itself is not a layer");
+  const rg = await post("/gis/raster-grid", { path: cat[0], scene_crs: "EPSG:32633", crs: "EPSG:3004", n: 8 });
+  eq([rg.how, rg.said, rg.xs.length], ["reprojected", "convertito da EPSG:3004 a EPSG:32633", 81], "a sheet's grid of nodes, converted");
+  near(rg.bbox[0], truth.centre_32633[0] - 600, 80, "…lands west of the centre, in 32633");
+  const dx = await post("/graph/gis-document", { doc: sd, doc_path: sdPath, paths: [`${SYN}/GIS/dxf/rilievo_cad.dxf`], name: "Rilievo CAD",
+    crs: { [`${SYN}/GIS/dxf/rilievo_cad.dxf`]: "EPSG:32633" }, shift: { [`${SYN}/GIS/dxf/rilievo_cad.dxf`]: truth.dxf.shift } });
+  ok(dx.ok, `the DXF with its CRS and shift — ${JSON.stringify(dx).slice(0, 300)}`);
+  apply(sd, dx.delta);
+  const dxl = G.gisLayersOf(sd).find((l) => l.format === "dxf");
+  eq([dxl.crs, dxl.shift], ["EPSG:32633", truth.dxf.shift], "the DXF's frame: the CRS and the shift given");
+  const fx = await post("/gis/features", { path: `${SYN}/GIS/dxf/rilievo_cad.dxf`, scene_crs: "EPSG:32633", crs: dxl.crs, shift: dxl.shift, feature_key: "text", group_key: "layer" });
+  const wall = fx.features.find((x) => x.group === "MURI" && x.type === "Polygon");
+  near(wall.coords[0][0][0], truth.centre_32633[0] - 12, 0.01, "the DXF's wall where the shift puts it (east)");
+  near(wall.coords[0][0][1], truth.centre_32633[1] - 7, 0.01, "…(north)");
+  const pb = await post("/graph/publishable", { doc: sd, doc_path: sdPath });
+  const heldIds = new Set(pb.withheld.map((x) => x.id));
+  ok(sheets.every((l) => heldIds.has(l.id)) && heldIds.has(gd.document_id), "the sheets inherit «uso di studio» from the document: withheld");
+  ok(!heldIds.has(dxl.id), "the DXF (another document, no such licence) goes out");
+  const SO = await import("data:text/javascript;base64," + Buffer.from((await esbuild.build({ entryPoints: [`${SRC}study-only.ts`], bundle: true, format: "esm", write: false })).outputFiles[0].text).toString("base64"));
+  const held = SO.studyOnlyNodes(sd);
+  eq(sheets.every((l) => held.get(l.id)?.inherited && held.get(l.id)?.originName === "Catasto 1835"), true, "the page's resolver: the same, inherited from the document");
+  eq([...held.keys()].sort(), [...heldIds].sort(), "the page and s3Dgraphy hold back the same nodes");
   // a file outside the served roots is refused
   const out = await get(`/gis/inspect?path=${encodeURIComponent("/etc/hosts")}`).catch(() => ({}));
   ok(!out.ok, "outside the served roots: refused");
