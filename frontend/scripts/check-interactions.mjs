@@ -10841,7 +10841,8 @@ const tsdBar = (p, win) => p.evaluate((w) => {
   return { id: b.dataset.tilesetBar, form: b.querySelector("[data-form]")?.dataset.form, pos: b.querySelector(".tsp-pos")?.textContent,
     warn: b.querySelector(".tsp-pos")?.dataset.warn === "true", recentred: !!b.querySelector("[data-recentred]"),
     note: b.querySelector("[data-recentred]")?.textContent ?? null,
-    attach: { disabled: b.querySelector("[data-tsp-attach]")?.disabled ?? null, title: b.querySelector("[data-tsp-attach]")?.title ?? null },
+    // MICRO-F p.2 · «Attacca all'epoca…» is now the one door («Porta dentro…»)
+    door: { disabled: b.querySelector("[data-tsp-door]")?.disabled ?? null, title: b.querySelector("[data-tsp-door]")?.title ?? null },
     pack: b.querySelector("[data-tsp-pack]") ? { disabled: b.querySelector("[data-tsp-pack]").disabled } : null,
     status: b.querySelector(".tsp-status")?.textContent ?? "" };
 }, win);
@@ -10851,27 +10852,48 @@ const tsdViewerTiles = (p, win) => p.evaluate((w) => {
   const s = h?.__tiles?.();
   return s ? { files: s.files, loaded: s.status.loaded, visible: s.status.visible, failed: s.status.failed, box: s.box } : null;
 }, win);
+/** MICRO-F p.2 · the door opened by a tileset's drop: its row (the preview's
+ *  findings), the epoch proposed; `pass(date)` fills the date and confirms */
+const tsdDoor = (p) => p.evaluate(() => {
+  const d = document.querySelector('[data-app-dialog="door"]');
+  if (!d) return null;
+  const r = d.querySelector("[data-door-tileset]");
+  return { row: r ? { form: r.dataset.form, pos: r.querySelector(".tsp-pos")?.textContent ?? "", warn: r.querySelector(".tsp-pos")?.dataset.warn === "true",
+    recentred: !!r.querySelector("[data-recentred]"), nameOnly: !!r.querySelector("[data-name-only]") } : null,
+    kind: d.querySelector("[data-door-kind]")?.dataset.doorKind ?? null, epoch: d.querySelector("[data-door-epoch]")?.value ?? null,
+    epochShown: !d.querySelector("[data-door-epoch]")?.closest(".door-row")?.classList.contains("hidden") };
+});
+const tsdDoorPass = (p, date) => p.evaluate((dt) => {
+  const d = document.querySelector('[data-app-dialog="door"]');
+  const f = d?.querySelector("[data-dialog-input]");
+  if (!f) return false;
+  f.value = dt; f.dispatchEvent(new Event("input", { bubbles: true }));
+  d.querySelector("[data-dialog-ok]")?.click();
+  return true;
+}, date);
 const tsdWait = async (p, fn, ms = 30000) => { const t0 = Date.now(); for (;;) { const v = await fn(); if (v || Date.now() - t0 > ms) return v; await p.waitForTimeout(250); } };
 
-test("TD1.viewer", "tileset trascinato · uno zip dal sistema sul Viewer: si vede subito (le tile lette a pezzi dal Blob), la barra dice cos'è; «Attacca all'epoca…» chiede, scrive RM + risorsa nell'epoca, un passo di annulla", async () => {
+test("TD1.viewer", "tileset trascinato · uno zip dal sistema sul Viewer: si vede subito (le tile lette a pezzi dal Blob), la barra dice cos'è; la PORTA si apre (MICRO-F): la riga dice la forma e «solo il nome», l'epoca proposta; con la data scrive documento + RM + risorsa nell'epoca, un passo di annulla", async () => {
   const { dir } = await tsdBench("td1");
   const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
-  await answerAppDialogs(p, true);
   const win = await winOf(p, "viewer");
   const prevented = await tsdDropFiles(p, win, [{ name: "disco.zip", b64: readFileSync(`${dir}/disco.zip`).toString("base64") }]);
   const bar = await tsdWait(p, () => tsdBar(p, win));
   const tiles = await tsdWait(p, async () => { const t = await tsdViewerTiles(p, win); return t && t.files.length ? t : null; });
   await p.screenshot({ path: SHOT("td1-viewer-zip") }).catch(() => {});
   const before = await p.evaluate(() => ({ rm: window.__EM_DRAG__.idsOfType("representation_model").length, res: window.__EM_DRAG__.idsOfType("resource").length }));
-  const epoch = await p.evaluate((w) => document.querySelector(`.tile-area[data-win="${w}"] [data-tsp-epoch]`)?.value, win);
-  await p.click(`.tile-area[data-win="${win}"] [data-tsp-attach]`);
-  await p.waitForTimeout(500);
+  const door = await tsdWait(p, () => tsdDoor(p), 10000);
+  await p.screenshot({ path: SHOT("td1-porta-dal-drop") }).catch(() => {});
+  const epoch = door?.epoch;
+  await tsdDoorPass(p, "2015");
+  await tsdWait(p, () => p.evaluate(() => window.__EM_DRAG__.idsOfType("representation_model").map((id) => window.__EM_DRAG__.node(id)).some((n) => n?.data?.is_tileset)), 10000);
   const after = await p.evaluate(() => {
     const D = window.__EM_DRAG__;
     const rms = D.idsOfType("representation_model").map((id) => D.node(id));
     const rm = rms.find((n) => n?.data?.is_tileset);
     // the canonical bond since MICRO-SOTTOFASI-E-TILESET-TEMPLU: epoch → has_representation_model → RM
-    const ep = rm ? D.edgesOf("has_representation_model").find((e) => e.target === rm.id)?.source : null;
+    // (MICRO-F: the door's document publishes it too — the EPOCH's edge is wanted)
+    const ep = rm ? D.edgesOf("has_representation_model").find((e) => e.target === rm.id && D.node(e.source)?.node_type === "EpochNode")?.source : null;
     const link = rm ? D.edgesOf("has_linked_resource").find((e) => e.source === rm.id)?.target : null;
     return { rm: rms.length, res: D.idsOfType("resource").length, url: rm?.data?.url ?? null, ep, res0: link ? D.node(link)?.data ?? null : null };
   });
@@ -10881,10 +10903,11 @@ test("TD1.viewer", "tileset trascinato · uno zip dal sistema sul Viewer: si ved
   const undone = await p.evaluate(() => ({ rm: window.__EM_DRAG__.idsOfType("representation_model").length, res: window.__EM_DRAG__.idsOfType("resource").length }));
   await ctx.close();
   return { pass: prevented && bar?.form === "package" && !bar.warn && !bar.recentred && (tiles?.files ?? []).length >= 1
+      && door?.row?.form === "package" && door.row.nameOnly && door.kind === "tileset" && door.epochShown && !!epoch
       && after.rm === before.rm + 1 && after.res === before.res + 1 && after.url === "disco.zip" && after.ep === epoch
-      && after.res0?.packaging === "archive" && line?.attach.disabled === true
+      && after.res0?.packaging === "archive" && line?.door.disabled === true
       && undone.rm === before.rm && undone.res === before.res && !errors.length,
-    detail: { prevented, bar, tiles, before, after, undone, errors } };
+    detail: { prevented, bar, door, tiles, before, after, undone, errors } };
 });
 
 test("TD2.pair", "tileset trascinato · la forma RealityScan (X/ dallo Storage, X.json accanto) sul Viewer: riconosciuta e detta, la posizione avvisa «geocentriche», centrata solo per la vista, le tile si vedono", async () => {
@@ -10900,17 +10923,17 @@ test("TD2.pair", "tileset trascinato · la forma RealityScan (X/ dallo Storage, 
   // centred: the root's box (2 × 2 × 0.5 around 2,2,0.5) near the origin, not 6 371 km away
   const near = (tiles?.box ?? []).every((v) => Math.abs(v) < 100);
   return { pass: prevented && bar?.form === "pair" && bar.warn && /geocentric/.test(bar.pos) && bar.recentred
-      && bar.attach.disabled === true && bar.pack?.disabled === false && (tiles?.files ?? []).length >= 1 && near
+      && bar.door.disabled === true && bar.pack?.disabled === false && (tiles?.files ?? []).length >= 1 && near
       && state?.disk?.root === `${dir}/disco_rs.json` && Math.abs(state.pos.lon - 10.5115) < 0.001 && !errors.length,
     detail: { prevented, bar, tiles, state, errors } };
 });
 
-test("TD3.pack", "tileset trascinato · «Prepara il pacchetto» sulla forma RealityScan: chiede, il bridge scrive disco_rs.3tz ACCANTO (canonico, X.json come tileset.json), gli originali intatti; poi si attacca", async () => {
+test("TD3.pack", "tileset trascinato · «Prepara il pacchetto» sulla forma RealityScan: chiede, il bridge scrive disco_rs.3tz ACCANTO (canonico, X.json come tileset.json), gli originali intatti; poi passa dalla porta (MICRO-F)", async () => {
   const { dir } = await tsdBench("td3");
   const listing = () => execFileSync("find", [dir, "-type", "f"], { encoding: "utf8" }).split("\n").filter(Boolean).sort();
   const before = listing();
   const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
-  await answerAppDialogs(p, true);
+  await answerAppDialogs(p, "2015");
   const win = await winOf(p, "viewer");
   await tsdDropPath(p, win, { path: `${dir}/disco_rs.json`, type: "file", name: "disco_rs.json", ext: "json" });
   const bar0 = await tsdWait(p, () => tsdBar(p, win));
@@ -10920,14 +10943,13 @@ test("TD3.pack", "tileset trascinato · «Prepara il pacchetto» sulla forma Rea
   const added = after.filter((f) => !before.includes(f));
   let names = [];
   try { names = execFileSync("unzip", ["-Z1", `${dir}/disco_rs.3tz`], { encoding: "utf8" }).split("\n").filter(Boolean); } catch { /* not written */ }
-  await p.click(`.tile-area[data-win="${win}"] [data-tsp-attach]`);
-  await p.waitForTimeout(500);
-  const rm = await p.evaluate(() => { const D = window.__EM_DRAG__; const n = D.idsOfType("representation_model").map((id) => D.node(id)).find((x) => x?.data?.is_tileset); return n?.data?.url ?? null; });
+  await p.click(`.tile-area[data-win="${win}"] [data-tsp-door]`);
+  const rm = await tsdWait(p, () => p.evaluate(() => { const D = window.__EM_DRAG__; const n = D.idsOfType("representation_model").map((id) => D.node(id)).find((x) => x?.data?.is_tileset); return n?.data?.url ?? null; }), 15000);
   await p.screenshot({ path: SHOT("td3-pacchetto-preparato") }).catch(() => {});
   await ctx.close();
   return { pass: bar0?.form === "pair" && bar1?.form === "package" && added.length === 1 && added[0] === `${dir}/disco_rs.3tz`
       && before.every((f) => after.includes(f)) && names.includes("tileset.json") && names.includes("disco_rs/tiles/root.glb")
-      && names[names.length - 1] === "@3dtilesIndex1@" && rm === `${dir}/disco_rs.3tz` && !errors.length,
+      && names[names.length - 1] === "@3dtilesIndex1@" && String(rm ?? "").endsWith("/disco_rs.3tz") && String(rm).startsWith("/") && !errors.length,
     detail: { bar0, bar1, added, names: names.slice(0, 4).concat(names.slice(-1)), rm, errors } };
 });
 
@@ -11028,17 +11050,21 @@ const td8Layers = (p) => p.evaluate(() => (document.querySelector(".scn-host")?.
   files: l.files.length, mode: l.mode, scale: l.status.ge?.scale ?? null, relocated: l.relocated,
   centre: l.box ? [0, 1, 2].map((k) => (l.box[k] + l.box[k + 3]) / 2) : null })));
 async function td8DropAndAttach(p, win, dir) {
+  // MICRO-F p.2 · the door opens at the drop: closed first (the loading is set on
+  // the preview), then opened again from the bar and passed with its date
+  await answerAppDialogs(p, false);
   await tsdDropPath(p, win, { path: `${dir}/ecef.3tz`, type: "file", name: "ecef.3tz", ext: "3tz" });
   const preview = await tsdWait(p, async () => (await td8Layers(p)).find((l) => l.id.startsWith("preview:") && l.files && l.centre) ?? null, 40000);
   // the person's loading on the preview: «auto», the errors ×1.5 (the bar's controls)
   if (preview) await p.evaluate((id) => document.querySelector(".scn-host").__spaceTileVerts(id, 1, 1.5), preview.id);
   await p.waitForTimeout(400);
   const bar = await tsdBar(p, win);
-  await p.click(`.tile-area[data-win="${win}"] [data-tsp-attach]`);
+  await answerAppDialogs(p, "2015");
+  await p.click(`.tile-area[data-win="${win}"] [data-tsp-door]`);
   return { preview, bar };
 }
 
-test("TD8.attach", "tileset trascinato · «Attacca all'epoca…» da un'anteprima in ECEF vero: l'anteprima sparisce, l'RM si colloca col frame vero del bridge (non al centro dell'anteprima), con il caricamento dell'anteprima (auto ×1.5); un passo di annulla", async () => {
+test("TD8.attach", "tileset trascinato · «Porta dentro…» (MICRO-F; era «Attacca all'epoca…») da un'anteprima in ECEF vero: l'anteprima sparisce, l'RM si colloca col frame vero del bridge (non al centro dell'anteprima), con il caricamento dell'anteprima (auto ×1.5); un passo di annulla", async () => {
   const { dir } = await td8Bench("td8");
   const { p, ctx, errors } = await td8Open(dir);
   await answerAppDialogs(p, true);

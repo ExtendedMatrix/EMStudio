@@ -49,15 +49,10 @@ export interface GisDocumentAsk {
   shift: Record<string, [number, number, number]>;
 }
 
-/** the study's next D.nn (s3Dgraphy `gis.next_document_name`) */
-export function nextDocumentName(doc: Parameters<typeof gisLayersOf>[0]): string {
-  let best = 0;
-  for (const n of doc?.graph?.nodes ?? []) {
-    if (n.node_type !== "document") continue;
-    const m = /^\s*D\.?\s*(\d+)\s*$/.exec(String(n.name ?? ""));
-    if (m) best = Math.max(best, Number(m[1]));
-  }
-  return `D.${String(best + 1).padStart(2, "0")}`;
+/** the study's next D.nn: the one rule (naming.ts, s3Dgraphy `next_document_name`) */
+import { nextDocumentName as nextDocName, type NamingDoc } from "./naming";
+export function nextDocumentName(doc: unknown): string {
+  return nextDocName((doc as NamingDoc | null) ?? { graph: { nodes: [] } });
 }
 
 /** the words of a sheet in another grid: «convertito da EPSG:3004 a EPSG:32633» */

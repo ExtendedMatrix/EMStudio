@@ -105,7 +105,9 @@ export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "graphs"];
  *  `assetListView`), and its QUEUE (MICRO-CODA-VISTA: Archive › Coda, one
  *  row per job, `queueView`). AUDIT C · it said «NOT connected
  *  (phase 2)», which stopped being true when the panel was implemented. */
-export const STORAGE_MODES = ["filesystem", "graphfiles", "s3", "assets", "documents", "queue"] as const;
+// MICRO-F p.1 · «bucket»: Archive ▸ Files ▸ Bucket, the configured bucket read as
+//  the disk is (`bucket-view.ts`), beside «Disco»
+export const STORAGE_MODES = ["filesystem", "bucket", "graphfiles", "s3", "assets", "documents", "queue"] as const;
 
 /** How a Viewer window shows its collection: one item at a time, or all of it.
  *  Same collection either way — the Mode is the reading, not the content. */

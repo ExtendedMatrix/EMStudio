@@ -27,6 +27,13 @@ eq(D.forTheDoor(["a.em.json", "b.obj"]), true, "a model is the door's");
 eq(D.looksLikeTropy({ "@context": "https://tropy.org/v1/contexts/item.jsonld", "@graph": [] }), true, "Tropy by its context");
 eq(D.looksLikeTropy({ "@graph": [{ photo: [] }] }), true, "Tropy by its items");
 eq(D.looksLikeTropy({ graphs: {} }), false, "an em.json is not Tropy");
+// MICRO-F p.2 · a dropped tileset at the door: what its preview read travels with it
+const tl = (o) => ({ dropId: "x", form: "package", formSaid: "", pos: "", posWarn: false, recentred: false, packaging: "archive", nameOnly: false, ...o });
+eq(D.doorTilesetOut({ name: "disco", tileset: tl({ nameOnly: true }), url: "disco.zip", size_bytes: 15540 }, null),
+  { kind: "tileset", packaging: "archive", name_only: true, url: "disco.zip", size_bytes: 15540 }, "a drop with no path: its name, said so");
+eq(D.doorTilesetOut({ name: "T", path: "/a/T/tileset.json", tileset: tl({ form: "folder", packaging: "directory" }) }, "sha256:ab"),
+  { kind: "tileset", packaging: "directory", checksum: "sha256:ab" }, "a folder on disk: directory, its entry's digest");
+eq(D.doorTilesetOut({ name: "x.obj", path: "/x.obj" }, null), {}, "any other file: nothing more");
 const S3D = path.resolve(new URL("../../../s3Dgraphy", import.meta.url).pathname);
 if (fs.existsSync(path.join(S3D, "src/s3dgraphy/door.py"))) {
   const PY = [path.join(S3D, ".venv/bin/python"), "python3"].find((p) => p === "python3" || fs.existsSync(p));

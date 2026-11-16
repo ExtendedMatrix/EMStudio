@@ -259,7 +259,7 @@ const eq = (got, want, what) => {
   // MICRO-CONTENTS-2 intervention 5 · «Disco», «File del grafo», «Nella stanza»;
   // MICRO-ARCHIVE-ASSET · «Asset», Archive's second view
   // MICRO-B-DOCUMENTI-MEDIA (14 Nov 2026): «Documenti», the tree of the sets, before the queue
-  eq([...W.winModes("storage")], ["filesystem", "graphfiles", "s3", "assets", "documents", "queue"], "storage offers the disk, the graph's files, the room, the assets, the documents and the queue");
+  eq([...W.winModes("storage")], ["filesystem", "bucket", "graphfiles", "s3", "assets", "documents", "queue"], "storage offers the disk, the bucket (MICRO-F), the graph's files, the room, the assets, the documents and the queue");
   eq([...W.winModes("viewer")], ["single", "gallery"], "viewer offers single + gallery");
   eq([...W.winModes("table")], [], "a type with no modes has no mode list");
 

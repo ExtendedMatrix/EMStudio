@@ -14,7 +14,7 @@ import type {
 import { MEMBERSHIP_EDGES } from "./folding";
 import { emIdMigration, isCodeProposed, isSaggio, proposalFor, settleHeaderCode, studyCode, isSite, makeSitePlace, placeEdgeType, placesIn, siteOf, sitePlaceId, studyPlace, studyKinds, withinType } from "./hdto";
 import type { HdtoRole } from "./hdto";
-import { paradataGroupName } from "./naming";
+import { paradataGroupName, rememberDocumentNumber } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
 import type { SpellingPlan } from "./rules";
 import { VOLATILE_KEY } from "./volatile";
@@ -2114,6 +2114,9 @@ export class DocumentStore {
   deleteNode(id: string): void {
     this.checkpoint();
     const g = this.doc.graph;
+    // MICRO-F p.3 · a D.nn used and then deleted does not come back
+    const gone = g.nodes.find((n) => n.id === id);
+    if (gone?.node_type === "document") rememberDocumentNumber(this.doc, gone.name);
     g.nodes = g.nodes.filter((n) => n.id !== id);
     g.edges = g.edges.filter((e) => e.source !== id && e.target !== id);
     const layout = this.doc.layout;
@@ -2730,6 +2733,9 @@ export class DocumentStore {
     this.checkpoint();
     // snapshot BEFORE, so the field stamps land on what actually changed
     const before = JSON.parse(JSON.stringify(n)) as Record<string, unknown>;
+    // MICRO-F p.3 · a D.nn renamed out of the series stays used
+    if (n.node_type === "document" && patch.name !== undefined && patch.name !== n.name)
+      rememberDocumentNumber(this.doc, n.name);
     // a property's description and data.value are written together
     patch = alignPropertyPatch(n, patch);
     Object.assign(n, patch);

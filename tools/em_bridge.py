@@ -1695,6 +1695,43 @@ def _object_store():
     return api.open_object_store()
 
 
+BUCKET_WHERE = ("the bridge's environment: S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, "
+                "S3_SECRET_ACCESS_KEY (and S3_PREFIX) — the variables Heriverse uses; "
+                "for the dev stack EMStudio/dev-stack/.env")
+
+
+def _bucket_list(q):
+    """MICRO-F p.1 · ``GET /bucket/list?prefix=&token=&limit=&q=``: the folders
+    and the objects of the configured bucket, each with its ``s3://`` address.
+    Not configured or not reachable is an answer (``configured``, ``reachable``,
+    ``error``, ``where``), never a 500."""
+    import time
+    one = lambda k, d="": (q.get(k) or [d])[0]
+    try:
+        store = _object_store()
+    except Exception as exc:  # noqa: BLE001 — not configured / s3dgraphy too old
+        return {"ok": False, "configured": False, "error": str(exc), "where": BUCKET_WHERE}
+    cfg = getattr(store, "config", None)
+    base = (getattr(cfg, "prefix", "") or "").strip("/")
+    prefix = one("prefix").lstrip("/")
+    if base and not (prefix + "/").startswith(base + "/"):
+        prefix = f"{base}/{prefix}" if prefix else f"{base}/"
+    t0 = time.perf_counter()
+    try:
+        r = store.listing(prefix, token=one("token") or None, limit=int(one("limit", "500") or 500),
+                          search=one("q").strip())
+    except Exception as exc:  # noqa: BLE001 — StoreError / StoreUnavailable / network
+        return {"ok": False, "configured": True, "reachable": False, "bucket": getattr(cfg, "bucket", ""),
+                "endpoint": getattr(cfg, "endpoint", ""), "error": str(exc), "where": BUCKET_WHERE}
+    ms = round((time.perf_counter() - t0) * 1000, 1)
+    objs = [{**o, "name": o["key"].rsplit("/", 1)[-1], "address": store.locator(o["key"])}
+            for o in r["objects"]]
+    return {"ok": True, "configured": True, "reachable": True, "bucket": getattr(cfg, "bucket", ""),
+            "endpoint": getattr(cfg, "endpoint", ""), "base": f"{base}/" if base else "", "prefix": prefix,
+            "folders": r["folders"], "objects": objs, "next_token": r["next_token"],
+            "truncated": r["truncated"], "scanned": r["scanned"], "ms": ms}
+
+
 def _bucket_route(route, body):
     """B1 · disk ↔ bucket. The library compares, plans and frees; the bridge
     carries the question. A free is checked again byte for byte just before each
@@ -2570,7 +2607,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: sample by level (and the largest of each level), the rest estimated
 #: (``estimated``), ``{tiles_full: true}`` reads all; one measure per (path,
 #: size, mtime) at a time, kept on disk, stopped when no page waits for it.
-BRIDGE_LEVEL = 71   # 71 = POST /graph/door («Porta dentro…»: files into one document, its date always, the epoch it represents to the models — s3Dgraphy door.bring_in, a delta) and POST /graph/master (a model's master replaced — the DTC records it with a transformation, the old master stays with its documents, its versions «da rigenerare» — or a version promoted to master: s3Dgraphy resources.master_swap, a delta) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = POST /gis/raster-grid (a georeferenced picture — GeoTIFF, JPEG/PNG with a world file — laid in the scene's CRS: its grid of nodes converted by PROJ, «convertito da EPSG:a a EPSG:b»), /gis/features takes shift and group_key (a DXF: its frame's shift, its layers as groups), POST /graph/gis-document (files brought in as the SHEETS of one document: a new D.nn or an existing one, its RMDoc, the licence on the document — s3Dgraphy gis.add_gis_document, a delta), /gis/inspect reads a DXF and a picture with a world file, /graph/publishable (the nodes «uso di studio, non pubblicabile», own or inherited) (MICRO-D-GIS-DOCUMENTI); 69 = POST /graph/epoch-move (a selection moved or extended to an epoch: s3Dgraphy epoch_scope.plan_epoch_move, the plan for the page to write), POST /graph/model-kind (RM · RMDoc · RMSF: plan_model_kind), POST /graph/container-links (the four bonds and their suggestions), /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 72   # 72 = GET /bucket/list (Archive ▸ Files ▸ Bucket: the folders and objects of the configured bucket, a page at a time, a search by name; not configured / not reachable said) and /graph/door takes a tileset dropped (its packaging, digest, size; name_only for a drop with no path) (MICRO-F-BUCKET-E-TILESET); 71 = POST /graph/door («Porta dentro…»: files into one document, its date always, the epoch it represents to the models — s3Dgraphy door.bring_in, a delta) and POST /graph/master (a model's master replaced — the DTC records it with a transformation, the old master stays with its documents, its versions «da rigenerare» — or a version promoted to master: s3Dgraphy resources.master_swap, a delta) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = POST /gis/raster-grid (a georeferenced picture — GeoTIFF, JPEG/PNG with a world file — laid in the scene's CRS: its grid of nodes converted by PROJ, «convertito da EPSG:a a EPSG:b»), /gis/features takes shift and group_key (a DXF: its frame's shift, its layers as groups), POST /graph/gis-document (files brought in as the SHEETS of one document: a new D.nn or an existing one, its RMDoc, the licence on the document — s3Dgraphy gis.add_gis_document, a delta), /gis/inspect reads a DXF and a picture with a world file, /graph/publishable (the nodes «uso di studio, non pubblicabile», own or inherited) (MICRO-D-GIS-DOCUMENTI); 69 = POST /graph/epoch-move (a selection moved or extended to an epoch: s3Dgraphy epoch_scope.plan_epoch_move, the plan for the page to write), POST /graph/model-kind (RM · RMDoc · RMSF: plan_model_kind), POST /graph/container-links (the four bonds and their suggestions), /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -3554,6 +3591,14 @@ def make_handler(api):
                 import em_optimize as O
                 self._json({"ok": True, "total_mb": O.memory_total_mb(),
                             "available_mb": O.memory_available_mb()})
+            elif route == "/bucket/list":
+                # MICRO-F-BUCKET-E-TILESET p.1 · Archive ▸ Files ▸ Bucket: what the
+                # bucket the bridge is configured with holds (the S3_* environment,
+                # the same Heriverse uses — no secret travels: the bucket, the
+                # endpoint, the prefix only), one level a page, or a search by name
+                if not self._fs_gate():
+                    return
+                self._json(_bucket_list(urllib.parse.parse_qs(parsed.query)))
             elif route == "/fs/roots":
                 if not self._fs_gate():
                     return
@@ -7865,10 +7910,19 @@ def make_handler(api):
                             # a bucket's file (S3 / rustfs): it stays there, the graph cites its address
                             files.append({**f, "path": addr, "url": addr})
                             continue
+                        if f.get("name_only") and f.get("kind") == "tileset":
+                            # MICRO-F p.2 · a tileset dropped from the system in a browser: no
+                            # path, its name only (the resource says so, as «aggancia» did)
+                            nm = str(f.get("url") or f.get("name") or "")
+                            if nm:
+                                files.append({**f, "path": nm, "url": nm})
+                            continue
                         pth = self._geo_inside(raw_p)
                         if not pth or not os.path.exists(_long_path(pth)):
                             return 400, {"ok": False, "error": f"{raw_p}: no such file (or outside the served roots)"}
-                        u = os.path.relpath(os.path.realpath(pth), em_real) if em_real else os.path.basename(pth)
+                        # MICRO-F p.2 · a graph not saved yet: the path as the page gave it (as
+                        # «aggancia» wrote it), not a bare name nobody can find again
+                        u = os.path.relpath(os.path.realpath(pth), em_real) if em_real else raw_p
                         if u.startswith(".." + os.sep + ".." + os.sep + ".."):
                             u = pth
                         u = u.replace(os.sep, "/")

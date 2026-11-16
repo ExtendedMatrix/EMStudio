@@ -96,8 +96,9 @@ const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, sea
   const TEMPLU = JSON.parse(readFileSync(new URL("../testdata/TempluMare.em.json", import.meta.url), "utf8"));
   const docs = (names) => ({ graph: { nodes: names.map((n, i) => ({ id: `d${i}`, node_type: "document", name: n })), edges: [] } });
   eq(naming.nextDocumentName(docs(["D.01", "D.02", "D.03", "D.04", "D.05", "D.06", "D.07", "D.08", "D.11", "D.20", "D.1000"])),
-     "D.09", "4 · the graph's spelling: after D.01…D.08 comes D.09, not D.9 (TempluMare)");
-  eq(naming.nextDocumentName(docs(["D.1", "D.3"])), "D.2", "4 · a graph without zero padding keeps D.2");
+     "D.1001", "4 · the graph's spelling, the highest + 1 (MICRO-F p.3): after D.1000 comes D.1001");
+  eq(naming.nextDocumentName(docs(["D.01", "D.02", "D.08"])), "D.09", "4 · after D.01…D.08 comes D.09, not D.9 (TempluMare)");
+  eq(naming.nextDocumentName(docs(["D.1", "D.3"])), "D.4", "4 · a graph without zero padding keeps none: D.4");
   eq(naming.nextDocumentName(docs(["D.001"])), "D.002", "4 · …and three digits stay three");
   const st = new DocumentStore(TEMPLU);
   const n0 = st.doc.graph.nodes.length, e0 = st.doc.graph.edges.length;

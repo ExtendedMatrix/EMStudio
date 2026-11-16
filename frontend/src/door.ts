@@ -54,6 +54,43 @@ export function doorRoles(k: DoorKind, withTileset: boolean): DoorRole[] {
   return [];
 }
 
-export interface DoorFile { path?: string; address?: string; name: string }
+/** MICRO-F p.2 · a tileset dropped on the Viewer or the Space passes by the
+ *  door: its preview becomes a ROW of the door — what was recognised (the
+ *  form: a .3tz, a folder with tileset.json, the RealityScan pair), where its
+ *  root's transform puts it, «centred for the view only» — and what the
+ *  preview read travels with the file (packaging, size, a name only). */
+export interface DoorTileset {
+  /** the dropped preview's id (main.ts `droppedTilesets`) */
+  dropId: string;
+  form: string;
+  /** «A tileset packed in a .3tz» … (the recogniser's words) */
+  formSaid: string;
+  /** the position line: «on the Earth at lat, lon, h» or «local» */
+  pos: string;
+  posWarn: boolean;
+  recentred: boolean;
+  /** null: the form cannot be cited as it is (the pair: «Prepara il pacchetto» first) */
+  packaging: "archive" | "directory" | null;
+  nameOnly: boolean;
+}
+export interface DoorFile {
+  path?: string; address?: string; name: string;
+  /** the kind when the name does not say it (a tileset's .zip) */
+  kind?: DoorKind;
+  /** the locator written (a dropped tileset with no path: its name) */
+  url?: string;
+  size_bytes?: number | null;
+  /** the file whose sha256 is taken when the door is passed (a tileset's archive / entry) */
+  digestPath?: string | null;
+  tileset?: DoorTileset;
+}
+
+/** what a dropped tileset sends to the bridge (`/graph/door`, s3Dgraphy door.bring_in) */
+export function doorTilesetOut(f: DoorFile, checksum: string | null): Record<string, unknown> {
+  const t = f.tileset;
+  if (!t) return {};
+  return { kind: "tileset", ...(t.packaging ? { packaging: t.packaging } : {}), ...(t.nameOnly ? { name_only: true, url: f.url ?? f.name } : {}),
+    ...(f.size_bytes ? { size_bytes: f.size_bytes } : {}), ...(checksum ? { checksum } : {}) };
+}
 /** does a drop belong to the door? (a graph opens as a graph, as today) */
 export const forTheDoor = (paths: string[]): boolean => paths.some((p) => doorKindOf(p) !== "graph");

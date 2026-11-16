@@ -12045,3 +12045,22 @@ button.uo-col { cursor: pointer; }
 .door-table th, .door-table td { border-bottom: 1px solid var(--border); padding: 2px 4px; text-align: left; }
 .door-table tr.door-nodate td { background: var(--warn-bg, rgba(255, 196, 0, 0.18)); }
 .scn-door { font-weight: 700; }
+
+/* MICRO-F-BUCKET-E-TILESET p.1 · Archive ▸ Files ▸ Bucket, read as the disk */
+.bucket-view { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 4px; padding: 4px; }
+.bucket-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bucket-crumb { flex: 1 1 auto; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bucket-crumb a { color: var(--accent); text-decoration: none; }
+.bucket-search { width: 220px; }
+.bucket-list { flex: 1 1 auto; min-height: 60px; overflow: auto; }
+.bucket-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.bucket-table th { text-align: left; cursor: pointer; position: sticky; top: 0; background: var(--bg-elevated, var(--bg)); border-bottom: 1px solid var(--border); padding: 2px 6px; }
+.bucket-table td { padding: 2px 6px; white-space: nowrap; }
+.bucket-table td.fn { width: 100%; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+.bucket-table tr[data-type="dir"] { cursor: pointer; }
+.bucket-table tr:hover td { background: var(--bg-sunken, rgba(127,127,127,.08)); }
+.bucket-table tr.chosen td { background: var(--accent-soft, rgba(80,140,255,.22)); }
+.bucket-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.bucket-status { flex: 1 1 auto; opacity: .8; }
+.bucket-refusal { padding: 10px; }
+.bucket-said { font-size: 12px; opacity: .8; }

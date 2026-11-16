@@ -338,7 +338,7 @@ import {
 } from "./shelf-find";
 import { resolveRemote, type PreviewDeps, type RemotePreview, type WebMeta } from "./web-preview";
 import { httpSource } from "./tiles3tz";
-import { attachDigestPath, attachTileset, bridgeTree, isArchiveName, openArchive, position, recognise, servedSource, treeOfDrop, unionTree,
+import { attachDigestPath, bridgeTree, isArchiveName, openArchive, position, recognise, servedSource, treeOfDrop, unionTree,
   type Position, type Recognised, type TreeSource } from "./tileset-drop";
 import { nodeBlobReady, nodeBlobUrl, ownedByNode, setNodeRoad, type FetchFailure } from "./node-road";
 import { isRoomUrl, rebaseRoomUrl, storeAddress, storeUrlOf } from "./store-url";
@@ -448,6 +448,7 @@ import {
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): the horizons as
 // bands, making room in the epochs, the site and its door (experimental.ts)
 import { EXPERIMENTAL, experimentalStored, setExperimental } from "./experimental";
+import { BUCKET_MIME, bucketView, bucketViewState } from "./bucket-view";
 import { doorDrop, initSiteDoor, type GisIngestAsk, onSiteMark, openDoor, siteChip, siteDoorState, siteMarks, spaceButtons } from "./site-door";
 import "./site-door.css";
 import { guessKind, mightBeTileset, planDesktopDrop, positionsArePhysical, toCssPoint, TILESET_TARGETS } from "./desktop-drop";
@@ -811,7 +812,7 @@ import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, re
   paramsFor, profileWords } from "./use-diagnosis";
 import { adviseAddons, enoughFor, type Advice } from "./addon-advice";
 import { pickPathInApp } from "./path-picker";
-import { doorKindOf, doorRoles, isGisKind, isModelKind, looksLikeTropy, type DoorFile, type DoorKind, type DoorRole } from "./door";
+import { doorKindOf, doorRoles, doorTilesetOut, isGisKind, isModelKind, looksLikeTropy, type DoorFile, type DoorKind, type DoorRole } from "./door";
 import { documentFiles as campaignFiles, filesReadForUnit, locatorOfNode, matchByName, mediumOfLocator, unitImages, unitPhotoFiles,
          unitPhotoResourceId, unitPhotoResourceOf, type UnitImage } from "./unit-images";
 import { GraphRemovalError, graphRemovalReport, settleLinksTowards } from "./graph-removal";
@@ -3108,6 +3109,8 @@ window.__EM_SCENE__ = () => {
   assetAnswer: () => assetUi.ans,
   // MICRO-E p.1 · «Porta dentro…» with files named (the dialog opens as from a way in)
   porta: (files: DoorFile[], opts: { epoch?: string | null } = {}) => portaDentro(files, opts),
+  // MICRO-F p.1 · Archive › Files › Bucket: what a window's bucket view holds
+  bucketState: (winId: string) => bucketViewState(winId),
   /** the Space's alternatives: per model its container, its side and the mode (altModeOf), and what is not drawn */
   openSpace: () => { if (!windowsOf().some((w) => w.type === "scene")) setWorkspace("space"); },
   spaceAlt: () => ({ info: [...spaceAltInfo].map(([id, x]) => ({ id, ...x, modeNow: altModeOf(x.group) })), substituted: [...spaceSubstituted.keys()] }),
@@ -17756,7 +17759,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 71;   // 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 72;   // 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -28605,6 +28608,8 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
     // Viewer or a Scene: a tileset may be in it (decided at the drop)
     if ((storageDragPayload(e) && ["viewer", "shelf", "scene", ...(EXPERIMENTAL ? ["graph"] : [])].includes(ty))   // EXPERIMENTAL: "graph", the site's door
         || (carriesFiles(e) && ["viewer", "scene"].includes(ty))
+        // MICRO-F p.1 · rows of Archive › Files › Bucket on the Space: the one door
+        || (e.dataTransfer?.types.includes(BUCKET_MIME) && ["scene", "viewer"].includes(ty))
         // MICRO-ARCHIVIO-1 · entries of the Shelf, onto a graph, the File window, a Viewer
         || (e.dataTransfer?.types.includes(SHELF_ENTRIES_MIME) && ["graph", "storage", "viewer"].includes(ty))) {
       e.preventDefault();
@@ -28626,6 +28631,19 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
     }
     // EXPERIMENTAL · a GIS file of the Storage on a Graph, a Matrix, a Space: the site's door
     if (EXPERIMENTAL && into && doorDrop(into.type, storageDragPayload(e))) { e.preventDefault(); e.stopPropagation(); selectWindow(winId); return; }
+    // MICRO-F p.1 · rows of the bucket on the Space (or a Viewer): the one door,
+    // the files cited by their address
+    {
+      const raw = e.dataTransfer?.getData(BUCKET_MIME);
+      if (raw && into && ["scene", "viewer"].includes(into.type)) {
+        e.preventDefault(); e.stopPropagation(); selectWindow(winId);
+        let list: { address: string; name: string }[] = [];
+        try { list = JSON.parse(raw); } catch { list = []; }
+        if (list.length && store) void portaDentro(list, { epoch: doorEpochHere() });
+        else if (!store) toast(t("toast.openADocument"));
+        return;
+      }
+    }
     // MICRO-E p.1 · a file of Archive ▸ Files dropped on the Space: the one door
     {
       const pay = storageDragPayload(e);
@@ -31042,41 +31060,45 @@ function droppedLocator(d: DroppedTileset): { locator: string; packaging: "archi
   return null;
 }
 
-async function attachDropped(d: DroppedTileset, epochId: string): Promise<void> {
-  if (!store || refuseReadOnly()) return;
-  const st = store;
+/** MICRO-F p.2 · a dropped tileset as a file of the one door: the preview's
+ *  findings (form, position, «centred for the view only») ride on its row; the
+ *  locator is the one «aggancia» wrote (relative to the em.json; with no path
+ *  its name, said so); the digest is taken when the door is passed. */
+function droppedDoorFile(d: DroppedTileset): DoorFile {
   const loc = droppedLocator(d);
-  if (!loc) { toast(t("tsp.prepareFirst")); return; }
-  const epoch = String(st.node(epochId)?.name ?? epochId);
-  if (!(await askConfirm(t("tsp.attachAsk", { name: d.label, epoch, locator: loc.locator })))) return;
-  // MICRO-SOTTOFASI-E-TILESET-TEMPLU (7 Nov 2026) · the file's sha256 first: a
-  // resource without one is never resident, and the Space said «declared, file
-  // missing» of TempluMare_2013_egm2008.3tz on the disk and never asked for it
-  // (6.58 GB: 3.9 s through the bridge, measured)
-  const digestPath = loc.nameOnly ? null : attachDigestPath(d.disk, loc.packaging);
-  if (digestPath) toast(t("tsp.attachHashing", { name: d.label }));
-  const checksum = digestPath ? await bridgeChecksum(digestPath) : null;
-  if (store !== st) return;
-  if (digestPath && !checksum) logWarn(t("tsp.attachNoDigest", { name: d.label }));
-  // MICRO-ANTEPRIMA-AGGANCIATA · the loading the person chose on the preview (auto
-  // or manual, the errors' multiplier) passes to the model, read before it closes
+  const path = loc && !loc.nameOnly ? attachDigestPath(d.disk, loc.packaging) ?? undefined : undefined;
+  const pos = d.pos.kind === "earth"
+    ? t("tsp.posEarth", { lat: d.pos.lat!.toFixed(4), lon: d.pos.lon!.toFixed(4), h: d.pos.h!.toFixed(1) }) + (d.pos.warn ? ` — ${t("tsp.posWarn")}` : "")
+    : t("tsp.posLocal");
+  return { ...(path ? { path } : {}), name: d.label, kind: "tileset", url: loc?.locator ?? d.droppedName, size_bytes: d.bytes,
+    digestPath: path ?? null,
+    tileset: { dropId: d.id, form: d.rec.form, formSaid: t(`tsp.form.${d.rec.form}`, { x: d.rec.name }), pos, posWarn: d.pos.warn,
+      recentred: d.recentred, packaging: loc?.packaging ?? null, nameOnly: !!loc?.nameOnly } };
+}
+
+/** «Porta dentro…» for a dropped tileset (at the drop, and from its bar) */
+async function doorDropped(d: DroppedTileset): Promise<void> {
+  if (!store) { toast(t("toast.openADocument")); return; }
+  if (!droppedLocator(d)) { toast(t("tsp.prepareFirst")); return; }
+  await portaDentro([droppedDoorFile(d)], { epoch: doorEpochHere() ?? epochChoices()[0]?.id ?? null });
+}
+
+/** after the door: each dropped tileset now a model — the preview goes and the
+ *  model is drawn as every tileset of the graph (its true frame), starting as
+ *  the person's preview loaded (MICRO-ANTEPRIMA-AGGANCIATA) */
+function droppedThroughDoor(dropId: string, modelId: string | null, epoch: string): void {
+  const d = droppedTilesets.get(dropId);
+  if (!d || !modelId) return;
   let start: NonNullable<SceneItem["tilesStart"]> | null = null;
   const showing = everyWindow().filter((w) => w.type === "scene" && scenePreviewOf(w)?.dropId === d.id);
   for (const w of showing) {
     const pv = scenePreviewOf(w)!;
     start ??= sceneHandles.get(w.id)?.tilesState(`rm:preview:${pv.resourceId ?? pv.url}`) ?? null;
   }
-  const out = attachTileset(storeGraph(st), { name: d.label, epochId, locator: loc.locator, packaging: loc.packaging,
-    sizeBytes: d.bytes, nameOnly: loc.nameOnly, checksum }, () => st.newId());
-  d.attached = { rmId: out.rmId, epoch };
-  // …and the preview goes: the model is drawn as every tileset of the graph is
-  // (its true frame, `spaceTilesRelocate`), not where the preview was centred
-  // for the view — E.D., 7 Nov 2026: the two surveys stayed on the origin,
-  // each centred on its own volume. The scene frames the model when it lands
-  if (showing.length) tilesHandoff.set(out.rmId, start ?? { mode: "auto" });
+  d.attached = { rmId: modelId, epoch };
+  if (showing.length) tilesHandoff.set(modelId, start ?? { mode: "auto" });
   for (const w of showing) setWinCurrent(w, "space.preview", null);
-  toastUndo(t(loc.nameOnly ? "tsp.attachedNameOnly" : "tsp.attached", { name: d.label, epoch }), st);
-  if (showing.length && spaceEpochId && spaceEpochId !== epochId) logInfo(t("tsp.attachedOtherEpoch", { name: d.label, epoch }), [out.rmId]);
+  if (showing.length && spaceEpochId && epoch && store?.node(spaceEpochId)?.name !== epoch) logInfo(t("tsp.attachedOtherEpoch", { name: d.label, epoch }), [modelId]);
   refreshSurfaces("scene");
   refreshInspector();
   renderViewer();
@@ -31134,21 +31156,19 @@ function droppedBar(d: DroppedTileset, win: Win): HTMLElement {
   const acts = document.createElement("div");
   acts.className = "tsp-actions";
   const loc = droppedLocator(d);
-  const epochs = epochChoices();
-  const sel = document.createElement("select");
-  sel.dataset.tspEpoch = "1";
-  for (const e of epochs) { const o = document.createElement("option"); o.value = e.id; o.textContent = e.name; sel.appendChild(o); }
-  const attach = document.createElement("button");
-  attach.type = "button";
-  attach.className = "insp-btn primary";
-  attach.dataset.tspAttach = "1";
-  attach.textContent = t("tsp.attach");
-  attach.disabled = !store || !epochs.length || !loc || !!d.attached;
-  attach.title = !store ? t("menu.noGraph") : !epochs.length ? t("tsp.noEpochs") : !loc ? t("tsp.prepareFirst")
-    : loc.nameOnly ? t("tsp.nameOnlyHint") : t("tsp.attachHint");
-  attach.addEventListener("click", (e) => { e.stopPropagation(); void attachDropped(d, sel.value); });
-  if (epochs.length && !d.attached) acts.append(sel);
-  acts.append(attach);
+  // MICRO-F p.2 · no «Attacca all'epoca…» of its own any more: the preview is a
+  // row of the one door (document, date, epoch it represents, role, licence),
+  // opened at the drop; this button opens it again (after «Prepara», a cancel)
+  const door = document.createElement("button");
+  door.type = "button";
+  door.className = "insp-btn primary";
+  door.dataset.tspDoor = "1";
+  door.textContent = t("door.menu");
+  door.disabled = !store || !loc || !!d.attached;
+  door.title = !store ? t("menu.noGraph") : !loc ? t("tsp.prepareFirst")
+    : loc.nameOnly ? t("tsp.nameOnlyHint") : t("tsp.doorHint");
+  door.addEventListener("click", (e) => { e.stopPropagation(); void doorDropped(d); });
+  acts.append(door);
   if (d.rec.preparable && d.rec.form !== "package") {
     const pack = document.createElement("button");
     pack.type = "button";
@@ -31211,8 +31231,11 @@ function dropTilesetOn(win: Win, e: DragEvent): boolean {
     e.preventDefault();
     e.stopPropagation();
     void droppedFromPath(payload.path, payload.type === "dir" ? "dir" : "file").then((d) => {
-      if (d) showDropped(win, d);
+      if (d) { showDropped(win, d); if (store && droppedLocator(d)) void doorDropped(d); }   // MICRO-F p.2 · the one door
       else if (win.type === "viewer" && payload.type === "dir") pinViewerCollection(win, payload);   // a folder of images, as before
+      // not a tileset's root: a .json for the door (a Tropy session, a file of a document)
+      else if (store && win.type === "scene" && payload.type === "file" && /\.json$/i.test(payload.name))
+        void portaDentro([{ path: payload.path, name: payload.name }], { epoch: doorEpochHere() });
     });
     return true;
   }
@@ -31221,7 +31244,7 @@ function dropTilesetOn(win: Win, e: DragEvent): boolean {
   if (!dropLooksLikeTileset(list)) return false;
   e.preventDefault();
   e.stopPropagation();
-  void filesOfEntries(list).then(droppedFromFiles).then((d) => { if (d) showDropped(win, d); });
+  void filesOfEntries(list).then(droppedFromFiles).then((d) => { if (d) { showDropped(win, d); if (store && droppedLocator(d)) void doorDropped(d); } });
   return true;
 }
 
@@ -31262,7 +31285,8 @@ async function wireDesktopFileDrop(): Promise<void> {
         return { path, kind: dir == null ? guessKind(path) : dir ? "dir" as const : "file" as const };
       }));
       // MICRO-E p.1 · files from the Finder on the Space: the one door (a graph opens
-      // as a graph, a tileset keeps its preview — planDesktopDrop below)
+      // as a graph; a tileset is previewed first and its preview is a row of the
+      // door — planDesktopDrop below, MICRO-F p.2)
       if (w?.type === "scene" && store && items.every((i) => i.kind === "file") && items.every((i) => doorTakes(i.path))) {
         await portaDentro(items.map((i) => ({ path: i.path, name: paths.leafName(i.path) })), { epoch: doorEpochHere() });
         return;
@@ -31279,7 +31303,7 @@ async function wireDesktopFileDrop(): Promise<void> {
       const win = windowsOf().find((x) => x.id === plan.win);
       if (!win) return;
       const d = await droppedFromPath(plan.path, plan.type);
-      if (d) showDropped(win, d);
+      if (d) { showDropped(win, d); if (store && droppedLocator(d)) void doorDropped(d); }   // MICRO-F p.2 · the one door
       else if (plan.pinFolder) {
         const name = paths.basename(plan.path) || plan.path;
         pinViewerCollection(win, { type: "dir", path: plan.path, name, ext: "" });   // a folder of images, as from the Storage
@@ -37826,8 +37850,14 @@ async function doorFromMenu(opts: { epoch?: string | null } = {}): Promise<void>
 }
 /** the epoch the Space shows: what «Che epoca rappresenta?» proposes from there */
 function doorEpochHere(): string | null { const sp = currentSpace(); return sp ? spaceEpochOf(sp) : null; }
-/** a file for the door (not a graph, not a tileset: a tileset dropped keeps its preview) */
-const doorTakes = (p: string): boolean => { const k = doorKindOf(p); return k !== "graph" && k !== "tileset"; };
+/** a file for the door straight away (not a graph; not a tileset: a tileset dropped is
+ *  recognised and previewed first, then its preview is a row of the door — MICRO-F p.2) */
+const doorTakes = (p: string): boolean => {
+  const k = doorKindOf(p);
+  // a .json that is not an em.json may be a tileset's root (RealityScan's X.json),
+  // a .zip a tileset packed: the recogniser reads them first (TD4, TD7)
+  return k !== "graph" && k !== "tileset" && !(k === "other" && /\.(json|zip)$/i.test(p));
+};
 
 interface DoorInspect { ok?: boolean; crs?: string | null; gis_format?: string; error?: string }
 const doorLicenseOf = (st: DocumentStore, docId: string): string => {
@@ -37853,7 +37883,7 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   const bridge = await bridgeUrl().catch(() => "");
   const rows: Array<{ f: DoorFile; kind: DoorKind; ins: DoorInspect | null }> = [];
   for (const f of files) {
-    let kind = doorKindOf(where(f));
+    let kind = f.kind ?? doorKindOf(where(f));
     if (kind === "graph") continue;
     let ins: DoorInspect | null = null;
     // a picture may be a raster (a world file, a GeoTIFF): the bridge reads it
@@ -37886,6 +37916,21 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
     kd.className = "door-kind";
     kd.textContent = ` · ${t(`door.kind.${r.kind}`)}${r.f.address ? ` · ${t("door.inBucket")}` : ""}`;
     row.append(nm, kd);
+    // MICRO-F p.2 · a dropped tileset: its preview is this row (what it is,
+    // where its root puts it, «centred for the view only»)
+    if (r.f.tileset) {
+      const tl = r.f.tileset;
+      const pv = document.createElement("div");
+      pv.className = "door-tileset";
+      pv.dataset.doorTileset = tl.dropId;
+      pv.dataset.form = tl.form;
+      const fm = document.createElement("span"); fm.className = "tsp-form"; fm.textContent = tl.formSaid;
+      const ps = document.createElement("span"); ps.className = `tsp-pos${tl.posWarn ? " warn" : ""}`; ps.dataset.warn = String(tl.posWarn); ps.textContent = tl.pos;
+      pv.append(fm, " · ", ps);
+      if (tl.recentred) { const n = document.createElement("span"); n.className = "tsp-note"; n.dataset.recentred = "1"; n.textContent = ` · ${t("tsp.recentredScene")}`; pv.appendChild(n); }
+      if (tl.nameOnly) { const n = document.createElement("span"); n.className = "tsp-note"; n.dataset.nameOnly = "1"; n.textContent = ` · ${t("tsp.nameOnlyHint")}`; pv.appendChild(n); }
+      row.appendChild(pv);
+    }
     const rs = doorRoles(r.kind, withTileset);
     if (rs.length) {
       const sel = document.createElement("select");
@@ -37964,11 +38009,22 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   });
   const a = await dlg;
   if (!a.ok) return;
+  // MICRO-F p.2 · a dropped tileset's digest, taken now (as «aggancia» did: a
+  // resource without one is never resident — 6.58 GB: 3.9 s through the bridge)
+  const sums = new Map<DoorFile, string | null>();
+  for (const r of rows) {
+    if (!r.f.digestPath) continue;
+    toast(t("tsp.attachHashing", { name: r.f.name }));
+    const ck = await bridgeChecksum(r.f.digestPath);
+    if (!ck) logWarn(t("tsp.attachNoDigest", { name: r.f.name }));
+    sums.set(r.f, ck);
+  }
+  if (store !== st) return;
   const filesOut = rows.map((r) => ({ ...(r.f.address ? { address: r.f.address } : { path: r.f.path }), name: r.f.name, kind: r.kind,
-    ...(roles.get(r.f) ? { role: roles.get(r.f)!.value as DoorRole } : {}) }));
+    ...(roles.get(r.f) ? { role: roles.get(r.f)!.value as DoorRole } : {}), ...doorTilesetOut(r.f, sums.get(r.f) ?? null) }));
   const crsB: Record<string, string> = {}, shB: Record<string, number[]> = {};
   for (const [p, x] of crsIn) { if (x.crs.value.trim()) crsB[p] = x.crs.value.trim(); shB[p] = x.sh.map((i) => Number(i.value) || 0); }
-  const j = await postGraph<{ delta: ContainerDelta; document_name: string; document_born: boolean; items: { role: string; reused: boolean }[];
+  const j = await postGraph<{ delta: ContainerDelta; document_name: string; document_born: boolean; items: { role: string; reused: boolean; kind?: string; model_id?: string | null }[];
     warnings: string[]; gis?: { sheets?: { said?: string; name?: string }[] } | null }>("/graph/door", {
     doc: st.doc, doc_path: currentFilePath ?? "", files: filesOut, document_id: dsel.value || null, title: title.value.trim(), name: dsel.value ? null : nextDocumentName(st.doc),
     date: a.value.trim(), epoch: models ? esel.value || null : null, license: lsel.value || null,
@@ -37980,6 +38036,13 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   logInfo(msg);
   for (const sh of j.gis?.sheets ?? []) if (sh.said) logInfo(`${sh.name ?? ""} · ${sh.said}`);
   for (const w of j.warnings ?? []) logWarn(w);
+  // MICRO-F p.2 · the dropped tilesets are models now: their previews go
+  {
+    const dropped = rows.filter((r) => r.kind === "tileset");
+    const made = j.items.filter((x) => x.kind === "tileset");
+    const epochName = models && esel.value ? String(st.node(esel.value)?.name ?? "") : "";
+    dropped.forEach((r, i) => { if (r.f.tileset) droppedThroughDoor(r.f.tileset.dropId, made[i]?.model_id ?? null, epochName); });
+  }
   toastUndo(msg, st);
 }
 
@@ -40429,6 +40492,22 @@ function renderStorageInto(host: StorageHost): void {
       body.textContent = "";
       body.classList.remove("storage-split");
       body.appendChild(store ? graphFilesPanel(win) : storageEmpty(t("storage.graphFilesNoGraph")));
+    });
+    return;
+  }
+
+  // MICRO-F p.1 · Archive › Files › Bucket: the configured bucket, read as the disk
+  if (winModeOf(win) === "bucket") {
+    if (crumb) crumb.textContent = t("bucket.crumb");
+    up?.classList.add("hidden");
+    paintSurface(win, body, () => {
+      body.textContent = "";
+      body.classList.remove("storage-split");
+      body.appendChild(bucketView(win.id, {
+        t, bridge: () => bridgeUrl(),
+        door: store ? (files) => void portaDentro(files) : null,
+        kindLabel: (k) => t(`files.kind.${k}`),
+      }));
     });
     return;
   }

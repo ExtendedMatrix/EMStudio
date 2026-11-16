@@ -46,6 +46,8 @@ export interface NamingDoc {
      * `extracted_from` we are looking for, so nothing needs a special case.
      */
     edges?: { source: string; target: string; edge_type?: string }[];
+    /** graph-level data: `document_number_max`, the highest D.nn ever given */
+    data?: unknown;
   };
 }
 
@@ -368,21 +370,52 @@ export function deriveCombinerName(doc: NamingDoc): string {
   return `C.${firstFree(used)}`;
 }
 
-/** Next free `D.<n>`. */
-export function nextDocumentName(doc: NamingDoc): string {
-  const used = new Set<number>();
-  // CAMPAGNA (1 ott, difetto 4) · the GRAPH's spelling: TempluMare writes D.01…
-  // D.08, and the next one is D.09, not D.9. The width is the widest number
-  // written with a leading zero (D.1000 or D.20 say nothing about padding); a
-  // graph with no zero-padded document keeps D.1, D.2…
-  let pad = 0;
-  for (const n of doc.graph.nodes) {
-    const m = DOC_RE.exec(nameOf(n));
+/** Where the highest D.nn ever given is kept (graph-level data) — s3Dgraphy
+ *  `document_names.HIGH_WATER_KEY`. */
+export const DOCUMENT_HIGH_WATER = "document_number_max";
+
+function documentHighWater(doc: NamingDoc): number {
+  const d = doc.graph.data as Record<string, unknown> | undefined;
+  const k = Number(d?.[DOCUMENT_HIGH_WATER] ?? 0);
+  return Number.isFinite(k) ? k : 0;
+}
+
+/**
+ * The study's next `D.<n>` — ONE way of numbering the documents (MICRO-F p.3,
+ * E.D. 16 Nov 2026): the highest number + 1, never the first free; a number
+ * used and then deleted does not come back (`document_number_max` in the
+ * graph's data, written when a numbered document leaves). `after`: the names
+ * already proposed in the same breath. The width is the graph's spelling
+ * (CAMPAGNA 1 ott, difetto 4): the widest number written with a leading zero
+ * (D.01…D.70 → D.71), none when no document has one (D.1, D.3 → D.4), and a
+ * study without a numbered document starts at D.01. s3Dgraphy's
+ * `document_names.next_document_name`, with a parity check (check-naming).
+ */
+export function nextDocumentName(doc: NamingDoc, after: string[] = []): string {
+  let best = documentHighWater(doc);
+  let pad = 0, numbered = false;
+  const names = doc.graph.nodes.filter((n) => n.node_type === "document").map(nameOf).concat(after.map((a) => a.trim()));
+  for (const name of names) {
+    const m = DOC_RE.exec(name);
     if (!m) continue;
-    used.add(Number(m[1]));
+    numbered = true;
+    best = Math.max(best, Number(m[1]));
     if (m[1].length > 1 && m[1].startsWith("0")) pad = Math.max(pad, m[1].length);
   }
-  return `D.${String(firstFree(used)).padStart(pad, "0")}`;
+  if (!numbered) pad = 2;
+  return `D.${String(best + 1).padStart(pad, "0")}`;
+}
+
+/** A numbered document leaves the graph (deleted, renamed out of the series):
+ *  its number stays the highest ever given, so it never comes back. Mutates
+ *  `doc.graph.data`; true when it wrote. */
+export function rememberDocumentNumber(doc: NamingDoc, name: string | null | undefined): boolean {
+  const m = DOC_RE.exec(String(name ?? "").trim());
+  if (!m || Number(m[1]) <= documentHighWater(doc)) return false;
+  const g = doc.graph as { data?: unknown };
+  if (!g.data || typeof g.data !== "object" || Array.isArray(g.data)) g.data = {};
+  (g.data as Record<string, unknown>)[DOCUMENT_HIGH_WATER] = Number(m[1]);
+  return true;
 }
 
 /** Next free `Temp<n>` — an extractor that has no document yet. */
@@ -651,22 +684,15 @@ export interface DocumentSeriesRename {
  * The renames that bring the documents named outside the series D.<n> into it —
  * the given ones, or all — computed one after the other so two never take the
  * same name. The same rule as s3Dgraphy's `diagnostics.document_series_hints`:
- * the `former_name` when it is in the series and free, else the first free
- * D.<n> with the graph's padding; the extractors follow only when they already
+ * the `former_name` when it is in the series and free, else the next D.<n>
+ * (`nextDocumentName`, the highest + 1); the extractors follow only when they already
  * read `<document>.<nn>`. Pure: the caller applies them in one batch.
  */
 export function documentSeriesRenames(doc: NamingDoc, ids?: string[]): DocumentSeriesRename[] {
   const nodes = doc.graph.nodes;
   const docs = nodes.filter((n) => n.node_type === "document");
   const taken = new Set(nodes.map(nameOf));
-  const used = new Set<number>();
-  let pad = 0;
-  for (const n of docs) {
-    const m = DOC_RE.exec(nameOf(n));
-    if (!m) continue;
-    used.add(Number(m[1]));
-    if (m[1].length > 1 && m[1].startsWith("0")) pad = Math.max(pad, m[1].length);
-  }
+  const proposed: string[] = [];
   const want = ids ? new Set(ids) : null;
   const out: DocumentSeriesRename[] = [];
   for (const n of docs) {
@@ -678,12 +704,10 @@ export function documentSeriesRenames(doc: NamingDoc, ids?: string[]): DocumentS
       if (DOC_RE.test(f) && !taken.has(f)) { to = f; fromFormer = true; break; }
     }
     if (!to) {
-      let k = 1;
-      while (used.has(k) || taken.has(`D.${String(k).padStart(pad, "0")}`)) k++;
-      to = `D.${String(k).padStart(pad, "0")}`;
+      to = nextDocumentName(doc, proposed);
+      while (taken.has(to)) { proposed.push(to); to = nextDocumentName(doc, proposed); }
     }
-    const m = DOC_RE.exec(to);
-    if (m) used.add(Number(m[1]));
+    proposed.push(to);
     taken.add(to);
     if (want && !want.has(n.id)) continue;
     const extractors: DocumentSeriesRename["extractors"] = [];

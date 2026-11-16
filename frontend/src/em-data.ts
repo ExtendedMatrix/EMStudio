@@ -23,6 +23,7 @@ import { sha1 } from "./sha1";
 import { epochsInTreeOrder } from "./outline";
 import { provIndex, resolveProvenance, type ProvRule } from "./provenance";
 import { t } from "./i18n";
+import { nextDocumentName } from "./naming";
 
 // ── deterministic identity (mirror of UnifiedXLSXImporter._mint) ────────────
 // Fixed namespace, copied verbatim from s3Dgraphy so ids computed here match the
@@ -623,9 +624,9 @@ export function addRow(store: DocumentStore, sheet: SheetKey): string | null {
     return id;
   }
   if (sheet === "Documents") {
-    let i = 1;
-    while (names.has(`D.${String(i).padStart(2, "0")}`)) i++;
-    const key = `D.${String(i).padStart(2, "0")}`;
+    // MICRO-F p.3 · the one rule: the highest + 1, never the first free
+    let key = nextDocumentName(store.doc);
+    while (names.has(key)) key = nextDocumentName(store.doc, [key]);
     const id = emDataMint(graphId, "document", key);
     store.addNode({ id, name: key, node_type: "document", description: "" });
     return id;

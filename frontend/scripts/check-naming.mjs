@@ -103,10 +103,10 @@ const LOOSE = { strictDocumentNames: false };
   eq(N.nextTempName(d), "Temp2", "Temp fills holes too");
   const c = doc([["a", "combiner", "C.1"], ["b", "combiner", "C.2"]]);
   eq(N.deriveCombinerName(c), "C.3", "combiners are progressive");
-  eq(N.nextDocumentName(doc([["a", "document", "D.1"], ["b", "document", "D.3"]])), "D.2",
-    "the next free document number");
+  eq(N.nextDocumentName(doc([["a", "document", "D.1"], ["b", "document", "D.3"]])), "D.4",
+    "MICRO-F p.3: the highest + 1, never the first free");
   eq(N.initialName(doc([]), "combiner"), "C.1", "a first combiner is C.1");
-  eq(N.initialName(doc([]), "document"), "D.1", "a first document is D.1");
+  eq(N.initialName(doc([]), "document"), "D.01", "a study's first document is D.01 (s3Dgraphy's spelling)");
   eq(N.initialName(doc([]), "US"), null, "other types are none of this module's business");
 }
 
@@ -158,7 +158,7 @@ const LOOSE = { strictDocumentNames: false };
   const free = doc([["d1", "document", "Rilievo Porta Marina"]]);
   eq(N.computeNameStatus(free, "d1", STRICT).status, "warn",
     "strict ON: a free-form document name warns");
-  eq(N.computeNameStatus(free, "d1", STRICT).suggestion, "D.1",
+  eq(N.computeNameStatus(free, "d1", STRICT).suggestion, "D.01",
     "…and suggests the next D.<n>");
   eq(N.computeNameStatus(free, "d1", LOOSE).status, "ok",
     "strict OFF: a free-form name is allowed");
@@ -298,15 +298,48 @@ const LOOSE = { strictDocumentNames: false };
   d.graph.nodes.find((n) => n.id === "tm15").data = { former_name: "D.115" };
   d.graph.nodes.find((n) => n.id === "tm3").data = { former_name: "D.02" };
   const all = N.documentSeriesRenames(d);
-  eq(all.map((r) => [r.from, r.to, r.fromFormer]), [["TM015", "D.115", true], ["TM003", "D.03", false], ["Pianta", "D.04", false]],
+  eq(all.map((r) => [r.from, r.to, r.fromFormer]), [["TM015", "D.115", true], ["TM003", "D.116", false], ["Pianta", "D.117", false]],
      "former_name when free, else the first free D.nn with the graph's padding; D.01/D.02 untouched");
   eq(all[0].extractors.map((x) => x.to), ["D.115.01", "D.115.02"], "the extractors that read <document>.nn follow");
   eq(all[0].kept.map((x) => x.name), ["lettura libera"], "the others are listed, not renamed");
-  eq(N.documentSeriesRenames(d, ["p"]).map((r) => r.to), ["D.04"], "one document: the same name it has in the whole plan");
+  eq(N.documentSeriesRenames(d, ["p"]).map((r) => r.to), ["D.117"], "one document: the same name it has in the whole plan");
   eq(N.computeNameStatus(d, "tm15").suggestion, "D.115", "the name status proposes the former name");
   eq(N.dataWithFormerName({ former_name: "D.115" }, "TM015", "D.115"), { former_name: "TM015" }, "the old name kept");
   eq(N.dataWithFormerName({ former_name: "D.02" }, "TM003", "D.03"), { former_name: "D.02", former_names: ["TM003"] },
      "a former name already there: the list");
+}
+
+// ── MICRO-F p.3 · one way of numbering: the highest + 1, a deleted one never back,
+//    PARITY with s3Dgraphy's document_names.next_document_name ─────────────────
+{
+  const docs = (names, data) => ({ graph: { nodes: names.map((n, i) => ({ id: `d${i}`, node_type: "document", name: n })), edges: [], ...(data ? { data } : {}) } });
+  const CASES = [
+    [["D.01", "D.02", "D.13", "D.70"], null, []], [["D.1", "D.3"], null, []], [["D.001"], null, []],
+    [["D.01", "D.1000"], null, []], [[], null, []], [["TM003", "Pianta"], null, []], [["D.01"], null, ["D.02"]],
+    [["D.01", "D.02"], { document_number_max: 9 }, []], [[], { document_number_max: 4 }, []], [[" D.07 ", "D. 9"], null, []],
+  ];
+  const page = CASES.map(([n, d, a]) => N.nextDocumentName(docs(n, d), a));
+  eq(page, ["D.71", "D.4", "D.002", "D.1001", "D.01", "D.01", "D.03", "D.10", "D.05", "D.08"], "the page's answers");
+  const g = docs(["D.01", "D.02", "D.03"]);
+  eq(N.rememberDocumentNumber(g, "D.03"), true, "a deleted D.03 is remembered");
+  g.graph.nodes.pop();
+  eq(N.nextDocumentName(g), "D.04", "…and never comes back");
+  eq(N.rememberDocumentNumber(g, "D.01"), false, "a lower one changes nothing");
+  eq(N.rememberDocumentNumber(g, "Catasto"), false, "a name outside the series is not a number");
+  const { execFileSync } = await import("node:child_process");
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const S3D = path.resolve(new URL("../../../s3Dgraphy", import.meta.url).pathname);
+  if (fs.existsSync(path.join(S3D, "src/s3dgraphy/document_names.py"))) {
+    const PY = [path.join(S3D, ".venv/bin/python"), "python3"].find((p) => p === "python3" || fs.existsSync(p));
+    const py = JSON.parse(execFileSync(PY, ["-c", `import json,sys
+sys.path.insert(0, ${JSON.stringify(path.join(S3D, "src"))})
+from s3dgraphy.document_names import next_document_name
+class G:
+    def __init__(s, names, data): s.nodes = [type("N", (), {"node_type": "document", "name": n})() for n in names]; s.data = data or {}
+print(json.dumps([next_document_name(G(n, d), after=a) for n, d, a in json.loads(${JSON.stringify(JSON.stringify(CASES))})]))`], { encoding: "utf8" }));
+    eq(page, py, "PARITY with s3dgraphy.document_names.next_document_name");
+  } else console.log("naming: s3Dgraphy not next door — parity skipped");
 }
 
 console.log(`naming: ${checks} checks passed`);
