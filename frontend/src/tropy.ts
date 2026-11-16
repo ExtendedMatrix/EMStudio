@@ -26,7 +26,9 @@ export interface TropyPhoto {
   id: string; path: string; title: string; checksum?: string;
   width?: number; height?: number; notes: string[]; selections: TropySelection[];
 }
-export interface TropyItem { id: string; title: string; photos: TropyPhoto[] }
+export interface TropyItem { id: string; title: string; photos: TropyPhoto[];
+  /** MICRO-E p.1 · read for «Porta dentro…»: the item's date, rights / licence, identifier */
+  date?: string; license?: string; identifier?: string }
 
 export const TROPY_KEY = "tropy";
 
@@ -88,7 +90,10 @@ export function parseTropy(json: unknown): TropyItem[] {
                ...(w ? { width: w } : {}), ...(h ? { height: h } : {}),
                notes: notesOf(p), selections: sels };
     });
-    items.push({ id, title, photos: ps });
+    const date = text(get(it, "date", "created"));
+    const license = text(get(it, "rights", "license", "licence"));
+    const identifier = text(get(it, "identifier"));
+    items.push({ id, title, photos: ps, ...(date ? { date } : {}), ...(license ? { license } : {}), ...(identifier ? { identifier } : {}) });
   }
   return items;
 }

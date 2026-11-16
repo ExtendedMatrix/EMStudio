@@ -421,3 +421,13 @@ export async function pathIsDir(path: string): Promise<boolean | null> {
 export function baseName(path: string): string {
   return basename(path) || path;
 }
+
+/** MICRO-E p.1 · File ▸ Porta dentro…: the system's selector, several files at
+ *  once → their paths (posix). Null outside Tauri (the page's own picker) and on cancel. */
+export async function pickFiles(title: string, defaultPath?: string): Promise<string[] | null> {
+  if (!isTauri()) return null;
+  const got = await open({ multiple: true, directory: false, title,
+    ...(defaultPath ? { defaultPath: toNative(defaultPath) } : {}) });
+  const list = (Array.isArray(got) ? got : got ? [got] : []).map((p) => picked(p)).filter((p): p is string => !!p);
+  return list.length ? list : null;
+}

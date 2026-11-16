@@ -2570,7 +2570,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: sample by level (and the largest of each level), the rest estimated
 #: (``estimated``), ``{tiles_full: true}`` reads all; one measure per (path,
 #: size, mtime) at a time, kept on disk, stopped when no page waits for it.
-BRIDGE_LEVEL = 70   # 70 = POST /gis/raster-grid (a georeferenced picture — GeoTIFF, JPEG/PNG with a world file — laid in the scene's CRS: its grid of nodes converted by PROJ, «convertito da EPSG:a a EPSG:b»), /gis/features takes shift and group_key (a DXF: its frame's shift, its layers as groups), POST /graph/gis-document (files brought in as the SHEETS of one document: a new D.nn or an existing one, its RMDoc, the licence on the document — s3Dgraphy gis.add_gis_document, a delta), /gis/inspect reads a DXF and a picture with a world file, /graph/publishable (the nodes «uso di studio, non pubblicabile», own or inherited) (MICRO-D-GIS-DOCUMENTI); 69 = POST /graph/epoch-move (a selection moved or extended to an epoch: s3Dgraphy epoch_scope.plan_epoch_move, the plan for the page to write), POST /graph/model-kind (RM · RMDoc · RMSF: plan_model_kind), POST /graph/container-links (the four bonds and their suggestions), /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 71   # 71 = POST /graph/door («Porta dentro…»: files into one document, its date always, the epoch it represents to the models — s3Dgraphy door.bring_in, a delta) and POST /graph/master (a model's master replaced — the DTC records it with a transformation, the old master stays with its documents, its versions «da rigenerare» — or a version promoted to master: s3Dgraphy resources.master_swap, a delta) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = POST /gis/raster-grid (a georeferenced picture — GeoTIFF, JPEG/PNG with a world file — laid in the scene's CRS: its grid of nodes converted by PROJ, «convertito da EPSG:a a EPSG:b»), /gis/features takes shift and group_key (a DXF: its frame's shift, its layers as groups), POST /graph/gis-document (files brought in as the SHEETS of one document: a new D.nn or an existing one, its RMDoc, the licence on the document — s3Dgraphy gis.add_gis_document, a delta), /gis/inspect reads a DXF and a picture with a world file, /graph/publishable (the nodes «uso di studio, non pubblicabile», own or inherited) (MICRO-D-GIS-DOCUMENTI); 69 = POST /graph/epoch-move (a selection moved or extended to an epoch: s3Dgraphy epoch_scope.plan_epoch_move, the plan for the page to write), POST /graph/model-kind (RM · RMDoc · RMSF: plan_model_kind), POST /graph/container-links (the four bonds and their suggestions), /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -4027,7 +4027,7 @@ def make_handler(api):
                 self._json(out, status)
             elif route in ("/gis/features", "/gis/surface", "/graph/gis-ingest", "/graph/site-footprint",
                            "/graph/landscape-surface", "/graph/gis-contours", "/gis/raster-grid",
-                           "/graph/gis-document", "/graph/publishable"):
+                           "/graph/gis-document", "/graph/publishable", "/graph/door"):
                 # MICRO-GIS-BASE · the GIS layers: read (s3Dgraphy, no GDAL),
                 # drawn in the scene's CRS, brought into the graph as a delta
                 if not self._fs_gate():
@@ -4048,7 +4048,7 @@ def make_handler(api):
             elif route in ("/consolidate", "/graph/compose-plan", "/graph/before-after", "/graph/tileset-whole",
                            "/graph/register-new-version", "/graph/tileset-master", "/assets/list",
                            "/graph/containers", "/assets/versions/remove", "/assets/textures/remove",
-                           "/graph/epoch-move", "/graph/model-kind", "/graph/container-links"):
+                           "/graph/epoch-move", "/graph/model-kind", "/graph/container-links", "/graph/master"):
                 # MICRO-BLEND-OFFICINA-3 · s3Dgraphy's consolidate and
                 # graph_compose: «Consolida per…», «Componi un .blend dal
                 # grafo», the before/after of the check, the tileset «Intero»
@@ -4080,6 +4080,7 @@ def make_handler(api):
                       "/graph/epoch-move": self._epoch_move,
                       "/graph/model-kind": self._model_kind,
                       "/graph/container-links": self._container_links,
+                      "/graph/master": self._master,
                       "/assets/versions/remove": self._asset_versions_remove,
                       "/assets/textures/remove": self._asset_texture_remove}[route]
                 try:
@@ -5392,6 +5393,43 @@ def make_handler(api):
             warnings = [w for x in (got if isinstance(got, list) else [got]) if isinstance(x, dict)
                         for w in x.get("warnings") or []]
             return 200, {"ok": True, "op": op, "got": got, "warnings": warnings, "delta": delta}
+
+        def _master(self, body):
+            """MICRO-E-PORTA-VERSIONI-COLORI p.2/p.3 · ``POST /graph/master {doc,
+            op, model, …}`` — a model's master by hand (s3Dgraphy's
+            ``resources.master_swap``), answered as a delta the page applies in
+            one undo step: ``replace {model, resource | path, why?, by?}`` (a new
+            master: a resource of the graph, or a file named by its path, made a
+            resource here; the DTC records the replacement, the old master stays
+            with its documents, its versions «da rigenerare»), ``promote {model,
+            version?, by?}`` (a version promoted to master: the richest when not
+            named). The files never move."""
+            from s3dgraphy.resources import master_swap as MS
+            from s3dgraphy.resources.files import add_resource
+            graph, _f = self._graph_of(body)
+            op = str(body.get("op") or "")
+            model = str(body.get("model") or "")
+            if graph.find_node_by_id(model) is None:
+                return 400, {"ok": False, "error": f"{model!r} is not a node of this graph"}
+            by = str(body.get("by") or "") or None
+
+            def _replace():
+                rid = str(body.get("resource") or "")
+                path = str(body.get("path") or "").strip()
+                if not rid and path:
+                    name = os.path.basename(path.rstrip("/")) or path
+                    res = add_resource(graph, name=name, kind="3d_model", tier="master",
+                                       files=[{"path": path}])
+                    rid = res.node_id if hasattr(res, "node_id") else str(res)
+                if not rid:
+                    raise ValueError("the new master is wanted: a resource or a path")
+                return MS.replace_master(graph, model, rid, by=by, why=str(body.get("why") or ""))
+            fns = {"replace": _replace,
+                   "promote": lambda: MS.promote_version(graph, model, str(body.get("version") or "") or None, by=by)}
+            if op not in fns:
+                return 400, {"ok": False, "error": f"unknown master gesture {op!r}"}
+            got, delta = self._gis_delta(graph, fns[op])
+            return 200, {"ok": True, "op": op, "got": got, "warnings": [], "delta": delta}
 
         def _epoch_move(self, body):
             """MICRO-TESTATE-COERENTI p.12 · ``POST /graph/epoch-move {doc, ids,
@@ -7810,6 +7848,49 @@ def make_handler(api):
                                  "inspect": {k: v for k, v in got["inspect"].items() if k != "features"},
                                  **({"site_id": got["site_id"], "site_name": got["site_name"]} if got.get("site_id") else {}),
                                  "delta": delta}
+                if route == "/graph/door":
+                    # MICRO-E-PORTA-VERSIONI-COLORI p.1 · «Porta dentro…»: files into ONE
+                    # document (a new D.nn or one there), its date ALWAYS, the epoch it
+                    # represents to the models, never to the document; GIS sheets as
+                    # MICRO-D; a file of a bucket (an address) cited as it is. One delta
+                    from s3dgraphy.door import bring_in
+                    em_real = os.path.realpath(em_folder) if em_folder else ""
+                    files, gurls = [], {}
+                    for f in body.get("files") or []:
+                        if not isinstance(f, dict):
+                            continue
+                        raw_p = str(f.get("path") or "")
+                        addr = str(f.get("address") or "")
+                        if addr:
+                            # a bucket's file (S3 / rustfs): it stays there, the graph cites its address
+                            files.append({**f, "path": addr, "url": addr})
+                            continue
+                        pth = self._geo_inside(raw_p)
+                        if not pth or not os.path.exists(_long_path(pth)):
+                            return 400, {"ok": False, "error": f"{raw_p}: no such file (or outside the served roots)"}
+                        u = os.path.relpath(os.path.realpath(pth), em_real) if em_real else os.path.basename(pth)
+                        if u.startswith(".." + os.sep + ".." + os.sep + ".."):
+                            u = pth
+                        u = u.replace(os.sep, "/")
+                        gurls[pth] = u
+                        files.append({**f, "path": pth, "url": u})
+                    if not files:
+                        return 400, {"ok": False, "error": "no file to bring in ('files')"}
+                    gis_b = {"urls": gurls}
+                    if isinstance(body.get("crs"), (str, dict)):
+                        gis_b["crs"] = body["crs"]
+                    if isinstance(body.get("shift"), (list, dict)):
+                        gis_b["shift"] = body["shift"]
+                    got, delta = self._gis_delta(graph, lambda: bring_in(
+                        graph, files, document_id=body.get("document_id") or None, title=str(body.get("title") or ""),
+                        name=str(body.get("name") or "") or None,
+                        date=body.get("date") if body.get("date") not in ("", None) else None,
+                        epoch_id=body.get("epoch") or None, license=body.get("license") or None,
+                        author_id=body.get("author_id") or None, gis=gis_b))
+                    for sh in ((got.get("gis") or {}).get("sheets") or []):
+                        cv = sh.get("convert")
+                        sh["said"] = f"convertito da {cv['from']} a {cv['to']}" if cv else ""
+                    return 200, {"ok": True, **got, "delta": delta}
                 if route == "/graph/gis-document":
                     # MICRO-D-GIS-DOCUMENTI · the files as the SHEETS of one document (a new
                     # D.nn or an existing one), its set, its RMDoc, the licence on the

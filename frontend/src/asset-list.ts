@@ -1687,3 +1687,58 @@ export type DropKind = "member" | "alternative";
 export function dropDefault(rows: readonly Pick<AssetRow, "kind" | "versions">[]): DropKind {
   return rows.length && rows.every((a) => isTilesetAsset(a)) ? "alternative" : "member";
 }
+
+// ── MICRO-E-PORTA-VERSIONI-COLORI p.2 · the target's card = its version ─────
+//
+// What the version of a target is made of: per asset, the version the target
+// loads — made ON PURPOSE for it (loaded by this target alone), REUSED (shared
+// with other targets), or none (the target is uncovered for that asset: a
+// master is never a fallback, E.D.). «Elimina la versione» takes away only what
+// was made on purpose, and only where the asset has a master.
+
+export interface CompositionRow { asset: string; name: string; version: string | null; bytes: number }
+export interface Composition {
+  target: TargetKey;
+  made: CompositionRow[];
+  shared: CompositionRow[];
+  missing: CompositionRow[];
+  madeBytes: number;
+  sharedBytes: number;
+  /** of the assets with a version made on purpose, those without a usable master */
+  noMaster: { asset: string; name: string; why: "none" | "file" }[];
+}
+
+/** a master is usable to make versions again: there, and its file not missing */
+export function usableMaster(a: AssetRow): { ok: boolean; why: "none" | "file" | null } {
+  const m = a.versions.find((v) => v.master);
+  if (!m) return { ok: false, why: "none" };
+  if (m.state === "missing" || m.state === "empty_copy" || !m.url) return { ok: false, why: "file" };
+  return { ok: true, why: null };
+}
+
+export function targetComposition(assets: AssetRow[], k: TargetKey): Composition {
+  const out: Composition = { target: k, made: [], shared: [], missing: [], madeBytes: 0, sharedBytes: 0, noMaster: [] };
+  for (const a of assets) {
+    const cell = a.targets[k];
+    if (!cell || cell.state === "na" || cell.covered_by) continue;
+    const v = cell.loads ? a.versions.find((x) => x.id === cell.loads) : undefined;
+    if (!v || v.master) { out.missing.push({ asset: a.id, name: a.name, version: null, bytes: 0 }); continue; }
+    const row = { asset: a.id, name: a.name, version: v.id, bytes: v.size_bytes ?? 0 };
+    const others = v.loaded_by.filter((x) => x !== k);
+    if (others.length) { out.shared.push(row); out.sharedBytes += row.bytes; }
+    else {
+      out.made.push(row); out.madeBytes += row.bytes;
+      const m = usableMaster(a);
+      if (!m.ok) out.noMaster.push({ asset: a.id, name: a.name, why: m.why ?? "none" });
+    }
+  }
+  return out;
+}
+
+/** «⋯ ▸ Rimuovi questa versione»: refused for the master and for the last version of an asset */
+export function versionRemovalRefusal(a: AssetRow, versionId: string): "master" | "last" | null {
+  const v = a.versions.find((x) => x.id === versionId);
+  if (!v || v.master) return "master";
+  if (a.versions.filter((x) => !x.master).length <= 1) return "last";
+  return null;
+}

@@ -9040,6 +9040,25 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-status { position: absolute; inset: 0; display: grid; place-content: center; color: var(--scene-ink); font-size: 0.8rem; }
 .scn-ov { position: absolute; left: 10px; top: 10px; max-width: min(380px, 72%); background: var(--scene-ov-bg); color: var(--scene-ov-ink); border: 1px solid var(--scene-ov-border); border-radius: 8px; padding: 7px 10px; font-size: 0.76rem; line-height: 1.45; z-index: 2; }
 .scn-ov b { font-weight: 600; }
+/* MICRO-E p.6 · «Colori ▾» and its legend (bottom left of the scene) */
+.scn-legend { position: absolute; left: 10px; bottom: 34px; max-width: min(300px, 60%); max-height: 46%; overflow: auto; background: var(--scene-ov-bg); color: var(--scene-ov-ink); border: 1px solid var(--scene-ov-border); border-radius: 8px; padding: 6px 8px; font-size: 0.74rem; line-height: 1.35; z-index: 2; }
+.scn-legend-h { font-weight: 600; margin-bottom: 3px; }
+.scn-legend-vars { display: flex; gap: 4px; margin: 2px 0 4px; }
+.scn-legend-vars button, .col-modes button, .col-variants button { font-size: 0.72rem; padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-sunken); color: var(--text); cursor: pointer; }
+.scn-legend-vars button[aria-pressed="true"], .col-modes button[aria-pressed="true"], .col-variants button[aria-pressed="true"] { background: var(--accent, #2f6fb5); color: #fff; border-color: transparent; }
+.scn-legend-counts { opacity: 0.85; margin-bottom: 3px; }
+.scn-legend-row { display: grid; grid-template-columns: 18px 1fr auto auto; align-items: center; gap: 6px; padding: 1px 2px; border-radius: 4px; cursor: pointer; }
+.scn-legend-row:hover { background: rgba(127, 127, 127, 0.15); }
+.scn-legend-row.off { opacity: 0.4; }
+.scn-legend-row.iso { outline: 1px solid var(--scene-ov-ink); }
+.scn-legend-sw { width: 16px; height: 14px; padding: 0; border: 1px solid var(--scene-ov-border); border-radius: 3px; background: none; cursor: pointer; }
+.scn-legend-lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scn-legend-n { font-variant-numeric: tabular-nums; opacity: 0.85; }
+.scn-legend-mark { font-size: 0.68rem; opacity: 0.8; }
+.col-body { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; min-width: 260px; }
+.col-modes, .col-variants { display: flex; gap: 4px; }
+.col-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.col-hint { font-size: 0.74rem; opacity: 0.85; margin: 0; }
 .scn-ov .miss { color: var(--danger); }
 .scn-ov .ref { color: var(--warn); }
 .scn-ov .ok { color: var(--ok); }
@@ -12004,3 +12023,25 @@ button.uo-col { cursor: pointer; }
 .insp-prov-src .insp-prov-from:hover { background: var(--inherit-soft); text-decoration: underline; }
 .insp-epochs-inherited .insp-ep-name.insp-link { display: inline-block; width: auto; }
 .gis-doc button[data-gis-act="frame-doc"] { width: auto; flex: none; padding: 0 6px; line-height: 1.4; }
+/* MICRO-E p.2 · the target's card = its version */
+.al-vm { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 2px; font-size: 0.76rem; }
+.al-vm-h { font-weight: 600; }
+.al-vm-line.over { color: var(--danger); }
+.al-vm-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.al-vm-bar button { font-size: 0.74rem; }
+.al-vm-bar button.danger:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+.al-vm-nomaster { margin: 2px 0; }
+.al-vm-nm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.al-ver-more { padding: 0 5px; line-height: 1.1; }
+.al-ver-refused { font-size: 0.72rem; margin-top: 2px; }
+/* MICRO-E p.1 · «Porta dentro…» */
+.door-body { display: flex; flex-direction: column; gap: 6px; min-width: 420px; max-width: 640px; font-size: 0.82rem; }
+.door-files { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; }
+.door-file { padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; }
+.door-kind { opacity: 0.8; }
+.door-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.door-row input[type="text"] { flex: 1; min-width: 180px; }
+.door-table { border-collapse: collapse; width: 100%; }
+.door-table th, .door-table td { border-bottom: 1px solid var(--border); padding: 2px 4px; text-align: left; }
+.door-table tr.door-nodate td { background: var(--warn-bg, rgba(255, 196, 0, 0.18)); }
+.scn-door { font-weight: 700; }

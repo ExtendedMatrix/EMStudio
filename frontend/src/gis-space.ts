@@ -34,6 +34,8 @@ export interface GisSpaceDeps {
   contours: (demId: string, interval: number) => Promise<string | null>;
   /** MICRO-D-GIS-DOCUMENTI · files brought in as the SHEETS of one document */
   ingestDocument?: (req: GisDocumentAsk) => Promise<string | null>;
+  /** MICRO-E p.1 · «Porta dentro…», the one door (main.ts) */
+  door?: () => void;
 }
 
 /** MICRO-D-GIS-DOCUMENTI · what «Porta dentro…» asks the bridge (`/graph/gis-document`) */
@@ -281,12 +283,10 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     panel.appendChild(addH);
     const add = document.createElement("div");
     add.className = "geo-add";
-    const inp = document.createElement("input");
-    inp.type = "text";
-    inp.placeholder = t("gis.pathPlaceholder");
-    inp.dataset.gisPath = "1";
-    inp.value = typed;
-    add.append(inp, btn(t("gis.inspect"), "inspect"));
+    // MICRO-E p.1 · the field with «;» is gone: the one door, «Porta dentro…»
+    // (its window reads each file, asks the document, its date, CRS + shift)
+    void typed;
+    add.append(btn(t("door.menu"), "door", t("door.menuHint")));
     panel.appendChild(add);
     if (inspects.length) panel.appendChild(documentBox());
     if (inspect) {
@@ -449,6 +449,7 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
     const b = (e.target as HTMLElement).closest<HTMLElement>("[data-gis-act]");
     if (!b) return;
     const act = b.dataset.gisAct;
+    if (act === "door") { d.door?.(); return; }
     if (act === "inspect") {
       const v = panel.querySelector<HTMLInputElement>("[data-gis-path]")?.value.trim() ?? "";
       // MICRO-D-GIS-DOCUMENTI · several files (separated by «;») = the sheets of one document

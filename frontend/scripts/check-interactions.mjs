@@ -11955,14 +11955,15 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
   const changed = await p.evaluate(() => ({ engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
     said: document.querySelector(".files-tab-optimize .files-engine .files-hint")?.dataset.tip ?? "",
     stored: localStorage.getItem("emstudio.optEngine") ?? "" }));
-  await p.click('[data-action="files-tiles-experimental"]');
+  // MICRO-E p.5 · the tileset's switch exists only with «Funzioni sperimentali» on
+  if (EXPERIMENTAL_ON) await p.click('[data-action="files-tiles-experimental"]');
   await p.waitForTimeout(500);
   const tilesOn = await p.evaluate(() => { const el = document.querySelector(".files-tab-optimize");
     return { stored: localStorage.getItem("emstudio.tilesetExperimental"),
       text: el ? `${el.textContent} ${[...el.querySelectorAll("[data-tip]")].map((x) => x.dataset.tip).join(" ")}` : "" }; });
   await ctx.close();
   const conds = {
-    on: web.pills.join(",") === "acceso,acceso,sperimentale,sperimentale" && web.chips === 5,
+    on: web.pills.join(",") === (EXPERIMENTAL_ON ? "acceso,acceso,sperimentale,sperimentale" : "acceso,acceso") && web.chips === 5,
     engine: web.engine === "gltfpack" && /un secondo/.test(web.why) && /KTX2/.test(web.kv) && /meshopt/.test(web.kv),
     named: web.variant.includes("OB_CUBO_LOD1@lod4-web.glb") && /-si 0\.1 -cc -tc -tl 1024/.test(web.command),
     addon: web.link && !web.cardHere && web.go === true,
@@ -11974,7 +11975,9 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     stampFirst: web.stampFirst,
     experience: exp.engine === "blender3dsc" && exp.notYet && exp.options.join(",") === "blender3dsc,gltfpack",
     changeable: changed.engine === "gltfpack" && /al posto di/.test(changed.said) && /"experience":"gltfpack"/.test(changed.stored),
-    tiles: web.tilesSwitch && /RealityScan/.test(web.tiles) && /Obj2Tiles/.test(web.tiles) && tilesOn.stored === "1" && /giro 2/.test(tilesOn.text),
+    // MICRO-E p.5 · switch off: no word of the experimental ways
+    tiles: EXPERIMENTAL_ON ? web.tilesSwitch && /RealityScan/.test(web.tiles) && /Obj2Tiles/.test(web.tiles) && tilesOn.stored === "1" && /giro 2/.test(tilesOn.text)
+      : !web.tilesSwitch && !/RealityScan/.test(web.tiles ?? ""),
     noErrors: !errors.length,
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, web, settings, exp, changed, errors } };
@@ -12174,7 +12177,8 @@ test("SR2.ritocchi", "MICRO-SPAZIO-RITOCCHI-2 · il nome dell'em.json nella barr
   return { pass: Object.values(conds).every(Boolean), detail: { conds, out, errors } };
 });
 
-test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, sperimentale dietro il suo interruttore: acceso, la destinazione «Tileset (3D Tiles)» si aggiunge e si sceglie; il motore Obj2Tiles con il perché (Blender + 3DSC in Blender stesso); Obj2Tiles come componente aggiuntivo (AGPL-3.0, OpenDroneMap, versione e sha256 fissate; sotto Rosetta su Apple Silicon, detto); il giudice (il validatore di Cesium, o il controllo strutturale detto come tale); la riga del file con la sua cartella in RB/versions/‹modello›@tiles, livelli, profondità e memoria; la memoria e il tetto detti prima; il comando; senza Obj2Tiles il pulsante non parte; spento, si torna al web", async () => {
+// MICRO-E p.5 · the experimental ways of Optimise: only with «Funzioni sperimentali» on
+(EXPERIMENTAL_ON ? test : () => {})("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, sperimentale dietro il suo interruttore: acceso, la destinazione «Tileset (3D Tiles)» si aggiunge e si sceglie; il motore Obj2Tiles con il perché (Blender + 3DSC in Blender stesso); Obj2Tiles come componente aggiuntivo (AGPL-3.0, OpenDroneMap, versione e sha256 fissate; sotto Rosetta su Apple Silicon, detto); il giudice (il validatore di Cesium, o il controllo strutturale detto come tale); la riga del file con la sua cartella in RB/versions/‹modello›@tiles, livelli, profondità e memoria; la memoria e il tetto detti prima; il comando; senza Obj2Tiles il pulsante non parte; spento, si torna al web", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab11");
   const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
@@ -12229,7 +12233,8 @@ test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, 
   return { pass: Object.values(conds).every(Boolean), detail: { conds, on, off, errors } };
 });
 
-test("AR13.survey", "MICRO-OTTIMIZZA-3 p.3 · più mesh, un solo tileset: due OBJ della stessa cartella con la destinazione «Tileset» → l'interruttore «un tileset per tutto il rilievo» acceso da sé (consigliato: «Un rilievo intero si guarda meglio come un tileset solo»), la riga ‹documento›_LOD0@tiles.3tz di 2 parti, le parti nelle sue sottocartelle, il pulsante «Fai il tileset del rilievo (2 parti)»; «un tileset per file» torna alle righe di prima", async () => {
+// MICRO-E p.5 · the experimental ways of Optimise: only with «Funzioni sperimentali» on
+(EXPERIMENTAL_ON ? test : () => {})("AR13.survey", "MICRO-OTTIMIZZA-3 p.3 · più mesh, un solo tileset: due OBJ della stessa cartella con la destinazione «Tileset» → l'interruttore «un tileset per tutto il rilievo» acceso da sé (consigliato: «Un rilievo intero si guarda meglio come un tileset solo»), la riga ‹documento›_LOD0@tiles.3tz di 2 parti, le parti nelle sue sottocartelle, il pulsante «Fai il tileset del rilievo (2 parti)»; «un tileset per file» torna alle righe di prima", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab13");
   for (const n of ["OB_EST_L_LOD0", "OB_INT_R_LOD0"]) writeFileSync(`${pr}/RB/LOD1/${n}.obj`, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
@@ -12277,7 +12282,8 @@ test("AR13.survey", "MICRO-OTTIMIZZA-3 p.3 · più mesh, un solo tileset: due OB
   return { pass: Object.values(conds).every(Boolean), detail: { conds, one, each, errors } };
 });
 
-test("AR12.blender", "MICRO-OTTIMIZZA-3 · Blender come seconda via, dietro il suo interruttore «sperimentale»: acceso, il bridge trova Blender e lo interroga (un lavoro leggero) e la scheda dice in parole che cosa c'è e che cosa manca — EM Tools che non si carica perché le sue librerie sono per Python 3.11 e questo Blender ha Python 3.13, 3D Survey Collection con il suo set di LOD; l'atlante ricotto di un modello (OB_CUBO_LOD1@atlas.glb); le esperienze col motore Blender + 3DSC: tre livelli RB/versions/‹modello›@lodN-realtime.glb, la memoria detta prima; il set di LOD come lavoro, i glb nella cartella delle versioni; spento, la sezione lo dice", async () => {
+// MICRO-E p.5 · the experimental ways of Optimise: only with «Funzioni sperimentali» on
+(EXPERIMENTAL_ON ? test : () => {})("AR12.blender", "MICRO-OTTIMIZZA-3 · Blender come seconda via, dietro il suo interruttore «sperimentale»: acceso, il bridge trova Blender e lo interroga (un lavoro leggero) e la scheda dice in parole che cosa c'è e che cosa manca — EM Tools che non si carica perché le sue librerie sono per Python 3.11 e questo Blender ha Python 3.13, 3D Survey Collection con il suo set di LOD; l'atlante ricotto di un modello (OB_CUBO_LOD1@atlas.glb); le esperienze col motore Blender + 3DSC: tre livelli RB/versions/‹modello›@lodN-realtime.glb, la memoria detta prima; il set di LOD come lavoro, i glb nella cartella delle versioni; spento, la sezione lo dice", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab12");
   // MICRO-TESTATA-CLOUD · a version made is signed: the queue waits for an author

@@ -88,6 +88,8 @@ const MAIN = readFileSync(`${SRC}main.ts`, "utf8");
 // MICRO-ARCHIVIO-2 · the project's four, together under New as in the mockup: New project, Open project, Reorder by the standard, Close the project
 const FILE_ORDER = ["new", "newProject", "openProject", "reorderProject", "closeProject", "revealDoc", "open", "openRecent▸", "openReplace", "close", "—",
   "save", "saveAs", "saveAll", "pin", "—",
+  // MICRO-E p.1 · «Porta dentro…», the one door, before Import
+  "door",
   "import▸", "import/importGraphml", "import/importMapping",
   "export▸", "export/exportSvg", "export/exportTtl", "integrate", "relocate", "collect", "—",
   "createRoom", "bringIntoRoom", "consolidate", "composeFromGraph"];

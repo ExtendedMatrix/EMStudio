@@ -126,6 +126,8 @@ export const MENUS: MenuDef[] = [
       cmd("saveAll", "toolbar.saveAll", "btn-save-all", { title: "menu.saveAllTitle", accel: "CmdOrCtrl+Alt+S" }),
       cmd("pin", "version.pin", "btn-pin-version", { title: "version.pinTitle" }),
       sep,
+      // MICRO-E p.1 · «Porta dentro…»: the one door (files into a document)
+      cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint" }),
       { kind: "sub", id: "import", label: "toolbar.import", rows: [
         cmd("importGraphml", "toolbar.importGraphmlItem", "btn-import-graphml", { title: "toolbar.importGraphmlTitle" }),
         cmd("importMapping", "impmap.menu", "btn-import-mapping", { title: "impmap.menuTitle" }),

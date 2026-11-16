@@ -92,6 +92,9 @@ cp "$CFG/em_qualia_types.json" "$DST/"
 # 2026): the contract scripts/check-version-for.mjs passes with chooseForHardware
 [ -f "$CFG/version_for_cases.json" ] && cp "$CFG/version_for_cases.json" "$DST/"
 [ -f "$CFG/version_for_hardware_cases.json" ] && cp "$CFG/version_for_hardware_cases.json" "$DST/"
+# MICRO-E (16 Nov 2026) · the colour scales of the visual manager, EM Tools' own
+# (s3dgraphy.color_schemes): the Space's «Colori ▾» reads them (space-colours.ts)
+[ -f "$CFG/em_color_ramps.json" ] && cp "$CFG/em_color_ramps.json" "$DST/"
 mkdir -p "$DST/icons2d"
 # BOTH raster and vector. Only `*.png` was copied here, which is why EMStudio drew
 # no SVG icons even after 28 of them shipped in s3Dgraphy: the renderer prefers

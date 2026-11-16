@@ -178,7 +178,10 @@ import {
   entriesText,
   filterEntries,
 } from "./logpanel";
-import { DocumentStore, setRoomAuthor, stripYedDrawing } from "./model";
+import { DocumentStore, editorHand, setRoomAuthor, stripYedDrawing } from "./model";
+import { presenceIndex } from "./epoch-presence";
+import { RAMPS, colourPlan, emcDocument, emcRead, hexToLinear, legendClick, legendShows, loadColourState, mix as colourMix,
+         propertyNames, propertyValues, rampScheme, saveColourState, type ColourPlan, type ColourState, type RampType } from "./space-colours";
 import { clearFiltersHiding, installTableTools } from "./table-tools";
 import {
   HAS_PARADATA_NODEGROUP,
@@ -431,6 +434,7 @@ import {
   onDesktopQueue,
   pickFolder,
   pickFile,
+  pickFiles,
   pickSourceFile,
   pickXlsx,
   readBinaryFile,
@@ -499,6 +503,7 @@ import { stateBadge, stateSign } from "./state-symbols";
 import * as alignment from "./alignment";
 import { buildCommand, type CommandVerb } from "./commands";
 import { addMembers, addResource, fileCounts, foldFiles, makeBlendLocator, materializeMember, memberRows, membersBase, movePointers, packagingLabel, parseBlendLocator, refreshMembersDigest, removeMembers, replaceFile, resourceFiles, resourceLabel, rowsDigest, storeGraph, type MemberRow } from "./resources";
+import { documentSets } from "./doc-sets";
 import { catalogueState, cite, documentOf, groupItems, setTree, isCatalogue, itemIsOf, localRoleId, mediaIndex, mediaOf, mediaRoles, roleLabel, treeRows, unitItemKeys,
          FRONTISPIECE as MEDIA_FRONTISPIECE, type CatalogueState, type MediaItem } from "./media";
 import { askWhichPointersMove } from "./resource-panel";
@@ -806,6 +811,7 @@ import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, re
   paramsFor, profileWords } from "./use-diagnosis";
 import { adviseAddons, enoughFor, type Advice } from "./addon-advice";
 import { pickPathInApp } from "./path-picker";
+import { doorKindOf, doorRoles, isGisKind, isModelKind, looksLikeTropy, type DoorFile, type DoorKind, type DoorRole } from "./door";
 import { documentFiles as campaignFiles, filesReadForUnit, locatorOfNode, matchByName, mediumOfLocator, unitImages, unitPhotoFiles,
          unitPhotoResourceId, unitPhotoResourceOf, type UnitImage } from "./unit-images";
 import { GraphRemovalError, graphRemovalReport, settleLinksTowards } from "./graph-removal";
@@ -3100,6 +3106,8 @@ window.__EM_SCENE__ = () => {
   assetState: () => ({ level: assetUi.level, sideHidden: assetUi.sideHidden, verSel: [...assetUi.verSel], minTri: assetUi.minTri,
     sel: [...assetUi.sel], target: assetUi.target, grouping: assetUi.grouping }),
   assetAnswer: () => assetUi.ans,
+  // MICRO-E p.1 · «Porta dentro…» with files named (the dialog opens as from a way in)
+  porta: (files: DoorFile[], opts: { epoch?: string | null } = {}) => portaDentro(files, opts),
   /** the Space's alternatives: per model its container, its side and the mode (altModeOf), and what is not drawn */
   openSpace: () => { if (!windowsOf().some((w) => w.type === "scene")) setWorkspace("space"); },
   spaceAlt: () => ({ info: [...spaceAltInfo].map(([id, x]) => ({ id, ...x, modeNow: altModeOf(x.group) })), substituted: [...spaceSubstituted.keys()] }),
@@ -17667,6 +17675,8 @@ document.getElementById("btn-reorder-project")?.addEventListener("click", () => 
 document.getElementById("btn-close-project")?.addEventListener("click", () => { void closeProjectGesture(); });
 // MICRO-SPAZIO-RITOCCHI-2 p.1 · File ▸ «Apri la cartella del progetto» (and a click on the file's name in the bar)
 document.getElementById("btn-reveal-doc")?.addEventListener("click", () => { void revealActiveDoc(); });
+// MICRO-E p.1 · File ▸ Porta dentro… (the system's selector, several files)
+document.getElementById("btn-porta-dentro")?.addEventListener("click", () => { void doorFromMenu(); });
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");
@@ -17746,7 +17756,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 70;   // 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 71;   // 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -28616,6 +28626,15 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
     }
     // EXPERIMENTAL · a GIS file of the Storage on a Graph, a Matrix, a Space: the site's door
     if (EXPERIMENTAL && into && doorDrop(into.type, storageDragPayload(e))) { e.preventDefault(); e.stopPropagation(); selectWindow(winId); return; }
+    // MICRO-E p.1 · a file of Archive ▸ Files dropped on the Space: the one door
+    {
+      const pay = storageDragPayload(e);
+      if (into?.type === "scene" && pay && pay.type === "file" && doorTakes(pay.path) && store) {
+        e.preventDefault(); e.stopPropagation(); selectWindow(winId);
+        void portaDentro([{ path: pay.path, name: pay.name }], { epoch: doorEpochHere() });
+        return;
+      }
+    }
     if (into && dropTilesetOn(into, e)) return;
     const resource = storageDragPayload(e);
     const target = winNow();
@@ -31242,6 +31261,12 @@ async function wireDesktopFileDrop(): Promise<void> {
         const dir = await pathIsDir(path);
         return { path, kind: dir == null ? guessKind(path) : dir ? "dir" as const : "file" as const };
       }));
+      // MICRO-E p.1 · files from the Finder on the Space: the one door (a graph opens
+      // as a graph, a tileset keeps its preview — planDesktopDrop below)
+      if (w?.type === "scene" && store && items.every((i) => i.kind === "file") && items.every((i) => doorTakes(i.path))) {
+        await portaDentro(items.map((i) => ({ path: i.path, name: paths.leafName(i.path) })), { epoch: doorEpochHere() });
+        return;
+      }
       const plan = planDesktopDrop(items, w ? { win: w.id, type: w.type } : null);
       logInfo(`desktop drop: ${ev.paths.length} path(s) on ${w?.type ?? "no window"} → ${plan.action}`);
       if (plan.action === "open") { await openPathFromDesktop(plan.path); return; }
@@ -34842,6 +34867,43 @@ function sideTab(tab: HTMLElement, dir: 1 | -1, open: () => void): void {
   });
 }
 
+// ── MICRO-E p.6 · the visual manager of the proxies (space-colours.ts) ──────
+//
+// The state of «Colori ▾» per window and document; the last used kept per
+// person and document in this machine's preferences, never in the em.json.
+const spaceColourStates = new Map<string, ColourState>();
+const colourDocKey = (): string => String(store?.doc.graph.graph_id ?? "doc");
+function spaceColoursOf(winId: string): ColourState {
+  const k = `${winId}\u0000${colourDocKey()}`;
+  let s = spaceColourStates.get(k);
+  if (!s) { s = loadColourState(editorHand().orcid, colourDocKey()); spaceColourStates.set(k, s); }
+  return s;
+}
+function setSpaceColours(winId: string, s: ColourState): void {
+  spaceColourStates.set(`${winId}\u0000${colourDocKey()}`, s);
+  saveColourState(editorHand().orcid, colourDocKey(), s);
+}
+/** the epochs as the legend lists them: each top epoch, then its sub-epochs */
+function colourEpochs(sp: Space): Array<{ id: string; name: string; color: string | null }> {
+  const out: Array<{ id: string; name: string; color: string | null }> = [];
+  const colourOf = (id: string) => { const c = (store?.node(id)?.data as Record<string, unknown> | undefined)?.color; return typeof c === "string" && c ? c : null; };
+  for (const e of sp.epochs) {
+    out.push({ id: e.id, name: e.name, color: colourOf(e.id) });
+    for (const x of sp.subEpochs(e.id)) out.push({ id: x.id, name: `${e.name} › ${x.name}`, color: colourOf(x.id) });
+  }
+  return out;
+}
+/** the plan of the units drawn in the epoch shown */
+function spaceColourPlan(st: DocumentStore, sp: Space, epochId: string, units: string[], cs: ColourState): ColourPlan {
+  if (cs.mode === "em") return colourPlan(cs, units, { epochs: [], firstOf: () => null });
+  const pres = presenceIndex(st.doc);
+  return colourPlan(cs, units, {
+    epochs: colourEpochs(sp), firstOf: (id) => pres.firstOf(id),
+    bornHere: cs.mode === "epochs" ? new Set(pres(epochId).born) : undefined,
+    values: cs.mode === "property" && cs.property ? propertyValues(st.doc.graph as never, cs.property, units) : undefined,
+  });
+}
+
 function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): void } {
   body.textContent = "";
   const wrap = document.createElement("div");
@@ -34883,6 +34945,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   overlay.className = "scn-ov";
   const empty = document.createElement("div");
   empty.className = "scn-empty hidden";
+  // MICRO-E p.6 · the legend of «Colori ▾», in the scene's bottom left corner
+  const legendEl = document.createElement("div");
+  legendEl.className = "scn-legend hidden";
+  legendEl.dataset.scnLegend = win.id;
+  for (const ev of ["pointerdown", "dblclick", "wheel"]) legendEl.addEventListener(ev, (e) => e.stopPropagation());
   // MICRO-PANNELLI-LATERALI · the Outliner closed leaves the same triangle as the
   // N panel's, on the left edge: a click opens it, and so does a drag inwards
   const tab = document.createElement("button");
@@ -34925,7 +34992,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   const tsp = document.createElement("div");
   tsp.className = "tsp-scene hidden";
   for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) tsp.addEventListener(ev, (e) => e.stopPropagation());
-  host.append(overlay, empty, tab, ntab, ovBtn, tsp);
+  host.append(overlay, empty, legendEl, tab, ntab, ovBtn, tsp);
   row.append(outl, grip, host, ngrip, npanel);
   wrap.append(row);
   body.appendChild(wrap);
@@ -35145,6 +35212,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     redrawBar: () => refresh(),
     ingest: (path, layer) => gisIngest(path, layer),
     ingestDocument: (req) => gisIngestDocument(req),
+    // MICRO-E p.1 · the GIS panel's door is the one door
+    door: () => void doorFromMenu(),
     surface: (dem, image) => gisSurface(dem, image),
     contours: (dem, interval) => gisContours(dem, interval),
   });
@@ -35311,6 +35380,229 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     if (!visMenu) openVis(b);
     if (cat) visMenu?.querySelector<HTMLElement>(`[data-vis-row="${cat}"]`)?.classList.add("vis-flash");
   });
+  // ── MICRO-E p.6 · «Colori ▾» and its legend ────────────────────────────────
+  let colMenu: HTMLElement | null = null;
+  function closeColours(): void { colMenu?.remove(); colMenu = null; document.removeEventListener("pointerdown", colOutside, true); document.removeEventListener("keydown", colKey, true); }
+  function colOutside(e: Event): void { const el = e.target as HTMLElement; if (colMenu && !colMenu.contains(el) && !el.closest("[data-colours]")) closeColours(); }
+  function colKey(e: KeyboardEvent): void { if (e.key === "Escape" && colMenu) { e.stopPropagation(); closeColours(); } }
+  function setColours(s2: ColourState): void { setSpaceColours(win.id, s2); if (colMenu) colMenu.replaceChildren(coloursBody()); refresh(); }
+  function coloursUnits(): string[] {
+    const sp = currentSpace();
+    const ep = sp ? spaceEpochOf(sp) : null;
+    return sp && ep ? sp.summary(ep)?.withProxy ?? [] : [];
+  }
+  function coloursBody(): HTMLElement {
+    const cs = spaceColoursOf(win.id);
+    const box = document.createElement("div");
+    box.className = "col-body";
+    const seg = document.createElement("div");
+    seg.className = "col-modes";
+    for (const m of ["em", "epochs", "property"] as const) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.colMode = m;
+      b.textContent = t(`col.mode.${m}`);
+      b.setAttribute("aria-pressed", String(cs.mode === m));
+      b.onclick = () => setColours({ ...cs, mode: m, isolated: null, hidden: [] });
+      seg.appendChild(b);
+    }
+    box.appendChild(seg);
+    if (cs.mode === "em") box.appendChild(tabLead(t("col.emHint"), "col-hint"));
+    if (cs.mode === "epochs") {
+      const vs = document.createElement("div");
+      vs.className = "col-variants";
+      for (const v of ["birth", "new"] as const) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.dataset.colVariant = v;
+        b.textContent = t(`col.variant.${v}`);
+        b.title = t(`col.variantHint.${v}`);
+        b.setAttribute("aria-pressed", String(cs.variant === v));
+        b.onclick = () => setColours({ ...cs, variant: v });
+        vs.appendChild(b);
+      }
+      box.append(vs, tabLead(t(`col.variantHint.${cs.variant}`), "col-hint"));
+    }
+    if (cs.mode === "property" && store) {
+      const st = store;
+      const units = coloursUnits();
+      const names = propertyNames(st.doc.graph as never, units);
+      if (!names.length) { box.appendChild(tabLead(t("col.noProperty"), "col-hint")); }
+      const row = document.createElement("label");
+      row.className = "col-row";
+      row.append(`${t("col.pickProperty")} `);
+      const sel = document.createElement("select");
+      sel.dataset.colProperty = "1";
+      const ph = document.createElement("option");
+      ph.value = ""; ph.textContent = t("col.pickPh");
+      sel.appendChild(ph);
+      for (const n of names) {
+        const o = document.createElement("option");
+        o.value = n.name; o.textContent = `${n.name} (${fmtN(n.units)})`;
+        o.selected = n.name === cs.property;
+        sel.appendChild(o);
+      }
+      if (cs.property && !names.some((n) => n.name === cs.property)) {
+        const o = document.createElement("option");
+        o.value = cs.property; o.textContent = cs.property; o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.onchange = () => setColours({ ...cs, property: sel.value || null, isolated: null, hidden: [],
+        scheme: sel.value === cs.property ? cs.scheme : {} });
+      row.appendChild(sel);
+      box.appendChild(row);
+      // the scale: EM Tools' own; a number goes on the continuous scale
+      const sr = document.createElement("div");
+      sr.className = "col-row";
+      const rsel = document.createElement("select");
+      rsel.dataset.colRamp = "1";
+      for (const [type, rs] of Object.entries(RAMPS) as Array<[RampType, Record<string, { name: string; colors: string[] }>]>)
+        for (const [k, r] of Object.entries(rs)) {
+          const o = document.createElement("option");
+          o.value = `${type}/${k}`;
+          o.textContent = `${r.name} · ${t(`col.scaleType.${type}`)}`;
+          o.selected = cs.ramp?.type === type && cs.ramp.name === k;
+          rsel.appendChild(o);
+        }
+      const ap = document.createElement("button");
+      ap.type = "button";
+      ap.dataset.colApply = "1";
+      ap.textContent = t("col.apply");
+      ap.disabled = !cs.property;
+      ap.onclick = () => {
+        if (!cs.property) return;
+        const [type, name] = rsel.value.split("/") as [RampType, string];
+        const vals = [...new Set(propertyValues(st.doc.graph as never, cs.property, units).values())];
+        setColours({ ...cs, ramp: { type, name }, scheme: Object.fromEntries(rampScheme(cs.property, vals, type, name)) });
+      };
+      sr.append(`${t("col.scale")} `, rsel, " ", ap);
+      box.appendChild(sr);
+      // .emc: EM Tools' file, opened and saved here
+      const io = document.createElement("div");
+      io.className = "col-row col-io";
+      const sv = document.createElement("button");
+      sv.type = "button";
+      sv.dataset.colSave = "1";
+      sv.textContent = t("col.save");
+      sv.disabled = !cs.property || !Object.keys(cs.scheme).length;
+      sv.onclick = () => {
+        if (!cs.property) return;
+        const doc = emcDocument(cs.property, cs.scheme, String(st.doc.graph.graph_id ?? ""));
+        downloadBlob(new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }), `${cs.property.replace(/[^\w.-]+/g, "_")}.emc`, "application/json");
+      };
+      const op = document.createElement("button");
+      op.type = "button";
+      op.dataset.colOpen = "1";
+      op.textContent = t("col.open");
+      op.onclick = () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".emc,application/json";
+        input.onchange = async () => {
+          const f = input.files?.[0];
+          if (!f) return;
+          try {
+            const r = emcRead(JSON.parse(await f.text()));
+            setColours({ ...spaceColoursOf(win.id), mode: "property", property: r.property, scheme: Object.fromEntries(r.scheme), ramp: null, isolated: null, hidden: [] });
+            toast(t("col.opened", { p: r.property, n: String(r.scheme.size) }));
+          } catch (err) { toast(t("col.badEmc", { why: (err as Error).message })); }
+        };
+        input.click();
+      };
+      io.append(sv, " ", op);
+      box.appendChild(io);
+    }
+    return box;
+  }
+  function openColours(anchor: HTMLElement): void {
+    if (colMenu) { closeColours(); return; }
+    closeVis();
+    const m = document.createElement("div");
+    m.className = "ctx-menu vis-menu col-menu";
+    m.dataset.colMenu = win.id;
+    const r = anchor.getBoundingClientRect();
+    m.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 340))}px`;
+    m.style.top = `${r.bottom + 4}px`;
+    for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) m.addEventListener(ev, (e) => e.stopPropagation());
+    m.appendChild(coloursBody());
+    document.body.appendChild(m);
+    keepOnScreen(m);
+    colMenu = m;
+    document.addEventListener("pointerdown", colOutside, true);
+    document.addEventListener("keydown", colKey, true);
+  }
+  /** the legend: colour, value, number; a click isolates, another hides, a third gives back */
+  function paintLegend(cs: ColourState, plan: ColourPlan): void {
+    legendEl.textContent = "";
+    legendEl.classList.toggle("hidden", cs.mode === "em" || !plan.legend.length);
+    legendEl.dataset.mode = cs.mode;
+    if (cs.mode === "em" || !plan.legend.length) return;
+    const head = document.createElement("div");
+    head.className = "scn-legend-h";
+    head.textContent = cs.mode === "epochs" ? `${t("col.mode.epochs")} · ${t(`col.variant.${cs.variant}`)}` : `${t("col.mode.property")} · ${cs.property ?? ""}`;
+    head.title = t("col.legendHint");
+    legendEl.appendChild(head);
+    if (cs.mode === "epochs") {
+      // the two variants, one click away
+      const vs = document.createElement("div");
+      vs.className = "scn-legend-vars";
+      for (const v of ["birth", "new"] as const) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.dataset.legendVariant = v;
+        b.textContent = t(`col.variant.${v}`);
+        b.title = t(`col.variantHint.${v}`);
+        b.setAttribute("aria-pressed", String(cs.variant === v));
+        b.onclick = () => setColours({ ...cs, variant: v });
+        vs.appendChild(b);
+      }
+      legendEl.appendChild(vs);
+      if (plan.counts) {
+        const c = document.createElement("div");
+        c.className = "scn-legend-counts";
+        c.dataset.legendCounts = `${plan.counts.born}/${plan.counts.survived}`;
+        c.textContent = t("col.counts", { n: fmtN(plan.counts.born), m: fmtN(plan.counts.survived) });
+        legendEl.appendChild(c);
+      }
+    }
+    const list = document.createElement("div");
+    list.className = "scn-legend-list";
+    for (const e of plan.legend) {
+      const r = document.createElement("div");
+      r.className = "scn-legend-row";
+      r.dataset.legendKey = e.key;
+      const iso = cs.isolated === e.key, hid = (cs.hidden ?? []).includes(e.key);
+      if (iso) r.classList.add("iso");
+      if (hid || (cs.isolated && !iso)) r.classList.add("off");
+      // the swatch: an epoch's colour is the graph's (a delta, an undo); a value's is the view's
+      const sw = document.createElement("input");
+      sw.type = "color";
+      sw.className = "scn-legend-sw";
+      sw.value = /^#[0-9a-f]{6}$/i.test(e.colour) ? e.colour : "#9a9a9a";
+      sw.title = e.epochId ? t("col.epochColour", { e: e.label }) : t("col.valueColour", { v: e.label || t("col.noValue") });
+      sw.addEventListener("click", (ev) => ev.stopPropagation());
+      sw.addEventListener("change", () => {
+        const hex = sw.value.toUpperCase();
+        if (e.epochId && store) { store.setField(e.epochId, "data.color", hex); return; }
+        const cur = spaceColoursOf(win.id);
+        setColours({ ...cur, scheme: { ...cur.scheme, [e.key]: hex } });
+      });
+      const lab = document.createElement("span");
+      lab.className = "scn-legend-lab";
+      lab.textContent = e.none ? t(cs.mode === "epochs" ? "col.noEpoch" : "col.noValue") : e.label;
+      const n = document.createElement("span");
+      n.className = "scn-legend-n";
+      n.textContent = e.faded ? `${fmtN(e.count)} (${fmtN(e.faded)}↓)` : fmtN(e.count);
+      const mark = document.createElement("span");
+      mark.className = "scn-legend-mark";
+      mark.textContent = iso ? t("col.isolated") : hid ? t("col.hiddenMark") : "";
+      r.append(sw, lab, n, mark);
+      r.title = t("col.legendHint");
+      r.addEventListener("click", () => setColours(legendClick(spaceColoursOf(win.id), e.key)));
+      list.appendChild(r);
+    }
+    legendEl.appendChild(list);
+  }
   const spaceLayersSection = (): HTMLElement => {
     const box = document.createElement("details");
     box.className = "sol-layers";
@@ -35355,7 +35647,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   gisSpaces.set(win.id, gisSpace);   // MICRO-OUTLINER-UNICO · the eyes of the Outliner's GIS branch
   const onBar = (e: Event) => {
     const vb = (e.target as HTMLElement).closest<HTMLElement>("[data-vis]");
-    if (vb) { e.stopPropagation(); openVis(vb); return; }
+    if (vb) { e.stopPropagation(); closeColours(); openVis(vb); return; }
+    const cb = (e.target as HTMLElement).closest<HTMLElement>("[data-colours]");
+    if (cb) { e.stopPropagation(); openColours(cb); return; }
+    if ((e.target as HTMLElement).closest("[data-door-plus]")) { e.stopPropagation(); void doorFromMenu({ epoch: doorEpochHere() }); return; }
     // the globe's chip turns the territory on and off no more: that is a category,
     // switched in «Visibilità ▾» (it opens there, on «Territorio / GIS»)
     const gt = (e.target as HTMLElement).closest<HTMLElement>("[data-geo='toggle']");
@@ -35562,7 +35857,22 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // EXPERIMENTAL · Epochs ⇄ Horizons and the site's marks («Funzioni sperimentali» on)
     bar.append(back, ...(EXPERIMENTAL ? [bands] : []), lab, seg, ...geoSpace.barButtons(),
       ...(EXPERIMENTAL ? spaceButtons(win.id) : []), hwb);
-    tail.replaceChildren(vis, sceneSearch(win), more);
+    // MICRO-E p.6 · «Colori ▾»: the mode said when it is not EM's
+    const csNow = spaceColoursOf(win.id);
+    const colb = document.createElement("button");
+    colb.type = "button";
+    colb.className = "scn-tg scn-col";
+    colb.dataset.colours = csNow.mode;
+    colb.textContent = csNow.mode === "em" ? `${t("col.title")} ▾` : `${t("col.title")} · ${t(`col.mode.${csNow.mode}`)} ▾`;
+    colb.title = t("col.tip");
+    // MICRO-E p.1 · «+»: the one door, the epoch shown proposed
+    const plus = document.createElement("button");
+    plus.type = "button";
+    plus.className = "scn-tg scn-door";
+    plus.dataset.doorPlus = "1";
+    plus.textContent = "+";
+    plus.title = t("door.plusHint");
+    tail.replaceChildren(plus, colb, vis, sceneSearch(win), more);
     gisSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
@@ -35779,14 +36089,30 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         tris: pv ? hardwareTris(pv) : null, textureSide: pv ? textureSideOf(pv) : null,
         ...(isTiles ? {} : { lighter: memoryAlternatives(r, plan.versionId) }) });
     }
+    // MICRO-E p.6 · «Colori ▾»: EM (the type's), the epochs, a property; the legend isolates and hides
+    const cs = spaceColoursOf(win.id);
+    const cplan = spaceColourPlan(st, sp, sum.epoch.id, sum.withProxy, cs);
+    paintLegend(cs, cplan);
+    const colourOfProxy = (u: string, type: string | undefined) => {
+      const base = { rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined, threed: nodeThreedStyle(type) };
+      const hex = cplan.colour.get(u);
+      if (!hex) return base;
+      // a survived unit: faded towards the scene's grey, and thinner
+      const faded = cplan.faded.has(u);
+      const rgb = hexToLinear(faded ? colourMix(hex, "#B8B8B8", 0.55) : hex);
+      return { rgb, threed: base.threed ? { ...base.threed, faces: { ...base.threed.faces, show: true, rgb,
+        opacity: (base.threed.faces.show ? base.threed.faces.opacity : 1) * (faded ? 0.35 : 1) } } : base.threed };
+    };
     if (space3dShown("s3_proxies", win.id))
       for (const u of sum.withProxy) {
         const px = sp.proxies.get(u);
         if (!px || !shown(`proxy:${u}`)) continue;
+        if (!legendShows(cs, cplan, u)) continue;
         const type = st.node(u)?.node_type;
-        const common = { kind: "proxy" as const, id: u, label: nm(u), decor: decorOf(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
+        const common = { kind: "proxy" as const, id: u, label: nm(u), decor: decorOf(u),
           // NIGHT-TAGLI-E-NEUTRE · the type's 3D style (em_visual_rules threed): USN, USNt and the rest
-          threed: nodeThreedStyle(type),
+          // MICRO-E p.6 · …or the colour «Colori ▾» gives it
+          ...colourOfProxy(u, type),
           edge: nodeStyle(type).border, selected: isSel(`proxy:${u}`), active: ssel.active === `proxy:${u}`,
           // MICRO-SERVSF-FINE-ISTANZE p.3 · an instance at its own model's transform
           pose: poseOfNode(px.instanceOf ? px.xfNode ?? px.shapeId : px.shapeId) };
@@ -37471,6 +37797,281 @@ function dropShelfEntries(win: Win, ids: string[]): void {
 
 // ── CATENA · the shelf's bar, the receipts, Tropy, «Promuovi a documento» ────
 
+// ── MICRO-E-PORTA-VERSIONI-COLORI p.1 · «Porta dentro…», the one door ───────
+//
+// One window behind four ways in (File ▸ Porta dentro…, «+» in the Space's bar,
+// a drop on the Space, a selection in Archive ▸ Files or in a bucket). It reads
+// what each file is (door.ts; a GIS file through /gis/inspect) and asks only
+// what is needed: the DOCUMENT (a new D.nn with its title, or one there), its
+// DATE — always, the dialog's own field, already written when the document has
+// one —, «Che epoca rappresenta?» for the models (never the document's date),
+// the role of each model (RM · RMDoc · source of the tileset), CRS + shift for a
+// GIS file that declares none, the licence proposed by the document. A Tropy
+// session is the other form of the same window: a table of items, one document
+// each. The graph is written by s3Dgraphy (`door.bring_in`, /graph/door) as ONE
+// delta, one undo.
+
+async function pickForDoor(): Promise<DoorFile[] | null> {
+  const start = currentFilePath ? paths.dirname(currentFilePath) : undefined;
+  const native = await pickFiles(t("door.pickTitle"), start);
+  if (native) return native.map((p) => ({ path: p, name: paths.leafName(p) }));
+  if (isTauri()) return null;
+  const one = await pickPathInApp({ mode: "file", title: t("door.pickTitle"), start: start ?? null });
+  return one ? [{ path: one, name: paths.leafName(one) }] : null;
+}
+async function doorFromMenu(opts: { epoch?: string | null } = {}): Promise<void> {
+  if (!store) { toast(t("toast.openADocument")); return; }
+  const f = await pickForDoor();
+  if (f?.length) await portaDentro(f, opts);
+}
+/** the epoch the Space shows: what «Che epoca rappresenta?» proposes from there */
+function doorEpochHere(): string | null { const sp = currentSpace(); return sp ? spaceEpochOf(sp) : null; }
+/** a file for the door (not a graph, not a tileset: a tileset dropped keeps its preview) */
+const doorTakes = (p: string): boolean => { const k = doorKindOf(p); return k !== "graph" && k !== "tileset"; };
+
+interface DoorInspect { ok?: boolean; crs?: string | null; gis_format?: string; error?: string }
+const doorLicenseOf = (st: DocumentStore, docId: string): string => {
+  const e = st.doc.graph.edges.find((x) => x.source === docId && x.edge_type === "has_license");
+  const n = e ? st.node(e.target) : null;
+  return String(((n?.data ?? {}) as Record<string, unknown>).license_type ?? "");
+};
+
+async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = {}): Promise<void> {
+  const st = store;
+  if (!st) { toast(t("toast.openADocument")); return; }
+  if (refuseReadOnly()) return;
+  const where = (f: DoorFile) => f.path ?? f.address ?? f.name;
+  // a Tropy session: the other form
+  for (const f of files) {
+    const k = doorKindOf(where(f));
+    if (k === "tropy" || /\.json$/i.test(f.name)) {
+      let json: unknown = null;
+      try { json = f.path ? JSON.parse(await (await fetch(await fsFileUrl(f.path))).text()) : null; } catch { json = null; }
+      if (k === "tropy" || looksLikeTropy(json)) { await openTropyDoor(json, f.name); return; }
+    }
+  }
+  const bridge = await bridgeUrl().catch(() => "");
+  const rows: Array<{ f: DoorFile; kind: DoorKind; ins: DoorInspect | null }> = [];
+  for (const f of files) {
+    let kind = doorKindOf(where(f));
+    if (kind === "graph") continue;
+    let ins: DoorInspect | null = null;
+    // a picture may be a raster (a world file, a GeoTIFF): the bridge reads it
+    if (f.path && bridge && (isGisKind(kind) || kind === "image")) {
+      ins = await fetch(`${bridge}/gis/inspect?${new URLSearchParams({ path: f.path })}`).then((r) => r.json(), () => null) as DoorInspect | null;
+      if (kind === "image" && ins?.ok && ins.gis_format) kind = "raster";
+    }
+    rows.push({ f, kind, ins });
+  }
+  if (!rows.length) { toast(t("door.nothing")); return; }
+  const withTileset = rows.some((r) => r.kind === "tileset");
+  const body = document.createElement("div");
+  body.className = "door-body";
+  body.dataset.door = "1";
+  // the files: what each is, and its role when it has one to choose
+  const list = document.createElement("div");
+  list.className = "door-files";
+  const roles = new Map<DoorFile, HTMLSelectElement>();
+  const crsIn = new Map<string, { crs: HTMLInputElement; sh: HTMLInputElement[] }>();
+  const frame = doorFrame(st);
+  for (const r of rows) {
+    const row = document.createElement("div");
+    row.className = "door-file";
+    row.dataset.doorFile = r.f.name;
+    row.dataset.doorKind = r.kind;
+    const nm = document.createElement("b");
+    nm.textContent = r.f.name;
+    nm.title = where(r.f);
+    const kd = document.createElement("span");
+    kd.className = "door-kind";
+    kd.textContent = ` · ${t(`door.kind.${r.kind}`)}${r.f.address ? ` · ${t("door.inBucket")}` : ""}`;
+    row.append(nm, kd);
+    const rs = doorRoles(r.kind, withTileset);
+    if (rs.length) {
+      const sel = document.createElement("select");
+      sel.dataset.doorRole = r.f.name;
+      for (const x of rs) { const o = document.createElement("option"); o.value = x; o.textContent = t(`door.role.${x}`); sel.appendChild(o); }
+      // a mesh beside a tileset: its source, by default
+      if (r.kind === "model" && withTileset) sel.value = "source";
+      row.append(" ", sel);
+      roles.set(r.f, sel);
+    } else if (isGisKind(r.kind)) row.append(` · ${t("door.role.rmdocGis")}`);
+    else if (r.kind === "image" || r.kind === "other") row.append(` · ${t("door.role.file")}`);
+    // CRS + shift only when the file says none (a DXF)
+    if (isGisKind(r.kind) && r.f.path && !r.ins?.crs) {
+      const fs = document.createElement("fieldset");
+      fs.className = "gis-crs-win";
+      fs.dataset.doorCrs = r.f.name;
+      const lg = document.createElement("legend");
+      lg.textContent = t("gis.crsWinTitle", { name: r.f.name });
+      const crs = document.createElement("input");
+      crs.type = "text"; crs.value = frame ? `EPSG:${frame.epsg}` : ""; crs.placeholder = "EPSG:32633";
+      fs.append(lg, crs);
+      const sh = [frame?.x ?? 0, frame?.y ?? 0, frame?.z ?? 0].map((v, i) => {
+        const inp = document.createElement("input"); inp.type = "number"; inp.step = "any"; inp.value = String(v);
+        const lab = document.createElement("label"); lab.append(`${"XYZ"[i]} `, inp); fs.appendChild(lab); return inp;
+      });
+      row.appendChild(fs);
+      crsIn.set(r.f.path, { crs, sh });
+    }
+    list.appendChild(row);
+  }
+  // the document: a new D.nn (its title) or one there
+  const docs = st.liveNodes().filter((n) => n.node_type === "document")
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { numeric: true }));
+  const dr = document.createElement("div");
+  dr.className = "door-row";
+  const dsel = document.createElement("select");
+  dsel.dataset.doorDoc = "1";
+  const o0 = document.createElement("option"); o0.value = ""; o0.textContent = t("door.docNew", { name: nextDocumentName(st.doc) }); dsel.appendChild(o0);
+  for (const d of docs) { const o = document.createElement("option"); o.value = d.id; o.textContent = `${d.name ?? d.id}${d.description ? ` — ${String(d.description).slice(0, 50)}` : ""}`; dsel.appendChild(o); }
+  const title = document.createElement("input");
+  title.type = "text"; title.dataset.doorTitle = "1"; title.placeholder = t("door.titlePh");
+  dr.append(`${rows.length > 1 ? t("door.docOfMany", { n: String(rows.length) }) : t("door.docOf")} `, dsel, " ", title);
+  // the epoch it represents: the models only, never the document's date
+  const models = rows.some((r) => isModelKind(r.kind));
+  const er = document.createElement("div");
+  er.className = "door-row";
+  const esel = document.createElement("select");
+  esel.dataset.doorEpoch = "1";
+  const e0 = document.createElement("option"); e0.value = ""; e0.textContent = t("door.epochNone"); esel.appendChild(e0);
+  for (const e of st.liveNodes().filter((n) => n.node_type === "EpochNode")) {
+    const o = document.createElement("option"); o.value = e.id; o.textContent = String(e.name ?? e.id); o.selected = e.id === opts.epoch; esel.appendChild(o);
+  }
+  er.append(`${t("door.epochAsk")} `, esel);
+  er.title = t("door.epochHint");
+  if (!models) er.classList.add("hidden");
+  // the licence, proposed by the document
+  const lr = document.createElement("div");
+  lr.className = "door-row";
+  const lsel = document.createElement("select");
+  lsel.dataset.doorLicense = "1";
+  for (const l of ["", "CC-BY-4.0", "CC-BY-SA-4.0", "CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC0-1.0", STUDY_ONLY]) {
+    const o = document.createElement("option"); o.value = l; o.textContent = l === STUDY_ONLY ? t("gis.licStudyOnly") : l || t("door.licenseNone"); lsel.appendChild(o);
+  }
+  lr.append(`${t("door.license")} `, lsel);
+  body.append(list, dr, er, lr);
+  const dateOf = (id: string) => String(((st.node(id)?.data ?? {}) as Record<string, unknown>).absolute_time_start ?? "");
+  const dlg = openDialog({ kind: "door", title: t("door.title"), body, ok: t("door.go"),
+    input: { value: "", label: t("door.dateAsk"), placeholder: t("door.datePh") },
+    validate: (v) => (v.trim() ? null : t("door.dateWanted")) });
+  // an existing document says its date (to confirm) and its licence (proposed)
+  dsel.addEventListener("change", () => {
+    title.classList.toggle("hidden", !!dsel.value);
+    const f = document.querySelector<HTMLInputElement>('[data-app-dialog="door"] [data-dialog-input]');
+    if (f && dsel.value) { f.value = dateOf(dsel.value); f.dispatchEvent(new Event("input", { bubbles: true })); }
+    lsel.value = dsel.value ? doorLicenseOf(st, dsel.value) : "";
+  });
+  const a = await dlg;
+  if (!a.ok) return;
+  const filesOut = rows.map((r) => ({ ...(r.f.address ? { address: r.f.address } : { path: r.f.path }), name: r.f.name, kind: r.kind,
+    ...(roles.get(r.f) ? { role: roles.get(r.f)!.value as DoorRole } : {}) }));
+  const crsB: Record<string, string> = {}, shB: Record<string, number[]> = {};
+  for (const [p, x] of crsIn) { if (x.crs.value.trim()) crsB[p] = x.crs.value.trim(); shB[p] = x.sh.map((i) => Number(i.value) || 0); }
+  const j = await postGraph<{ delta: ContainerDelta; document_name: string; document_born: boolean; items: { role: string; reused: boolean }[];
+    warnings: string[]; gis?: { sheets?: { said?: string; name?: string }[] } | null }>("/graph/door", {
+    doc: st.doc, doc_path: currentFilePath ?? "", files: filesOut, document_id: dsel.value || null, title: title.value.trim(), name: dsel.value ? null : nextDocumentName(st.doc),
+    date: a.value.trim(), epoch: models ? esel.value || null : null, license: lsel.value || null,
+    ...(Object.keys(crsB).length ? { crs: crsB, shift: shB } : {}) });
+  if (!j.ok) { toast(t("door.failed", { why: String(j.error ?? j.status) })); return; }
+  applyBridgeDelta(st, j.delta);
+  const msg = t(j.document_born ? "door.doneNew" : "door.done", { d: j.document_name, n: String(j.items.length),
+    reused: String(j.items.filter((x) => x.reused).length) });
+  logInfo(msg);
+  for (const sh of j.gis?.sheets ?? []) if (sh.said) logInfo(`${sh.name ?? ""} · ${sh.said}`);
+  for (const w of j.warnings ?? []) logWarn(w);
+  toastUndo(msg, st);
+}
+
+/** the study's frame, proposed to a file that declares none (CRS + shift) */
+function doorFrame(st: DocumentStore): { epsg: string; x: number; y: number; z: number } | null {
+  const geo = st.liveNodes().find((n) => n.node_type === "geo_position");
+  const d = (geo?.data ?? {}) as Record<string, unknown>;
+  const epsg = String(d.epsg ?? d.crs ?? "").replace(/^EPSG:/i, "");
+  if (!epsg) return null;
+  return { epsg, x: Number(d.shift_x ?? 0) || 0, y: Number(d.shift_y ?? 0) || 0, z: Number(d.shift_z ?? 0) || 0 };
+}
+
+/** the delta of a bridge gesture written in ONE step of undo */
+function applyBridgeDelta(st: DocumentStore, d: ContainerDelta): void {
+  st.batch(() => {
+    for (const id of d.edges_removed ?? []) { const e = st.doc.graph.edges.find((x) => x.id === id); if (e) st.deleteEdge(e); }
+    for (const id of d.nodes_removed ?? []) if (st.node(id)) st.deleteNode(id);
+    for (const n of d.nodes_added ?? []) if (!st.node(n.id)) st.addNode(JSON.parse(JSON.stringify(n)));
+    for (const n of d.nodes_changed ?? []) if (st.node(n.id)) st.updateNode(n.id, { data: { ...(n.data ?? {}) } } as Parameters<typeof st.updateNode>[1]);
+    for (const e of d.edges_added ?? []) if (!st.doc.graph.edges.some((x) => x.id === e.id) && st.node(e.source) && st.node(e.target)) st.addEdge(e.source, e.target, e.edge_type, e.attributes, e.id);
+  });
+}
+
+/** Tropy through the same door: one row per item → one document, its photos its
+ *  files; date and licence read from Tropy, a row without a date lit to fill;
+ *  an item with the name of a document there is merged into it. Confirmed in
+ *  ONE block (one undo). */
+async function openTropyDoor(json: unknown, fileName: string): Promise<void> {
+  const st = store;
+  if (!st) return;
+  let items: ReturnType<typeof parseTropy>;
+  try { items = parseTropy(json); } catch (err) { toast(t("tropy.bad", { why: String((err as Error).message ?? err) })); return; }
+  if (!items.length) { toast(t("door.tropyEmpty")); return; }
+  const docsByName = new Map(st.liveNodes().filter((n) => n.node_type === "document").map((n) => [String(n.name ?? "").trim(), n.id] as const));
+  const body = document.createElement("div");
+  body.className = "door-body door-tropy";
+  body.dataset.doorTropy = String(items.length);
+  const table = document.createElement("table");
+  table.className = "door-table";
+  const hd = document.createElement("tr");
+  for (const k of ["item", "photos", "date", "license", "into"]) { const th = document.createElement("th"); th.textContent = t(`door.tcol.${k}`); hd.appendChild(th); }
+  table.appendChild(hd);
+  const rows = items.map((it) => {
+    const tr = document.createElement("tr");
+    tr.dataset.doorItem = it.id;
+    const date = document.createElement("input");
+    date.type = "text"; date.value = it.date ?? ""; date.placeholder = t("door.datePh");
+    const paint = () => tr.classList.toggle("door-nodate", !date.value.trim());
+    date.addEventListener("input", paint);
+    paint();
+    const lic = document.createElement("input");
+    lic.type = "text"; lic.value = it.license ?? "";
+    const into = document.createElement("select");
+    const o0 = document.createElement("option"); o0.value = ""; o0.textContent = t("door.docNewShort"); into.appendChild(o0);
+    const same = docsByName.get(it.title.trim()) ?? (it.identifier ? docsByName.get(it.identifier.trim()) : undefined);
+    for (const [n, id] of docsByName) { const o = document.createElement("option"); o.value = id; o.textContent = n; o.selected = id === same; into.appendChild(o); }
+    const c = (x: Node | string) => { const td = document.createElement("td"); td.append(x); return td; };
+    tr.append(c(it.title), c(String(it.photos.length)), c(date), c(lic), c(into));
+    table.appendChild(tr);
+    return { it, date, lic, into };
+  });
+  body.appendChild(table);
+  const ok = await openDialog({ kind: "door-tropy", title: t("door.tropyTitle", { file: fileName, n: String(items.length) }), body,
+    message: t("door.tropyHint"), ok: t("door.go") });
+  if (!ok.ok) return;
+  const missing = rows.filter((r) => !r.date.value.trim());
+  if (missing.length) { toast(tn("door.tropyNoDate", missing.length)); return; }
+  let made = 0, merged = 0;
+  st.batch(() => {
+    for (const r of rows) {
+      let docId = r.into.value;
+      if (docId) { merged++; st.setField(docId, "data.absolute_time_start", r.date.value.trim()); }
+      else {
+        docId = st.newId();
+        st.addNode({ id: docId, node_type: "document", name: nextDocumentName(st.doc), description: r.it.title,
+          data: { absolute_time_start: r.date.value.trim(), tropy: r.it.id } } as EmNode);
+        made++;
+      }
+      if (r.lic.value.trim()) st.setField(docId, "data.license", r.lic.value.trim());
+      // the photos: the files of ONE set of the document (MICRO-B), no place in the space
+      const files = r.it.photos.filter((p) => p.path).map((p) => ({ path: paths.leafName(p.path), url: p.path, ...(p.checksum ? { checksum: p.checksum } : {}) }));
+      if (files.length) {
+        const res = addResource(storeGraph(st), { name: `${r.it.title} · Tropy`, kind: "", files, resourceId: st.newId(), packaging: "file_set" });
+        st.addEdge(docId, res.id, "has_linked_resource");
+      }
+    }
+  });
+  const msg = t("door.tropyDone", { n: String(made), m: String(merged) });
+  logInfo(msg);
+  toastUndo(msg, st);
+}
+
 /** «Importa da Tropy…» — the shelf is where a Tropy session (JSON-LD) lands.
  *  MICRO-CONTENTS-2 C8 · in the Shelf's ⋯ menu, not at the head of every list. */
 function pickTropySession(): void {
@@ -37479,7 +38080,14 @@ function pickTropySession(): void {
   input.accept = ".json,.jsonld,application/ld+json,application/json";
   input.addEventListener("change", () => {
     const f = input.files?.[0];
-    if (f) void f.text().then((txt) => importTropy(txt, f.name));
+    // MICRO-E p.1 · with a graph open Tropy comes in by the one door (its items
+    // as documents, a table confirmed in one block); without one, on the shelf
+    if (f) void f.text().then((txt) => {
+      let json: unknown = null;
+      try { json = JSON.parse(txt); } catch { /* importTropy says it */ }
+      if (store && json && looksLikeTropy(json)) void openTropyDoor(json, f.name);
+      else importTropy(txt, f.name);
+    });
   });
   input.click();
 }
@@ -40862,6 +41470,8 @@ async function composeFromMany(pathsIn: string[]): Promise<void> {
 
 const OPT_ENGINE_KEY = "emstudio.optEngine";
 const TILES_EXPERIMENTAL_KEY = "emstudio.tilesetExperimental";
+/** the tileset's own switch, read only under «Funzioni sperimentali» (MICRO-E p.5) */
+const tilesOn = (): boolean => EXPERIMENTAL && localStorage.getItem(TILES_EXPERIMENTAL_KEY) === "1";
 const optPlans = new Map<string, OptPlan>();
 interface OptTool { path: string; version: string; addon?: boolean }
 interface OptPlan { at: number; tool: OptTool | null; outputs: OptOut[]; error?: string; command?: string }
@@ -41166,7 +41776,7 @@ const USE_PROFILE_KEY = "emstudio.useProfile";
 function addonUsage(): { variants: boolean; tileset: boolean; blender: boolean; profile: string | null } {
   let profile: string | null = null;
   try { profile = localStorage.getItem(USE_PROFILE_KEY); } catch { /* none */ }
-  return { variants: true, tileset: localStorage.getItem(TILES_EXPERIMENTAL_KEY) === "1", blender: blenderOn(), profile };
+  return { variants: true, tileset: tilesOn(), blender: blenderOn(), profile };
 }
 
 /** The add-on's card: first, in plain words, what it is FOR YOU and whether to
@@ -41429,8 +42039,8 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   sec.appendChild(h);
   box.appendChild(sec);
   // MICRO-OTTIMIZZA-2 · «Tileset (3D Tiles)» is a destination too, while the
-  // experimental switch is on
-  const ton = localStorage.getItem(TILES_EXPERIMENTAL_KEY) === "1";
+  // experimental switch is on (and «Funzioni sperimentali», MICRO-E p.5)
+  const ton = tilesOn();
   const dest = filesPref(win, "opt") ?? "web";
   const tiling = ton && dest === TILESET_PRESET_ID;
   const pre = OPTIMIZE_PRESETS.find((p) => p.id === dest) ?? OPTIMIZE_PRESETS[0];
@@ -41472,11 +42082,13 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   // 2 · .3tz — on
   box.appendChild(filesPackSection(listing));
 
-  // 3 · a tileset from a mesh — experimental, behind its switch
-  box.appendChild(filesTilesSwitch(win, ton));
-
-  // 4 · Blender, the second way — experimental, behind its switch
-  box.appendChild(filesBlenderSection(win, chosen, models));
+  // 3 · a tileset from a mesh — experimental, behind its switch; 4 · Blender,
+  // the second way — the same. MICRO-E p.5: both only with «Funzioni
+  // sperimentali» on; off, no word of them (experimental.ts)
+  if (EXPERIMENTAL) {
+    box.appendChild(filesTilesSwitch(win, ton));
+    box.appendChild(filesBlenderSection(win, chosen, models));
+  }
 
   // 5 · prepared for a use: the diagnosis, the grid, the versions on disk
   box.appendChild(filesUseSection(win, chosen));
@@ -41850,7 +42462,7 @@ function useDiagnosisView(win: Win, d: Diagnosis, key: string, profile: string, 
         renderStorage();
         requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-tiles-switch]")?.scrollIntoView({ block: "start" }));
       };
-      gb.append(go, " ", tabTip(t("files.useTilesetTip")));
+      if (EXPERIMENTAL) gb.append(go, " ", tabTip(t("files.useTilesetTip")));
       grid.appendChild(gb);
       continue;
     }
@@ -42900,7 +43512,7 @@ interface BlOut { level: string; path: string; name: string; exists?: boolean; e
   facts?: { faces: number; vertices: number; texture_count: number; texture_side_px: number | null; extensions: string[] } }
 interface BlPlan { at: number; error?: string; op?: string; outputs: BlOut[]; estimate_mb?: number; ceiling_mb?: number; blender?: string }
 
-const blenderOn = (): boolean => localStorage.getItem(BLENDER_EXPERIMENTAL_KEY) === "1";
+const blenderOn = (): boolean => EXPERIMENTAL && localStorage.getItem(BLENDER_EXPERIMENTAL_KEY) === "1";
 
 /** `GET /blender`: the Blenders found, the one used, its last probe. */
 async function loadBlender(force = false): Promise<BlenderState | null> {
@@ -43424,6 +44036,25 @@ function filesInfoTab(win: Win, listing: FsListing): HTMLElement {
       box.appendChild(row);
     }
     return box;
+  }
+  // MICRO-E p.1 · the files chosen here go into the graph by the one door; a
+  // file of a bucket stays there and the graph cites its address
+  {
+    const files = chosen.filter((e) => e.type === "file" && doorKindOf(e.path) !== "graph");
+    if (files.length && store) {
+      const dr = document.createElement("div");
+      dr.className = "files-box files-door";
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "primary";
+      b.dataset.action = "files-door";
+      b.textContent = files.length > 1 ? t("door.menuN", { n: String(files.length) }) : t("door.menu");
+      b.title = t("door.menuHint");
+      const bucket = /^(s3|https?):\/\//i.test(listing.path);
+      b.onclick = () => void portaDentro(files.map((e) => bucket ? { address: e.path, name: e.name } : { path: e.path, name: e.name }));
+      dr.appendChild(b);
+      box.appendChild(dr);
+    }
   }
   if (chosen.length > 1) {
     const st = chosen.filter((e) => filesStamped(listing, e.path)).length;
@@ -48384,24 +49015,37 @@ function documentsView(win: Win): HTMLElement {
       if (open.has(kk)) setRows(k, kk, depth + 1);
     }
   };
-  const docs = st.liveNodes().filter((n) => n.node_type === "document")
-    .filter((d) => st.doc.graph.edges.some((e) => e.source === d.id && e.edge_type === "has_linked_resource" && isSetNode(ix, e.target)))
+  // MICRO-E p.4 · a document reaches its sets through its models and their
+  // container too, and a version follows its master (doc-sets.ts)
+  const isSetId = (id: string) => isSetNode(ix, id);
+  const reach = new Map(st.liveNodes().filter((n) => n.node_type === "document").map((d) => [d.id, documentSets(ix, d.id, isSetId)] as const));
+  const docs = st.liveNodes().filter((n) => n.node_type === "document" && reach.get(n.id)!.length)
     .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { numeric: true }));
   const censused = new Set<string>();
   for (const d of docs) {
-    const sets = st.doc.graph.edges.filter((e) => e.source === d.id && e.edge_type === "has_linked_resource" && isSetNode(ix, e.target)).map((e) => e.target);
-    const trees = sets.map((r) => setTreeOf(ix, r));
-    for (const r of sets) censused.add(r);
+    const rows = reach.get(d.id)!;
+    const trees = rows.map((r) => setTreeOf(ix, r.set));
+    // the versions are on disk too: they count in the document's files and MB
+    const vtrees = rows.flatMap((r) => r.versions.map((v) => setTreeOf(ix, v)));
+    for (const r of rows) { censused.add(r.set); for (const v of r.versions) censused.add(v); }
     const cat = isCatalogue(ix, d.id) ? catalogueStateOf(st, d.id) : null;
-    const files = trees.reduce((k, x) => k + x.files, 0), bytes = trees.reduce((k, x) => k + x.bytes, 0);
+    const files = [...trees, ...vtrees].reduce((k, x) => k + x.files, 0), bytes = [...trees, ...vtrees].reduce((k, x) => k + x.bytes, 0);
     row(d.id, d.id, 0, String(d.name ?? d.id) + (d.description ? ` — ${String(d.description).slice(0, 60)}` : ""), "",
         cat ? cat.files : files, cat ? cat.bytes : bytes, cat ? `${t(`mv.cat.${cat.state}`)} · ${t("mv.catEntries", { n: fmtN(cat.entries) })}` : t("dv.document"), true);
     if (open.has(d.id))
-      for (const tr of trees) {
+      rows.forEach((r, i) => {
+        const tr = trees[i];
         const kk = `${d.id}/${tr.id}`;
-        row(kk, tr.id, 1, tr.name, tr.role ? roleLabel(st.doc.graph as never, tr.role, lang) : "", tr.files, tr.bytes, "", tr.children.length > 0);
-        if (open.has(kk)) setRows(tr, kk, 2);
-      }
+        const via = r.via ? t("dv.via", { m: String(st.node(r.via)?.name ?? r.via) }) : "";
+        row(kk, tr.id, 1, tr.name, tr.role ? roleLabel(st.doc.graph as never, tr.role, lang) : via, tr.files, tr.bytes, "", tr.children.length > 0 || r.versions.length > 0);
+        if (open.has(kk)) {
+          setRows(tr, kk, 2);
+          for (const v of r.versions) {
+            const vt = setTreeOf(ix, v);
+            row(`${kk}/${v}`, v, 2, vt.name, t("dv.version"), vt.files, vt.bytes, "", false);
+          }
+        }
+      });
   }
   // the sets nobody censused (no document, no parent): the first gradino
   const loose = st.liveNodes().filter((n) => isSetNode(ix, n.id) && !censused.has(n.id) && !ix.inn(n.id, "has_sub_resource").length
@@ -49357,8 +50001,141 @@ function assetBudgetCard(ans: AL.AssetListAnswer, k: AL.TargetKey): HTMLElement 
     + ` · ${t("al.barsHint")}`;
   note.title = note.textContent;
   card.appendChild(note);
+  // MICRO-E p.2 · the card is the target's VERSION: what it is made of, and its gestures
+  card.appendChild(targetVersionManager(ans, k));
   return card;
 }
+
+/** MICRO-E-PORTA-VERSIONI-COLORI p.2 (E.D., 16 Nov 2026) · the version of a
+ *  target: made on purpose / reused / missing (and to remake, after a master
+ *  replaced), with «Genera ciò che manca», «Rigenera», «Elimina la versione…»;
+ *  deleting takes only what was made on purpose and only where every asset has
+ *  a master — else it says so and offers to indicate one or promote the richest
+ *  version. After it, the target stays uncovered and says «manca». */
+function targetVersionManager(ans: AL.AssetListAnswer, k: AL.TargetKey): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "al-vm";
+  box.dataset.alVm = k;
+  const comp = AL.targetComposition(ans.assets, k);
+  const masters = new Map(ans.assets.flatMap((a) => a.versions.filter((v) => v.master).map((v) => [v.id, a] as const)));
+  const staleNodes = (store?.liveNodes() ?? []).filter((n) => {
+    const r = (n.data as Record<string, unknown> | undefined)?.regenerate as { replaced_by?: string } | undefined;
+    return !!r && masters.has(String(r.replaced_by ?? ""));
+  });
+  const staleAssets = [...new Set(staleNodes.map((n) => masters.get(String(((n.data as Record<string, unknown>).regenerate as { replaced_by: string }).replaced_by))!.id))];
+  box.dataset.made = String(comp.made.length);
+  box.dataset.shared = String(comp.shared.length);
+  box.dataset.missing = String(comp.missing.length);
+  box.dataset.stale = String(staleNodes.length);
+  const h = document.createElement("div");
+  h.className = "al-vm-h";
+  h.textContent = t("al.ver.title");
+  box.appendChild(h);
+  const line = (text: string, cls = "", data?: string) => { const l = document.createElement("div"); l.className = `al-vm-line ${cls}`; l.textContent = text; if (data) l.dataset.alVmLine = data; box.appendChild(l); return l; };
+  line(t("al.ver.made", { n: fmtN(comp.made.length), mb: fmtMB(comp.madeBytes) }), "", "made");
+  line(t("al.ver.shared", { n: fmtN(comp.shared.length), mb: fmtMB(comp.sharedBytes) }), "", "shared");
+  if (comp.missing.length) {
+    const all = !comp.made.length && !comp.shared.length;
+    const m = line(all ? t("al.ver.missing", { t: t(`al.t.${k}`) }) : t("al.ver.missingN", { t: t(`al.t.${k}`), n: fmtN(comp.missing.length) }), "over", "missing");
+    m.title = comp.missing.slice(0, 30).map((x) => x.name).join("\n");
+  }
+  if (staleNodes.length) {
+    const st = line(t("al.ver.stale", { n: fmtN(staleNodes.length) }), "over", "stale");
+    st.title = staleNodes.slice(0, 30).map((n) => String(n.name ?? n.id)).join("\n");
+  }
+  // the rule of the masters: said, with its two ways out, before any deletion
+  if (comp.noMaster.length) {
+    const nm = document.createElement("div");
+    nm.className = "al-vm-nomaster";
+    nm.dataset.alVmNoMaster = String(comp.noMaster.length);
+    nm.appendChild(tabLead(t("al.ver.noMaster", { n: fmtN(comp.noMaster.length) }), "files-hint files-warn"));
+    for (const x of comp.noMaster.slice(0, 12)) {
+      const r = document.createElement("div");
+      r.className = "al-vm-nm-row";
+      r.dataset.alVmNmRow = x.asset;
+      r.append(`${x.name} · ${t(x.why === "file" ? "al.ver.noMasterFile" : "al.ver.noMasterNone")} `);
+      const ind = document.createElement("button");
+      ind.type = "button";
+      ind.className = "ghost";
+      ind.dataset.action = "al-vm-indicate";
+      ind.textContent = t("al.ver.indicate");
+      ind.onclick = () => void masterReplaceAsked(x.asset, x.name);
+      const pro = document.createElement("button");
+      pro.type = "button";
+      pro.className = "ghost";
+      pro.dataset.action = "al-vm-promote";
+      pro.textContent = t("al.ver.promote");
+      pro.onclick = () => void masterOp({ op: "promote", model: x.asset }, t("al.ver.promoted", { name: x.name }));
+      r.append(ind, " ", pro);
+      nm.appendChild(r);
+    }
+    box.appendChild(nm);
+  }
+  const bar = document.createElement("div");
+  bar.className = "al-vm-bar";
+  const btn = (act: string, label: string, title: string, disabled: boolean, run: () => void) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.action = act;
+    b.textContent = label;
+    b.title = title;
+    b.disabled = disabled;
+    b.onclick = (e) => { e.stopPropagation(); run(); };
+    bar.appendChild(b);
+    return b;
+  };
+  const queueFor = (ids: string[]) => {
+    assetUi.target = k;
+    assetUi.sel.clear();
+    for (const id of ids) assetUi.sel.add(id);
+    renderStorage();
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-action="al-apply-enqueue"]')?.click());
+  };
+  btn("al-vm-generate", t("al.ver.generate"), t("al.ver.generateTitle"), !comp.missing.length, () => queueFor(comp.missing.map((x) => x.asset)));
+  btn("al-vm-regenerate", t("al.ver.regenerate"), t("al.ver.regenerateTitle"), !comp.made.length && !staleAssets.length,
+    () => queueFor([...new Set([...comp.made.map((x) => x.asset), ...staleAssets])]));
+  const del = btn("al-vm-delete", t("al.ver.delete"), comp.made.length ? t("al.ver.deleteTitle") : t("al.ver.nothingMade"),
+    !comp.made.length || comp.noMaster.length > 0,
+    () => void removeVersionsAsked(ans, comp.made.map((x) => x.version!),
+      [...(comp.shared.length ? [t("al.ver.sharedStays", { n: fmtN(comp.shared.length) })] : []), t("al.ver.after", { t: t(`al.t.${k}`) })]));
+  del.classList.add("danger");
+  box.appendChild(bar);
+  return box;
+}
+
+/** MICRO-E p.2/p.3 · a model's master by hand (the bridge's /graph/master,
+ *  s3Dgraphy's master_swap), applied as ONE step of undo; the list asked again. */
+async function masterOp(body: Record<string, unknown>, sayOf: string | ((got: { stale?: string[] }) => string)): Promise<boolean> {
+  const st = store;
+  if (!st || refuseReadOnly()) return false;
+  const j = await postGraph<{ delta: ContainerDelta; got: { stale?: string[] } }>("/graph/master", { doc: st.doc, by: editorHand().orcid ?? "", ...body });
+  if (!j.ok) { toast(String(j.error ?? j.status)); return false; }
+  const d = j.delta;
+  st.batch(() => {
+    for (const id of d.edges_removed ?? []) { const e = st.doc.graph.edges.find((x) => x.id === id); if (e) st.deleteEdge(e); }
+    for (const id of d.nodes_removed ?? []) if (st.node(id)) st.deleteNode(id);
+    for (const n of d.nodes_added ?? []) if (!st.node(n.id)) st.addNode(JSON.parse(JSON.stringify(n)));
+    for (const n of d.nodes_changed ?? []) { if (st.node(n.id)) st.updateNode(n.id, { data: { ...(n.data ?? {}) } } as Parameters<typeof st.updateNode>[1]); }
+    for (const e of d.edges_added ?? []) if (!st.doc.graph.edges.some((x) => x.id === e.id) && st.node(e.source) && st.node(e.target)) st.addEdge(e.source, e.target, e.edge_type, e.attributes, e.id);
+  });
+  const say = typeof sayOf === "string" ? sayOf : sayOf(j.got ?? {});
+  logInfo(say);
+  toastUndo(say, st);
+  await askAssetList();
+  return true;
+}
+
+/** «Indica tu il file master…» / «Sostituisci il master…»: a path, and why (the DTC says it) */
+async function masterReplaceAsked(model: string, name: string): Promise<void> {
+  const path = await askText(t("al.ver.indicateAsk", { name }), "", { kind: "al-master-path" });
+  if (!path) return;
+  const why = await askText(t("al.ver.replaceWhy"), "", { kind: "al-master-why" });
+  if (why === null) return;
+  await masterOp({ op: "replace", model, path, why }, (got) => t("al.ver.replaced", { name, n: fmtN(got.stale?.length ?? 0) }));
+}
+
+/** MICRO-E p.2 · a removal refused on a version row: the reason, on the row */
+const verRefused = new Map<string, string>();
 
 /** One asset: its row, and when open its versions and their textures. */
 function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0: AL.Bands | undefined,
@@ -49506,7 +50283,39 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
       state.title = t("al.cloud.versionTitle", { mb: fmtMB(x.cloud_bytes ?? 0), path: x.cloud_paths.join("\n") });
       state.append(" ", cloudButton({ paths: x.cloud_paths, bytes: x.cloud_bytes ?? 0 }, "al-hydrate-version", true));
     }
-    vr.append(cell(""), name, cell(AL.levelSay(x, t("al.tilesetStreaming"), t("al.chainLod")), "", x.tiles ? tilesTitle(x) : ""),
+    // MICRO-E p.2 · «⋯» on every version: «Rimuovi questa versione…» (refused,
+    // with the reason on the row, for the master and for an asset's last
+    // version); on the master «Sostituisci il master…» (p.3)
+    const moreTd = cell("");
+    const mb = document.createElement("button");
+    mb.type = "button";
+    mb.className = "ghost al-ver-more";
+    mb.dataset.alVerMore = x.id;
+    mb.textContent = "⋯";
+    mb.title = t("al.ver.rowMore");
+    mb.onclick = (e) => {
+      e.stopPropagation();
+      const r = mb.getBoundingClientRect();
+      spaceMenu(r.left, r.bottom + 2, x.master ? `◆ ${a.name}` : `${a.name} · ${x.level || x.name}`, [
+        { label: t("al.ver.rowRemove"), act: "al-ver-remove", run: () => {
+          const why = AL.versionRemovalRefusal(a, x.id);
+          if (why) { verRefused.set(x.id, t(`al.ver.refuse.${why}`, { name: a.name })); repaint(); return; }
+          verRefused.delete(x.id);
+          if (assetUi.ans) void removeVersionsAsked(assetUi.ans, [x.id]);
+        } },
+        ...(x.master ? [{ label: t("al.ver.replace"), act: "al-ver-replace", run: () => void masterReplaceAsked(a.id, a.name) }] : []),
+      ]);
+    };
+    moreTd.appendChild(mb);
+    const refused = verRefused.get(x.id);
+    if (refused) {
+      const rn = document.createElement("div");
+      rn.className = "al-ver-refused files-warn";
+      rn.dataset.alVerRefused = x.id;
+      rn.textContent = refused;
+      name.appendChild(rn);
+    }
+    vr.append(moreTd, name, cell(AL.levelSay(x, t("al.tilesetStreaming"), t("al.chainLod")), "", x.tiles ? tilesTitle(x) : ""),
       x.tiles ? cell(tilesTri(x), "n", tilesTitle(x)) : cell(fmtN(x.triangles), `n${obv.tri ? " over" : ""}`), cell(fmtMB(x.size_bytes)),
       cell(fmtMB(x.gpu_bytes) + (!x.measured && x.gpu_bytes != null ? "*" : ""), "n"),
       x.tiles?.max_texture_side ? cell(`${x.tiles.max_texture_side} ${t("al.perTile")}`, "n", tilesTitle(x))
@@ -49684,7 +50493,7 @@ interface VersionRemovalPlan { id: string; name: string; where: string; files: s
  *  nodes), what each use falls back on, the textures that go and those that
  *  stay because another geometry uses them; then the confirmation. The
  *  files go on disk (no undo), the nodes in one step of the graph. */
-async function removeVersionsAsked(ans: AL.AssetListAnswer, ids: string[]): Promise<void> {
+async function removeVersionsAsked(ans: AL.AssetListAnswer, ids: string[], extra: string[] = []): Promise<void> {
   if (!store || !ids.length || refuseReadOnly()) return;
   const set = new Set(ids);
   const fate = AL.textureFate(ans.textures, set);
@@ -49696,7 +50505,7 @@ async function removeVersionsAsked(ans: AL.AssetListAnswer, ids: string[]): Prom
   const files = plan.reduce((x, p) => x + p.files.length, 0);
   const bytes = plan.reduce((x, p) => x + p.bytes, 0);
   const nodes = plan.reduce((x, p) => x + p.nodes.length, 0);
-  const lines: string[] = [t("al.removeSum", { n: String(plan.length), files: String(files), mb: fmtMB(bytes), nodes: String(nodes) })];
+  const lines: string[] = [t("al.removeSum", { n: String(plan.length), files: String(files), mb: fmtMB(bytes), nodes: String(nodes) }), ...extra];
   for (const p of plan.slice(0, 12))
     lines.push(`• ${p.name} — ${p.files.length ? `${tn("al.removeFiles", p.files.length)}, ${fmtMB(p.bytes)} MB` : t("al.levelNotHere")} · ${tn("al.removeNodes", p.nodes.length)}`);
   if (plan.length > 12) lines.push(t("al.removeMore", { n: String(plan.length - 12) }));
