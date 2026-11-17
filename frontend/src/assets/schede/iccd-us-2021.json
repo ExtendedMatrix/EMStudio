@@ -3,7 +3,7 @@
   "format_version": "1",
   "header": {
     "id": "iccd-us-2021",
-    "version": "3.0.0",
+    "version": "4.0.0",
     "standard": {
       "authority": "ICCD",
       "code": "US",
@@ -187,19 +187,19 @@
         "license": "CC BY 4.0"
       }
     ],
-    "digest": "sha256:1c78ba15bb59770a2e8c11f730db739b1564b3a59d6a24ea4b67dab959746989",
+    "digest": "sha256:52156fc0e2ea888c91d781b4c7c4a21eda0b1b78f973174dcccd1d91b80a5528",
     "datamodel": {
-      "nodes": "1.6.47",
+      "nodes": "1.6.48",
       "node_registry": "1.6.41",
       "connections": "1.6.55",
       "visual_rules": "1.6.47",
-      "qualia": "1.6.12",
+      "qualia": "1.6.13",
       "translations": "1.17",
-      "digest": "sha256:5f48e71d48850da08200c7516ddf355a75abd4dab77a02728d82bb8390b97af8",
+      "digest": "sha256:a6632923a44dcccae0d641dd1b8f4ea7be3fe9780592dfbd636868611a43d5e8",
       "files": {
         "nodes": {
-          "digest": "sha256:5dc72aec337b166ada9ef536747a8f55b585411dfbbf5c6f37a9b07740524d8e",
-          "version": "1.6.47"
+          "digest": "sha256:03a49281a9f72e279abac53374670ba94ef040d821daf1fc3bbdb5b0e2b5f9e5",
+          "version": "1.6.48"
         },
         "node_registry": {
           "digest": "sha256:5669c0824d7149e22a25d424645b3b78b7c698c5338f3fd639d75c60b31483da",
@@ -210,14 +210,14 @@
           "version": "1.6.55"
         },
         "qualia": {
-          "digest": "sha256:bfabd911a2b4d01c4b06cceff4f6171e35e18db8054cc7255ff43f1131392d95",
-          "version": "1.6.12"
+          "digest": "sha256:175c189d760b4dc511b0b93ed16e95b354272152458cc9984a8d64bb6db50bca",
+          "version": "1.6.13"
         }
       },
       "em_ttl": "1.6.26",
-      "s3dgraphy": "1.6.0.dev115",
+      "s3dgraphy": "1.6.0.dev116",
       "taken_from": {
-        "git_commit": "ac75461598229630c34165a9a9f19b304ce7bcd5",
+        "git_commit": "fd86ac3c7d2c473d79be9c0954a548788b4ba8d6",
         "git_dirty": false
       },
       "snapshot": "registry/s3dgraphy-snapshot.json"
@@ -685,7 +685,7 @@
       {
         "id": "definizione",
         "paragraph": "definizione_fisica",
-        "type": "term",
+        "type": "text",
         "required": true,
         "repeatable": false,
         "recorded_in": "trench",
@@ -693,7 +693,7 @@
           "it": "DEFINIZIONE",
           "en": "DEFINITION"
         },
-        "vocabulary": {
+        "concept_vocabulary": {
           "scheme": "iccd-us-definizione",
           "provisional": "em-us-definizione"
         }
@@ -2975,29 +2975,48 @@
       "definizione": {
         "verdict": "property",
         "each": false,
-        "element": {
-          "name": "definition",
-          "declared_on": "StratigraphicNode",
-          "value": "concept",
-          "rdf": {
-            "with_concept": "crm:P2_has_type",
-            "concept_class": "crm:E55_Type",
-            "label_only": null,
-            "specialised_alternative": "em:hasDefinition"
+        "resolve": {
+          "$prop": {
+            "mint": true
           }
         },
         "steps": [
           {
             "emit": {
-              "op": "update_field",
-              "node_id": "$unit",
-              "field": "data.definition",
-              "value": "$value"
+              "op": "add_node",
+              "node": {
+                "id": "$prop",
+                "node_type": "property",
+                "name": "definition",
+                "description": "$value",
+                "data": {
+                  "property_type": "definition",
+                  "value": "$value"
+                }
+              }
+            }
+          },
+          {
+            "emit": {
+              "op": "add_edge",
+              "edge_type": "has_property",
+              "source": "$unit",
+              "target": "$prop"
             }
           }
         ],
-        "scheme": "iccd-us-definizione",
-        "provisional": "em-us-definizione"
+        "property": {
+          "property_type": "definition",
+          "registered_qualia": false,
+          "described_by": "interpretazione",
+          "concept": {
+            "scheme": "iccd-us-definizione",
+            "em_json": "data.concept",
+            "node": "$prop",
+            "optional": true,
+            "provisional": "em-us-definizione"
+          }
+        }
       },
       "criteri_distinzione": {
         "verdict": "property",
@@ -3772,39 +3791,19 @@
       "interpretazione": {
         "verdict": "property",
         "each": false,
-        "resolve": {
-          "$prop": {
-            "mint": true
-          }
-        },
         "steps": [
           {
             "emit": {
-              "op": "add_node",
-              "node": {
-                "id": "$prop",
-                "node_type": "property",
-                "name": "interpretation",
-                "description": "$value",
-                "data": {
-                  "property_type": "interpretation"
-                }
-              }
-            }
-          },
-          {
-            "emit": {
-              "op": "add_edge",
-              "edge_type": "has_property",
-              "source": "$unit",
-              "target": "$prop"
+              "op": "update_field",
+              "node_id": "$field.definizione.prop",
+              "field": "description",
+              "value": "$value"
             }
           }
         ],
-        "property": {
-          "property_type": "interpretation",
-          "registered_qualia": false
-        }
+        "after": [
+          "definizione"
+        ]
       },
       "datazione": {
         "verdict": "property",

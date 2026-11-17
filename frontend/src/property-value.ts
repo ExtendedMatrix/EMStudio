@@ -11,6 +11,14 @@
 // they were aligned. `DocumentStore` applies it in `addNode`, `updateNode` and
 // on opening a document (in memory: the file changes only when it is saved).
 // Remote operations are not touched: their writer aligned them.
+//
+// MICRO-K-DEFINIZIONE-E-PASSI (E.D., 17 Nov 2026): the PropertyNode
+// `definition` holds the DEFINITION in its value and the INTERPRETATION in its
+// description, once the two differ — the rule bends there as in s3Dgraphy
+// (`PropertyNode.interpreted`): two different texts survive birth (and the
+// opening of a document); a new value carries the description only while the
+// two are one; writing the description never moves the value, unless there is
+// no value (the EM writer that keeps it in the description alone).
 import type { EmDocument, EmNode } from "./types";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,6 +57,13 @@ function withValue(data: Record<string, unknown>, v: string): Record<string, unk
   return d;
 }
 
+/** the definition property: its description is its interpretation */
+export function isInterpreted(n: Partial<EmNode> | undefined): boolean {
+  if (!isProperty(n)) return false;
+  return [String(dataOf(n).property_type ?? ""), String(n?.name ?? "")]
+    .some((x) => x.trim().toLowerCase() === "definition");
+}
+
 /** Align a property being born, in place. Returns true when it changed. */
 export function alignPropertyAtBirth(n: EmNode): boolean {
   if (!isProperty(n) || mirrorExempt(n)) return false;
@@ -56,6 +71,7 @@ export function alignPropertyAtBirth(n: EmNode): boolean {
   if (isUuidPointer(v) || isUuidPointer(d)) return false;
   const tv = asText(v), td = asText(d);
   if (tv === null || td === null) return false;
+  if (tv && td && isInterpreted(n)) return false; // a definition and its interpretation
   if (tv && tv !== td) { n.description = tv; return true; }
   if (td && !tv) { n.data = withValue(dataOf(n), td); return true; }
   return false;
@@ -72,6 +88,19 @@ export function alignPropertyPatch(before: EmNode, patch: Partial<EmNode>): Part
   const wasAligned = tvOld !== null && tvOld === (tdOld ?? "");
   const valChanged = "data" in patch && dataOf(patch).value !== oldV;
   const descChanged = "description" in patch && patch.description !== before.description;
+  if (isInterpreted(after)) {
+    if (valChanged && !descChanged) {
+      const nv = dataOf(after).value;
+      const t = asText(nv);
+      if (t === null || isUuidPointer(nv)) return patch;
+      return wasAligned || !tdOld ? { ...patch, description: t } : patch;
+    }
+    if (descChanged && !valChanged) {
+      const t = asText(patch.description);
+      return t && !tvOld ? { ...patch, data: withValue(dataOf(after), t) } : patch;
+    }
+    return patch;
+  }
   if (valChanged) {
     const nv = dataOf(after).value;
     if (isUuidPointer(nv)) return patch;
@@ -101,7 +130,7 @@ export function alignPropertyValues(doc: EmDocument): number {
 /** The properties whose two places differ (geometry and pointers excluded). */
 export function divergentProperties(doc: EmDocument): EmNode[] {
   return (doc.graph?.nodes ?? []).filter((n) => {
-    if (!isProperty(n) || mirrorExempt(n)) return false;
+    if (!isProperty(n) || mirrorExempt(n) || isInterpreted(n)) return false;
     const v = dataOf(n).value;
     if (isUuidPointer(v) || isUuidPointer(n.description)) return false;
     const tv = asText(v), td = asText(n.description);

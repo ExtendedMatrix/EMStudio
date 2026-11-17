@@ -55,9 +55,10 @@ const labels = (rows) => rows.map((r) => `${"  ".repeat(r.depth)}${r.label}${r.c
   eq(rows.filter((r) => r.kind === "dim").map((r) => r.label), ["Units", "Documents", "Authors", "Epochs", "Models", "Proxies", "Paradata"],
     "default dimensions (paradata on when not synced, other off, no GIS / aux when empty)");
   // MICRO-C-CORREZIONI-ED · SF1 is «real» (the datamodel's family): born in
-  // Età arcaica and still existing, it is a row of Età romana too — the count
-  // counts the rows (5 units, 6 rows)
-  ok(rows.find((r) => r.label === "Units").count === "6", "the count of the units");
+  // Età arcaica and still existing, it is a row of Età romana too — and
+  // MICRO-K §B5: the count counts the UNITS, not the rows (5 units, 6 rows)
+  eq(rows.filter((r) => r.kind === "node" && r.key.includes("|units/") && r.label === "SF1").length, 2, "SF1 is two rows");
+  eq(rows.find((r) => r.label === "Units").count, "5", "the count of the units: 5, not the 6 rows");
 }
 // 2 · alphabetical and by type
 {
@@ -86,8 +87,9 @@ const labels = (rows) => rows.map((r) => `${"  ".repeat(r.depth)}${r.label}${r.c
   ok(!grey.find((r) => r.id === "SF1").absent, "SF1 has an RMSF: present");
   ok(grey.find((r) => r.id === "D2").absent && !grey.find((r) => r.id === "D1").absent, "D.02 (no RMDoc) grey, D.01 not");
   ok(!grey.some((r) => r.label === "Paradata"), "paradata off by default when synced");
-  // SF1 (present) is a row of two epochs since MICRO-C: 3 rows present of 6
-  eq(grey.find((r) => r.label === "Units").count, "3 / 6", "the count says present / all");
+  // SF1 (present) is a row of two epochs since MICRO-C — one unit (MICRO-K §B5):
+  // US1 and SF1 present, of 5 units
+  eq(grey.find((r) => r.label === "Units").count, "2 / 5", "the count says present / all, in units");
   const filt = run({ sync3d: true, absent: "filter" }, tg);
   ok(!filt.some((r) => r.id === "US9") && !filt.some((r) => r.id === "D2"), "filtered: the absent ones go");
   ok(!filt.some((r) => r.label === "No epoch"), "…and a group left empty with them");

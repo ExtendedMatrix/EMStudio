@@ -349,6 +349,14 @@ def _node_elements(node_datamodel: Dict, classes: Dict) -> Dict[str, Dict[str, A
                 "value": rule.get("value"),
                 "rdf": rule.get("rdf"),
             }
+            if rule.get("applies_when"):
+                # PropertyNode.concept (nodes 1.6.48): only on the property named
+                out[name]["applies_when"] = rule.get("applies_when")
+            if rule.get("deprecated"):
+                # read by those who find it, written by no definition (the
+                # unit's data.definition, nodes 1.6.48)
+                out[name]["deprecated"] = rule.get("deprecated")
+                out[name]["superseded_by"] = rule.get("superseded_by")
     return out
 
 

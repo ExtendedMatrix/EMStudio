@@ -70,6 +70,9 @@ export interface VisualField {
   help?: Labels;
   options?: Array<{ value: string; labels: Labels }>;
   vocabulary?: { scheme: string; provisional?: string };
+  /** SPEC §2.6 (ICCD 4.0.0): the scheme whose term MAY classify the box's
+   *  property — DEFINIZIONE's text, its term beside it */
+  concept_vocabulary?: { scheme: string; provisional?: string };
   note?: string;
 }
 export interface RecipeStep { emit: Record<string, unknown>; when?: string }
@@ -78,7 +81,11 @@ export interface RecipeEntry {
   each?: boolean;
   steps?: RecipeStep[];
   resolve?: Record<string, { find?: Record<string, unknown>; create?: boolean; mint?: boolean; when_missing?: string }>;
-  property?: { property_type?: string; per_item_from?: string; box?: string; registered_qualia?: boolean; accepts?: string[] };
+  property?: { property_type?: string; per_item_from?: string; box?: string; registered_qualia?: boolean; accepts?: string[];
+    /** SPEC §2.6: the box that writes this property's description */
+    described_by?: string;
+    /** SPEC §2.6: the term on the same node (`from: $value` = a term box) */
+    concept?: { scheme?: string; em_json?: string; optional?: boolean; from?: string; provisional?: string } };
   defaults?: Record<string, string>;
   element?: { name: string; value?: string };
   node?: { class?: string; node_type?: string };
@@ -256,12 +263,15 @@ export function layoutFields(sides: LayoutSide[]): string[] {
 export function conceptsFor(def: CompiledDef, fid: string, lang: string):
   { scheme: string | null; answeredBy: string | null; concepts: Array<{ concept: string; label: string }> } {
   const f = visualField(def, fid);
-  const scheme = f?.vocabulary?.scheme ?? null;
+  // a term box's vocabulary, or the scheme whose term MAY classify a text box
+  // (SPEC §2.6: DEFINIZIONE's term)
+  const voc = f?.vocabulary ?? f?.concept_vocabulary;
+  const scheme = voc?.scheme ?? null;
   if (!scheme) return { scheme: null, answeredBy: null, concepts: [] };
   let v = VOCABS.get(scheme);
   let answeredBy: string | null = scheme;
-  if ((!v || !v.concepts.length) && (f?.vocabulary?.provisional || v?.provisional)) {
-    answeredBy = f?.vocabulary?.provisional ?? v?.provisional ?? null;
+  if ((!v || !v.concepts.length) && (voc?.provisional || v?.provisional)) {
+    answeredBy = voc?.provisional ?? v?.provisional ?? null;
     v = answeredBy ? VOCABS.get(answeredBy) : undefined;
   }
   if (!v || !v.concepts.length) return { scheme, answeredBy: null, concepts: [] };
@@ -323,6 +333,14 @@ export interface FieldReading {
   readonly?: { key: string; p?: Record<string, string> };
   /** for an ambiguous box: what the graph has, that no mark attributes */
   candidates?: string[];
+  /** DEFINIZIONE (SPEC §2.6): the term that classifies the definition, on the
+   *  same PropertyNode (`data.concept`) */
+  concept?: { concept?: string; label?: string } | null;
+  /** INTERPRETAZIONE: the chain of the definition's PropertyNode (extractors,
+   *  combiners, documents) — shown under the box, read only */
+  chain?: Array<{ id: string; name: string; node_type: string }>;
+  /** a remark on the box that corrects nothing (DESCRIZIONE ≈ DEFINIZIONE) */
+  remark?: { key: string; p?: Record<string, string> };
 }
 
 export interface UnitReading {
@@ -348,14 +366,68 @@ const propValue = (n: EmNode): string => {
   return d || str(dataOf(n).value).trim();
 };
 const qualiaOf = (n: EmNode): string => str(dataOf(n).property_type || n.name);
+const readAs = qualiaOf;
 
-/** em_qualia_types 1.6.12 (MICRO-J §C, E.D. 17 Nov 2026): the HISTORICAL
- *  property names and the name they are read as. The `definition` PropertyNode
- *  of the EM 1.5 templates holds an interpretation in words; the unit's
- *  definition is the element `data.definition`, a term. So the box
- *  INTERPRETAZIONE reads it (through the lens, said), DEFINIZIONE never does. */
-export const PROPERTY_ALIASES: Readonly<Record<string, string>> = { definition: "interpretation" };
-const readAs = (n: EmNode): string => PROPERTY_ALIASES[qualiaOf(n)] ?? qualiaOf(n);
+// ─────────────────────── the definition, its interpretation, the description
+// MICRO-K-DEFINIZIONE-E-PASSI (E.D., 17 Nov 2026 — withdraws MICRO-J §C): the
+// DEFINITION is the VALUE of the unit's PropertyNode `definition`; the
+// INTERPRETATION is the DESCRIPTION of that same node (none while it equals
+// the value); the DESCRIPTION is the unit's own. The twin of s3Dgraphy's
+// `s3dgraphy.definition` (same answers on the v10: check-sheet).
+
+export const DEFINITION = "definition";
+/** where the sheets up to ICCD US 2021 3.0.0 wrote INTERPRETAZIONE: read,
+ *  never written */
+export const LEGACY_INTERPRETATION = "interpretation";
+
+/** `{value, interpretation, concept}` of a PropertyNode `definition`. */
+export function definitionParts(p: EmNode | undefined): { value: string; interpretation: string; concept: { concept?: string; label?: string } | null } {
+  if (!p) return { value: "", interpretation: "", concept: null };
+  const d = dataOf(p);
+  let v = str(d.value).trim();
+  let i = str(p.description).trim();
+  if (!v && i) { v = i; i = ""; }
+  const c = d.concept;
+  const concept = c && typeof c === "object"
+    ? { concept: str((c as Record<string, unknown>).concept) || undefined, label: str((c as Record<string, unknown>).label) || undefined }
+    : typeof c === "string" && c ? (/^(https?:|urn:)/.test(c) ? { concept: c } : { label: c }) : null;
+  return { value: v, interpretation: i && i !== v ? i : "", concept };
+}
+
+const fold = (t: string): string => t.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/[^\p{L}\p{N}_]+/gu, " ").trim();
+
+/** Ratcliff/Obershelp, as Python's `difflib.SequenceMatcher(autojunk=False).ratio()`. */
+function likeness(a: string, b: string): number {
+  const matches = (a0: number, a1: number, b0: number, b1: number): number => {
+    let best = 0, bi = a0, bj = b0;
+    let prev = new Map<number, number>();
+    for (let i = a0; i < a1; i++) {
+      const cur = new Map<number, number>();
+      for (let j = b0; j < b1; j++) {
+        if (a[i] !== b[j]) continue;
+        const k = (prev.get(j - 1) ?? 0) + 1;
+        cur.set(j, k);
+        if (k > best) { best = k; bi = i - k + 1; bj = j - k + 1; }
+      }
+      prev = cur;
+    }
+    if (!best) return 0;
+    return best + matches(a0, bi, b0, bj) + matches(bi + best, a1, bj + best, b1);
+  };
+  const n = a.length + b.length;
+  return n ? (2 * matches(0, a.length, 0, b.length)) / n : 1;
+}
+
+/** Whether a unit's description is (almost) its definition — EM's historical
+ *  use of the description as a label. SAID, never corrected
+ *  (`s3dgraphy.definition.echoes`: the same words after case, accents and
+ *  punctuation, or a likeness of 0.85). */
+export function echoes(description: string, definition: string): boolean {
+  const a = fold(str(description)), b = fold(str(definition));
+  if (!a || !b) return false;
+  return a === b || likeness(a, b) >= 0.85;
+}
 
 /** SPEC §2.4: does a node carry the discriminant of a box (`where`)? And does
  *  it carry ANY of its keys — then, not matching, it is another box's. */
@@ -476,6 +548,7 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
     return Array.isArray(v) ? v.map(String) : null;
   };
   // the unit's properties, with the field that marked them
+  const nameOf = (n: EmNode | undefined): string => str(n?.name).trim();
   const props = (ix.out.get(unitId) ?? []).filter((e) => e.edge_type === "has_property")
     .map((e) => ix.byId.get(e.target)).filter((n): n is EmNode => !!n && n.node_type === "property");
   const minted = new Map<string, EmNode[]>();
@@ -488,8 +561,25 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
   const claimed = new Set([...minted.values()].flat().map((p) => p.id));
   const used = new Set<string>();
   const byQualia = (q: string): EmNode[] => props.filter((p) => !claimed.has(p.id) && !used.has(p.id) && readAs(p) === q);
-
-  const nameOf = (n: EmNode | undefined): string => str(n?.name).trim();
+  // the unit's definition (MICRO-K): its PropertyNode, whatever box marked it
+  const defProp = props.find((p) => qualiaOf(p).toLowerCase() === DEFINITION);
+  const chainOf = (pid: string): NonNullable<FieldReading["chain"]> => {
+    const out: NonNullable<FieldReading["chain"]> = [];
+    const seen = new Set<string>([pid]);
+    const todo = [pid];
+    while (todo.length && out.length < 50) {
+      const id = todo.shift()!;
+      for (const e of ix.out.get(id) ?? []) {
+        if (!["has_data_provenance", "extracted_from", "combines"].includes(str(e.edge_type)) || seen.has(e.target)) continue;
+        seen.add(e.target);
+        const n = ix.byId.get(e.target);
+        if (!n) continue;
+        out.push({ id: n.id, name: nameOf(n) || n.id, node_type: str(n.node_type) });
+        todo.push(n.id);
+      }
+    }
+    return out;
+  };
 
   for (const f of def.visual.fields) {
     const fid = f.id;
@@ -582,6 +672,36 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
       done();
       continue;
     }
+    const onProp = steps.length === 1 && steps[0].emit.op === "update_field"
+      && /^\$field\.[^.]+\.prop$/.test(str(steps[0].emit.node_id)) && str(steps[0].emit.field) === "description";
+    if (onProp) {
+      // SPEC §2.6 (ICCD 4.0.0): INTERPRETAZIONE is the description of the
+      // PropertyNode another box mints (DEFINIZIONE's) — empty while it equals
+      // the value; else an old PropertyNode `interpretation` (≤ 3.0.0), read
+      const base = str(steps[0].emit.node_id).split(".")[1];
+      const baseNode = fields.get(base)?.nodes[0];
+      const prop = baseNode ? ix.byId.get(baseNode) : undefined;
+      const parts = definitionParts(prop);
+      if (prop) {
+        r.nodes = [prop.id];
+        r.chain = chainOf(prop.id);
+      }
+      if (parts.interpretation) {
+        r.value = parts.interpretation;
+        r.how = { key: "sheet.how.interpretation", p: { field: base } };
+      } else {
+        const legacy = byQualia(LEGACY_INTERPRETATION);
+        if (legacy.length && propValue(legacy[0])) {
+          legacy.forEach((p) => used.add(p.id));
+          r.value = propValue(legacy[0]);
+          r.lens = true;
+          r.how = { key: "sheet.how.legacyInterpretation", p: { field: base } };
+        } else r.how = { key: prop ? "sheet.how.interpretationNone" : "sheet.how.afterEmpty", p: { field: base } };
+      }
+      if (!prop) r.readonly = { key: "sheet.ro.definitionFirst", p: { field: base } };
+      done();
+      continue;
+    }
     const native = steps.length === 1 && steps[0].emit.op === "update_field" && steps[0].emit.node_id === "$unit";
     if (native) {
       const field = str(steps[0].emit.field);
@@ -592,26 +712,23 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
         else r.value = raw;
         r.how = { key: "sheet.how.native", p: { field } };
       } else if (entry.element) {
-        // THE LENS on an element: a graph written before `definition` became an
-        // element of the node (nodes 1.6.9) carries it as a PropertyNode of the
-        // same name — read, said, never translated into the element on its own
-        // em_qualia_types 1.6.12: a PropertyNode of the element's name is the
-        // HISTORICAL spelling of another property (definition → interpretation)
-        // — never read as the element; the box says where it went
-        const alias = PROPERTY_ALIASES[entry.element.name];
-        const legacy = alias ? props.filter((p) => qualiaOf(p) === entry.element!.name) : [];
-        if (legacy.length) r.how = { key: "sheet.how.elementAlias", p: { field, qualia: entry.element.name, to: alias } };
-        else {
-          const lensProps = byQualia(entry.element.name);
-          if (lensProps.length) {
-            lensProps.forEach((p) => used.add(p.id));
-            r.value = { label: propValue(lensProps[0]) };
-            r.lens = true;
-            r.nodes = lensProps.map((p) => p.id);
-            r.how = { key: "sheet.how.lensElement", p: { field, qualia: entry.element.name } };
-          } else r.how = { key: "sheet.how.nativeEmpty", p: { field } };
-        }
+        // THE LENS on an element: a graph written before the element carries
+        // it as a PropertyNode of the same name — read, said
+        const lensProps = byQualia(entry.element.name);
+        if (lensProps.length) {
+          lensProps.forEach((p) => used.add(p.id));
+          r.value = { label: propValue(lensProps[0]) };
+          r.lens = true;
+          r.nodes = lensProps.map((p) => p.id);
+          r.how = { key: "sheet.how.lensElement", p: { field, qualia: entry.element.name } };
+        } else r.how = { key: "sheet.how.nativeEmpty", p: { field } };
       } else r.how = { key: "sheet.how.nativeEmpty", p: { field } };
+      // MICRO-K §A.3: a description that repeats the definition (EM's
+      // historical use of the description as a label) is SAID, not corrected
+      if (field === "description" && typeof r.value === "string" && defProp) {
+        const dv = definitionParts(defProp).value;
+        if (echoes(r.value, dv)) r.remark = { key: "sheet.remark.echo", p: { def: dv } };
+      }
       done();
       continue;
     }
@@ -627,6 +744,35 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
         continue;
       }
       const q = boxQualia(entry);
+      if (q === DEFINITION && !entry.each) {
+        // MICRO-K §A (ICCD 4.0.0): the VALUE of the PropertyNode `definition`
+        // (data.value before the description, which may be its interpretation);
+        // its term in data.concept. No PropertyNode: the deprecated element
+        // data.definition (nodes 1.6.48) is read, said
+        let p = (minted.get(fid) ?? []).find((x) => qualiaOf(x).toLowerCase() === DEFINITION);
+        if (!p) { p = byQualia(DEFINITION)[0] ?? props.find((x) => qualiaOf(x).toLowerCase() === DEFINITION && !used.has(x.id)); if (p) r.lens = !markOf(p).field; }
+        if (p) {
+          used.add(p.id);
+          const parts = definitionParts(p);
+          r.nodes = [p.id];
+          r.concept = parts.concept;
+          if (f.type === "term") r.value = parts.concept ?? (parts.value ? { label: parts.value } : undefined);
+          else if (parts.value) r.value = parts.value;
+          r.how = { key: r.lens ? "sheet.how.lensProperty" : "sheet.how.property", p: { qualia: DEFINITION } };
+        } else {
+          const el = unitData.definition;
+          const label = el && typeof el === "object" ? str((el as Record<string, unknown>).label) : str(el);
+          const concept = el && typeof el === "object" ? str((el as Record<string, unknown>).concept) : "";
+          if (label || concept) {
+            r.value = f.type === "term" ? { ...(concept ? { concept } : {}), ...(label ? { label } : {}) } : (label || concept);
+            r.concept = concept || label ? { concept: concept || undefined, label: label || undefined } : null;
+            r.lens = true;
+            r.how = { key: "sheet.how.deprecatedElement", p: {} };
+          } else r.how = { key: "sheet.how.property", p: { qualia: DEFINITION } };
+        }
+        done();
+        continue;
+      }
       let nodes = (minted.get(fid) ?? []).filter((p) => !entry.property?.property_type || qualiaOf(p) === entry.property.property_type);
       if (!nodes.length && q) {
         nodes = byQualia(q);
@@ -638,7 +784,6 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
         nodes = props.filter((p) => !claimed.has(p.id) && !used.has(p.id) && accepts.includes(readAs(p)));
         if (nodes.length) r.lens = true;
       }
-      const viaAlias = nodes.some((p) => PROPERTY_ALIASES[qualiaOf(p)] !== undefined);
       nodes.forEach((p) => used.add(p.id));
       r.nodes = nodes.map((p) => p.id);
       const valued = nodes.filter((p) => propValue(p) !== "");
@@ -664,8 +809,6 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
         r.how = accepts.length
           ? { key: r.lens ? "sheet.how.lensAccepts" : "sheet.how.accepts", p: { box: str(entry.property?.box), qualia: accepts.join(", ") } }
           : { key: "sheet.how.propertyRows", p: { box: str(entry.property?.box) } };
-      if (viaAlias)
-        r.how = { key: "sheet.how.lensAlias", p: { qualia: q ?? "—", old: Object.keys(PROPERTY_ALIASES).filter((k) => PROPERTY_ALIASES[k] === q).join(", ") } };
       done();
       continue;
     }
@@ -832,6 +975,18 @@ export function planEdit(def: CompiledDef, g: Graph, unitId: string, fid: string
   if (f.type === "date" && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return refuse("sheet.no.date", { v });
   if (f.type === "choice" && v && !(f.options ?? []).some((o) => o.value === v)) return refuse("sheet.no.choice", { v });
 
+  const onProp = steps.length === 1 && steps[0].emit.op === "update_field"
+    && /^\$field\.[^.]+\.prop$/.test(str(steps[0].emit.node_id)) && str(steps[0].emit.field) === "description";
+  if (onProp) {
+    // SPEC §2.6: INTERPRETAZIONE writes the description of the definition's
+    // PropertyNode. Emptied, the description goes back to the value — the EM
+    // form an old reader reads, and that says «no interpretation»
+    const prop = r.nodes[0] ? index(g).byId.get(r.nodes[0]) : undefined;
+    if (!prop) return refuse("sheet.ro.definitionFirst", { field: str(steps[0].emit.node_id).split(".")[1] });
+    const value = definitionParts(prop).value;
+    const notes: Plan["notes"] = r.lens ? [{ key: "sheet.note.legacyInterpretation" }] : [];
+    return { acts: [{ op: "update", nodeId: prop.id, patch: { description: v || value } }], notes };
+  }
   const onAct = steps.length === 1 && steps[0].emit.op === "update_field" && str(steps[0].emit.node_id).startsWith("$anchor.");
   if (onAct) return planActTime(def, g, unitId, str(steps[0].emit.node_id).slice("$anchor.".length),
                                 str(steps[0].emit.field), f.type === "integer" && v ? Number(v) : v);
@@ -862,6 +1017,13 @@ export function planEdit(def: CompiledDef, g: Graph, unitId: string, fid: string
       value = term.concept ?? term.label;
       extra = term.concept ? { label: term.label } : { uncontrolled: true, label: term.label };
       if (v && !term.concept) notes.push({ key: "sheet.note.word", p: { v } });
+    }
+    if (q === DEFINITION && f.type === "term" && r.nodes.length) {
+      // a term box on the definition (es-ue, DAI): the term in data.concept,
+      // its label the value (SPEC §2.6)
+      const term = v ? asTerm() : { label: "" };
+      return { acts: [{ op: "setProp", propId: r.nodes[0], value: term.label },
+                      { op: "setField", nodeId: r.nodes[0], field: "data.concept", value: v ? term : "" }], notes };
     }
     if (r.nodes.length) {
       // the property is there (marked, or read through the lens): its value
@@ -913,6 +1075,23 @@ export function planEdit(def: CompiledDef, g: Graph, unitId: string, fid: string
   // the pointer BY ROLE: from now on this box's node is this one
   acts.push({ op: "setField", nodeId: unitId, field: `data.${LINKS}.${fid}`, value: targetId ? [targetId] : [] });
   return { acts, notes };
+}
+
+/** SPEC §2.6 (ICCD 4.0.0): the TERM that classifies the definition, on its
+ *  PropertyNode (`data.concept`): a concept of the box's concept vocabulary
+ *  by label, or cleared. Refused while there is no definition. */
+export function planConcept(def: CompiledDef, g: Graph, unitId: string, fid: string, input: string, lang: string): Plan {
+  const r = readUnit(def, g, unitId, lang).fields.get(fid);
+  const entry = def.recipe.fields[fid];
+  const c = entry?.property?.concept;
+  if (!r || !c) return refuse("sheet.no.field", { field: fid });
+  if (!r.nodes.length || r.how.key === "sheet.how.deprecatedElement") return refuse("sheet.ro.definitionFirst", { field: fid });
+  const v = input.trim();
+  const field = str(c.em_json || "data.concept");
+  if (!v) return { acts: [{ op: "setField", nodeId: r.nodes[0], field, value: "" }], notes: [] };
+  const hit = conceptsFor(def, fid, lang).concepts.find((x) => x.concept === v || x.label.toLowerCase() === v.toLowerCase());
+  if (!hit) return refuse("sheet.no.concept", { v });
+  return { acts: [{ op: "setField", nodeId: r.nodes[0], field, value: { concept: hit.concept, label: hit.label } }], notes: [] };
 }
 
 /**
@@ -971,36 +1150,6 @@ export function planStatus(def: CompiledDef, unitId: string, key: string): Plan 
   if (!rs) return refuse("sheet.no.status");
   if (key && !(rs.values ?? []).includes(key)) return refuse("sheet.no.choice", { v: key });
   return { acts: [{ op: "setField", nodeId: unitId, field: str(rs.em_json || "data.record_status"), value: key }], notes: [] };
-}
-
-/** em_qualia_types 1.6.12 (MICRO-J §C): the PropertyNodes of the graph spelled
- *  with a HISTORICAL name (`definition`), with their unit — what the migration
- *  would rename. The same rule as s3dgraphy.migrations.definition_to_interpretation. */
-export function legacyProperties(g: Graph): Array<{ id: string; from: string; to: string; value: string; unit: string }> {
-  const ix = index(g);
-  const out: Array<{ id: string; from: string; to: string; value: string; unit: string }> = [];
-  for (const n of g.nodes) {
-    if (n.node_type !== "property" || dataOf(n).removed) continue;
-    const old = [str(n.name).trim().toLowerCase(), str(dataOf(n).property_type).trim().toLowerCase()].find((x) => PROPERTY_ALIASES[x]);
-    if (!old) continue;
-    const unit = (ix.inn.get(n.id) ?? []).find((e) => e.edge_type === "has_property");
-    out.push({ id: n.id, from: old, to: PROPERTY_ALIASES[old], value: propValue(n), unit: str(ix.byId.get(unit?.source ?? "")?.name) });
-  }
-  return out.sort((a, b) => a.unit.localeCompare(b.unit, undefined, { numeric: true }));
-}
-
-/** The migration as ONE plan (one delta, one undo): `name` and
- *  `data.property_type` renamed in place, ids and chain untouched. `keep`: ids
- *  a person decided to leave as they are. */
-export function planLegacyRename(g: Graph, keep: readonly string[] = []): Plan {
-  const rows = legacyProperties(g).filter((r) => !keep.includes(r.id));
-  if (!rows.length) return refuse("sheet.no.legacy");
-  const acts: Act[] = [];
-  for (const r of rows) {
-    acts.push({ op: "update", nodeId: r.id, patch: { name: r.to } });
-    acts.push({ op: "setField", nodeId: r.id, field: "data.property_type", value: r.to });
-  }
-  return { acts, notes: [{ key: "sheet.note.legacyRenamed", p: { n: String(rows.length) } }] };
 }
 
 /** Which unit a typed reference means — never invented, never guessed between

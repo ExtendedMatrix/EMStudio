@@ -26,8 +26,8 @@ export interface SheetViewCallbacks {
   onPrint(): void;
   /** SPEC §5 (3.0.0): the record's status set on the unit ("" = not said) */
   onStatus?(key: string): void;
-  /** em_qualia_types 1.6.12: rename the graph's historical `definition` properties */
-  onLegacy?(): void;
+  /** SPEC §2.6 (ICCD 4.0.0): the term that classifies the definition ("" = none) */
+  onConcept?(fid: string, value: string): void;
 }
 
 export interface SheetViewInput {
@@ -40,8 +40,6 @@ export interface SheetViewInput {
   note?: string;
   /** the record status, said in the sheet's language: key → label */
   statusLabels?: Record<string, string>;
-  /** how many PropertyNodes of the GRAPH carry a historical name */
-  legacy?: number;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -91,13 +89,6 @@ function head(body: HTMLElement, inp: SheetViewInput | null, cb: SheetViewCallba
       if (!st.key) none.selected = true;
       ss.addEventListener("change", () => cb.onStatus!(ss.value));
       bar.appendChild(ss);
-    }
-    if (inp.legacy && cb.onLegacy) {
-      const lb = el("button", "sk-legacy", cb.t("sheet.legacyButton", { n: inp.legacy }));
-      lb.dataset.skLegacy = "1";
-      lb.title = cb.t("sheet.legacyTitle", { n: inp.legacy });
-      lb.addEventListener("click", () => cb.onLegacy!());
-      bar.appendChild(lb);
     }
     const pr = el("button", "sk-print", cb.t("sheet.print"));
     pr.dataset.skPrint = "1";
@@ -249,7 +240,61 @@ function cellEl(c: LayoutCell, inp: SheetViewInput, cb: SheetViewCallbacks): HTM
     box.appendChild(lab);
   }
   box.appendChild(valueBox(inp.def, inp.lang, r, cb));
+  extras(box, inp, r, cb);
   return box;
+}
+
+/** MICRO-K §A: what a box says beside its value — the TERM of the definition
+ *  (a picker, on the same PropertyNode), the CHAIN of the interpretation (read
+ *  only: extractors, combiners, documents), a REMARK that corrects nothing
+ *  (a description that repeats the definition). */
+function extras(box: HTMLElement, inp: SheetViewInput, r: FieldReading, cb: SheetViewCallbacks): void {
+  const f = visualField(inp.def, r.fid);
+  if (f?.concept_vocabulary && f.type !== "term" && cb.onConcept) {
+    const line = el("div", "sk-concept");
+    line.dataset.skConcept = r.fid;
+    const { concepts, answeredBy } = conceptsFor(inp.def, r.fid, inp.lang);
+    const sel = el("select", "sk-concept-pick");
+    sel.title = cb.t("sheet.conceptTitle", { scheme: String(answeredBy ?? f.concept_vocabulary.scheme) });
+    const none = el("option", undefined, cb.t("sheet.conceptNone"));
+    none.value = "";
+    sel.appendChild(none);
+    const cur = r.concept?.concept ?? "";
+    for (const c of concepts) {
+      const o = el("option", undefined, c.label);
+      o.value = c.concept;
+      if (c.concept === cur) o.selected = true;
+      sel.appendChild(o);
+    }
+    if (cur && !concepts.some((c) => c.concept === cur)) {
+      const o = el("option", undefined, r.concept?.label || cur);
+      o.value = cur;
+      o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.disabled = !r.nodes.length || r.how.key === "sheet.how.deprecatedElement";
+    sel.addEventListener("change", () => cb.onConcept!(r.fid, sel.value));
+    line.append(el("span", "sk-concept-lbl", cb.t("sheet.concept")), sel);
+    box.appendChild(line);
+  }
+  if (r.chain && r.chain.length) {
+    const ch = el("div", "sk-chain");
+    ch.dataset.skChain = String(r.chain.length);
+    ch.title = cb.t("sheet.chainTitle");
+    ch.appendChild(el("span", "sk-chain-lbl", cb.t("sheet.chain")));
+    for (const n of r.chain) {
+      const a = el("span", "sk-chain-node", n.name);
+      a.title = n.node_type;
+      a.addEventListener("dblclick", () => cb.onPick(n.id));
+      ch.appendChild(a);
+    }
+    box.appendChild(ch);
+  }
+  if (r.remark) {
+    const rm = el("div", "sk-remark", cb.t(r.remark.key, r.remark.p));
+    rm.dataset.skRemark = r.remark.key;
+    box.appendChild(rm);
+  }
 }
 
 function rowEl(r: LayoutRow, inp: SheetViewInput, cb: SheetViewCallbacks): HTMLElement {

@@ -9041,7 +9041,7 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-ov { position: absolute; left: 10px; top: 10px; max-width: min(380px, 72%); background: var(--scene-ov-bg); color: var(--scene-ov-ink); border: 1px solid var(--scene-ov-border); border-radius: 8px; padding: 7px 10px; font-size: 0.76rem; line-height: 1.45; z-index: 2; }
 .scn-ov b { font-weight: 600; }
 /* MICRO-E p.6 · «Colori ▾» and its legend (bottom left of the scene) */
-.scn-legend { position: absolute; left: 10px; bottom: 34px; max-width: min(300px, 60%); max-height: 46%; overflow: auto; background: var(--scene-ov-bg); color: var(--scene-ov-ink); border: 1px solid var(--scene-ov-border); border-radius: 8px; padding: 6px 8px; font-size: 0.74rem; line-height: 1.35; z-index: 2; }
+.scn-legend { position: absolute; left: 10px; bottom: 34px; min-width: 200px; max-width: min(440px, 72%); max-height: 46%; overflow: auto; background: var(--scene-ov-bg); color: var(--scene-ov-ink); border: 1px solid var(--scene-ov-border); border-radius: 8px; padding: 6px 8px; font-size: 0.74rem; line-height: 1.35; z-index: 2; }
 .scn-legend-h { font-weight: 600; margin-bottom: 3px; }
 .scn-legend-vars { display: flex; gap: 4px; margin: 2px 0 4px; }
 .scn-legend-vars button, .col-modes button, .col-variants button { font-size: 0.72rem; padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-sunken); color: var(--text); cursor: pointer; }
@@ -12114,6 +12114,12 @@ button.uo-col { cursor: pointer; }
 .sk-unread { background: var(--bg-panel); color: var(--text); width: calc(var(--mm) * 186); margin: 0 auto 10px; padding: 8px 12px; border-radius: 3px; font-size: 12px; }
 .sk-unread h4 { margin: 0 0 4px; font-size: 12px; }
 .sk-unread-row { display: flex; gap: 10px; } .sk-unread-row b { min-width: 9em; }
+/* MICRO-K · the term of the definition, the chain of the interpretation, a remark */
+.sk-concept { display: flex; gap: 6px; align-items: center; margin-top: 2px; font-size: 11px; color: var(--text-muted); }
+.sk-concept-pick { font-size: 11px; max-width: 70%; }
+.sk-chain { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; font-size: 10.5px; color: var(--text-muted); }
+.sk-chain-node { padding: 0 5px; border: 1px solid var(--border); border-radius: 8px; cursor: default; }
+.sk-remark { margin-top: 3px; font-size: 10.5px; color: var(--warning, #b7791f); font-style: italic; }
 .sk-foot { text-align: center; font-size: 10px; color: var(--text-faint); }
 .sk-print-ov { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 9000; display: flex; align-items: center; justify-content: center; }
 .sk-print-box { width: min(980px, 94vw); height: 92vh; background: var(--bg-elevated); border-radius: var(--radius-lg); display: flex; flex-direction: column; overflow: hidden; }

@@ -340,6 +340,13 @@ def _check_graph(t: Template, reg: Registry, problems: List[Problem], draft: boo
                     or parent.graph.node_type != "EpochNode":
                 problems.append(Problem(where, f"graph.sub_epoch_of names '{g.sub_epoch_of}', "
                                                "which is not a box writing an EpochNode"))
+        if g.concept_scheme:
+            if g.verdict != "property":
+                problems.append(Problem(where, "graph.concept_scheme classifies the PropertyNode "
+                                               "of a 'property' verdict; this verdict has none"))
+            if g.concept_scheme not in t.vocabularies:
+                problems.append(Problem(where, f"graph.concept_scheme '{g.concept_scheme}' is not "
+                                               f"in template.vocabularies {t.vocabularies}"))
         if g.find:
             if f.type not in ("resource_ref_list", "record_ref_list"):
                 problems.append(Problem(where, "graph.find is for a reference list "

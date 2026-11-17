@@ -133,13 +133,33 @@ for (const u of UNITS) {
 }
 eq(field("SU003", "descrizione").text, "Foundation of the walls", "SU003 DESCRIZIONE = the node's description");
 eq(field("SU003", "posteriore_a").value, ["SU050"], "SU003 POSTERIORE A = SU050 (is_after →)");
-// MICRO-J §C (em_qualia_types 1.6.12): the v10's PropertyNode «definition» is
-// an INTERPRETATION under its historical name — INTERPRETAZIONE reads it,
-// DEFINIZIONE (the element, a term) never does and says where it went
-eq(field("SU003", "definizione").state, "empty", "DEFINIZIONE: the element is empty, the old property is not read as it");
-eq(field("SU003", "definizione").how.key, "sheet.how.elementAlias", "…and the box says where the old property went");
-eq(field("SU003", "interpretazione").text, "Foundation of the external walls", "INTERPRETAZIONE reads the «definition» PropertyNode");
-eq(field("SU003", "interpretazione").how.key, "sheet.how.lensAlias", "…through the lens, under its historical name, said");
+// MICRO-K §A (ICCD US 2021 4.0.0, E.D. 17 Nov 2026): DEFINIZIONE is the VALUE
+// of the PropertyNode «definition», INTERPRETAZIONE its description (none
+// while it equals the value), DESCRIZIONE the unit's own
+eq(field("SU003", "definizione").text, "Foundation of the external walls", "DEFINIZIONE = the value of the PropertyNode «definition»");
+eq(field("SU003", "definizione").nodes.length, 1, "…one node");
+eq(field("SU003", "interpretazione").state, "empty", "INTERPRETAZIONE: the description equals the value — no interpretation yet");
+eq(field("SU003", "interpretazione").how.key, "sheet.how.interpretationNone", "…and it says so");
+ok((field("SU003", "interpretazione").chain ?? []).length > 0, `INTERPRETAZIONE shows the chain of the definition (${(field("SU003", "interpretazione").chain ?? []).map((c) => c.name).join(", ")})`);
+eq(field("USV108", "interpretazione").text, "Reconstructed foundation level not far from the preserved SU004", "USV108: an old PropertyNode «interpretation», read through the lens");
+eq(field("USV108", "interpretazione").how.key, "sheet.how.legacyInterpretation", "…said");
+eq(field("SU002", "descrizione").remark?.key, "sheet.remark.echo", "SU002: the description repeats the definition — said, not corrected");
+{
+  // parity with s3Dgraphy (s3dgraphy.definition.echoes_emjson): the same units
+  const units = st.liveNodes().filter((n) => S.isSheetUnit(n) && String(n.description ?? "").trim());
+  const tsEcho = units.filter((n) => S.readUnit(def, G(), n.id, "it").fields.get("descrizione").remark).map((n) => n.name).sort();
+  const S3D = path.resolve(new URL("../../../s3Dgraphy", import.meta.url).pathname);
+  const PY3 = [path.join(S3D, ".venv/bin/python"), "python3"].find((p) => p === "python3" || fs.existsSync(p));
+  if (fs.existsSync(path.join(S3D, "src/s3dgraphy/definition.py"))) {
+    const code = `import json,sys
+from s3dgraphy import definition as D
+doc=json.load(open(sys.argv[1])); sec=doc['graphs'][sys.argv[2]]; sec=sec.get('graph',sec)
+print(json.dumps(sorted(r['name'] for r in D.echoes_emjson(sec))))`;
+    const py = JSON.parse(execFileSync(PY3, ["-c", code, V10, gid], { env: { ...process.env, PYTHONPATH: path.join(S3D, "src") } }).toString());
+    const pyUnits = py.filter((nm) => units.some((n) => n.name === nm));
+    eq(tsEcho, pyUnits, `the description that repeats the definition: ${tsEcho.length} units, the same as s3Dgraphy`);
+  } else ok(tsEcho.length > 0, `${tsEcho.length} descriptions repeat their definition`);
+}
 eq(field("SU003", "ente_responsabile").state, "silent", "ENTE RESPONSABILE: not in the graph (blocked_on)");
 // 3.0.0 (SPEC §2.5): ANNO hangs on a DEFINED act — empty until the act is there
 eq(field("SU003", "anno").state, "empty", "ANNO: the excavation act, not in the v10 yet");
@@ -187,16 +207,34 @@ eq([sc.nodes[0], sc.lens ?? false], [lensProp, false], "…and it is now this bo
 ok(/w3id.org\/extendedmatrix\/vocab\/us-stato-conservazione/.test(st.node(lensProp).description), "a concept of the provisional vocabulary, not the word");
 st.undo();
 ok(field("SU003", "stato_conservazione").lens, "undo: the old value, unmarked");
-ok(apply(S.planEdit(def, G(), su3, "interpretazione", "Fondazione perimetrale", "it")), "INTERPRETAZIONE (the old «definition» property)");
-eq(st.doc.graph.nodes.length, n0, "it changes where it lives: no second node");
-eq(field("SU003", "interpretazione").text, "Fondazione perimetrale", "read back by its mark");
+// MICRO-K · INTERPRETAZIONE writes the description of the definition's node,
+// DEFINIZIONE its value: two texts on one node, each kept when the other moves
+const defId = field("SU003", "definizione").nodes[0];
+ok(apply(S.planEdit(def, G(), su3, "interpretazione", "Fondazione perimetrale: lega con SU004 e poggia sul banco", "it")), "INTERPRETAZIONE written");
+eq(st.doc.graph.nodes.length, n0, "no second node: the description of the definition's PropertyNode");
+eq([st.node(defId).data.value, st.node(defId).description], ["Foundation of the external walls", "Fondazione perimetrale: lega con SU004 e poggia sul banco"], "…the value stays, the description is the interpretation");
+eq(field("SU003", "interpretazione").text, "Fondazione perimetrale: lega con SU004 e poggia sul banco", "read back");
+ok(apply(S.planEdit(def, G(), su3, "definizione", "Fondazione in opera cementizia", "it")), "DEFINIZIONE changed after it");
+eq([st.node(defId).data.value, st.node(defId).description], ["Fondazione in opera cementizia", "Fondazione perimetrale: lega con SU004 e poggia sul banco"], "…the interpretation does not follow the value");
+ok(apply(S.planEdit(def, G(), su3, "interpretazione", "", "it")), "INTERPRETAZIONE emptied");
+eq(st.node(defId).description, "Fondazione in opera cementizia", "…the description goes back to the value (the EM form): no interpretation");
+eq(field("SU003", "interpretazione").state, "empty", "…read empty");
+st.undo(); st.undo(); st.undo();
+eq(field("SU003", "definizione").text, "Foundation of the external walls", "three undos: back");
+eq(field("SU003", "definizione").concept, null, "DEFINIZIONE: no term yet");
+const cpt = S.conceptsFor(def, "definizione", "it");
+ok(cpt.concepts.length > 0, `the term of DEFINIZIONE from ${cpt.answeredBy} (${cpt.concepts.length} concepts)`);
+ok(apply(S.planConcept(def, G(), su3, "definizione", cpt.concepts[0].label, "it")), "a term on the definition");
+eq(st.node(defId).data.concept, { concept: cpt.concepts[0].concept, label: cpt.concepts[0].label }, "…in data.concept of the same node");
+eq(field("SU003", "definizione").text, "Foundation of the external walls", "…the sentence stays the value");
 st.undo();
-eq(field("SU003", "interpretazione").text, "Foundation of the external walls", "undo: back");
-ok(apply(S.planEdit(def, G(), su3, "definizione", "fondazione in muratura", "it")) || true, "DEFINIZIONE");
-const dv = byName("SU003").data.definition;
-ok(dv && (dv.concept || dv.label), "the element data.definition written");
-st.undo();
-eq(byName("SU003").data.definition, undefined, "undo: the element gone");
+eq(st.node(defId).data.concept, undefined, "undo: no term");
+eq(S.planConcept(def, G(), su3, "definizione", "parola inventata", "it").refused.key, "sheet.no.concept", "a word that is not a term is refused");
+{
+  // a unit with no definition: INTERPRETAZIONE waits for it
+  const none = st.liveNodes().find((n) => S.isSheetUnit(n) && !S.readUnit(def, G(), n.id, "it").fields.get("definizione").nodes.length);
+  if (none) eq(S.planEdit(def, G(), none.id, "interpretazione", "x", "it").refused.key, "sheet.ro.definitionFirst", `${none.name}: no definition, no interpretation`);
+}
 ok(apply(S.planEdit(def, G(), su3, "formazione_natura", "artificial", "it")), "a choice");
 eq(field("SU003", "formazione_natura").value, "artificial", "…read back");
 st.undo();
@@ -229,17 +267,7 @@ eq(read("SU003").status.key, "revised", "…read back");
 eq(S.recordOf(def, read("SU003")).status, "revised", "…and in the record for the print");
 st.undo();
 eq(read("SU003").status.key, null, "undo: not said");
-// MICRO-J §C · the migration: one delta, one undo, ids untouched
-const legacy = S.legacyProperties(G());
-eq(legacy.length, 99, "the v10's 99 PropertyNodes «definition»");
-ok(apply(S.planLegacyRename(G())), "renamed as one delta");
-eq(S.legacyProperties(G()).length, 0, "none left");
-const renamed = st.node(legacy[0].id);
-eq([renamed.name, renamed.data.property_type], ["interpretation", "interpretation"], "same id, the new name");
-eq(field("SU003", "interpretazione").how.key, "sheet.how.lensProperty", "INTERPRETAZIONE reads it by its own name now");
-st.undo();
-eq(S.legacyProperties(G()).length, 99, "undo: all 99 back");
-eq(JSON.stringify(st.doc.graph), before, "migration undone: the graph as it was");
+eq(JSON.stringify(st.doc.graph), before, "the graph as it was");
 
 // 5 · relations ↔ edges
 const p1 = S.planRefAdd(def, G(), su3, "copre", "SU050");

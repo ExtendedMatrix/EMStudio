@@ -94,3 +94,38 @@ export function doorTilesetOut(f: DoorFile, checksum: string | null): Record<str
 }
 /** does a drop belong to the door? (a graph opens as a graph, as today) */
 export const forTheDoor = (paths: string[]): boolean => paths.some((p) => doorKindOf(p) !== "graph");
+
+/** MICRO-K §B1 (node datamodel 1.6.48) · the nodes that say WHEN they were
+ *  acquired and until when they hold: RM, RMDoc, RMSF, the container, the
+ *  document. */
+export const ACQUIRED_TYPES: ReadonlySet<string> = new Set(["representation_model", "representation_model_doc",
+  "representation_model_sf", "RepresentationModelNodeGroup", "document"]);
+
+/** A `data.acquired` / `data.valid_until` typed by a person: a year («2015»,
+ *  «-27»), an ISO date («2015-06-12»), an interval («2013–2015», «2013-2015»,
+ *  «2013/2015») → `{start, end}`. `null` = cleared; `undefined` = not a date. */
+export function parseAcquired(text: string): string | number | { start: string | number; end: string | number } | null | undefined {
+  const v = text.trim();
+  if (!v) return null;
+  const one = (x: string): string | number | undefined => {
+    const y = x.trim();
+    if (/^-?\d{1,4}$/.test(y)) return Number(y);
+    if (/^\d{4}-\d{2}(-\d{2})?$/.test(y)) return y;
+    return undefined;
+  };
+  const m = /^(-?\d{1,4}(?:-\d{2}(?:-\d{2})?)?)\s*(?:–|—|\/|\s-\s|-(?=\d{4}$))\s*(-?\d{1,4}(?:-\d{2}(?:-\d{2})?)?)$/.exec(v);
+  if (m) {
+    const a = one(m[1]), b = one(m[2]);
+    return a === undefined || b === undefined ? undefined : { start: a, end: b };
+  }
+  return one(v);
+}
+
+/** the text a `data.acquired` reads as */
+export function acquiredText(v: unknown): string {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const o = v as Record<string, unknown>;
+    return `${o.start ?? "?"}–${o.end ?? "?"}`;
+  }
+  return v == null ? "" : String(v);
+}

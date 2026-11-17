@@ -1,4 +1,5 @@
 import { BASE_ROLES } from "./media";
+import { composeName } from "./person-name";
 import { numField } from "./num-field";
 import { t, getLocale } from "./i18n";
 import { helpGlyph } from "./help-glyph";
@@ -22,6 +23,8 @@ import { linksOfGraph } from "./links";
 import { chainCard, isChainNode } from "./hdto-card";
 import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
 import { isGeometryProperty, propertyValue } from "./paradata-chain";
+import { isInterpreted } from "./property-value";
+import { ACQUIRED_TYPES, acquiredText, parseAcquired } from "./door";
 import { geometryValueEl } from "./paradata-inspector";
 import { commitField, confirmOnMultiEnter, multiHint, multiKeyOf, type MultiScope } from "./multi-edit";
 import type { ChronEntry, ChronStatus } from "./chron-bridge";
@@ -616,6 +619,8 @@ export function renderInspector(
     // MICRO-SERVSF-FINE-ISTANZE p.2 · a BR's type is in its own section,
     // translated and editable
     if (rule.field === "end_reason" && cb.endOfUnit) continue;
+    // MICRO-K §B1 · when a representation was made, until when it holds: below, editable
+    if (rule.field === "acquired" || rule.field === "valid_until") continue;
     const key = (rule.em_json ?? `data.${rule.field}`).replace(/^data\./, "");
     const raw = ((node.data ?? {}) as Record<string, unknown>)[key];
     if (raw === undefined || raw === null || raw === "") continue;
@@ -653,6 +658,34 @@ export function renderInspector(
     root.appendChild(row);
   }
 
+  // MICRO-K §B1 (node datamodel 1.6.48; the MICRO-A proposal approved by E.D.
+  // on 14 Nov 2026) · WHEN a representation was made (`data.acquired`: a year,
+  // an ISO date, «2013–2015» a campaign) and UNTIL WHEN it is valid to show the
+  // place (`data.valid_until`, empty = still valid). The warning «rilievo con
+  // data diversa dal documento» reads `acquired` first.
+  if (ACQUIRED_TYPES.has(String(node.node_type))) {
+    const d = (node.data ?? {}) as Record<string, unknown>;
+    for (const key of ["acquired", "valid_until"] as const) {
+      root.appendChild(el("label", "insp-field-label", t(`insp.el.${key}`)));
+      const inp = document.createElement("input");
+      inp.className = "insp-name-input";
+      inp.dataset.inspAcquired = key;
+      inp.value = acquiredText(d[key]);
+      inp.placeholder = t(key === "acquired" ? "insp.acquiredPh" : "insp.validUntilPh");
+      inp.addEventListener("change", () => {
+        const now = ((store.node(nodeId)?.data ?? {}) as Record<string, unknown>)[key];
+        if (acquiredText(now) === inp.value.trim()) return; // nothing changed: no write, no undo step
+        const v = parseAcquired(inp.value);
+        if (v === undefined) { inp.classList.add("insp-invalid"); inp.title = t("insp.acquiredBad"); return; }
+        inp.classList.remove("insp-invalid");
+        inp.title = "";
+        if (v === null) store.clearField(nodeId, `data.${key}`);
+        else store.setField(nodeId, `data.${key}`, v);
+      });
+      root.appendChild(inp);
+    }
+  }
+
   // PropertyNode value: the property's measured/asserted value, stored in
   // `description` (uniform with real EM data). For an epoch's absolute_time_*
   // property this mirrors back to the epoch's start_time/end_time, so editing
@@ -680,6 +713,28 @@ export function renderInspector(
     root.appendChild(valIn);
     bindMulti(scope, nodeId, valIn, t("multi.f.value"), (n) => n.node_type === "property" && !isGeometryProperty(n),
       (id, v) => { if (v.trim() !== propertyValue(store.node(id))) store.setPropertyValue(id, v); });
+    // MICRO-K §A (E.D., 17 Nov 2026): on the PropertyNode `definition` the
+    // value is the definition and the DESCRIPTION its interpretation — shown
+    // empty while the two are one; emptied, it goes back to the value
+    if (isInterpreted(node)) {
+      root.appendChild(el("label", "insp-field-label", t("insp.interpretation")));
+      const itp = document.createElement("textarea");
+      itp.className = "insp-desc-input";
+      itp.rows = 3;
+      itp.dataset.propInterpretation = nodeId;
+      const val = propertyValue(node);
+      const d = String(node.description ?? "").trim();
+      itp.value = d && d !== val ? d : "";
+      itp.placeholder = t("insp.interpretationNone");
+      itp.addEventListener("change", () => {
+        const cur = store.node(nodeId);
+        if (!cur) return;
+        const next = itp.value.trim() || propertyValue(cur);
+        if (next === String(cur.description ?? "").trim()) return; // nothing changed
+        store.updateNode(nodeId, { description: next });
+      });
+      root.appendChild(itp);
+    }
     // the value of a property IS its description in em.json: its languages
     if (cb.renderTextLanguages && naturalFields(node).includes("description"))
       cb.renderTextLanguages(root, nodeId, "description");
@@ -1254,7 +1309,7 @@ export function renderInspector(
     claim.title = me ? t("insp.iAmTheAuthorTitle", { orcid: me.orcid })
                      : t("insp.noIdentity");
     if (me) multiClick(claim, t("insp.author"), hasRights, (id) => store.setNodeRights(id, {
-      author: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid,
+      author: composeName(me.name, me.surname) || me.orcid,
       orcid: me.orcid,
     }), false);
     actions.appendChild(claim);

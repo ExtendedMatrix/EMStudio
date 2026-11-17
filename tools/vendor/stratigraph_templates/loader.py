@@ -47,7 +47,7 @@ _FIELD_KEYS = {
 _GRAPH_KEYS = {
     "verdict", "node_type", "node_types", "edge_type", "direction", "qualia",
     "property_name", "attaches_to", "target", "note", "blocked_on",
-    "accepts", "where", "sub_epoch_of", "find",
+    "accepts", "where", "sub_epoch_of", "find", "concept_scheme",
 }
 _ANCHOR_KEYS = {"node_type", "edge_type", "direction", "where", "scope", "match", "note"}
 _CELL_KEYS = {"field", "block", "block_labels", "rows", "w", "label", "rotated", "style"}
@@ -95,6 +95,7 @@ def _graph(doc: Any, where: str) -> GraphBinding:
         where={str(k): str(v) for k, v in (doc.get("where") or {}).items()},
         sub_epoch_of=doc.get("sub_epoch_of"),
         find=[str(x) for x in (doc.get("find") or [])],
+        concept_scheme=doc.get("concept_scheme"),
     )
 
 
@@ -303,8 +304,9 @@ def parse_template(doc: Dict[str, Any], path: Optional[str] = None) -> Template:
 
 
 #: the keys of a compiled field (SPEC §9.2) that are not keys of a definition's
-#: field: `paragraph` is said by the paragraphs, `provisional` by the schemes
-_COMPILED_ONLY_FIELD_KEYS = {"paragraph"}
+#: field: `paragraph` is said by the paragraphs, `provisional` by the schemes,
+#: `concept_vocabulary` by the graph binding (SPEC §2.6), which is not read back
+_COMPILED_ONLY_FIELD_KEYS = {"paragraph", "concept_vocabulary"}
 _VOCABULARY_REF_KEYS = {"scheme", "binding", "level_expr"}
 
 

@@ -102,6 +102,12 @@ export interface SpaceRM {
    *  with the uses of a scene (web, realtime, heriverse, aton) — null when the
    *  model has no versions (its first resource is shown, as before) */
   choice?: VersionChoice | null;
+  /** MICRO-K §B3 · «never the master as a fallback» (MICRO-E): the model HAS
+   *  versions and none of them is one the scene can load — the target is
+   *  uncovered, SAID, and the master is not loaded in silence (`resource`
+   *  null). A model with no versions at all shows its own file, as before:
+   *  there is nothing it falls back from. */
+  uncovered?: boolean;
   /** MICRO-3DTILES · the TILESET of the same model, when its first resource is
    *  not one (proposed instead of a glb over the threshold) */
   tileset: SpaceResource | null;
@@ -496,12 +502,23 @@ export function buildSpace(
     const assets = [...new Set((models.length ? models : linked).map((r) => assetOf(vg, r.id)))].sort();
     return assets.flatMap((a) => versionsOf(vg, a));
   };
-  const chosenOf = (rmId: string): { resource: SpaceResource; choice: VersionChoice } | null => {
+  const chosenOf = (rmId: string): { resource: SpaceResource | null; choice: VersionChoice } | null => {
     const entries = entriesOf(rmId);
     if (!entries.some((e) => !e.master)) return null;
     const choice = chooseVersion(entries.filter((e) => opensGltf(e.data ?? {})), SCENE_USES);
-    const node = choice?.entry ? byId.get(choice.entry.id) : undefined;
-    return node && choice ? { resource: asResource(servable(node)), choice } : null;
+    // MICRO-K §B3 · never the master as a fallback: no version for the scene's
+    // uses → the lightest version a loader opens, or nothing (uncovered, said)
+    if (!choice || choice.reason === "master" || choice.reason === "none") {
+      const versions = entries.filter((e) => !e.master && opensGltf(e.data ?? {}));
+      const light = chooseVersion(versions.map((e) => ({ ...e, use: ["__any__"] })), "__any__");
+      const node = light?.entry ? byId.get(light.entry.id) : undefined;
+      const said = { entry: light?.entry ?? null, reason: (node ? "use" : "none") as VersionChoice["reason"], use: null,
+        note: node ? `no version for ${SCENE_USES.join(", ")}: the lightest version, never the master`
+          : `no version the scene can load: the target is uncovered, the master is not loaded` };
+      return { resource: node ? asResource(servable(node)) : null, choice: said };
+    }
+    const node = choice.entry ? byId.get(choice.entry.id) : undefined;
+    return node ? { resource: asResource(servable(node)), choice } : null;
   };
 
   // representation models
@@ -530,9 +547,10 @@ export function buildSpace(
     // a membership to a node that is not a group is not one (a hand-edited file)
     const group = outOf(rm.id, RM_GROUP_EDGE).find((g) => byId.get(g)?.node_type === RM_GROUP_TYPE) ?? null;
     const resource = chosen ? chosen.resource : resourceOf(rm.id);
+    const uncovered = !!chosen && !chosen.resource;
     const frame = resource?.tiles ? frameAmong([resource.id, assetOf(vg, resource.id), rm.id], (i) => dataOf(byId.get(i))) : null;
     return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], exactEpochs: [...exact], documentId, genre, group,
-             resource, choice: chosen?.choice ?? null, ...(frame ? { frame } : {}),
+             resource, choice: chosen?.choice ?? null, ...(uncovered ? { uncovered } : {}), ...(frame ? { frame } : {}),
              ...(resource?.tiles ? { frameHome: assetOf(vg, resource.id) } : {}),
              tileset: tilesetOf(rm.id),
              // MICRO-SPAZIO-3D-3 p.10 · its uses, its data (the measures), its file as the scene reads it

@@ -26,6 +26,7 @@
  * Pure: an index of the document is built once per pass (`provIndex`) and
  * memoises its answers; build a new one after the graph changes.
  */
+import { composeName } from "./person-name";
 import type { EmDocument, EmEdge, EmNode } from "./types";
 import { dtcKindFamily, isStratigraphicType, unitFamily } from "./rules";
 import { t } from "./i18n";
@@ -137,7 +138,8 @@ function formatAuthor(a: EmNode): string | null {
   const d = dataOf(a);
   const name = d.name as string | undefined;
   const surname = d.surname as string | undefined;
-  if (name && name !== "noname" && surname && surname !== "nosurname") return `${name} ${surname}`.trim();
+  // MICRO-K §B5 · never the surname twice (a name that already carries it)
+  if (name && name !== "noname" && surname && surname !== "nosurname") return composeName(name, surname);
   if (name && name !== "noname") return name;
   if (surname && surname !== "nosurname") return surname;
   return a.name ? String(a.name) : null;
@@ -605,7 +607,7 @@ export function redundancyReport(ix: ProvIndex): Redundancy {
   return out;
 }
 
-export interface DatingWarning { rule: "model_vs_document" | "member_vs_container" | "servile_vs_master"; id: string; name: string; other: string; other_name: string; message: string; fix: string | null; epoch?: string | null; acquired?: [number, number]; acquisitions?: string[] }
+export interface DatingWarning { rule: "model_vs_document" | "member_vs_container" | "servile_vs_master"; id: string; name: string; other: string; other_name: string; message: string; fix: string | null; epoch?: string | null; acquired?: [number, number]; acquisitions?: string[]; acquired_from?: string | null }
 
 const yearOf = (v: unknown): number | null => {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -641,6 +643,49 @@ export function acquisitionDates(ix: ProvIndex, modelId: string): { start: numbe
   return years.length ? { start: Math.min(...years), end: Math.max(...years), acquisitions: acqs } : { start: null, end: null, acquisitions: [] };
 }
 
+/** `(start, end)` years of a `data.acquired`: a year, an ISO date, or an
+ *  interval `{start, end}` (a long campaign). */
+function acquiredSpan(v: unknown): [number, number] | null {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const o = v as Record<string, unknown>;
+    const a = yearOf(o.start), b = yearOf(o.end);
+    if (a == null && b == null) return null;
+    return [a ?? b!, b ?? a!];
+  }
+  const y = yearOf(v);
+  return y == null ? null : [y, y];
+}
+
+/** WHEN a representation was MADE (node datamodel 1.6.48, `data.acquired`;
+ *  the MICRO-A proposal approved by E.D. on 14 Nov 2026, MICRO-K §B1) — the
+ *  twin of s3Dgraphy `attribution.acquired_of`: its OWN → the DTC capture →
+ *  the DOCUMENT that publishes it (skipped with `publisher: false`, as the
+ *  warning comparing the two does) → its CONTAINER. `from` says which. */
+export function acquiredOf(ix: ProvIndex, modelId: string, publisher = true):
+  { start: number | null; end: number | null; from: "own" | "dtc" | "document" | "container" | null; by: string | null; acquisitions: string[] } {
+  const none = { start: null, end: null, from: null, by: null, acquisitions: [] as string[] };
+  const own = (id: string) => acquiredSpan(dataOf(ix.node(id)).acquired);
+  let got = own(modelId);
+  if (got) return { ...none, start: got[0], end: got[1], from: "own", by: modelId };
+  const dtc = acquisitionDates(ix, modelId);
+  if (dtc.start != null) return { ...dtc, from: "dtc", by: dtc.acquisitions[0] ?? null };
+  if (publisher) {
+    for (const d of ["has_representation_model", "has_representation_model_doc"].flatMap((et) => ix.sources(modelId, et)).filter((s) => ix.nt(s) === "document")) {
+      got = own(d);
+      if (!got) {
+        const s = resolveProvenance(ix, d, "absolute_time_start");
+        if ((s.level === "node" || s.level === "swimlane") && s.value != null) got = [Number(s.value), Number(s.value)];
+      }
+      if (got) return { ...none, start: got[0], end: got[1], from: "document", by: d };
+    }
+  }
+  for (const c of ix.targets(modelId, "is_in_representation_model_group")) {
+    got = own(c);
+    if (got) return { ...none, start: got[0], end: got[1], from: "container", by: c };
+  }
+  return none;
+}
+
 /** the container's declared epochs (alternatives.container_own_epochs): an
  *  epoch reaching it — never the Document publishing it (MICRO-D-GIS-DOCUMENTI p.6) */
 function containerOwnEpochs(ix: ProvIndex, gid: string): string[] {
@@ -658,7 +703,8 @@ export function datingWarnings(ix: ProvIndex): DatingWarning[] {
     // MICRO-C-CORREZIONI-ED · when the model was MADE (the DTC's capture)
     // against the Document's dates, not what it represents; silent without an
     // acquisition date; no cure of its own
-    const acq = acquisitionDates(ix, id);
+    // MICRO-K §B1: its own `acquired` first, then the DTC, then its container
+    const acq = acquiredOf(ix, id, false);
     const pubs = [...new Set(["has_representation_model", "has_representation_model_doc"].flatMap((et) => ix.sources(id, et)).filter((s) => ix.nt(s) === "document"))];
     for (const d of acq.start != null ? pubs : []) {
       const [ds, de] = span(d);
@@ -668,9 +714,11 @@ export function datingWarnings(ix: ProvIndex): DatingWarning[] {
       if (d0 <= acq.start! && acq.end! <= d1) continue;
       const a = acq.end === acq.start ? `${acq.start}` : `${acq.start}–${acq.end}`;
       const b = d1 === d0 ? `${d0}` : `${d0}–${d1}`;
+      const said = acq.from === "dtc" ? acq.acquisitions.map((x) => ix.name(x)).join(", ")
+        : acq.from === "own" ? t("pv.acq.own") : t("pv.acq.container", { c: ix.name(acq.by ?? "") });
       out.push({ rule: "model_vs_document", id, name: ix.name(id), other: d, other_name: ix.name(d),
-        message: t("pv.msg.modelAcq", { m: ix.name(id), a, acq: acq.acquisitions.map((x) => ix.name(x)).join(", "), d: ix.name(d), ds: b }),
-        fix: null, acquired: [acq.start!, acq.end!], acquisitions: acq.acquisitions });
+        message: t("pv.msg.modelAcq", { m: ix.name(id), a, acq: said, d: ix.name(d), ds: b }),
+        fix: null, acquired: [acq.start!, acq.end!], acquisitions: acq.acquisitions, acquired_from: acq.from });
     }
     if (!own(ms)) continue;
     for (const c of ix.targets(id, "is_in_representation_model_group")) {

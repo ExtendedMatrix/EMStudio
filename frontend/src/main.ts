@@ -1,4 +1,5 @@
 import "./style.css";
+import { composeName } from "./person-name";
 import { hdtoDropped, shownCode, studyCode, withCode } from "./hdto";
 import { linksOf, resolveAddress, type GraphDocs } from "./links";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
@@ -357,7 +358,7 @@ import {
   checkReceipt, coversMoreThanTheFile, receiptOf, receiptsOfEmission, refreshedCopies, verdictChanged,
   type ReceiptCheck, type StampVerdict,
 } from "./receipt";
-import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs, type PromoteBytes } from "./tropy";
+import { addSelectionExtractors, licenseTermOf, parseTropy, promoteToDocument, tropyOf, tropyShelfInputs, type PromoteBytes } from "./tropy";
 import {
   closeAddMenu,
   showAddMenu as showAddMenuUi,
@@ -618,8 +619,7 @@ import {
   planRefRemove as planSheetRefRemove, readUnit as readSheetUnit, recordOf as sheetRecordOf, resolveDefinition,
   sheetLanguage, studySheetChoice, STUDY_SHEET_KEY, fillCounts as sheetFillCounts, labelIn as sheetLabelIn,
   applyPlan as applySheetActs, type Plan as SheetPlan, type CompiledDef,
-  planStatus as planSheetStatus, legacyProperties as sheetLegacyProperties,
-  planLegacyRename as planSheetLegacyRename, schemeKeyLabel as sheetSchemeKeyLabel,
+  planStatus as planSheetStatus, planConcept as planSheetConcept, schemeKeyLabel as sheetSchemeKeyLabel,
 } from "./sheet";
 import { renderSheet } from "./sheet-view";
 import { isVolatile, VOLATILE_KEY } from "./volatile";
@@ -824,7 +824,7 @@ import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, re
   paramsFor, profileWords } from "./use-diagnosis";
 import { adviseAddons, enoughFor, type Advice } from "./addon-advice";
 import { pickPathInApp } from "./path-picker";
-import { doorKindOf, doorRoles, doorTilesetOut, isGisKind, isModelKind, looksLikeTropy, type DoorFile, type DoorKind, type DoorRole } from "./door";
+import { doorKindOf, doorRoles, doorTilesetOut, isGisKind, isModelKind, looksLikeTropy, parseAcquired, type DoorFile, type DoorKind, type DoorRole } from "./door";
 import { documentFiles as campaignFiles, filesReadForUnit, locatorOfNode, matchByName, mediumOfLocator, unitImages, unitPhotoFiles,
          unitPhotoResourceId, unitPhotoResourceOf, type UnitImage } from "./unit-images";
 import { GraphRemovalError, graphRemovalReport, settleLinksTowards } from "./graph-removal";
@@ -2621,14 +2621,18 @@ window.__EM_SCENE__ = () => {
   sheetReading: () => {
     const now = sheetReadingNow();
     if (!now) return null;
-    const fields: Record<string, { state: string; text: string; lens: boolean; how: string }> = {};
-    for (const r of now.reading.fields.values()) fields[r.fid] = { state: r.state, text: r.text, lens: !!r.lens, how: r.how.key };
+    const fields: Record<string, { state: string; text: string; lens: boolean; how: string; remark?: string; concept?: unknown; chain?: number }> = {};
+    for (const r of now.reading.fields.values()) fields[r.fid] = { state: r.state, text: r.text, lens: !!r.lens, how: r.how.key,
+      ...(r.remark ? { remark: r.remark.key } : {}), ...(r.concept !== undefined ? { concept: r.concept } : {}), ...(r.chain ? { chain: r.chain.length } : {}) };
     const c = sheetFillCounts(now.reading);
     return { unit: now.unitId, name: store?.node(now.unitId)?.name, def: `${now.def.header.id}@${now.def.header.version}`,
              lang: now.lang, fields, counts: Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.length])),
              unread: now.reading.unread.map((u) => u.qualia) };
   },
   sheetEdit: (fid: string, value: string) => sheetEdit(fid, value),
+  // MICRO-K · the term of the definition; the door with files (no picker)
+  sheetConcept: (fid: string, value: string) => sheetConcept(fid, value),
+  portaDentro: (files: DoorFile[]) => portaDentro(files),
   sheetRefAdd: (fid: string, text: string) => sheetRefAdd(fid, text),
   sheetRefRemove: (fid: string, name: string) => {
     const now = sheetReadingNow();
@@ -19259,7 +19263,7 @@ function nodeSelf(): { orcid: string | null; name: string | null; role: string |
   const role = sync.inRoom ? hostInfo.role ?? null : null;
   if (author) {
     const local = knownIdentities().find((i) => i.orcid === author);
-    const localName = local ? [local.name, local.surname].filter(Boolean).join(" ") : "";
+    const localName = local ? composeName(local.name, local.surname) : "";
     const name = nodeIdentity?.orcid === author ? nodeIdentity.name : null;
     return { orcid: author, name: name || localName || null, role };
   }
@@ -19273,7 +19277,7 @@ function localIsAnotherPerson(): string | null {
   const self = nodeSelf();
   const me = currentIdentity();
   if (!self?.orcid || !me || sameSignature(me.orcid, self.orcid) !== false) return null;
-  return [me.name, me.surname].filter(Boolean).join(" ") || me.orcid;
+  return composeName(me.name, me.surname) || me.orcid;
 }
 
 function nodeConfirmsTheSignature(): boolean | null {
@@ -19614,7 +19618,7 @@ async function askNodeWhoIAm(server: string): Promise<void> {
  */
 function identitySentence(me: Identity | null = currentIdentity()): string {
   if (!me) return t("identity.stateNone");
-  const who = [me.name, me.surname].filter(Boolean).join(" ") || me.orcid;
+  const who = composeName(me.name, me.surname) || me.orcid;
   const when = (iso?: string) => (iso ? readableWhen(iso) : t("idw.whenUnknown"));
   switch (identityState(me)) {
     case "attested": return t("idw.attested", { who, orcid: me.orcid, node: me.attestedBy ?? "?", at: when(me.attestedAt) });
@@ -19635,7 +19639,7 @@ function whoFacts(): who.WhoFacts {
   const me = currentIdentity();
   const st = identityState(me);
   return {
-    author: me ? { name: [me.name, me.surname].filter(Boolean).join(" "), orcid: me.orcid,
+    author: me ? { name: composeName(me.name, me.surname), orcid: me.orcid,
                    state: st === "verified" || st === "attested" ? st : "declared" } : null,
     node: (getSettings().sync.hubUrl?.trim() || servingNode() || "").replace(/\/+$/, ""),
     signedIn: !!hubToken,
@@ -20044,7 +20048,7 @@ function refreshIdentityChip(): void {
   }
 
   const who = identity && (identity.name || identity.surname)
-    ? `${identity.name ?? ""} ${identity.surname ?? ""}`.trim()
+    ? composeName(identity.name, identity.surname)
     : (identity?.orcid ?? nodeIdentity?.name ?? nodeIdentity?.orcid ?? "");
   // FIRMA DELLA NASCITA · in a room the name is the ROOM's person (the hand
   // that signs), not this computer's
@@ -20165,7 +20169,7 @@ function nextRungInvitation(): string {
 async function signOutIdentity(): Promise<void> {
   const me = currentIdentity();
   if (!me) return;
-  if (!await askConfirm(t("idw.signOutAsk", { who: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid, orcid: me.orcid }))) return;
+  if (!await askConfirm(t("idw.signOutAsk", { who: composeName(me.name, me.surname) || me.orcid, orcid: me.orcid }))) return;
   forgetIdentity(me.orcid);
   useNoIdentity();
   hubToken = null;
@@ -20400,7 +20404,7 @@ function applyIdentityToDocument(): void {
   const identity = currentIdentity();
   if (!identity) return;
   const scope = store.readGraphScope();
-  const who = `${identity.name ?? ""} ${identity.surname ?? ""}`.trim() || identity.orcid;
+  const who = composeName(identity.name, identity.surname) || identity.orcid;
   if (scope.author && scope.orcid && scope.orcid !== identity.orcid) {
     toast(t("identity.documentHasAnotherAuthor", { orcid: scope.orcid }));
     return;
@@ -26070,7 +26074,7 @@ function renderCoverageInto(host: HTMLElement, narrativeId: string): void {
 function identityRef(): { orcid: string; label: string } | null {
   const me = currentIdentity();
   if (!me) return null;
-  return { orcid: me.orcid, label: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid };
+  return { orcid: me.orcid, label: composeName(me.name, me.surname) || me.orcid };
 }
 
 /** The action waiting for an identity, run once one exists. */
@@ -26282,7 +26286,7 @@ function openIdentityPanel(then?: () => void,
     nameIn.dataset.idpName = "1";
     nameIn.placeholder = t("idp.namePh");
     nameIn.setAttribute("aria-label", t("idp.namePh"));
-    if (me?.name || me?.surname) nameIn.value = [me.name, me.surname].filter(Boolean).join(" ");
+    if (me?.name || me?.surname) nameIn.value = composeName(me.name, me.surname);
     const b3 = el("button", "ghost", t("idp.way3Btn"));
     b3.type = "button";
     b3.dataset.idpDeclare = "1";
@@ -34744,7 +34748,8 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       const hasAlt = !!grp && sp.rms.some((x) => x.altOf === grp.id);
       // MICRO-SPAZIO-3D-3 p.11 · the name without its level, the level a chip
       const nm = rmShown(r.id, sp);
-      const failed = modelFailureOf(`rm:${r.id}`);
+      // MICRO-K §B3 · a target uncovered is said, never filled by the master
+      const failed = modelFailureOf(`rm:${r.id}`) ?? (r.uncovered ? t("space.uncovered") : undefined);
       const whole = r.altOf && !r.resource?.tiles ? wholeLabel(r) : null;
       return { id: r.id, name: whole ?? nm?.shown ?? r.name, ...(whole ? { technical: r.name } : nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
         ...(failed ? { failed } : {}),
@@ -35013,6 +35018,19 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   legendEl.className = "scn-legend hidden";
   legendEl.dataset.scnLegend = win.id;
   for (const ev of ["pointerdown", "dblclick", "wheel"]) legendEl.addEventListener(ev, (e) => e.stopPropagation());
+  // MICRO-K §B5 · the legend sits ABOVE the strips of the models (the ones not
+  // loaded, the tileset's controls) and its chip, never over them: its bottom
+  // follows their height, read when it is painted and when they change size
+  const placeLegend = (): void => {
+    const strips = host.querySelector<HTMLElement>(".scn-strips");
+    const chip = host.querySelector<HTMLElement>(".scn-tchip:not(.hidden)");
+    const under = Math.max(strips?.offsetHeight ?? 0, chip?.offsetHeight ?? 0);
+    const bottom = Math.max(34, under + 16);
+    legendEl.style.bottom = `${bottom}px`;
+    legendEl.style.maxHeight = `calc(100% - ${bottom + 56}px)`;
+  };
+  const legendRO = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => placeLegend()) : null;
+  legendRO?.observe(host);
   // MICRO-PANNELLI-LATERALI · the Outliner closed leaves the same triangle as the
   // N panel's, on the left edge: a click opens it, and so does a drag inwards
   const tab = document.createElement("button");
@@ -35600,6 +35618,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     legendEl.classList.toggle("hidden", cs.mode === "em" || !plan.legend.length);
     legendEl.dataset.mode = cs.mode;
     if (cs.mode === "em" || !plan.legend.length) return;
+    const strips = host.querySelector<HTMLElement>(".scn-strips");
+    if (strips && legendRO) legendRO.observe(strips);
+    requestAnimationFrame(placeLegend);
     const head = document.createElement("div");
     head.className = "scn-legend-h";
     head.textContent = cs.mode === "epochs" ? `${t("col.mode.epochs")} · ${t(`col.variant.${cs.variant}`)}` : `${t("col.mode.property")} · ${cs.property ?? ""}`;
@@ -36682,7 +36703,7 @@ function renderSheetInto(body: HTMLElement, _win: Win): void {
     onChoose: (id: string) => chooseSheetDefinition(id),
     onPrint: () => { void printSheet(); },
     onStatus: (key: string) => sheetStatus(key),
-    onLegacy: () => { void sheetLegacyRename(); },
+    onConcept: (fid: string, value: string) => sheetConcept(fid, value),
   };
   const { def, choice, versionDiffers } = sheetDef();
   if (!store) { renderSheet(body, null, cb, sheetChoices(), null, t("sheet.noDocument")); return; }
@@ -36696,11 +36717,10 @@ function renderSheetInto(body: HTMLElement, _win: Win): void {
   if (selectedId && selectedId !== now.unitId) notes.push(t("sheet.stillUnit", { name: String(unit.name ?? unit.id) }));
   const st = now.reading.status;
   const statusLabels = st ? Object.fromEntries(st.values.map((k) => [k, sheetSchemeKeyLabel(st.scheme, k, now.lang)])) : undefined;
-  const legacy = sheetLegacyProperties({ nodes: store.liveNodes(), edges: store.liveEdges() }).length;
   renderSheet(body, {
     def, lang: now.lang, unitName: String(unit.name || unit.id), unitType: String(unit.node_type),
     reading: now.reading, choices: sheetChoices(), note: notes.join(" · ") || undefined,
-    statusLabels, legacy,
+    statusLabels,
   }, cb, sheetChoices(), def.header.id);
 }
 
@@ -36711,18 +36731,13 @@ function sheetStatus(key: string): boolean {
   return applySheetPlan(planSheetStatus(now.def, now.unitId, key));
 }
 
-/** em_qualia_types 1.6.12 (MICRO-J §C, E.D. 17 Nov 2026): the PropertyNodes
- *  `definition` of the EM 1.5 templates are interpretations — renamed in place
- *  (`name`, `data.property_type`), ids and chain untouched, as ONE delta: one
- *  undo puts them back. Asked first, with how many and where. */
-async function sheetLegacyRename(): Promise<boolean> {
-  if (!store) return false;
+/** SPEC §2.6 (ICCD 4.0.0, MICRO-K): the term that classifies the unit's
+ *  definition, on its PropertyNode (data.concept), one delta. */
+function sheetConcept(fid: string, value: string): boolean {
+  const now = sheetReadingNow();
+  if (!now || !store) return false;
   const g = { nodes: store.liveNodes(), edges: store.liveEdges() };
-  const rows = sheetLegacyProperties(g);
-  if (!rows.length) { toast(t("sheet.no.legacy")); return false; }
-  const units = [...new Set(rows.map((r) => r.unit).filter(Boolean))];
-  if (!(await askConfirm(t("sheet.legacyAsk", { n: rows.length, units: units.slice(0, 8).join(", ") + (units.length > 8 ? "…" : "") })))) return false;
-  return applySheetPlan(planSheetLegacyRename(g));
+  return applySheetPlan(planSheetConcept(now.def, g, now.unitId, fid, value, now.lang));
 }
 
 /** The study's choice of definition — kept on the graph-self node beside its
@@ -38308,6 +38323,17 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   er.append(`${t("door.epochAsk")} `, esel);
   er.title = t("door.epochHint");
   if (!models) er.classList.add("hidden");
+  // MICRO-K §B1 · when the models were MADE (data.acquired: not the epoch they
+  // represent, not the document's date) and until when they hold (valid_until)
+  const ar = document.createElement("div");
+  ar.className = "door-row";
+  const acq = document.createElement("input");
+  acq.type = "text"; acq.dataset.doorAcquired = "1"; acq.placeholder = t("insp.acquiredPh");
+  const until = document.createElement("input");
+  until.type = "text"; until.dataset.doorValidUntil = "1"; until.placeholder = t("insp.validUntilPh");
+  ar.append(`${t("door.acquiredAsk")} `, acq, ` ${t("door.validUntil")} `, until);
+  ar.title = t("door.acquiredHint");
+  if (!models) ar.classList.add("hidden");
   // the licence, proposed by the document
   const lr = document.createElement("div");
   lr.className = "door-row";
@@ -38317,7 +38343,7 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
     const o = document.createElement("option"); o.value = l; o.textContent = l === STUDY_ONLY ? t("gis.licStudyOnly") : l || t("door.licenseNone"); lsel.appendChild(o);
   }
   lr.append(`${t("door.license")} `, lsel);
-  body.append(list, dr, er, lr);
+  body.append(list, dr, er, ar, lr);
   const dateOf = (id: string) => String(((st.node(id)?.data ?? {}) as Record<string, unknown>).absolute_time_start ?? "");
   const dlg = openDialog({ kind: "door", title: t("door.title"), body, ok: t("door.go"),
     input: { value: "", label: t("door.dateAsk"), placeholder: t("door.datePh") },
@@ -38331,6 +38357,9 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   });
   const a = await dlg;
   if (!a.ok) return;
+  const acqV = models ? parseAcquired(acq.value) : null;
+  const untilV = models ? parseAcquired(until.value) : null;
+  if (acqV === undefined || untilV === undefined) { toast(t("insp.acquiredBad")); return; }
   // MICRO-F p.2 · a dropped tileset's digest, taken now (as «aggancia» did: a
   // resource without one is never resident — 6.58 GB: 3.9 s through the bridge)
   const sums = new Map<DoorFile, string | null>();
@@ -38352,6 +38381,8 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
     date: a.value.trim(), epoch: models ? esel.value || null : null, license: lsel.value || null,
     ...(Object.keys(crsB).length ? { crs: crsB, shift: shB } : {}) });
   if (!j.ok) { toast(t("door.failed", { why: String(j.error ?? j.status) })); return; }
+  // MICRO-K §B1 · the acquisition written on the models IN the same delta (one undo)
+  if (acqV != null || untilV != null) doorStampAcquired(st, j.delta, j.items.map((x) => x.model_id).filter((x): x is string => !!x), acqV, untilV);
   applyBridgeDelta(st, j.delta);
   const msg = t(j.document_born ? "door.doneNew" : "door.done", { d: j.document_name, n: String(j.items.length),
     reused: String(j.items.filter((x) => x.reused).length) });
@@ -38366,6 +38397,24 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
     dropped.forEach((r, i) => { if (r.f.tileset) droppedThroughDoor(r.f.tileset.dropId, made[i]?.model_id ?? null, epochName); });
   }
   toastUndo(msg, st);
+}
+
+/** MICRO-K §B1 · `data.acquired` / `data.valid_until` on the models the door
+ *  made or reused, folded into the bridge's delta before it is applied: the
+ *  new ones in `nodes_added`, the reused ones as a `nodes_changed`. */
+function doorStampAcquired(st: DocumentStore, delta: ContainerDelta, modelIds: string[],
+                           acquired: unknown, validUntil: unknown): void {
+  const stamp = (d: Record<string, unknown>): Record<string, unknown> => ({
+    ...d, ...(acquired != null ? { acquired } : {}), ...(validUntil != null ? { valid_until: validUntil } : {}) });
+  for (const id of new Set(modelIds)) {
+    const born = (delta.nodes_added ?? []).find((n) => n.id === id);
+    if (born) { born.data = stamp((born.data ?? {}) as Record<string, unknown>); continue; }
+    const there = st.node(id);
+    if (!there) continue;
+    const changed = (delta.nodes_changed ??= []).find((n) => n.id === id);
+    if (changed) changed.data = stamp((changed.data ?? {}) as Record<string, unknown>);
+    else delta.nodes_changed.push({ ...there, data: stamp({ ...((there.data ?? {}) as Record<string, unknown>) }) } as (typeof delta.nodes_changed)[number]);
+  }
 }
 
 /** the study's frame, proposed to a file that declares none (CRS + shift) */
@@ -38432,7 +38481,7 @@ async function openTropyDoor(json: unknown, fileName: string): Promise<void> {
   if (!ok.ok) return;
   const missing = rows.filter((r) => !r.date.value.trim());
   if (missing.length) { toast(tn("door.tropyNoDate", missing.length)); return; }
-  let made = 0, merged = 0;
+  let made = 0, merged = 0, sels = 0, licTerms = 0, licDeclared = 0;
   st.batch(() => {
     for (const r of rows) {
       let docId = r.into.value;
@@ -38443,16 +38492,25 @@ async function openTropyDoor(json: unknown, fileName: string): Promise<void> {
           data: { absolute_time_start: r.date.value.trim(), tropy: r.it.id } } as EmNode);
         made++;
       }
-      if (r.lic.value.trim()) st.setField(docId, "data.license", r.lic.value.trim());
+      // MICRO-K §B4 · the licence: a TERM of the licence vocabulary when Tropy's
+      // text is one it recognises (the has_license the door writes), else the
+      // text as declared (data.license), never guessed
+      const licText = r.lic.value.trim();
+      const term = licenseTermOf(licText);
+      if (term) { st.setNodeRights(docId, { license: term }); licTerms++; }
+      else if (licText) { st.setField(docId, "data.license", licText); licDeclared++; }
       // the photos: the files of ONE set of the document (MICRO-B), no place in the space
       const files = r.it.photos.filter((p) => p.path).map((p) => ({ path: paths.leafName(p.path), url: p.path, ...(p.checksum ? { checksum: p.checksum } : {}) }));
       if (files.length) {
         const res = addResource(storeGraph(st), { name: `${r.it.title} · Tropy`, kind: "", files, resourceId: st.newId(), packaging: "file_set" });
         st.addEdge(docId, res.id, "has_linked_resource");
       }
+      // MICRO-K §B4 · its SELECTIONS become extractors, as «Promuovi a documento» does
+      for (const p of r.it.photos) sels += addSelectionExtractors(st, docId, p.selections, p.id).length;
     }
   });
-  const msg = t("door.tropyDone", { n: String(made), m: String(merged) });
+  const msg = t("door.tropyDone", { n: String(made), m: String(merged) })
+    + (sels || licTerms || licDeclared ? ` · ${t("door.tropyMore", { x: String(sels), l: String(licTerms), d: String(licDeclared) })}` : "");
   logInfo(msg);
   toastUndo(msg, st);
 }
@@ -41738,7 +41796,7 @@ function filesStampTab(win: Win, listing: FsListing): HTMLElement {
   };
   const kindLabel = pre ? dtcKindsFor(pre.origin ? "acquisition" : "process").find((k) => k.kind === pre.kind)?.label ?? pre.kind : "";
   const me = currentIdentity();
-  const who = me ? [me.name, me.surname].filter(Boolean).join(" ") : "";
+  const who = me ? composeName(me.name, me.surname) : "";
   for (const e of todo)
     row(e.name, pre ? [kindLabel, who, pre.instrument].filter(Boolean).join(" · ") : t("files.prevAsked"),
         pre && !pre.origin ? t("files.prevFromStep", { name: e.name }) : t("files.prevOrigin", { name: e.name.replace(/\.[^.]+$/, "") }));
@@ -42719,7 +42777,9 @@ function filesUseSection(win: Win, chosen: FsEntry[]): HTMLElement {
   if (blend) {
     sec.appendChild(tabLead(t("files.useBlend", { name: baseName(blend) }), "files-lead"));
     if (!blenderOn() || !probe?.ok || !probe.emtools?.loaded) {
-      sec.appendChild(tabLead(t("files.useNeedBlender"), "files-hint files-warn"));
+      // MICRO-K §B5 · the line sends to «Blender (the second way)», a section
+      // that exists only with the experimental functions on: off, no word of it
+      if (EXPERIMENTAL) sec.appendChild(tabLead(t("files.useNeedBlender"), "files-hint files-warn"));
       if (!gltfs.length) return sec;
     }
     const m = useState.measured.get(key);
@@ -43730,7 +43790,7 @@ async function stampDerivedWhy(source: string | string[], out: { path: string; s
   draft.technique = act.technique;
   draft.parameters = act.parameters;
   draft.software = act.software;
-  draft.operator = { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") };
+  draft.operator = { id: `https://orcid.org/${me.orcid}`, label: composeName(me.name, me.surname) };
   const n = new Date();
   draft.at = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
   if (all.length > 1) {
@@ -45030,7 +45090,7 @@ function openDraft(outputs: FsEntry[], listing: FsListing): void {
   if (me?.orcid) {
     stampDraft.operator = {
       id: `https://orcid.org/${me.orcid}`,
-      label: [me.name, me.surname].filter(Boolean).join(" "),
+      label: composeName(me.name, me.surname),
     };
   }
   // RISORSA-FILE · the last declared chain comes back: written once, reused
@@ -47293,7 +47353,7 @@ function ingestDelivery(): HTMLElement {
   // ── the DEPOSITOR · a line, never a box ───────────────────────────────────
   const me = currentIdentity();
   const who = me
-    ? [me.name, me.surname].filter(Boolean).join(" ") || me.orcid
+    ? composeName(me.name, me.surname) || me.orcid
     : "";
   const dep = ing("div", "ing-depositor");
   dep.appendChild(ing("span", "ing-role-tag", t("assets.depositor")));
@@ -54586,7 +54646,7 @@ async function stampPhotogrammetryChain(psx: string): Promise<void> {
   if (!ans.ok) return;
   if (!me?.orcid) { toast(t("master.chainNoAuthor")); return; }
   const done = await photogrammetryChain(psx, { write: true, chunk: plan.chunk?.id,
-    operator: { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") } });
+    operator: { id: `https://orcid.org/${me.orcid}`, label: composeName(me.name, me.surname) } });
   if (!done.ok) { toast(done.error || t("storage.bridgeDown")); return; }
   const kept = (done.written ?? []).filter((w) => w.endsWith("(kept)")).length;
   toast(t("master.chainWritten", { n: String((done.written ?? []).length - kept), kept: String(kept) }));
@@ -55056,7 +55116,7 @@ async function openIngressOn(assets: IngressAsset[], folder: string, masters: Re
   const state = newIngress(assets, {
     nextDocName: (store && (initialName(store.doc, "document") ?? nextFreeName(store.doc, "document"))) || "D.01",
     takenNames: ingressTakenNames(), today,
-    operator: me?.orcid ? { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") }
+    operator: me?.orcid ? { id: `https://orcid.org/${me.orcid}`, label: composeName(me.name, me.surname) }
       : { id: "", label: [me?.name, me?.surname].filter(Boolean).join(" ") },
     graphFrame: epsg ? { epsg, shift: [num(geo?.shift_x), num(geo?.shift_y), num(geo?.shift_z)] } : null,
     shiftFile,
@@ -56451,6 +56511,16 @@ function vwSceneBar(win: Win, bar: HTMLElement, s: VwScene): void {
   seen.textContent = vwSeenLine(s);
   seen.title = t("vw.seenTitle", { lim: String(getSettings().viewer.lodLimitMB) });
   bar.appendChild(seen);
+  // MICRO-K §B3 · a model whose target is uncovered is said, never filled by its master
+  const uncovered = s.models.map((id) => s.sp.rms.find((r) => r.id === id)).filter((r) => r?.uncovered);
+  if (uncovered.length) {
+    const u = document.createElement("span");
+    u.className = "vw-uncovered";
+    u.dataset.vwUncovered = String(uncovered.length);
+    u.textContent = t("vw.uncovered", { n: String(uncovered.length) });
+    u.title = `${uncovered.map((r) => r!.name).join(", ")}: ${t("space.uncovered")}`;
+    bar.appendChild(u);
+  }
   // MICRO-VIEWER-SPAZIO-EMTREE p.2 · «Versioni»: the tileset, the levels from the
   // lightest, weight and kind; the side panel's tab is the same list
   if (s.choices.length > 1) {

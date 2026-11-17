@@ -173,21 +173,50 @@ export function promoteToDocument(store: DocumentStore, e: ShelfEntry, bytes: Pr
       resourceId = res.id;
       store.addEdge(docId, res.id, "has_linked_resource");
     }
-    const extractors: string[] = [];
-    for (const s of tr?.selections ?? []) {
-      const x = store.newId();
-      store.addNode({ id: x, node_type: "extractor", name: initialName(store.doc, "extractor") ?? "Temp1",
-                      description: s.note, data: { tropy_selection: s.id } } as EmNode);
-      setReadingGeometry(store, x, docId, { kind: "region2d", shape_kind: "rect", rect: [...s.rect] });
-      const renamed = renameOnAttach(store.doc, x);
-      if (renamed) {
-        store.updateNode(x, { name: renamed });
-        const r = store.doc.graph.edges.find((ed) => ed.source === x && ed.edge_type === "extracted_from"
-          && store.node(ed.target)?.node_type === "annotation_region")?.target;
-        if (r) store.updateNode(r, { name: `${renamed} · region` });
-      }
-      extractors.push(x);
-    }
+    const extractors = addSelectionExtractors(store, docId, tr?.selections ?? []);
     return { documentId: docId, extractors, resourceId };
   });
+}
+
+/** One extractor per Tropy SELECTION on the document `docId`: the selection's
+ *  region its geometry, its note the reading's description, named `D.<n>.<k>`
+ *  (NAME1). Used by «Promuovi a documento» and by the Tropy form of the door
+ *  (MICRO-K §B4) — the caller holds the batch. `photo`: the Tropy photo the
+ *  selection is on, kept beside the selection's id. */
+export function addSelectionExtractors(store: DocumentStore, docId: string, sels: TropySelection[], photo?: string): string[] {
+  const extractors: string[] = [];
+  for (const s of sels) {
+    const x = store.newId();
+    store.addNode({ id: x, node_type: "extractor", name: initialName(store.doc, "extractor") ?? "Temp1",
+                    description: s.note, data: { tropy_selection: s.id, ...(photo ? { tropy_photo: photo } : {}) } } as EmNode);
+    setReadingGeometry(store, x, docId, { kind: "region2d", shape_kind: "rect", rect: [...s.rect] });
+    const renamed = renameOnAttach(store.doc, x);
+    if (renamed) {
+      store.updateNode(x, { name: renamed });
+      const r = store.doc.graph.edges.find((ed) => ed.source === x && ed.edge_type === "extracted_from"
+        && store.node(ed.target)?.node_type === "annotation_region")?.target;
+      if (r) store.updateNode(r, { name: `${renamed} · region` });
+    }
+    extractors.push(x);
+  }
+  return extractors;
+}
+
+/** MICRO-K §B4 · a licence as Tropy writes it (`rights`: a Creative Commons
+ *  URL, «CC BY 4.0», «CC-BY-SA-4.0», «Public domain») mapped on a TERM of the
+ *  licence vocabulary (the SPDX codes of s3Dgraphy `rights.LICENSE_VOCABULARY`,
+ *  the ones the door offers), or null: then it is kept as DECLARED TEXT. */
+export const LICENSE_TERMS = ["CC-BY-4.0", "CC-BY-SA-4.0", "CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC0-1.0"] as const;
+export function licenseTermOf(text: string): string | null {
+  const v = String(text ?? "").trim();
+  if (!v) return null;
+  const exact = LICENSE_TERMS.find((x) => x.toLowerCase() === v.toLowerCase());
+  if (exact) return exact;
+  const low = v.toLowerCase();
+  if (/creativecommons\.org\/publicdomain\/zero\/1\.0/.test(low) || /^cc0(\s*1\.0)?$/.test(low)) return "CC0-1.0";
+  const url = /creativecommons\.org\/licenses\/(by(?:-nc)?(?:-sa)?)\/4\.0/.exec(low);
+  const words = /^cc[\s-]+(by(?:[\s-]+nc)?(?:[\s-]+sa)?)[\s-]+4\.0$/.exec(low);
+  const kind = (url?.[1] ?? words?.[1] ?? "").replace(/[\s]+/g, "-");
+  const term = kind ? `CC-${kind.toUpperCase()}-4.0` : "";
+  return (LICENSE_TERMS as readonly string[]).includes(term) ? term : null;
 }

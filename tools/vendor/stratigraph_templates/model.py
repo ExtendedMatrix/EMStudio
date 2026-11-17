@@ -136,6 +136,10 @@ class GraphBinding:
     #: resource_ref_list / record_ref_list: how the cited node is found, in
     #: order — by `name` (a document is cited as D.nn), by `url` (SPEC §2.4)
     find: List[str] = dc_field(default_factory=list)
+    #: property verdict only: the scheme whose term MAY classify the
+    #: PropertyNode this box writes (data.concept on the same node — the term
+    #: of DEFINIZIONE, SPEC §2.6). Optional: the box's value stays its text.
+    concept_scheme: Optional[str] = None
 
 
 @dataclass

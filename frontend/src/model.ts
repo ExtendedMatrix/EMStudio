@@ -18,7 +18,7 @@ import { paradataGroupName, rememberDocumentNumber } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
 import type { SpellingPlan } from "./rules";
 import { VOLATILE_KEY } from "./volatile";
-import { alignPropertyAtBirth, alignPropertyPatch, alignPropertyValues } from "./property-value";
+import { alignPropertyAtBirth, alignPropertyPatch, alignPropertyValues, isInterpreted } from "./property-value";
 import { currentIdentity, signatureAuth, type SignatureAuth } from "./identity";
 import { birthLanguage } from "./translation";
 import { resolveNodePair } from "./container";
@@ -2060,7 +2060,10 @@ export class DocumentStore {
     const pd = { ...((p.data ?? {}) as Record<string, unknown>) };
     if (v === "") delete pd.value;
     else pd.value = v;
-    this.updateNode(propId, { description: v, data: pd });
+    // MICRO-K · a definition's description is its interpretation: the value
+    // alone, and updateNode carries the description only while the two are one
+    if (isInterpreted(p)) this.updateNode(propId, { data: pd });
+    else this.updateNode(propId, { description: v, data: pd });
     const propType = ((p.data ?? {}) as Record<string, unknown>).property_type;
     if (propType === "absolute_time_start" || propType === "absolute_time_end") {
       const epochId = this.epochOfTemporalProperty(propId);

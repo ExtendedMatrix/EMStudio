@@ -798,14 +798,21 @@ export function flattenOutliner(b: BuildIn): URow[] {
     keep.set(t, v);
     return v;
   };
+  // MICRO-K §B5 · the count says how many UNITS (nodes), not how many rows: a
+  // unit living in two epochs is two rows of the tree and one unit
   const counts = (t: TNode): { all: number; present: number } => {
-    let all = 0, present = 0;
+    const all = new Set<string>(), present = new Set<string>();
+    let anon = 0, anonPresent = 0;
     const walk = (x: TNode) => {
-      if (x.row.kind === "node" || x.row.kind === "gis" || x.row.kind === "aux") { all++; if (presentOf(x)) present++; }
+      if (x.row.kind === "node" || x.row.kind === "gis" || x.row.kind === "aux") {
+        const id = x.row.id;
+        if (id) { all.add(id); if (presentOf(x)) present.add(id); }
+        else { anon++; if (presentOf(x)) anonPresent++; }
+      }
       for (const c of x.row.kind === "node" ? [] : kidsOf(x)) walk(c);
     };
     for (const c of kidsOf(t)) walk(c);
-    return { all, present };
+    return { all: all.size + anon, present: present.size + anonPresent };
   };
   const walk = (t: TNode, depth: number): void => {
     if ((q || filter) && !survives(t)) return;

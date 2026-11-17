@@ -137,6 +137,10 @@ def _visual(t: Template) -> Dict[str, Any]:
             "help": f.help,
             "options": [{"value": o.value, "labels": o.labels} for o in f.options],
             "vocabulary": _drop_empty(dataclasses.asdict(f.vocabulary)) if f.vocabulary else None,
+            # SPEC §2.6: the scheme whose term MAY classify the box's property
+            # (a picker beside the text: the term of a definition)
+            "concept_vocabulary": ({"scheme": f.graph.concept_scheme}
+                                   if f.graph and f.graph.concept_scheme else None),
             "provenance": dataclasses.asdict(f.provenance) if f.provenance else None,
             "note": f.note,
         }))
@@ -376,6 +380,29 @@ def _guarded_inverse(rdf: Dict[str, Any], source: Optional[set], target: Optiona
     return rdf
 
 
+def _described(ctx: _Ctx, name: str) -> Optional[str]:
+    """The box that writes the DESCRIPTION of the PropertyNode `name` (a field
+    `property_name: description, attaches_to: property:<name>` — an interpretation
+    on the definition, SPEC §2.6), or None."""
+    for d in ctx.t.fields:
+        g = d.graph
+        if (g and g.verdict == "property" and g.property_name in NATIVE_FIELDS
+                and g.attaches_to == f"property:{name}"):
+            return d.id
+    return None
+
+
+def _term_element(ctx: _Ctx, property_type: str) -> Optional[Dict[str, Any]]:
+    """The node element of a PropertyNode that holds the TERM of the property
+    `property_type` (`concept`, `applies_when: {property_type: definition}`,
+    nodes 1.6.48), or None."""
+    for rule in ctx.reg.node_elements.values():
+        if (rule.get("value") == "concept" and PROPERTY_CLASS in rule.get("applies_to", [])
+                and (rule.get("applies_when") or {}).get("property_type") == property_type):
+            return rule
+    return None
+
+
 def _property_steps(ctx: _Ctx, f: Field, property_type: str, anchor: str,
                     registered: bool) -> Dict[str, Any]:
     prop = ctx.node(PROPERTY_CLASS, f"field '{f.id}'")
@@ -391,9 +418,21 @@ def _property_steps(ctx: _Ctx, f: Field, property_type: str, anchor: str,
         if registered:
             defaults["$item.qualia"] = property_type
         data["units"] = "$item.unit"
+    described_by = _described(ctx, property_type) if f.type not in LIST_TYPES else None
+    term_of = _term_element(ctx, property_type) if f.type == "term" else None
+    if term_of:
+        # a TERM box writing a property that carries its term as an element
+        # (the definition, nodes 1.6.48 PropertyNode.properties.concept): the
+        # concept goes whole where the datamodel says, the label is the value
+        data[term_of["em_json"].split(".", 1)[1]] = "$value"
+        data["value"] = "$value.label"
+    if described_by:
+        # another box writes this node's description (its interpretation):
+        # the value is said in data.value too, so the two places are two texts
+        data["value"] = "$value.label" if term_of else _value_ref(f)
     data = {"property_type": ptype, **data}
     node = {"id": "$prop", "node_type": prop["node_type"], "name": ptype,
-            "description": _value_ref(f), "data": data}
+            "description": "$value.label" if term_of else _value_ref(f), "data": data}
     entry: Dict[str, Any] = {
         "each": each,
         "resolve": {"$prop": {"mint": True}},
@@ -408,6 +447,15 @@ def _property_steps(ctx: _Ctx, f: Field, property_type: str, anchor: str,
             "registered_qualia": registered if f.type != "quantity_list" else None,
             "box": property_type if f.type == "quantity_list" else None,
             "accepts": list(f.graph.accepts) if f.graph and f.graph.accepts else None,
+            "described_by": described_by,
+            # SPEC §2.6: a term MAY classify the node (data.concept), offered by
+            # a reader beside the text; the recipe writes the text only
+            "concept": ({"scheme": f.graph.concept_scheme, "em_json": "data.concept",
+                         "node": "$prop", "optional": True}
+                        if f.graph and f.graph.concept_scheme else
+                        {"scheme": f.vocabulary.scheme if f.vocabulary else None,
+                         "em_json": term_of["em_json"], "node": "$prop", "from": "$value"}
+                        if term_of else None),
         }),
     }
     if defaults:
@@ -444,7 +492,9 @@ def _is_unit_element(ctx: _Ctx, f: Field, name: str) -> bool:
     classes that do not. When the definition does not say the unit's classes
     (no `node_type` field), the unit is read as a `UNIT_WHEN_UNDECIDED`."""
     rule = ctx.reg.node_elements.get(name)
-    if rule is None:
+    if rule is None or rule.get("deprecated"):
+        # a deprecated element is read, never written: the box is a property
+        # (data.definition → the PropertyNode definition, nodes 1.6.48)
         return False
     classes = _unit_classes(ctx, f"field '{f.id}'") or [UNIT_WHEN_UNDECIDED]
     return bool(set(classes) & set(rule.get("applies_to", [])))
@@ -783,10 +833,17 @@ def _mark_provisional(visual: Dict[str, Any], recipe: Dict[str, Any], vocab: Voc
         v = f.get("vocabulary")
         if v and v.get("scheme") in vocab.schemes and vocab.schemes[v["scheme"]].provisional:
             v["provisional"] = vocab.schemes[v["scheme"]].provisional
+        c = f.get("concept_vocabulary")
+        if c and c.get("scheme") in vocab.schemes and vocab.schemes[c["scheme"]].provisional:
+            c["provisional"] = vocab.schemes[c["scheme"]].provisional
     for entry in (recipe.get("fields") or {}).values():
         sid = entry.get("scheme")
         if sid in vocab.schemes and vocab.schemes[sid].provisional:
             entry["provisional"] = vocab.schemes[sid].provisional
+        concept = (entry.get("property") or {}).get("concept")
+        if concept and concept.get("scheme") in vocab.schemes \
+                and vocab.schemes[concept["scheme"]].provisional:
+            concept["provisional"] = vocab.schemes[concept["scheme"]].provisional
 
 
 def compile_template(t: Template, reg: Registry, vocab: Vocabularies) -> Dict[str, Any]:
