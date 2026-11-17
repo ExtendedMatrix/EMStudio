@@ -187,6 +187,15 @@ export async function saveTtl(
   return path;
 }
 
+/** MICRO-G-SCHEDE p.5 · the A4 of a sheet, saved where the person says (the
+ *  system's «Save As…» already asked about a file that is there). */
+export async function savePdf(bytes: Uint8Array, defaultName: string): Promise<string | null> {
+  const path = picked(await save({ defaultPath: toNative(defaultName), filters: [{ name: "PDF", extensions: ["pdf"] }] }));
+  if (!path) return null;
+  await writeFile(toNative(path), bytes);
+  return path;
+}
+
 /** Set the OS window title (dirty-state indicator lives here on desktop). */
 export async function setWindowTitle(title: string): Promise<void> {
   try {

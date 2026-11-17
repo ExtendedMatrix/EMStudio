@@ -1,0 +1,19 @@
+{
+ "attribution": "MiC — ICCD",
+ "authority": "ICCD",
+ "concepts": [],
+ "format": 1,
+ "labels": {
+  "en": "Terms for «Consistency» (US field model)",
+  "it": "Termini per «CONSISTENZA» (scheda US da campo)"
+ },
+ "languages": [
+  "en",
+  "it"
+ ],
+ "license": "CC BY-SA 4.0 (modello US 2021) — vocabolario non ancora pubblicato in SKOS",
+ "provisional": "em-us-consistenza",
+ "scheme": "iccd-us-consistenza",
+ "status": "declared",
+ "uri": null
+}

@@ -77,7 +77,10 @@ export type WindowType =
   // SPAZIO · THE SCENA 3D: the representation models of an epoch and the
   // proxies of its units, in one orbitable scene, with the epoch selector it
   // shares with the Chronology (scrivania v11b, 30 set 2026).
-  | "scene";
+  | "scene"
+  // MICRO-G-SCHEDE · THE SCHEDA: the unit as its recording sheet, drawn from a
+  // definition of stratigraph-templates (sheet.ts), its boxes the graph's
+  | "sheet";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -361,6 +364,31 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
                      b: { dir: "row", ratio: 0.52, a: { win: "canvas" }, b: { win: "inspector" } } } },
     },
   },
+  // SCHEDE · «Che cosa dice la scheda di questa unità?» (MICRO-G-SCHEDE, E.D.,
+  // 17 Nov 2026). The Outliner on the left (a unit picked = the sheet shows
+  // it), the Scheda in the middle, two small windows on the right that follow
+  // the SAME unit — its proxy in the Space, its neighbourhood in the Matrix
+  // (`follow: "neighbourhood"`: framed with the units it touches) — and the
+  // unit's photographs and documents below (the Viewer of the node, MICRO-B).
+  {
+    id: "sheets", labelKey: "ws.sheets", hintKey: "ws.qSheets",
+    icon: "▤", windowType: "sheet", builtin: true,
+    arrangement: {
+      wins: [
+        { name: "sheet", type: "sheet" },
+        { name: "outliner", type: "outliner" },
+        { name: "scene", type: "scene" },
+        { name: "canvas", type: "graph", state: { mode: "matrix", follow: "neighbourhood" } },
+        { name: "viewer", type: "viewer", state: { follow: "unit-media" } },
+      ],
+      active: "sheet",
+      layout: { dir: "row", ratio: 0.16, a: { win: "outliner" },
+                b: { dir: "col", ratio: 0.74,
+                     a: { dir: "row", ratio: 0.66, a: { win: "sheet" },
+                          b: { dir: "col", ratio: 0.5, a: { win: "scene" }, b: { win: "canvas" } } },
+                     b: { win: "viewer" } } },
+    },
+  },
 ];
 
 /**
@@ -570,6 +598,7 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   "narrative-index": { icon: windowIcon("narrative-index"), labelKey: "win.narrativeIndex" },
   chronology: { icon: windowIcon("chronology"), labelKey: "win.chronology" },
   scene: { icon: windowIcon("scene"), labelKey: "win.scene" },
+  sheet: { icon: windowIcon("sheet"), labelKey: "win.sheet" },
 };
 
 /** The window type the active workspace currently shows — the ACTIVE window's

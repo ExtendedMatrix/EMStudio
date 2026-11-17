@@ -1,0 +1,57 @@
+{
+ "attribution": "Extended Matrix — vocabolario originato in StratiGraph WP3 (CNR-ISPC). Termini raccolti dal thesaurus e dall'interfaccia di PyArchInit (progetto pyArchInit, GPL); definizioni riformulate, non trascritte.",
+ "authority": "Extended Matrix",
+ "concepts": [
+  {
+   "concept": "https://w3id.org/extendedmatrix/vocab/us-affidabilita/buona",
+   "labels": {
+    "en": "good",
+    "it": "buona"
+   }
+  },
+  {
+   "concept": "https://w3id.org/extendedmatrix/vocab/us-affidabilita/discreta",
+   "labels": {
+    "en": "fair",
+    "it": "discreta"
+   }
+  },
+  {
+   "concept": "https://w3id.org/extendedmatrix/vocab/us-affidabilita/ottima",
+   "labels": {
+    "en": "excellent",
+    "it": "ottima"
+   }
+  },
+  {
+   "concept": "https://w3id.org/extendedmatrix/vocab/us-affidabilita/scarsa",
+   "labels": {
+    "en": "poor",
+    "it": "scarsa"
+   }
+  }
+ ],
+ "format": 1,
+ "labels": {
+  "en": "Stratigraphic reliability (US sheet, Extended Matrix)",
+  "it": "Affidabilità stratigrafica (scheda US, Extended Matrix)"
+ },
+ "languages": [
+  "en",
+  "it"
+ ],
+ "license": "CC BY 4.0",
+ "provisional_for": "iccd-us-affidabilita",
+ "scheme": "em-us-affidabilita",
+ "status": "resolvable",
+ "unverified_languages": [
+  "de",
+  "el",
+  "en",
+  "es",
+  "he",
+  "pl",
+  "ro"
+ ],
+ "uri": "https://w3id.org/extendedmatrix/vocab/us-affidabilita/"
+}

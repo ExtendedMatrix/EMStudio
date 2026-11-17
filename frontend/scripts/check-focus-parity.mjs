@@ -79,6 +79,8 @@ const CONVERTED = {
   // 30 set 2026 (NIGHT-SPAZIO) · the Scena 3D, born converted: one WebGL
   // canvas per window, built once in its own body
   scene: ["scene-view"],
+  // 17 Nov 2026 (MICRO-G-SCHEDE) · the Scheda, born converted like the Study
+  sheet: ["sheet-view"],
   // 13 set 2026 · the two HOSTED types. Their singletons were of two kinds and
   // both are listed: the surface they were mounted into (`#panel-view`) and the
   // four PANELS themselves, which were elements taken from the document at boot

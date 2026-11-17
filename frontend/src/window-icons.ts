@@ -34,6 +34,8 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
   chronology: '<path d="M2.5 13.5h11M3.5 4h6M5.5 7h7M7 10h3.5"/>',
   // SPAZIO · the Scena 3D: a block in space
   scene: '<path d="M8 1.8 13.5 5v6L8 14.2 2.5 11V5z"/><path d="M2.5 5 8 8.2 13.5 5M8 8.2v6"/>',
+  // MICRO-G-SCHEDE · the scheda: a sheet with its boxes
+  sheet: '<rect x="3" y="2.5" width="10" height="11" rx="1"/><path d="M3 6h10M3 9.5h10M7.5 6v7.5"/>',
   study: '<path d="M8 13.8s4.5-3.9 4.5-7.3a4.5 4.5 0 0 0-9 0c0 3.4 4.5 7.3 4.5 7.3z"/><circle cx="8" cy="6.4" r="1.6"/>',
   // RIFINITURE · not a window: the ✦ of «ask the AI», in the same stroke, so
   // the glyph is the same on every platform (the text ✦ is not)

@@ -221,6 +221,7 @@ import { installHelpTips } from "./help-tip";
 // MICRO-OUTLINER-EPOCHE-TOOLTIP p.3 · every «?» of the app opens beside itself
 installHelpTips();
 import { gisLayersOf, surfacesOf } from "./gis-scene";
+import { orderContradictions } from "./issues";
 import { issues as computeIssues, unitOfIssue, type Issue, type IssueFixers, type IssueSources } from "./issues";
 import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
 import { iconUrlFor } from "./icons";
@@ -444,6 +445,7 @@ import {
   windowFrames,
   onDesktopDragDrop,
   pathIsDir,
+  savePdf,
 } from "./tauri";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): the horizons as
 // bands, making room in the epochs, the site and its door (experimental.ts)
@@ -610,6 +612,13 @@ import {
   clearEmDataFilters,
 } from "./emdata";
 import { addQualiaClaim, addRow, deleteRow } from "./em-data";
+import {
+  definitions as sheetDefinitions, isSheetUnit, planEdit as planSheetEdit, planRefAdd as planSheetRefAdd,
+  planRefRemove as planSheetRefRemove, readUnit as readSheetUnit, recordOf as sheetRecordOf, resolveDefinition,
+  sheetLanguage, studySheetChoice, STUDY_SHEET_KEY, fillCounts as sheetFillCounts, labelIn as sheetLabelIn,
+  applyPlan as applySheetActs, type Plan as SheetPlan, type CompiledDef,
+} from "./sheet";
+import { renderSheet } from "./sheet-view";
 import { isVolatile, VOLATILE_KEY } from "./volatile";
 import {
   addRecent, addRecentRoom, clearRecents, getRecents, onRecentsChange, recentReopenable,
@@ -2605,6 +2614,27 @@ window.__EM_SCENE__ = () => {
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
   selected: () => [...selectedIds],
+  // MICRO-G-SCHEDE · the sheet of the unit shown, its boxes and their states
+  sheetReading: () => {
+    const now = sheetReadingNow();
+    if (!now) return null;
+    const fields: Record<string, { state: string; text: string; lens: boolean; how: string }> = {};
+    for (const r of now.reading.fields.values()) fields[r.fid] = { state: r.state, text: r.text, lens: !!r.lens, how: r.how.key };
+    const c = sheetFillCounts(now.reading);
+    return { unit: now.unitId, name: store?.node(now.unitId)?.name, def: `${now.def.header.id}@${now.def.header.version}`,
+             lang: now.lang, fields, counts: Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.length])),
+             unread: now.reading.unread.map((u) => u.qualia) };
+  },
+  sheetEdit: (fid: string, value: string) => sheetEdit(fid, value),
+  sheetRefAdd: (fid: string, text: string) => sheetRefAdd(fid, text),
+  sheetRefRemove: (fid: string, name: string) => {
+    const now = sheetReadingNow();
+    const r = now?.reading.fields.get(fid)?.refs?.find((x) => x.name === name);
+    if (!r) return false;
+    sheetRefRemove(fid, r.edge);
+    return true;
+  },
+  sheetLabel: (fid: string) => { const d = sheetDef().def; const f = d?.visual.fields.find((x) => x.id === fid); return f && d ? sheetLabelIn(f.labels, sheetLanguage(d, getLocale())) : null; },
   /** MICRO-FOTO-DOCUMENTI-BBOX · the unit thumbnails asked, and where they came from */
   thumbStats: () => ({ ...unitThumbStats, queued: unitThumbQueue.length, busy: unitThumbBusy }),
   // MICRO-B-DOCUMENTI-MEDIA · the strip, the image viewer, the media of a node
@@ -3844,10 +3874,15 @@ function pickSource(): PickFrom | null {
  * `centerOn` after a pick any more.
  */
 function showSelection(nodeId: string, from: PickFrom | null): void {
+  // MICRO-G-SCHEDE · a graph window that FOLLOWS (Schede's small Matrix) frames
+  // the unit with its neighbourhood whatever «zoom to selection» says: that is
+  // what the window is for
+  followNeighbourhood(nodeId, from);
   if (!getSettings().interaction.zoomToSelection) return;
   const here = activeWin();
   for (const w of windowsOf()) {
     if (w.type !== "graph" || !winAreas.has(w.id) || from?.win === w.id) continue;
+    if (w.state?.follow === "neighbourhood") continue;
     if (w.id !== here.id) setActiveWin(w.id);
     try {
       if (nodeWhollyInView(nodeId) === false) centerOn(nodeId);
@@ -4079,6 +4114,7 @@ function select(nodeId: string | null): void {
     queueMicrotask(() => { refreshSurfaces("scene"); refreshSurfaces("chronology"); });
   refreshInspector();
   nodeList.setSelected(nodeId);
+  selectInSurfaces("sheet", nodeId);   // MICRO-G-SCHEDE · the sheet is OF the selected unit
   draw();
   // «Zoom to selection» · the other windows show the node — after the scenes
   // this pick may rebuild (a DTC set opening, a jump that rebuilds)
@@ -17759,7 +17795,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 72;   // 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 73;   // 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -36591,6 +36627,255 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
 }
 
 /** …and the one renderer both — now all — mounts call. */
+
+// ─────────────────────────────────────────── MICRO-G-SCHEDE · the Scheda
+//
+// The window reads the study's definition (the graph-self node's
+// `data.sheet_template`, ICCD US 2021 when it says none: `sheet.ts`), draws the
+// selected unit through it (`sheet-view.ts`) and turns every edit into ONE delta
+// of the store (`store.batch`: one undo). The Inspector, the Matrix and the
+// Space repaint from the store's change as for any other edit.
+
+/** the unit the sheets show: the selection when it is a unit, else the last
+ *  unit shown (a click on a property in the Matrix does not empty the sheet) */
+let sheetUnit: string | null = null;
+
+function sheetDef(): { def: CompiledDef | null; choice: ReturnType<typeof studySheetChoice>; versionDiffers: string | null } {
+  const data = (store?.graphRootNode()?.data ?? {}) as Record<string, unknown>;
+  const choice = studySheetChoice(data);
+  return { ...resolveDefinition(choice), choice };
+}
+
+function sheetChoices(): Array<{ id: string; label: string }> {
+  return sheetDefinitions().map((d) => ({
+    id: d.header.id,
+    label: `${d.header.standard.authority} ${d.header.standard.code} ${d.header.standard.version} · ${d.header.version}`,
+  }));
+}
+
+function currentSheetUnit(): string | null {
+  if (!store) return null;
+  if (selectedId && isSheetUnit(store.node(selectedId))) sheetUnit = selectedId;
+  if (sheetUnit && !store.node(sheetUnit)) sheetUnit = null;
+  return sheetUnit;
+}
+
+function sheetReadingNow(): { def: CompiledDef; lang: string; unitId: string; reading: ReturnType<typeof readSheetUnit> } | null {
+  const { def } = sheetDef();
+  const unitId = currentSheetUnit();
+  if (!store || !def || !unitId) return null;
+  const lang = sheetLanguage(def, getLocale());
+  const g = { nodes: store.liveNodes(), edges: store.liveEdges() };
+  return { def, lang, unitId, reading: readSheetUnit(def, g, unitId, lang) };
+}
+
+function renderSheetInto(body: HTMLElement, _win: Win): void {
+  const cb = {
+    t: (k: string, p?: Record<string, string | number>) => t(k, p),
+    onEdit: (fid: string, value: string) => sheetEdit(fid, value),
+    onRefAdd: (fid: string, text: string) => sheetRefAdd(fid, text),
+    onRefRemove: (fid: string, edge: EmEdge) => sheetRefRemove(fid, edge),
+    onPick: (id: string) => select(id),
+    onChoose: (id: string) => chooseSheetDefinition(id),
+    onPrint: () => { void printSheet(); },
+  };
+  const { def, choice, versionDiffers } = sheetDef();
+  if (!store) { renderSheet(body, null, cb, sheetChoices(), null, t("sheet.noDocument")); return; }
+  if (!def) { renderSheet(body, null, cb, sheetChoices(), null, t("sheet.notVendored", { id: choice.id })); return; }
+  const now = sheetReadingNow();
+  if (!now) { renderSheet(body, null, cb, sheetChoices(), def.header.id, t("sheet.pickUnit")); return; }
+  const unit = store.node(now.unitId)!;
+  const notes: string[] = [];
+  if (versionDiffers) notes.push(t("sheet.versionDiffers", { asked: versionDiffers, have: def.header.version }));
+  if (now.lang !== getLocale()) notes.push(t("sheet.langOf", { lang: now.lang }));
+  if (selectedId && selectedId !== now.unitId) notes.push(t("sheet.stillUnit", { name: String(unit.name ?? unit.id) }));
+  renderSheet(body, {
+    def, lang: now.lang, unitName: String(unit.name || unit.id), unitType: String(unit.node_type),
+    reading: now.reading, choices: sheetChoices(), note: notes.join(" · ") || undefined,
+  }, cb, sheetChoices(), def.header.id);
+}
+
+/** The study's choice of definition — kept on the graph-self node beside its
+ *  working language, an edit like any other (it travels with the document). */
+function chooseSheetDefinition(id: string): void {
+  if (!store) return;
+  const def = sheetDefinitions().find((d) => d.header.id === id);
+  if (!def) return;
+  const gid = store.ensureGraphRootId();
+  store.setField(gid, `data.${STUDY_SHEET_KEY}`, { id: def.header.id, version: def.header.version });
+}
+
+/** One plan, one delta. The placeholder ids of the nodes a plan creates are
+ *  minted here (UUIDs, `store.newId`), never by the plan. */
+function applySheetPlan(plan: SheetPlan): boolean {
+  if (!store) return false;
+  const st = store;
+  if (plan.refused) { toast(t(plan.refused.key, plan.refused.p)); return false; }
+  if (!applySheetActs(st, plan, (u, q, v) => addQualiaClaim(st, u, q, v))) return false;
+  for (const n of plan.notes) toast(t(n.key, n.p));
+  return true;
+}
+
+function sheetEdit(fid: string, value: string): boolean {
+  const now = sheetReadingNow();
+  if (!now || !store) return false;
+  const g = { nodes: store.liveNodes(), edges: store.liveEdges() };
+  return applySheetPlan(planSheetEdit(now.def, g, now.unitId, fid, value, now.lang));
+}
+
+/** The cycles of the graph through either end of a new relation, as the
+ *  Matrix's warning computes them (`issues.orderContradictions`). */
+function cyclesThrough(a: string, b: string): string[][] {
+  if (!store) return [];
+  return orderContradictions(store.liveNodes(), store.liveEdges())
+    .filter((c) => c.kind === "cycle" && c.nodes.includes(a) && c.nodes.includes(b)).map((c) => c.nodes);
+}
+
+function sheetRefAdd(fid: string, text: string): boolean {
+  const now = sheetReadingNow();
+  if (!now || !store) return false;
+  const g = { nodes: store.liveNodes(), edges: store.liveEdges() };
+  const plan = planSheetRefAdd(now.def, g, now.unitId, fid, text);
+  const add = plan.acts.find((x) => x.op === "addEdge") as { source: string; target: string; edgeType: string } | undefined;
+  const before = add ? cyclesThrough(add.source, add.target).length : 0;
+  if (!applySheetPlan(plan)) return false;
+  const nm = (x: string) => String(store!.node(x)?.name ?? x);
+  if (add) {
+    const after = cyclesThrough(add.source, add.target);
+    if (after.length > before)
+      toast(t("sheet.cycle", { path: [...after[0], after[0][0]].map(nm).join(" → ") }));
+    else toast(t("sheet.added", { s: nm(add.source), edge: add.edgeType, t: nm(add.target) }));
+  }
+  refollowNeighbourhood();
+  return true;
+}
+
+function sheetRefRemove(_fid: string, edge: EmEdge): void {
+  if (applySheetPlan(planSheetRefRemove(edge))) refollowNeighbourhood();
+}
+
+function refollowNeighbourhood(): void {
+  const u = currentSheetUnit();
+  if (u) queueMicrotask(() => { buildScenes(); followNeighbourhood(u, null); });
+}
+
+/** The graph windows that FOLLOW frame the unit with the units it touches
+ *  (any relation between stratigraphic nodes: the Matrix's neighbourhood). */
+function followNeighbourhood(nodeId: string, from: PickFrom | null): void {
+  if (!store) return;
+  // …and a Viewer that follows (Schede's, below the sheet) is the unit's
+  // photographs and documents: the media viewer of MICRO-B (`media.on`)
+  if (isSheetUnit(store.node(nodeId))) {
+    const viewers = windowsOf().filter((w) => w.type === "viewer" && w.state?.follow === "unit-media" && winAreas.has(w.id));
+    for (const w of viewers) {
+      if (winCurrent(w, "media.on") !== nodeId) { mediaSel.get(w.id)?.clear(); setWinCurrent(w, "media.group", null); }
+      setWinCurrent(w, "media.on", nodeId);
+    }
+    if (viewers.length) { renderViewer(); renderAreaHeaders(); }
+  }
+  const wins = windowsOf().filter((w) => w.type === "graph" && w.state?.follow === "neighbourhood" && winAreas.has(w.id) && from?.win !== w.id);
+  if (!wins.length) return;
+  const near = new Set<string>([nodeId]);
+  for (const e of store.liveEdges()) {
+    if (e.source !== nodeId && e.target !== nodeId) continue;
+    const other = e.source === nodeId ? e.target : e.source;
+    if (isSheetUnit(store.node(other))) near.add(other);
+  }
+  const here = activeWin();
+  for (const w of wins) {
+    if (w.id !== here.id) setActiveWin(w.id);
+    try {
+      const s = scene();
+      const boxes = [...near].map((id) => s?.byId.get(id)).filter((b): b is NonNullable<typeof b> => !!b);
+      if (!s || !boxes.length) continue;
+      const x0 = Math.min(...boxes.map((b) => b.x)), y0 = Math.min(...boxes.map((b) => b.y));
+      const x1 = Math.max(...boxes.map((b) => b.x + b.w)), y1 = Math.max(...boxes.map((b) => b.y + b.h));
+      const vp = viewport();
+      const { w: vw, h: vh } = viewSize();
+      const M = 40;
+      const fit = Math.min(1.2, (vw - 2 * M) / Math.max(1, x1 - x0), (vh - 2 * M) / Math.max(1, y1 - y0));
+      // neighbours too far apart to be read together (other lanes): the unit
+      // in the middle at a scale that still reads, the rest at the edges
+      vp.scale = Math.max(0.55, fit);
+      const u = s.byId.get(nodeId)!;
+      const [cx, cy] = fit >= 0.55 ? [(x0 + x1) / 2, (y0 + y1) / 2] : [u.x + u.w / 2, u.y + u.h / 2];
+      vp.x = vw / 2 - cx * vp.scale;
+      vp.y = vh / 2 - cy * vp.scale;
+      draw();
+    } finally {
+      if (w.id !== here.id) setActiveWin(here.id);
+    }
+  }
+}
+
+/** The A4 recto/verso: the record read off the graph, printed by
+ *  stratigraph-templates' own renderer (`render.sheet_html(mode="print")`)
+ *  through the bridge — the Python is the print, as in StratiField; the page
+ *  shows it, the system prints it, WeasyPrint (when the bridge has it) saves
+ *  the PDF. */
+async function printSheet(): Promise<void> {
+  const now = sheetReadingNow();
+  if (!now || !store) return;
+  const unit = store.node(now.unitId);
+  const record = sheetRecordOf(now.def, now.reading);
+  let answer: { html?: string; pdf_b64?: string; pages?: number; pdf?: boolean; why?: string; error?: string };
+  try {
+    const res = await fetch(`${await bridgeUrl()}/sheet/render`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ definition: now.def, record, lang: now.lang, pdf: true }),
+    });
+    answer = await res.json();
+    if (!res.ok) throw new Error(answer.error ?? `HTTP ${res.status}`);
+  } catch (e) {
+    toast(t("sheet.printNoBridge", { why: String((e as Error).message ?? e) }));
+    return;
+  }
+  openSheetPrint(String(unit?.name ?? now.unitId), now.def, answer);
+}
+
+function openSheetPrint(name: string, def: CompiledDef,
+                        answer: { html?: string; pdf_b64?: string; pages?: number; why?: string }): void {
+  document.getElementById("sk-print")?.remove();
+  const ov = document.createElement("div");
+  ov.id = "sk-print";
+  ov.className = "sk-print-ov";
+  const box = document.createElement("div");
+  box.className = "sk-print-box";
+  const bar = document.createElement("div");
+  bar.className = "sk-print-bar";
+  const title = document.createElement("b");
+  title.textContent = t("sheet.printPreview", { name, std: `${def.header.standard.authority} ${def.header.standard.code} ${def.header.standard.version}` });
+  bar.appendChild(title);
+  const info = document.createElement("span");
+  info.className = "sk-print-info";
+  info.textContent = answer.pdf_b64 ? t("sheet.printPages", { n: String(answer.pages ?? "?") }) : t("sheet.printNoPdf", { why: answer.why ?? "" });
+  bar.appendChild(info);
+  const frame = document.createElement("iframe");
+  frame.className = "sk-print-frame";
+  frame.srcdoc = answer.html ?? "";
+  const btn = (label: string, run: () => void, key: string): void => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.dataset.skPrintAct = key;
+    b.addEventListener("click", run);
+    bar.appendChild(b);
+  };
+  btn(t("sheet.printSystem"), () => frame.contentWindow?.print(), "print");
+  if (answer.pdf_b64) btn(t("sheet.savePdf"), async () => {
+    const bytes = Uint8Array.from(atob(answer.pdf_b64!), (c) => c.charCodeAt(0));
+    const file = `${def.header.standard.code}_${name}.pdf`.replace(/[^\w.-]+/g, "_");
+    if (isTauri()) {
+      const at = await savePdf(bytes, file);
+      if (at) toast(t("sheet.savedPdf", { path: at }));
+    } else downloadBlob(new Blob([bytes], { type: "application/pdf" }), file, "application/pdf");
+  }, "pdf");
+  btn(t("sheet.close"), () => ov.remove(), "close");
+  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") ov.remove(); });
+  box.append(bar, frame);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+}
+
 function renderStudyInto(body: HTMLElement): void {
   if (!store) {
     body.textContent = "";
@@ -58845,6 +59130,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   "narrative-index": [],
   chronology: [],
   scene: [],
+  sheet: [],
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -62389,6 +62675,7 @@ registerBuiltinSurfaces({
   renderNarrativeIndexInto,
   renderChronologyInto,
   mountScene,
+  renderSheetInto,
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
   // that a panel can be repainted, told the selection moved, and taken down.

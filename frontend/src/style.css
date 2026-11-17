@@ -12064,3 +12064,59 @@ button.uo-col { cursor: pointer; }
 .bucket-status { flex: 1 1 auto; opacity: .8; }
 .bucket-refusal { padding: 10px; }
 .bucket-said { font-size: 12px; opacity: .8; }
+
+/* ── MICRO-G-SCHEDE · the Scheda window: the definition's sheet as a form.
+   The paper stays paper in both themes (white sheet, dark ink, the value in
+   the definition's blue), as StratiField's Foglio; the window around it follows
+   the theme. One scale: --mm, px per millimetre, set from the window's width. */
+.tile-sheetbody { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+.sk-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle); font-size: 12px; flex: 0 0 auto; flex-wrap: wrap; }
+.sk-head .sk-unit { font-weight: 600; }
+.sk-head .sk-counts { color: var(--text-muted); flex: 1; }
+.sk-head select, .sk-head button { font: inherit; font-size: 12px; }
+.sk-note, .sk-empty-note { padding: 6px 10px; font-size: 12px; color: var(--text-muted); }
+.sk-empty-note { padding: 24px; text-align: center; }
+.sk-pages { flex: 1; overflow: auto; padding: 12px 16px 40px; background: var(--bg-sunken); }
+.sk-side { background: #fff; color: #111; width: calc(var(--mm) * 186); margin: 0 auto 14px; padding: calc(var(--mm) * 4);
+  box-shadow: 0 1px 4px rgba(0,0,0,.18); border-radius: 3px; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.sk-side-head { display: flex; gap: 10px; align-items: baseline; border-bottom: 2px solid #111; margin-bottom: 4px; padding-bottom: 2px; font-size: 11px; }
+.sk-side-head span { flex: 1; } .sk-side-head .sk-side-name { flex: 0 0 auto; color: #666; text-transform: uppercase; font-size: 10px; }
+.sk-row { display: flex; width: 100%; align-items: stretch; }
+.sk-cell { flex: 0 0 auto; min-width: 0; border: 1px solid #555; padding: 2px 4px; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.sk-cell.sk-spacer { border: none; }
+.sk-block { border: none; padding: 0; }
+.sk-block.sk-labelled { border: 1px solid #555; padding: 0; }
+.sk-block .sk-inner { width: 100%; }
+.sk-strip { background: #f2f2f2; border-bottom: 1px solid #ccc; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; }
+.sk-lbl { font-size: 8.5px; text-transform: uppercase; letter-spacing: .02em; line-height: 1.1; color: #333; }
+.sk-req { color: #b00; }
+.sk-badge { margin-left: 4px; font-size: 8px; text-transform: none; background: #fff3c4; border: 1px solid #d9b74a; border-radius: 3px; padding: 0 3px; color: #6b5100; }
+.sk-v { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; flex: 1; }
+.sk-in { width: 100%; border: 0; border-bottom: 1px dotted #99a; background: transparent; font: inherit; font-size: 12px; color: #1a3f7a; padding: 1px 0; min-height: 16px; }
+.sk-in.sk-long { resize: vertical; min-height: 34px; }
+.sk-in:focus { outline: 2px solid #2b6cb0; outline-offset: 1px; background: #fffbe8; }
+.sk-ro { font-size: 12px; color: #1a3f7a; } .sk-none { color: #aaa; }
+.sk-opt { font-size: 10px; text-transform: uppercase; white-space: nowrap; margin-right: 6px; }
+.sk-chip { display: inline-flex; align-items: center; gap: 2px; background: #e8eef8; border: 1px solid #b8c6dc; border-radius: 10px; padding: 0 2px 0 7px;
+  font-size: 11px; font-weight: 700; color: #1a3f7a; }
+.sk-chip.sk-nonum { background: #fde8e8; border-color: #d99; color: #900; }
+.sk-chip .sk-dup { font-weight: 400; color: #8a5a00; }
+.sk-chip-x { border: 0; background: transparent; cursor: pointer; color: #567; font-size: 12px; padding: 0 3px; }
+.sk-ref-add { width: 5em; border: 0; border-bottom: 1px dotted #99a; font: inherit; font-size: 11px; background: transparent; }
+/* the states that are not «full»: said by the box itself */
+.sk-cell.sk-empty .sk-lbl { color: #666; }
+.sk-cell.sk-silent, .sk-cell.sk-open { background: repeating-linear-gradient(135deg, #fafafa 0 6px, #f0f0f0 6px 12px); }
+.sk-out { font-size: 9.5px; font-style: italic; color: #888; }
+.sk-cell.sk-ambiguous { background: #fff7e0; }
+.sk-amb { font-size: 11px; color: #8a5a00; }
+.sk-cell.sk-lens { box-shadow: inset 3px 0 0 #e0b94a; }
+.sk-unread { background: var(--bg-panel); color: var(--text); width: calc(var(--mm) * 186); margin: 0 auto 10px; padding: 8px 12px; border-radius: 3px; font-size: 12px; }
+.sk-unread h4 { margin: 0 0 4px; font-size: 12px; }
+.sk-unread-row { display: flex; gap: 10px; } .sk-unread-row b { min-width: 9em; }
+.sk-foot { text-align: center; font-size: 10px; color: var(--text-faint); }
+.sk-print-ov { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 9000; display: flex; align-items: center; justify-content: center; }
+.sk-print-box { width: min(980px, 94vw); height: 92vh; background: var(--bg-elevated); border-radius: var(--radius-lg); display: flex; flex-direction: column; overflow: hidden; }
+.sk-print-bar { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
+.sk-print-bar .sk-print-info { flex: 1; color: var(--text-muted); font-size: 12px; }
+.sk-print-frame { flex: 1; border: 0; background: #888; }

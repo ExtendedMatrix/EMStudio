@@ -1,0 +1,33 @@
+{
+ "format": "emstudio/schede-vendored",
+ "format_version": "1",
+ "from": {
+  "commit": "3b22594",
+  "repository": "stratigraph-templates"
+ },
+ "schede": {
+  "iccd-us-2021": {
+   "digest": "sha256:4802d763044f3eb47e08a118f94a0f194b4489d0dd129e1002482837a66bd0fb",
+   "languages": [
+    "it",
+    "en"
+   ],
+   "sheet": true,
+   "standard": {
+    "attribution": "MiC — Istituto Centrale per il Catalogo e la Documentazione (ICCD)",
+    "authority": "ICCD",
+    "code": "US",
+    "invented": false,
+    "kind": "field_model",
+    "license": "CC BY-SA 4.0",
+    "source": "SCHEDE_ICCD/US_Unità Stratigrafica_modello per rilevamento sul campo_2021.doc",
+    "title": {
+     "en": "Stratigraphic Unit — field recording model",
+     "it": "Unità Stratigrafica — modello per il rilevamento sul campo"
+    },
+    "version": "2021"
+   },
+   "version": "2.0.1"
+  }
+ }
+}
