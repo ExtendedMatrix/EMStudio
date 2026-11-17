@@ -694,7 +694,7 @@ export type Pane =
   | { kind: "leaf"; winId: string }
   | { kind: "split"; dir: "row" | "col"; ratio: number; a: Pane; b: Pane };
 
-interface WorkspaceWindows {
+export interface WorkspaceWindows {
   wins: Win[];
   activeId: string;
   /** the arrangement; absent in layouts saved before WIN5 → rebuilt as a leaf */
@@ -898,9 +898,14 @@ function loadRegistry(): Registry {
       const entry = parsed[preset.id];
       if (!entry || !Array.isArray(entry.wins) || entry.wins.length === 0)
         continue;
+      // MICRO-M · two windows under one id (saved by the ghost of «↺»): the
+      // first is kept, as every lookup by id already found it
+      const ids = new Set<string>();
       const wins = entry.wins.filter(
-        (w) => w && typeof w.id === "string" && typeof w.type === "string",
+        (w) => w && typeof w.id === "string" && typeof w.type === "string"
+          && !ids.has(w.id) && !!ids.add(w.id),
       );
+      if (wins.length !== entry.wins.length) migratedOnLoad = true;
       if (!wins.length) continue;
       const migrated = wins.map((w) => migrateWin({ ...w, state: w.state ?? {} }));
       // MICRO-CONTENTS-3 F1 · the Archive's chain window saved before it was a
@@ -999,9 +1004,21 @@ export function paneIds(p: Pane | undefined): string[] {
  */
 function repairLayout(p: Pane | undefined, wins: Win[]): Pane {
   const live = new Set(wins.map((w) => w.id));
+  // MICRO-M-SPAZIO-FANTASMA · a window is placed ONCE: a second leaf of the
+  // same id had a rectangle and no area of its own — an empty column, whose
+  // divider closed the window drawn elsewhere. It goes, its branch with it
+  const seen = new Set<string>();
   const prune = (n: Pane | undefined): Pane | null => {
     if (!n) return null;
-    if (n.kind === "leaf") return live.has(n.winId) ? n : null;
+    if (n.kind === "leaf") {
+      if (seen.has(n.winId) || n.winId.startsWith("missing:")) {
+        console.warn(`[workspace] leaf without a window of its own, collapsed: ${n.winId}`);
+        return null;
+      }
+      if (!live.has(n.winId)) return null;   // a closed window: its split joins
+      seen.add(n.winId);
+      return n;
+    }
     const a = prune(n.a);
     const b = prune(n.b);
     if (a && b) return { ...n, a, b };
@@ -1298,6 +1315,19 @@ export function closeSplitSide(path: string, side: "a" | "b",
   return gone;
 }
 
+/** MICRO-M-SPAZIO-FANTASMA · the arrangement of a space as it is now — a copy,
+ *  taken before a divider closes a side, so the toast's «Riapri» can put it back */
+export function workspaceSnapshot(ws: WorkspaceId = active): WorkspaceWindows {
+  return structuredClone(registry[ws]);
+}
+
+/** …and back: the windows, their states and the tree exactly as they were. */
+export function restoreWorkspaceSnapshot(snap: WorkspaceWindows,
+                                         ws: WorkspaceId = active): void {
+  registry[ws] = structuredClone(snap);
+  persistWindows();
+}
+
 // ───────────────────────── WIN7 · magnify (full-screen area) ─────────────────
 //
 // One area fills the workspace and the others step aside — Blender's Ctrl+Space,
@@ -1383,7 +1413,14 @@ export function applyArrangement(ws: WorkspaceId = active): boolean {
   entry.maxOf = undefined;   // the arrangement IS the shape: nothing to return to
   entry.saved = undefined;
 
-  const anchor = entry.wins[0] ?? seedWindows(preset).wins[0];
+  // MICRO-M-SPAZIO-FANTASMA · the anchor keeps its id only if no other window
+  // of the arrangement is born under it. After the first window was closed,
+  // `wins[0]` was e.g. `provenance:outliner`: reused as the Viewer, it shared
+  // its id with the Outliner made below — two leaves, one area, the first
+  // rectangle an empty column, and its divider closed the Viewer
+  const others = new Set(spec.wins.slice(1).map((w) => `${ws}:${w.name}`));
+  const kept = entry.wins[0];
+  const anchor = kept && !others.has(kept.id) ? kept : seedWindows(preset).wins[0];
   const byName = new Map<string, Win>();
   const wins: Win[] = [];
   spec.wins.forEach((w, i) => {
@@ -1401,15 +1438,49 @@ export function applyArrangement(ws: WorkspaceId = active): boolean {
   const build = (node: ArrangementNode): Pane => {
     if ("win" in node) {
       const win = byName.get(node.win);
-      if (!win) throw new Error(`arrangement names a window it does not declare: ${node.win}`);
-      return { kind: "leaf", winId: win.id };
+      // a leaf with no window takes no room: `repairLayout` below collapses
+      // its branch (and `arrangementProblems` has said which window it was)
+      return { kind: "leaf", winId: win ? win.id : `missing:${node.win}` };
     }
     return { kind: "split", dir: node.dir, ratio: node.ratio,
              a: build(node.a), b: build(node.b) };
   };
-  entry.layout = build(spec.layout);
+  const problems = arrangementProblems(preset);
+  if (problems.length) console.warn(`[workspace] arrangement of ${ws}:`, problems.join("; "));
+  entry.layout = repairLayout(build(spec.layout), entry.wins);
   persistWindows();
   return true;
+}
+
+/**
+ * MICRO-M-SPAZIO-FANTASMA · what is wrong with an arrangement, in words — empty
+ * when every leaf names a declared window, none twice, and every declared
+ * window is placed. `check-tiling.mjs` asks it of every built-in space, so a
+ * space whose arrangement would leave a hole does not ship.
+ */
+export function arrangementProblems(preset: Pick<WorkspacePreset, "arrangement">): string[] {
+  const spec = preset.arrangement;
+  if (!spec) return [];
+  const out: string[] = [];
+  const declared = new Set<string>();
+  for (const w of spec.wins) {
+    if (declared.has(w.name)) out.push(`window declared twice: ${w.name}`);
+    declared.add(w.name);
+  }
+  const placed = new Set<string>();
+  const walk = (node: ArrangementNode): void => {
+    if ("win" in node) {
+      if (!declared.has(node.win)) out.push(`leaf names no window: ${node.win}`);
+      else if (placed.has(node.win)) out.push(`window placed twice: ${node.win}`);
+      placed.add(node.win);
+      return;
+    }
+    walk(node.a);
+    walk(node.b);
+  };
+  walk(spec.layout);
+  for (const name of declared) if (!placed.has(name)) out.push(`window never placed: ${name}`);
+  return out;
 }
 
 /** Every window of a workspace, in creation order — and after them the windows

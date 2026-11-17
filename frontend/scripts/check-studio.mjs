@@ -41,8 +41,9 @@ const eq = (got, want, what) => {
   const W = await load("workspace.ts");
   // COLLEGARE (29 set 2026, E.D.) · four spaces, one per activity
   // NIGHT-SPAZIO (30 set 2026) · and the fifth, «Spazio»
-  eq(W.WORKSPACES.map((w) => w.id), ["canvas", "provenance", "assets", "narrative", "space"],
-     "the bar holds the five spaces");
+  // MICRO-G-SCHEDE (17 Nov 2026) · the sixth, «Schede»
+  eq(W.WORKSPACES.map((w) => w.id), ["canvas", "provenance", "assets", "narrative", "space", "sheets"],
+     "the bar holds the six spaces");
   eq(W.WORKSPACES[0].labelKey, "ws.stratigraphy", "…the first called Stratigrafia");
   // MICRO-VIEWER-UNICO · the Annotator went (it was Fonti with the Viewer large)
   eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons"],

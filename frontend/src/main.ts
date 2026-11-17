@@ -655,6 +655,8 @@ import {
   stackedRatio,
   toggleCompressed,
   closeSplitSide,
+  workspaceSnapshot,
+  restoreWorkspaceSnapshot,
   setActiveWin,
   setActiveWorkspace,
   setWinCurrent,
@@ -28869,11 +28871,19 @@ function positionAreas(): void {
         window.removeEventListener("pointercancel", up);
         mark(null);
         if (closing) {
+          // MICRO-M-SPAZIO-FANTASMA · a window closed by a drag comes back:
+          // «Riapri» in the toast puts the space back as it was
+          const ws = activeWorkspace();
+          const before = workspaceSnapshot(ws);
           const gone = closeSplitSide(info.path, closing);
           if (gone.length) {
             renderTiles();
-            toast(t(gone.length === 1 ? "win.closedOne" : "win.closedMany",
-                    { n: String(gone.length) }));
+            toastAsk(t(gone.length === 1 ? "win.closedOne" : "win.closedMany",
+                       { n: String(gone.length) }),
+                     [{ label: t("win.reopen"), run: () => {
+                       restoreWorkspaceSnapshot(before, ws);
+                       if (activeWorkspace() === ws) renderTiles();
+                     } }], 8000);
           }
         }
       };

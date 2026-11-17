@@ -329,8 +329,9 @@ const eq = (got, want, what) => {
 {
   const ids = W.WORKSPACES.filter((w) => w.builtin).map((w) => w.id);
   // NIGHT-SPAZIO (30 set 2026) · the fifth space, «Spazio» (scrivania v11b)
-  eq(ids, ["canvas", "provenance", "assets", "narrative", "space"],
-     "the five spaces, with the ids every saved arrangement is keyed by");
+  // MICRO-G-SCHEDE (17 Nov 2026) · the sixth, «Schede»
+  eq(ids, ["canvas", "provenance", "assets", "narrative", "space", "sheets"],
+     "the six spaces, with the ids every saved arrangement is keyed by");
   // MICRO-VIEWER-UNICO · the Annotator went: it was Fonti with the Viewer large
   eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons"], "the rest stay parked");
   const sig = (id) => W.arrangementSignature(W.WORKSPACES.find((w) => w.id === id).arrangement);
@@ -414,6 +415,86 @@ const eq = (got, want, what) => {
   ok(m.parsed.assets === saved.assets, "an arrangement the user reshaped is kept as it is");
   ok(m.parsed.dtc === saved.dtc && m.parsed.ws7 === saved.ws7, "parked and user workspaces are untouched");
   eq(W.migrateSavedArrangements(m.parsed).reseeded, [], "a second pass reseeds nothing");
+}
+
+// ── MICRO-M-SPAZIO-FANTASMA · «Ripristina» never leaves an empty column ─────
+// E.D., 17 Nov 2026: in Sources, after the Viewer was closed, «↺» left a column
+// with no window on the left, and dragging its divider closed the VIEWER. The
+// anchor `applyArrangement` reuses was the first SURVIVING window
+// (`provenance:outliner`), and the arrangement then made the Outliner under the
+// same id: two leaves, one area, the first rectangle empty. So, for every
+// built-in space: restored fresh, and restored after closing EACH of its
+// windows, every leaf is a window, no id twice, every window placed; and the
+// root divider dragged over a side closes exactly that side's windows.
+{
+  const sound = (ws, what) => {
+    const ids = W.paneIds(W.layoutOf(ws));
+    const wins = W.windowsOf(ws).filter((w) => !W.isDetachedWin(w.id)).map((w) => w.id);
+    eq(new Set(ids).size, ids.length, `${ws} ${what}: no window placed twice (${ids})`);
+    eq(new Set(wins).size, wins.length, `${ws} ${what}: no two windows share an id (${wins})`);
+    eq([...ids].sort(), [...wins].sort(), `${ws} ${what}: every leaf is a window and every window a leaf`);
+  };
+  for (const preset of W.WORKSPACES.filter((p) => p.builtin && p.arrangement)) {
+    const ws = preset.id;
+    eq(W.arrangementProblems(preset), [], `${ws}: its arrangement is valid by construction`);
+    W.applyArrangement(ws);
+    sound(ws, "restored");
+    const n = preset.arrangement.wins.length;
+    for (let i = 0; i < n; i++) {
+      W.applyArrangement(ws);
+      W.closeWindow(W.windowsOf(ws)[i].id, ws);
+      W.applyArrangement(ws);
+      sound(ws, `restored after closing window ${i}`);
+      eq(W.windowsOf(ws).map((w) => w.type), preset.arrangement.wins.map((w) => w.type),
+         `${ws} restored after closing window ${i}: the declared types, in order`);
+      // …and twice in a row (the anchor is now the fresh one)
+      W.closeWindow(W.windowsOf(ws)[0].id, ws);
+      W.applyArrangement(ws);
+      sound(ws, `restored twice after closing window ${i}`);
+    }
+    // the root divider dragged all the way left closes the LEFT side, only it
+    W.applyArrangement(ws);
+    const root = W.layoutOf(ws);
+    const left = W.paneIds(root.a), right = W.paneIds(root.b);
+    const gone = W.closeSplitSide("", "a", ws);
+    eq([...gone].sort(), [...left].sort(), `${ws}: the side dragged over is the side that goes`);
+    eq([...W.paneIds(W.layoutOf(ws))].sort(), [...right].sort(), `${ws}: the other side stays whole`);
+    W.applyArrangement(ws);
+  }
+  // a broken arrangement is SAID, not drawn as a hole
+  eq(W.arrangementProblems({ id: "x", arrangement: {
+       wins: [{ name: "a", type: "graph" }, { name: "b", type: "viewer" }, { name: "b", type: "table" }],
+       layout: { dir: "row", ratio: 0.5, a: { win: "a" }, b: { dir: "row", ratio: 0.5, a: { win: "ghost" }, b: { win: "a" } } } } }),
+     ["window declared twice: b", "leaf names no window: ghost", "window placed twice: a", "window never placed: b"],
+     "arrangementProblems names each fault");
+}
+
+// ── MICRO-M · a SAVED registry with the ghost (two windows, one id) heals ───
+{
+  const S = (dir, a, b, ratio = 0.5) => ({ kind: "split", dir, ratio, a, b });
+  const L = (winId) => ({ kind: "leaf", winId });
+  mem.set("emstudio.workspaces.rev", "999");
+  mem.set("emstudio.windows", JSON.stringify({
+    provenance: {
+      wins: [{ id: "provenance:outliner", type: "viewer", state: {} },
+             { id: "provenance:outliner", type: "outliner", state: {} },
+             { id: "provenance:graph", type: "graph", state: { mode: "matrix" } },
+             { id: "provenance:inspector", type: "inspector", state: {} }],
+      activeId: "provenance:outliner",
+      layout: S("row", L("provenance:outliner"),
+                S("row", S("row", L("provenance:outliner"), L("provenance:graph")), L("provenance:inspector"))),
+    },
+  }));
+  const again = await esbuild.build({ entryPoints: [`${SRC}workspace.ts`], bundle: true, format: "esm", write: false });
+  const W2 = await import("data:text/javascript;base64," +
+    Buffer.from(again.outputFiles[0].text + "\n// reload\n").toString("base64"));
+  const ids = W2.paneIds(W2.layoutOf("provenance"));
+  eq(ids, ["provenance:outliner", "provenance:graph", "provenance:inspector"],
+     "a saved ghost collapses: the duplicate leaf goes, its branch with it");
+  eq(W2.windowsOf("provenance").map((w) => w.id), ids, "and the duplicate window with it (the first kept)");
+  W2.applyArrangement("provenance");
+  const fresh = W2.paneIds(W2.layoutOf("provenance"));
+  eq(new Set(fresh).size, 4, "«↺» on it gives four windows, four areas");
 }
 
 console.log(`tiling: ${checks} checks passed`);
