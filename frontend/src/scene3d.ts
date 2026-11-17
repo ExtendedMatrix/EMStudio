@@ -111,6 +111,11 @@ export interface SceneItem {
    *  mode and the errors' multiplier of the preview it was attached from — the
    *  loading the person chose on the preview passes to the model */
   tilesStart?: { mode: "auto" | "manual"; errorScale?: number | "auto"; errorChoice?: ErrorChoice };
+  /** MICRO-P-GEOREF-PER-GRAFO · a MODEL in a system of its own (its `data.frame`):
+   *  the transform from its frame into its graph's scene (column-major, three's
+   *  axes), applied over its pose as a parent — the file and the pose untouched.
+   *  Absent = the model is in its graph's system */
+  frameMatrix?: number[] | null;
   /** MICRO tileset, shift e epoche · the tileset's frame (a CRS minus a shift):
    *  the layer is relocated into the study's frame (`TilesLayer.relocate`) */
   tilesRelocate?: { key: string; fn: RelocateFn } | null;
@@ -554,6 +559,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     /** MICRO-MEMORIA-SESSIONE p.1 · what the guard counts (MB) and its two numbers */
     __spaceGuard?: () => unknown;
     __spaceScreenOf?: (id: string) => { x: number; y: number } | null;
+    __spaceWorldBox?: (k: string) => number[] | null;
     __spaceCamera?: () => number[];
     /** MICRO-GIZMO-ASSI · the navigation gizmo, the camera's matrices, a camera set */
     __spaceGizmo?: () => unknown;
@@ -1779,6 +1785,18 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         m.scale.set(...p.scale);
         m.updateMatrixWorld(true);
       };
+      // MICRO-P-GEOREF-PER-GRAFO · a model in its own system hangs from a parent
+      // holding the transform into the graph's scene; its pose stays its own
+      const placeIn = (obj: any, item: SceneItem): void => {
+        if (!item.frameMatrix || item.frameMatrix.length !== 16) { content.add(obj); return; }
+        const w = new THREE.Group();
+        w.matrixAutoUpdate = false;
+        w.matrix.fromArray(item.frameMatrix);
+        w.userData.frameOf = `${item.kind}:${item.id}`;
+        w.add(obj);
+        content.add(w);
+        w.updateMatrixWorld(true);
+      };
       const gizmo = TransformControls ? new TransformControls(camera, renderer.domElement) : null;
       const gizmoHelper = gizmo ? (typeof gizmo.getHelper === "function" ? gizmo.getHelper() : gizmo) : null;
       if (gizmoHelper) scene.add(gizmoHelper);
@@ -2111,9 +2129,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (item.pose) setPose(obj, item.pose);
               roots.set(key, obj);
               obj.visible = altVisible(item);
-              if (selOutline(item)) content.add(selBox(obj, item));
               tag(obj, item);
-              content.add(obj);
+              placeIn(obj, item);
+              if (selOutline(item)) content.add(selBox(obj, item));
               addLabel(item.label, topOf(obj), `rm k-rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "mesh", url: v.url });
               flowState.set(key, { item, current: v.id, gen });
@@ -2214,9 +2232,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (item.pose) setPose(obj, item.pose);
               roots.set(key, obj);
               obj.visible = altVisible(item);
-              if (selOutline(item)) content.add(selBox(obj, item));
               tag(obj, item);
-              content.add(obj);
+              placeIn(obj, item);
+              if (selOutline(item)) content.add(selBox(obj, item));
               addLabel(item.label, topOf(obj), `rm k-rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "mesh", url: u });
               // MICRO-SPAZIO-3D-3 p.10 · the version drawn is known now: the Outliner's dot follows
@@ -2242,11 +2260,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (item.kind === "proxy") {
                 obj.traverse((o: any) => { if (o.isMesh) o.material = translucent(item); });
                 obj.traverse((o: any) => { if (o.isMesh) o.add(outline(o.geometry, item)); });
-              } else if (selOutline(item)) {
-                content.add(selBox(obj, item));
               }
               tag(obj, item);
-              content.add(obj);
+              placeIn(obj, item);
+              if (item.kind !== "proxy" && selOutline(item)) content.add(selBox(obj, item));
               for (const part of item.kind === "proxy" ? item.parts ?? [] : []) {
                 pending.push(load(part.url).then((pg) => {
                   if (gen !== generation || disposed || "fail" in pg) return;
@@ -2433,6 +2450,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!c) return null;
         return toScreen(c);
       };
+      // MICRO-P-GEOREF-PER-GRAFO · where an object stands in the scene (three's
+      // axes, its world box: a model in its own system, under its frame's parent)
+      probe.__spaceWorldBox = (k: string) => {
+        const o = roots.get(k);
+        if (!o) return null;
+        o.updateMatrixWorld(true);
+        const b = new THREE.Box3().setFromObject(o);
+        return b.isEmpty() ? null : [...arr(b.min), ...arr(b.max)].map((q) => Math.round(q * 1000) / 1000);
+      };
       probe.__spaceCamera = () => [...camera.position.toArray(), ...controls.target.toArray()].map((x: number) => Math.round(x * 1000) / 1000);
       probe.__spaceCursor = () => cursorAt.map((q) => Math.round(q * 10000) / 10000);
       /** MICRO-PROVA-DEV47 · what an object is made of in the scene: meshes, vertices, in the content or not */
@@ -2568,9 +2594,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const gone = new Set<any>();
         old.traverse((o: any) => gone.add(o));
         for (let i = pickables.length - 1; i >= 0; i--) if (gone.has(pickables[i])) pickables.splice(i, 1);
-        content.remove(old);
+        const parent = old.parent ?? content;
+        parent.remove(old);
         tag(obj, st.item);
-        content.add(obj);
+        parent.add(obj);
+        obj.updateMatrixWorld(true);
         roots.set(key, obj);
         const was = st.item.flow?.find((x) => x.id === st.current);
         st.current = v.id;

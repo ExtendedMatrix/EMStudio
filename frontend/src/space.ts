@@ -132,7 +132,8 @@ export interface SpaceRM {
    *  `data.frame`: its coordinates are a CRS minus a shift) and the node that
    *  says it — the resource, its asset, then its hat (`frame_of`'s order) */
   frame?: { frame: FileFrame; from: string } | null;
-  /** …and where a new frame is written: the tileset's asset (its versions inherit it) */
+  /** …and where a new frame is written: the tileset's asset (its versions inherit it);
+   *  for a mesh (MICRO-P-GEOREF-PER-GRAFO) the RM itself, absent here */
   frameHome?: string | null;
 }
 
@@ -548,7 +549,9 @@ export function buildSpace(
     const group = outOf(rm.id, RM_GROUP_EDGE).find((g) => byId.get(g)?.node_type === RM_GROUP_TYPE) ?? null;
     const resource = chosen ? chosen.resource : resourceOf(rm.id);
     const uncovered = !!chosen && !chosen.resource;
-    const frame = resource?.tiles ? frameAmong([resource.id, assetOf(vg, resource.id), rm.id], (i) => dataOf(byId.get(i))) : null;
+    // MICRO-P-GEOREF-PER-GRAFO · every model may say its own system (a mesh too,
+    // written on the RM): read in s3Dgraphy's order, the resource, its asset, the RM
+    const frame = frameAmong(resource ? [resource.id, assetOf(vg, resource.id), rm.id] : [rm.id], (i) => dataOf(byId.get(i)));
     return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], exactEpochs: [...exact], documentId, genre, group,
              resource, choice: chosen?.choice ?? null, ...(uncovered ? { uncovered } : {}), ...(frame ? { frame } : {}),
              ...(resource?.tiles ? { frameHome: assetOf(vg, resource.id) } : {}),

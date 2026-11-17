@@ -136,3 +136,121 @@ export function conversionPatch(sameGrid: boolean, to: number,
   if (!reprojected || !Number.isFinite(reprojected.x) || !Number.isFinite(reprojected.y)) return null;
   return { epsg: to, shift_x: Math.round(reprojected.x * 1000) / 1000, shift_y: Math.round(reprojected.y * 1000) / 1000 };
 }
+
+// ── MICRO-P-GEOREF-PER-GRAFO (E.D., 17 Nov 2026) · per graph, per model ──────
+//
+// THE GEOREFERENCE LIVES ON EACH GRAPH, never on the file: an em.json holds
+// graphs with systems of their own, each its GeoPositionNode (`geoPositionNode`
+// of its store). A MODEL may declare its own system — its `data.frame`
+// (s3Dgraphy 1.6.38: «its coordinates are CRS X minus shift S», plus, since
+// this MICRO, `datum_operation`) — or none: «as the graph», and then it
+// follows every change of the graph's. The positions of a model are never
+// rewritten: only the transformation from its frame to the graph's changes.
+
+/** s3Dgraphy's `api.normalise_datum_operation`: «EPSG:<code>»; null = not
+ *  declared; a malformed value throws (checked against s3Dgraphy in
+ *  `check-georef-card.mjs`) */
+export function normaliseDatumOperation(value: unknown): string | null {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return null;
+  if (typeof value === "boolean") throw new Error(`datum_operation: ${String(value)} is not an EPSG operation`);
+  let code: number;
+  if (typeof value === "number") code = value;
+  else {
+    const m = /^\s*(?:EPSG\s*:{1,2}\s*)?(\d+)\s*$/i.exec(String(value));
+    if (!m) throw new Error(`datum_operation: ${JSON.stringify(value)} is not «EPSG:<code>»`);
+    code = Number(m[1]);
+  }
+  if (!Number.isInteger(code) || code <= 0) throw new Error(`datum_operation: ${String(value)} is not an EPSG operation`);
+  return `EPSG:${code}`;
+}
+
+/** A model's own system, as the card reads it (`file-frame.ts` `readFrame`'s
+ *  answer, duplicated here as a shape so this module stays free of imports) */
+export interface ModelFrame { crs: string | null; shift: [number, number, number]; datum_operation?: string; note?: string; source?: string }
+
+/** What a model's system is, against its graph's:
+ *  - `graph` — «in the graph's system»: no frame of its own (it follows the
+ *    graph), or a frame that says the graph's CRS and shift;
+ *  - `graph-shift` — the graph's CRS (or no CRS) with a shift of its own: a
+ *    translation, said;
+ *  - `reprojected` — another CRS: converted from `from` into the graph's;
+ *  - `local` — neither the model nor its graph says a CRS: scene metres. */
+export type ModelGeoKind = "graph" | "graph-shift" | "reprojected" | "local";
+
+export function crsCode(crs: unknown): number | null {
+  return epsgOf({ epsg: crs });
+}
+
+export function modelGeoState(frame: ModelFrame | null | undefined, graph: Record<string, unknown> | null | undefined):
+    { kind: ModelGeoKind; from?: string; own: boolean } {
+  const g = graph ?? {};
+  const ge = epsgOf(g);
+  if (!frame) return { kind: ge === null ? "local" : "graph", own: false };
+  const fe = crsCode(frame.crs);
+  const gs = [num(g.shift_x) ?? 0, num(g.shift_y) ?? 0, num(g.shift_z) ?? 0];
+  const sameShift = frame.shift.every((v, i) => Math.abs(v - gs[i]) < 1e-6);
+  if (fe === null) return { kind: ge === null && sameShift ? "local" : sameShift ? "graph" : "graph-shift", own: true };
+  if (ge === null) return { kind: "local", from: `EPSG:${fe}`, own: true };
+  if (fe === ge) return { kind: sameShift ? "graph" : "graph-shift", own: true };
+  return { kind: "reprojected", from: `EPSG:${fe}`, own: true };
+}
+
+/** The translation (the data's axes: x east, y north, z up) from a frame in
+ *  the graph's CRS (or none) to the graph's scene: its shift minus the graph's;
+ *  null when the CRSs differ (PROJ's, `/geo/frame-fit`) */
+export function frameOffset(frame: ModelFrame, graph: Record<string, unknown> | null | undefined): [number, number, number] | null {
+  const g = graph ?? {};
+  const fe = crsCode(frame.crs), ge = epsgOf(g);
+  if (fe !== null && ge !== null && fe !== ge) return null;
+  return [frame.shift[0] - (num(g.shift_x) ?? 0), frame.shift[1] - (num(g.shift_y) ?? 0), frame.shift[2] - (num(g.shift_z) ?? 0)];
+}
+
+/** column-major 4×4 of a translation */
+export const translation = (t: [number, number, number]): number[] =>
+  [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t[0], t[1], t[2], 1];
+
+/** a × b, column-major 4×4 */
+export function mul4(a: number[], b: number[]): number[] {
+  const o = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+    o[c * 4 + r] = s;
+  }
+  return o;
+}
+
+/** The graph's azimuth undone: a point of the CRS grid (minus the shift) into
+ *  the scene's axes (`localToCrs` inverted), column-major, the data's axes */
+export function gridToScene(graph: Record<string, unknown> | null | undefined): number[] {
+  const th = ((num((graph ?? {}).rotation) ?? 0) * Math.PI) / 180;
+  const c = Math.cos(th), s = Math.sin(th);
+  // x = dx c − dy s ; y = dx s + dy c
+  return [c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+}
+
+/** A transform of the data's axes (x east, y north, z up) as three's (x, y up,
+ *  z = −north): P · M · Pᵀ, column-major */
+export function dataToThree(m: number[]): number[] {
+  const P = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];      // columns: x→x, y→−z, z→y
+  const Pt = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1];
+  return mul4(mul4(P, m), Pt);
+}
+
+export const isIdentity4 = (m: number[] | null | undefined): boolean =>
+  !m || m.every((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-12);
+
+/** The datum section of the card is OPEN («the two models of the Earth
+ *  differ») or kept under «Advanced»: open when a model of the graph stands on
+ *  another datum, or the graph already declares one */
+export function datumOpen(graph: Record<string, unknown> | null | undefined, anyOtherDatum: boolean): boolean {
+  return anyOtherDatum || !!String((graph ?? {}).datum_operation ?? "").trim();
+}
+
+/** What the card's search field asks: a code («3844», «EPSG:3844») or words */
+export function crsQuery(q: string): { code: number } | { words: string } | null {
+  const s = String(q ?? "").trim();
+  if (!s) return null;
+  const m = /^(?:EPSG\s*:{0,2}\s*)?(\d+)$/i.exec(s);
+  return m ? { code: Number(m[1]) } : { words: s };
+}

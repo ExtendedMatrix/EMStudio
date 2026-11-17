@@ -60,6 +60,9 @@ export interface InspectorCallbacks {
   onSetSitePosition?: () => void;
   /** MICRO-GEOREF-GRAFO · the graph's georeference (and the map pin's proposal), under the site position */
   geoSections?: (host: HTMLElement) => void;
+  /** MICRO-P-GEOREF-PER-GRAFO p.4 · the GeoPositionNode's own data, editable
+   *  with the card's controls (and the link to the card) */
+  geoNodeEditor?: (host: HTMLElement, nodeId: string) => boolean;
   onClose: () => void;
   onDeleteNode: (nodeId: string) => void;
   onDeleteEdge: (edge: EmEdge) => void;
@@ -390,6 +393,9 @@ function renderTimeRows(host: HTMLElement, store: DocumentStore,
     host.appendChild(row);
   }
 }
+
+/** MICRO-P-GEOREF-PER-GRAFO · the GeoPositionNode's keys the card's controls edit */
+const GEO_EDITED = new Set(["epsg", "shift_x", "shift_y", "shift_z", "rotation", "rotation_reference", "datum_operation"]);
 
 export function renderInspector(
   root: HTMLElement,
@@ -1516,6 +1522,8 @@ export function renderInspector(
     }
   }
 
+  // MICRO-P-GEOREF-PER-GRAFO p.4 · a GeoPositionNode: its data are the card's fields, edited here
+  const geoEdited = node.node_type === "geo_position" && !!nodeId && !!cb.geoNodeEditor?.(root, nodeId);
   // extra data fields (read-only)
   const data = (node as EmNode).data;
   if (data && Object.keys(data).length) {
@@ -1528,6 +1536,7 @@ export function renderInspector(
       // I3 · said once: the genre is the chip and its element row above, and a
       // `label` that repeats the type or the name is not a second fact
       if (shownAbove.has(k)) continue;
+      if (geoEdited && GEO_EDITED.has(k)) continue;
       if (k === "label" && (String(v) === String(node.name ?? "") || /US \(or SU\)/.test(String(v))
           || String(v).toLowerCase() === typeLabel.toLowerCase())) continue;
       // I3 · an identifier exists for the developer only, and then out of the way

@@ -22,6 +22,17 @@ export interface FileFrame {
   shift: [number, number, number];
   note?: string;
   source?: "manual" | "graph" | "file";
+  /** MICRO-P-GEOREF-PER-GRAFO · the datum operation of its CRS to WGS 84
+   *  («EPSG:<code>», the GeoPositionNode's meaning); absent = PROJ's best */
+  datum_operation?: string;
+}
+
+/** s3Dgraphy's `normalise_datum_operation`, null for a malformed value (a
+ *  reading never fails on it) */
+function datumOp(v: unknown): string | null {
+  if (typeof v === "number" && Number.isInteger(v) && v > 0) return `EPSG:${v}`;
+  const m = typeof v === "string" ? /^\s*(?:EPSG\s*:{1,2}\s*)?(\d+)\s*$/i.exec(v) : null;
+  return m && Number(m[1]) > 0 ? `EPSG:${Number(m[1])}` : null;
 }
 
 const num = (v: unknown): number | null => {
@@ -55,14 +66,18 @@ export function readFrame(data: Record<string, unknown> | null | undefined): Fil
   const out: FileFrame = { crs, shift };
   if (f.note) out.note = String(f.note);
   if (f.source === "manual" || f.source === "graph" || f.source === "file") out.source = f.source;
+  const op = datumOp(f.datum_operation);
+  if (op) out.datum_operation = op;
   return out;
 }
 
 /** the frame to write: numbers, never strings (`make_frame`); null = remove */
-export function makeFrame(crs: unknown, shift: unknown[], note = "", source?: FileFrame["source"]): FileFrame {
+export function makeFrame(crs: unknown, shift: unknown[], note = "", source?: FileFrame["source"], datum_operation?: string | null): FileFrame {
   const out: FileFrame = { crs: normaliseCrs(crs), shift: [0, 1, 2].map((i) => num(shift[i]) ?? 0) as [number, number, number] };
   if (note) out.note = note;
   if (source) out.source = source;
+  const op = datumOp(datum_operation);
+  if (op) out.datum_operation = op;
   return out;
 }
 

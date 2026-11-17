@@ -11939,6 +11939,44 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 .ccard-sugg { margin: 4px 0; padding: 4px 6px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn-ink); border: 1px solid var(--warn-border); font-size: 12px; }
 .ccard-none { color: var(--text-muted); font-style: italic; }
 .ccard-foot { display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; }
+/* MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione» (the container card's frame, wider) */
+.gr-card { left: calc(50% - 250px); width: 500px; }
+.gr-rule { margin: 0 0 6px; }
+.gr-graphs .gr-graph { display: block; width: 100%; text-align: left; margin: 2px 0; padding: 3px 6px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--text); cursor: pointer; font-size: 12px; }
+.gr-graphs .gr-graph.on { border-color: var(--accent, var(--border-strong)); font-weight: 600; }
+.gr-graph-crs { color: var(--text-muted); }
+.gr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin: 4px 0; }
+.gr-f { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.gr-f:first-child { grid-column: 1 / -1; }
+.gr-f input, .gr-f select { width: 100%; box-sizing: border-box; }
+.gr-f input:disabled { opacity: .7; }
+.gr-card .gr-f .insp-name-input, .gr-insp .gr-f .insp-name-input { font-size: 12px; font-weight: 400; padding: 2px 5px; margin: 0; border-color: var(--border); background: var(--bg-sunken); }
+.gr-card .georef-warn, .gr-insp .georef-warn { font-size: 12px; }
+.gr-crs-name { margin: 1px 0 0; }
+.gr-crs { position: relative; }
+.gr-crs-hits { position: absolute; left: 0; right: 0; top: 100%; z-index: 2; max-height: 220px; overflow: auto; background: var(--bg-elevated);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: 0 6px 18px rgba(0,0,0,.3); }
+.gr-crs-hits.hidden { display: none; }
+.gr-crs-hit { display: block; width: 100%; text-align: left; border: 0; background: none; color: var(--text); padding: 3px 6px; cursor: pointer; font-size: 12px; }
+.gr-crs-hit:hover, .gr-crs-hit:focus-visible { background: var(--bg-hover); }
+.gr-crs-hit.deprecated { color: var(--text-muted); }
+.gr-crs-name { font-size: 12px; color: var(--text-muted); margin: 0 0 4px; }
+.gr-datum summary { cursor: pointer; font-weight: 600; color: var(--text); }
+.gr-datum-prose { font-style: italic; }
+.gr-datum-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+.gr-datum-row select { max-width: 100%; }
+.gr-model { border-top: 1px dashed var(--border); padding: 4px 0; }
+.gr-model:first-child { border-top: 0; }
+.gr-model-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+.gr-model-name { font-weight: 600; color: var(--text); }
+.gr-model-kind { font-size: 11px; padding: 0 5px; border-radius: 8px; background: var(--bg-sunken); color: var(--text-muted); }
+.gr-model-top select { margin-left: auto; }
+.gr-state { font-size: 12px; color: var(--text-muted); }
+.gr-state.reprojected, .gr-state.graph-shift { color: var(--warn-ink); }
+.gr-state.local { color: var(--text-muted); font-style: italic; }
+.gr-model-datum { margin: 2px 0 0 10px; }
+.gr-insp .gr-open-card { margin: 0 0 4px; }
 .scn-vis { white-space: nowrap; }
 /* MICRO-RITOCCHI-CHIARI p.2b · the Warnings table: rows picked by hand, verbs over them */
 .tv-issues .tv-pick { width: 22px; text-align: center; padding-left: 2px; padding-right: 2px; }

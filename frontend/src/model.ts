@@ -2836,6 +2836,9 @@ export class DocumentStore {
   // datamodel for GeoPositionNode at graph scope). ONE source: the globe, the
   // Space and the Inspector read and write this node.
 
+  /** MICRO-P-GEOREF-PER-GRAFO · the GeoPositionNode as it was when the store was clean */
+  private geoSaved: { id: string; node: EmNode } | null = null;
+
   /** The graph's GeoPositionNode (one per graph), or undefined: never a fake one. */
   geoPositionNode(): EmNode | undefined {
     return this.liveNodes().find((n) => n.node_type === "geo_position");
@@ -2871,6 +2874,9 @@ export class DocumentStore {
   setGeoreference(patch: Record<string, unknown>): EmNode {
     return this.batch(() => {
       let g = this.geoPositionNode();
+      // MICRO-P-GEOREF-PER-GRAFO · the node as saved (taken while the store is clean)
+      if (g && (!this.dirty || !this.geoSaved || this.geoSaved.id !== g.id))
+        this.geoSaved = { id: g.id, node: JSON.parse(JSON.stringify(g)) as EmNode };
       if (!g) {
         const gid = String((this.doc.graph as Record<string, unknown>).graph_id ?? "graph");
         const ids = new Set(this.doc.graph.nodes.map((n) => n.id));
@@ -2887,6 +2893,18 @@ export class DocumentStore {
       }
       if (data.rotation_reference == null) data.rotation_reference = "grid";
       this.updateNode(g.id, { data } as Partial<EmNode>);
+      // MICRO-P-GEOREF-PER-GRAFO (E.D.: «ritorno al valore → identico al byte nel
+      // salvataggio») · every value back to the saved one: the node as it was
+      // saved, its clocks and its stamps too — a second thought is not an edit.
+      // Out of a room only: there the operation already went out with its clock
+      const saved = this.geoSaved;
+      const now = this.node(g.id);
+      if (saved && now && saved.id === g.id && !this.live) {
+        const a = saved.node as unknown as Record<string, unknown>, b = now as unknown as Record<string, unknown>;
+        const names = new Set([...contentFields(a), ...contentFields(b)]);
+        if ([...names].every((k) => canonicalValue(getField(a, k)) === canonicalValue(getField(b, k))))
+          (now as { data?: unknown }).data = JSON.parse(JSON.stringify(saved.node.data ?? {}));
+      }
       this.putGeoInGraphParadata();
       return this.node(g.id) ?? g;
     });

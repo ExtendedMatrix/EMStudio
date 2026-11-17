@@ -7,6 +7,29 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **The georeference, visible and editable, per graph and per model**
+  (MICRO-P-GEOREF-PER-GRAFO, E.D. 17 November 2026). The card
+  «Georeferenziazione» (⌖ in the Space's bar, File ▸ Georeferenziazione…, «Apri
+  nella scheda» in the GeoPositionNode's Inspector) edits the GeoPositionNode of
+  ONE graph of the active file — the file's graphs listed, each with its own
+  system; nothing is written on the file or on all graphs. One field «Sistema di
+  coordinate» (a code, or words of its name: `/geo/crs-search`, «Stereo 70» →
+  3844), shift X/Y, the azimuth and its north (grid/true), Z shown 0 and fixed;
+  «Non georiferito» + «Georeferenzia questo grafo» (no system: never 4326). The
+  models (RM, RMDoc, tilesets): «come il grafo» (no frame: it follows) or «sistema
+  proprio» (`data.frame` on the RM, the tileset's asset), labelled «nel sistema
+  del grafo» / «…shift proprio» / «riproiettato da EPSG:x» / «locale, non
+  georiferito»; a mesh in its own frame hangs from a parent holding the
+  transform (same CRS: the shifts' difference; another: `/geo/frame-fit`, PROJ's
+  points fitted, «convertito da … a …»). The datum operation is said only when
+  two models of the Earth meet (else under «Avanzate»): PROJ's operations with
+  their accuracy and area (`/geo/datum`), the best at the site preselected and
+  written only by a choice, a declared one whose area is not the site said.
+  Every change one undo step, a Log line on the node (its history). Values back
+  to the saved ones (out of a room): the GeoPositionNode as saved, its clocks
+  too — the save identical to the byte. The GeoPositionNode's Inspector edits
+  its data with the card's controls. Bridge level 74.
+  `scripts/check-georef-card.mjs`.
 - **Three corrections of E.D.** (MICRO-C-CORREZIONI-ED, 14 November 2026).
   `provenance.ts › unitLife` reads «real» from the node datamodel's `family`
   (`rules.unitFamily`), as s3Dgraphy: SF, RSF, USD, USN… without a continuity

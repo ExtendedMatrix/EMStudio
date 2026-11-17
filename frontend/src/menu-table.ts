@@ -128,6 +128,8 @@ export const MENUS: MenuDef[] = [
       sep,
       // MICRO-E p.1 · «Porta dentro…»: the one door (files into a document)
       cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint" }),
+      // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione»: each graph its system
+      cmd("georef", "gr.menu", "btn-georef", { title: "gr.menuTitle" }),
       { kind: "sub", id: "import", label: "toolbar.import", rows: [
         cmd("importGraphml", "toolbar.importGraphmlItem", "btn-import-graphml", { title: "toolbar.importGraphmlTitle" }),
         cmd("importMapping", "impmap.menu", "btn-import-mapping", { title: "impmap.menuTitle" }),

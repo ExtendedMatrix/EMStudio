@@ -299,13 +299,14 @@ import { ERROR_MANUAL_MIN, ERROR_PROFILES, normaliseErrorChoice, type ErrorChoic
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { mountGisSpace, type GisDocumentAsk, type GisSpace, type GisSpaceDeps } from "./gis-space";
 import { STUDY_ONLY, studyOnlyNodes } from "./study-only";
-import { epsgOf, georefSummary, parseShiftTxt } from "./georef";
+import { dataToThree, epsgOf, frameOffset, georefSummary, gridToScene, isIdentity4, mul4, parseShiftTxt, translation } from "./georef";
 import {
   actFor, documentNode, documentsOf, effective, entering, frameData, newIngress, stampParameters,
   type IngressAsset, type IngressState, type PointsFit, type V3 as IngressV3,
 } from "./ingress";
 import { closeIngress, ingressIsOpen, openIngress } from "./ingress-ui";
 import { proposalNow, proposeConversion, renderGeorefSection, renderSitePinProposal, type GeorefDeps } from "./georef-panel";
+import { cardModelsOf, chooseGraph, renderGeorefCard, renderGeorefInspector, type GeorefCardDeps, type GeorefGraph } from "./georef-card";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
@@ -4316,6 +4317,7 @@ function renderInspectorInto(host: HTMLElement): void {
       onJump: (id) => jumpTo(id),     // FONTE · a jump: «Indietro» comes back
       onSetSitePosition: () => openSitePickerOnGraph(),
       geoSections: (h) => renderGeoSections(h, owning),
+      geoNodeEditor: (h) => renderGeoNodeEditor(h, owning),
       onClose: () => select(null),
       // DAG · act on the document the thing LIVES in: an acquisition deleted
       // from the DTC canvas is deleted from the corpus, and `store!` there would
@@ -5917,6 +5919,7 @@ function renderInspectorIssues(host: HTMLElement): void {
  */
 function refreshInspector(): void {
   renderViewer();
+  if (grCardEl) paintGeorefCard();   // MICRO-P-GEOREF-PER-GRAFO · an undo, another graph
   refreshSurfaces("inspector");
   renderNameStrip();
   // SHIFT-A · «solo la selezione» follows the selection
@@ -17804,7 +17807,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 73;   // 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 74;   // 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -23612,6 +23615,86 @@ function renderGeoSections(host: HTMLElement, st: DocumentStore): void {
   });
   renderGeorefSection(host, st, deps);
 }
+// ── MICRO-P-GEOREF-PER-GRAFO (E.D., 17 Nov 2026) · the card «Georeferenziazione» ──
+// Opened from the Space's bar (⌖) and from File ▸ Georeferenziazione…, from the
+// GeoPositionNode's Inspector too. It edits the GeoPositionNode of ONE graph of
+// the active file (`georef-card.ts`): never the file, never every graph at once.
+let grCardEl: HTMLElement | null = null;
+function closeGeorefCard(): void { grCardEl?.remove(); grCardEl = null; }
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !grCardEl || document.querySelector(".modal.app-dialog")) return;
+  e.preventDefault();
+  e.stopPropagation();
+  closeGeorefCard();
+}, true);
+document.addEventListener("pointerdown", (e) => {
+  const tgt = e.target as Element | null;
+  if (!grCardEl || !tgt || grCardEl.contains(tgt) || tgt.closest?.(".modal, .app-dialog, .ctx-menu, [data-gr-open]")) return;
+  closeGeorefCard();
+}, true);
+/** the graphs of the active graph's file (a graph with no file: itself) */
+function georefCardGraphs(): GeorefGraph[] {
+  const act = emtree.active();
+  const f = emtree.fileOf(act);
+  const slots = f ? emtree.slotsOf(f.id) : act ? [act] : [];
+  return slots.map((sl) => ({ id: sl.id, label: slotLabel(sl), store: sl.store }));
+}
+function georefCardDeps(): GeorefCardDeps {
+  return {
+    graphs: georefCardGraphs,
+    activeId: () => emtree.active()?.id ?? null,
+    models: (st) => {
+      const sp = st === store ? baseSpace()
+        : buildSpace(st.doc, { isUnit: isStratigraphicType, resident: null, notFound: new Set(), refused: new Set(), sceneProxies: null, fromStore: !!assetStoreBase() });
+      return cardModelsOf(sp?.rms ?? [], (id) => st.node(id));
+    },
+    bridge: async () => {
+      const b = await bridgeUrl().catch(() => null);
+      return b && await fetch(`${b}/health`).then((r) => r.ok, () => false) ? b : null;
+    },
+    log: (m, ids) => logInfo(m, ids),
+    done: (m, st) => { toastUndo(m, st); refreshIssues(); refreshSurfaces("scene"); refreshInspector(); paintGeorefCard(); },
+    help: (text, probe) => helpGlyph(text, probe),
+    close: closeGeorefCard,
+  };
+}
+/** the card drawn again (an answer of the bridge, a step written, an undo): the
+ *  field being typed in keeps its text and its caret */
+function paintGeorefCard(): void {
+  const card = grCardEl;
+  if (!card) return;
+  const a = document.activeElement as HTMLInputElement | null;
+  const keep = a && card.contains(a) && a.dataset?.grField ? { k: a.dataset.grField, v: a.value, s: a.selectionStart, e: a.selectionEnd } : null;
+  const scroll = card.scrollTop;
+  renderGeorefCard(card, georefCardDeps(), paintGeorefCard);
+  card.scrollTop = scroll;
+  if (keep) {
+    const i = card.querySelector<HTMLInputElement>(`[data-gr-field="${CSS.escape(keep.k)}"]`);
+    if (i) { i.value = keep.v; i.focus(); try { i.setSelectionRange(keep.s, keep.e); } catch { /* a select */ } }
+  }
+}
+function openGeorefCard(slotId?: string | null): void {
+  closeGeorefCard();
+  chooseGraph(slotId ?? emtree.active()?.id ?? null);
+  const card = document.createElement("div");
+  card.className = "ccard gr-card";
+  card.dataset.grCard = "1";
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) card.addEventListener(ev, (e) => e.stopPropagation());
+  document.body.appendChild(card);
+  grCardEl = card;
+  paintGeorefCard();
+}
+document.getElementById("btn-georef")?.addEventListener("click", () => openGeorefCard());
+
+/** MICRO-P-GEOREF-PER-GRAFO p.4 · the GeoPositionNode's Inspector: the card's controls, the link */
+function renderGeoNodeEditor(host: HTMLElement, st: DocumentStore): boolean {
+  const slot = emtree.slots.find((sl) => sl.store === st);
+  if (!st.geoPositionNode()) return false;
+  renderGeorefInspector(host, { id: slot?.id ?? "", label: slot ? slotLabel(slot) : "", store: st }, georefCardDeps(),
+    () => refreshInspector(), () => openGeorefCard(slot?.id ?? null));
+  return true;
+}
+
 /** …the conversion proposed (a deprecated CRS, a ballpark operation): once, at the
  *  opening and after a SHIFT.txt */
 function proposeGeorefConversion(st: DocumentStore): void {
@@ -26952,7 +27035,7 @@ function narrativeSceneItems(node: EmNode): SceneItem[] {
       ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}),
       ...(alt ? { alt: { group: alt.group, role: alt.role, err: 10, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group } } : {}),
       tiles: r.resource?.tiles || undefined, edge: placementColour(r.genre) ?? undefined,
-      pose: isTiles ? undefined : poseOfNode(r.id), tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined,
+      pose: isTiles ? undefined : poseOfNode(r.id), tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined, frameMatrix: isTiles ? undefined : spaceFrameMatrix(r),
       ...(isTiles ? { tilesStart: { mode: "auto" as const } } : {}),
       bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
       tris: pv ? hardwareTris(pv) : null, textureSide: pv ? textureSideOf(pv) : null,
@@ -35966,7 +36049,18 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     plus.dataset.doorPlus = "1";
     plus.textContent = "+";
     plus.title = t("door.plusHint");
-    tail.replaceChildren(plus, colb, vis, sceneSearch(win), more);
+    // MICRO-P-GEOREF-PER-GRAFO · ⌖ the card «Georeferenziazione»: the graph's system and its models'
+    const geoB = document.createElement("button");
+    geoB.type = "button";
+    geoB.className = "scn-tg scn-georef";
+    geoB.dataset.grOpen = "1";
+    const gd = (store?.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
+    const ge = gd ? epsgOf(gd) : null;
+    geoB.textContent = "⌖";
+    geoB.title = ge === null ? t("gr.openNone") : t("gr.open", { epsg: String(ge) });
+    geoB.dataset.grEpsg = ge === null ? "" : String(ge);
+    geoB.addEventListener("click", (e) => { e.stopPropagation(); if (grCardEl) closeGeorefCard(); else openGeorefCard(); });
+    tail.replaceChildren(plus, geoB, colb, vis, sceneSearch(win), more);
     gisSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
@@ -36172,6 +36266,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),
         // MICRO tileset, shift e epoche · a tileset with a frame, relocated into the study's
         tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined,
+        // MICRO-P-GEOREF-PER-GRAFO · a model in its own system, into its graph's
+        frameMatrix: isTiles ? undefined : spaceFrameMatrix(r),
         // MICRO-ANTEPRIMA-AGGANCIATA · attached from a preview: its loading, framed when it lands
         // MICRO-TILE-METASHAPE · …else «Automatico», as a container's tileset: in «Manuale» the
         // Space showed the root alone (41 kB) however near the camera came (the Viewer keeps «Manuale»)
@@ -36466,6 +36562,54 @@ function spaceTilesRelocate(r: SpaceRM): SceneItem["tilesRelocate"] {
     if (!res.ok) noteRelocationRefused(r, key, res.error ?? "refused");
     return res;
   }
+}
+
+/** MICRO-P-GEOREF-PER-GRAFO (E.D., 17 Nov 2026) · a MODEL (a mesh) in a system
+ *  of its own — its `data.frame` — drawn in its graph's: the same CRS (or none),
+ *  a translation, its shift minus the graph's; another CRS, PROJ's transform
+ *  fitted by the bridge (`/geo/frame-fit`, the same engine as the GIS layers),
+ *  asked once per frame and graph georeference. The graph's azimuth is undone
+ *  after (`gridToScene`). null: the model is in its graph's system, or its
+ *  transform is not known (yet, or refused — said in the Log once). */
+const frameFits = new Map<string, { m: number[] | null; error?: string; said?: string; residual?: number } | "pending">();
+function spaceFrameMatrix(r: SpaceRM, st: DocumentStore | null = store): number[] | null {
+  if (!st || !r.frame || r.resource?.tiles) return null;
+  const geo = (st.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
+  const f = r.frame.frame;
+  const off = frameOffset(f, geo);
+  let m: number[] | null;
+  if (off) m = off.every((v) => v === 0) ? null : translation(off);
+  else {
+    const target = studyTarget(geo, { crs: null, shift: [0, 0, 0] });
+    if (!target) return null;
+    const key = `${f.crs}|${f.shift.join(",")}|${f.datum_operation ?? ""}>${target.crs}|${target.shift.join(",")}|${target.datum_operation ?? ""}`;
+    const have = frameFits.get(key);
+    if (have === "pending") return null;
+    if (!have) {
+      frameFits.set(key, "pending");
+      void (async () => {
+        const base = await bridgeUrl().catch(() => null);
+        let out: { m: number[] | null; error?: string; said?: string; residual?: number };
+        if (!base) out = { m: null, error: t("gr.noBridge") };
+        else {
+          const res = await fetch(`${base}/geo/frame-fit`, { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ frame: f, target }) }).catch(() => null);
+          const j = await res?.json().catch(() => null);
+          out = j?.ok ? { m: j.transform as number[], said: String(j.said ?? ""), residual: Number(j.residual_max_m) }
+            : { m: null, error: res?.status === 404 ? t("georef.oldBridge") : String(j?.error ?? res?.status ?? "?") };
+        }
+        frameFits.set(key, out);
+        if (out.error) logWarn(t("gr.fitRefused", { name: r.name, why: out.error }), [r.id]);
+        else logInfo(t("gr.fitDone", { name: r.name, said: out.said ?? "", mm: ((out.residual ?? 0) * 1000).toFixed(2) }), [r.id]);
+        refreshSpaceSoon(false);
+      })();
+      return null;
+    }
+    m = have.m;
+  }
+  const rot = gridToScene(geo);
+  const full = m ? mul4(rot, m) : rot;
+  return isIdentity4(full) ? null : dataToThree(full);
 }
 
 /** The epoch's Inspector: its chronology problems, and the tool. */
@@ -56024,7 +56168,7 @@ function vwSceneItems(s: VwScene): SceneItem[] {
       // MICRO-3DTILES p.2 · over the threshold the scene proposes the tileset of
       // the same model, as the Space does (the Doc did; the Viewer had lost it)
       tileset: r.tileset?.state === "resident" ? r.tileset.url || undefined : undefined,
-      pose: isTiles ? undefined : poseOfNode(r.id), bytes: v?.bytes ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
+      pose: isTiles ? undefined : poseOfNode(r.id), frameMatrix: isTiles ? undefined : spaceFrameMatrix(r), bytes: v?.bytes ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
       // MICRO tileset, shift e epoche · a tileset with a frame, relocated into the study's
       tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined });
   }

@@ -51,6 +51,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import struct
 import threading
 import time
@@ -1075,6 +1076,205 @@ def convert_point(src: int, dst: int, x: float, y: float) -> dict:
         return {"ok": False, "error": f"PROJ has no operation from EPSG:{src} to EPSG:{dst} for this point"}
     t, a, b = hit
     return {"ok": True, "x": a, "y": b, "same_grid": False, "op": _op_words(t)}
+
+
+# ── MICRO-P-GEOREF-PER-GRAFO (17 Nov 2026) · the card «Georeferenziazione» ──
+
+def _alnum(s: str) -> str:
+    return "".join(ch for ch in str(s).lower() if ch.isalnum())
+
+
+def crs_search(q: str, limit: int = 20) -> dict:
+    """The CRSs of PROJ's EPSG database a person means by ``q``: a code
+    («3844», «EPSG:3844») or words of the name, spaces and punctuation aside
+    («Stereo 70» → Pulkovo 1942(58) / Stereo70, 3844). Projected and
+    geographic 2D; the deprecated ones after the others, said."""
+    from pyproj.database import query_crs_info
+    from pyproj.enums import PJType
+    q = str(q or "").strip()
+    if not q:
+        return {"ok": True, "q": q, "hits": []}
+    m = re.fullmatch(r"(?:EPSG\s*:{0,2}\s*)?(\d+)", q, re.IGNORECASE)
+    rows = query_crs_info(auth_name="EPSG", pj_types=[PJType.PROJECTED_CRS, PJType.GEOGRAPHIC_2D_CRS])
+    if m:
+        hits = [r for r in rows if r.code == m.group(1)]
+    else:
+        whole = _alnum(q)
+        words = [_alnum(w) for w in re.split(r"[\s/,;]+", q) if _alnum(w)]
+        hits = [r for r in rows if whole in _alnum(r.name) or (words and all(w in _alnum(r.name) for w in words))]
+        hits.sort(key=lambda r: (r.deprecated, 0 if whole in _alnum(r.name) else 1, len(r.name), int(r.code)))
+    out = []
+    for r in hits[:max(1, int(limit))]:
+        a = r.area_of_use
+        out.append({"epsg": int(r.code), "name": r.name, "deprecated": bool(r.deprecated),
+                    "kind": "projected" if r.type == PJType.PROJECTED_CRS else "geographic",
+                    "area": a.name if a is not None else None})
+    return {"ok": True, "q": q, "hits": out, "more": max(0, len(hits) - len(out))}
+
+
+_OP_TYPES: dict = {}
+
+
+def _transformation_code(codes) -> "str | None":
+    """the code among a PROJ operation's steps that is a datum TRANSFORMATION
+    (an axis order change is a conversion: not the recipe)"""
+    from pyproj.crs import CoordinateOperation
+    for c in codes:
+        if c not in _OP_TYPES:
+            try:
+                _OP_TYPES[c] = CoordinateOperation.from_authority("EPSG", c.split(":", 1)[1]).type_name
+            except Exception:  # noqa: BLE001
+                _OP_TYPES[c] = "?"
+        if _OP_TYPES[c] in ("Transformation", "Concatenated Operation"):
+            return c
+    return None
+
+
+def datum_info(epsg: int, other=None, x=None, y=None) -> dict:
+    """The model of the Earth (the datum) of ``epsg``, whether ``other`` stands
+    on the same one, and the operations PROJ knows from that datum to WGS 84 —
+    each with its EPSG code, its name, its accuracy (m; None unknown), whether
+    it is a «ballpark» and whether its area holds the point ``(x, y)`` of
+    ``epsg``. ``best``: the most accurate available non-ballpark operation
+    whose area holds the point (the first of PROJ's list on a tie); none when
+    the CRS is on WGS 84 itself (nothing to convert)."""
+    from pyproj import CRS, Transformer
+    from pyproj.transformer import TransformerGroup
+    import em_gis
+    crs = CRS.from_epsg(int(epsg))
+    geod = crs.geodetic_crs
+    wgs = CRS.from_epsg(4326)
+    datum = crs.datum.name if crs.datum is not None else None
+    on_wgs = bool(geod is not None and geod.datum is not None
+                  and (geod.datum.name or "").startswith("World Geodetic System 1984"))
+    out = {"ok": True, "epsg": int(epsg), "name": crs.name, "datum": datum, "wgs84": on_wgs, "ops": [], "best": None}
+    if other not in (None, ""):
+        o = CRS.from_epsg(int(other))
+        od = o.datum.name if o.datum is not None else None
+        o_wgs = (od or "").startswith("World Geodetic System 1984")
+        out["other"] = {"epsg": int(other), "name": o.name, "datum": od, "wgs84": o_wgs,
+                        "same_datum": (od == datum) or (o_wgs and on_wgs),
+                        "same_grid": crs.is_projected and o.is_projected and same_grid(int(epsg), int(other))}
+    if on_wgs or geod is None:
+        return out
+    lonlat = None
+    if x is not None and y is not None:
+        try:
+            lonlat = Transformer.from_crs(crs, wgs, always_xy=True).transform(float(x), float(y))
+        except Exception:  # noqa: BLE001
+            lonlat = None
+    seen = set()
+    for t in TransformerGroup(geod, wgs, always_xy=True).transformers:
+        code = _transformation_code(em_gis._step_codes(t))
+        if code is None or code in seen:
+            continue
+        seen.add(code)
+        acc = t.accuracy if t.accuracy is not None and t.accuracy >= 0 else None
+        aou = t.area_of_use
+        here = None
+        if lonlat is not None and aou is not None:
+            lon, lat = lonlat
+            here = bool(aou.south <= lat <= aou.north and (aou.west <= lon <= aou.east
+                        or (aou.west > aou.east and (lon >= aou.west or lon <= aou.east))))
+        words = _op_words(t)
+        out["ops"].append({"code": code, "name": words["name"], "accuracy": acc, "ballpark": words["ballpark"],
+                           "area": aou.name if aou is not None else None, "here": here})
+    good = [o for o in out["ops"] if not o["ballpark"] and o["here"] is not False]
+    if good:
+        best = min(good, key=lambda o: (o["accuracy"] is None, o["accuracy"] or 0))
+        out["best"] = best["code"]
+    return out
+
+
+def check_datum_operation(value) -> dict:
+    """«EPSG:<code>» as s3Dgraphy's ``api.normalise_datum_operation`` writes
+    it (the bridge's copy, ``em_gis``, when that s3Dgraphy is not here), and
+    whether PROJ knows it"""
+    try:
+        from s3dgraphy.api import normalise_datum_operation as norm
+    except ImportError:                                     # pragma: no cover — a frozen bridge
+        import em_gis
+        norm = em_gis.normalise_datum_operation
+    try:
+        code = norm(value)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if code is None:
+        return {"ok": True, "code": None}
+    known = _transformation_code([code]) is not None
+    return {"ok": known, "code": code, **({} if known else {"error": f"{code} is not a datum transformation PROJ knows"})}
+
+
+def frame_fit(frame: dict, target: dict, *, half: float = 250.0, high: float = 50.0) -> dict:
+    """A MODEL whose frame is not its graph's: the affine transform (16
+    numbers, column-major, the data's axes — x east, y north, z up) from its
+    own coordinates (``frame``: its CRS minus its shift) to the graph's
+    (``target``: the GeoPositionNode's CRS minus its shift), fitted on 3×3×3
+    points of a box of ±``half`` m around the model's origin (±``high`` m in
+    height) and checked on 5×5×5 — the residual says, in metres, how far the
+    affine transform is from PROJ. The datum operations the two declare
+    (``datum_operation``: to WGS 84) are used when the datums differ: through
+    WGS 84, each side with its own; else PROJ's best. Heights pass through
+    (plus the difference of the two z shifts): the models carry them."""
+    from s3dgraphy.geometry.frame import _fit_affine, normalise_crs
+    import em_gis
+    a, b = normalise_crs((frame or {}).get("crs")), normalise_crs((target or {}).get("crs"))
+    if not a or not b:
+        return {"ok": False, "error": "a CRS is missing: the model or its graph declares none"}
+    fs = [float(v or 0) for v in (list((frame or {}).get("shift") or []) + [0, 0, 0])[:3]]
+    ts = [float(v or 0) for v in (list((target or {}).get("shift") or []) + [0, 0, 0])[:3]]
+    how = "same"
+    ops = {"model": None, "graph": None}
+    if a == b or em_gis.transformer(a, b)[1] == "same grid":
+        fn = lambda xs, ys: (list(xs), list(ys))
+        how = "same" if a == b else "same grid"
+    else:
+        fdo, tdo = (frame or {}).get("datum_operation"), (target or {}).get("datum_operation")
+        if fdo or tdo:
+            ma, why = em_gis.datum_op(a, fdo) if fdo else (None, None)
+            if fdo and ma is None:
+                return {"ok": False, "error": why}
+            mb, why = em_gis.datum_op(b, tdo) if tdo else (None, None)
+            if tdo and mb is None:
+                return {"ok": False, "error": why}
+            from pyproj import Transformer
+            ta = None if ma else Transformer.from_crs(a, "EPSG:4326", always_xy=True)
+            tb = None if mb else Transformer.from_crs("EPSG:4326", b, always_xy=True)
+
+            def fn(xs, ys):
+                X, Y = [], []
+                for x, y in zip(xs, ys):
+                    lon, lat = ma.inverse(x, y) if ma else ta.transform(x, y)
+                    e, n = mb.transform(lon, lat) if mb else tb.transform(lon, lat)
+                    X.append(e)
+                    Y.append(n)
+                return X, Y
+            ops = {"model": ma.words() if ma else None, "graph": mb.words() if mb else None}
+        else:
+            fn, how = em_gis.transformer(a, b)
+        how = "reprojected"
+
+    def cube(k):
+        s = [-1 + 2 * i / (k - 1) for i in range(k)]
+        return [(x * half, y * half, z * high) for x in s for y in s for z in s]
+
+    def to(pts):
+        X, Y = fn([p[0] + fs[0] for p in pts], [p[1] + fs[1] for p in pts])
+        return [(X[i] - ts[0], Y[i] - ts[1], p[2] + fs[2] - ts[2]) for i, p in enumerate(pts)]
+    P = cube(3)
+    rows = _fit_affine(P, to(P))
+    V = cube(5)
+    Q = to(V)
+    worst = sq = 0.0
+    for p, q in zip(V, Q):
+        r = [rows[i][0] * p[0] + rows[i][1] * p[1] + rows[i][2] * p[2] + rows[i][3] for i in range(3)]
+        d = math.dist(r, q)
+        worst = max(worst, d)
+        sq += d * d
+    m = rows + [[0.0, 0.0, 0.0, 1.0]]
+    return {"ok": True, "transform": [m[r][c] for c in range(4) for r in range(4)], "how": how,
+            "said": em_gis.converted_said(a, b, how), "residual_max_m": worst,
+            "residual_rms_m": math.sqrt(sq / len(V)), "datum": ops}
 
 
 # ── rasters ──────────────────────────────────────────────────────────────────
