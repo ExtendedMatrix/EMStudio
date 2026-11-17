@@ -318,6 +318,55 @@ def _check_graph(t: Template, reg: Registry, problems: List[Problem], draft: boo
                 )
             )
 
+        # SPEC §2.4 — what tells this box's node from its siblings'
+        if g.accepts:
+            if f.type != "quantity_list":
+                problems.append(Problem(where, "graph.accepts is for a quantity_list (the qualia "
+                                               f"its rows may declare), not a {f.type}"))
+            for q in g.accepts:
+                if q not in reg.qualia:
+                    problems.append(Problem(where, f"graph.accepts names qualia '{q}', which "
+                                                   f"s3Dgraphy does not declare (qualia types "
+                                                   f"{reg.qualia_version})"))
+        if g.where and g.verdict != "node":
+            problems.append(Problem(where, "graph.where says what the NODE of a 'node' verdict "
+                                           "carries; this verdict has no node"))
+        if g.sub_epoch_of:
+            parent = next((x for x in t.fields if x.id == g.sub_epoch_of), None)
+            if g.verdict != "node" or g.node_type != "EpochNode":
+                problems.append(Problem(where, "graph.sub_epoch_of is for a 'node' verdict on an "
+                                               "EpochNode"))
+            if parent is None or not parent.graph or parent.graph.verdict != "node" \
+                    or parent.graph.node_type != "EpochNode":
+                problems.append(Problem(where, f"graph.sub_epoch_of names '{g.sub_epoch_of}', "
+                                               "which is not a box writing an EpochNode"))
+        if g.find:
+            if f.type not in ("resource_ref_list", "record_ref_list"):
+                problems.append(Problem(where, "graph.find is for a reference list "
+                                               "(resource_ref_list, record_ref_list)"))
+            bad = [x for x in g.find if x not in ("name", "url")]
+            if bad:
+                problems.append(Problem(where, f"graph.find: {bad}; a reference is found by "
+                                               "'name' or 'url'"))
+    for name, a in t.anchors.items():
+        where = f"anchor '{name}'"
+        if a.node_type not in reg.node_types:
+            problems.append(Problem(where, f"node type '{a.node_type}' is not declared by "
+                                           f"s3Dgraphy (node datamodel {reg.node_datamodel_version})"))
+        if a.edge_type not in reg.edge_types:
+            problems.append(Problem(where, f"edge type '{a.edge_type}' is not declared by "
+                                           f"s3Dgraphy (connections datamodel {reg.connections_version})"))
+        if a.direction not in ("incoming", "outgoing"):
+            problems.append(Problem(where, f"direction must be incoming or outgoing, got {a.direction!r}"))
+        if a.scope != "unit":
+            fid = a.scope.split(":", 1)[1] if a.scope.startswith("value:") else None
+            if fid is None or not any(x.id == fid for x in t.fields):
+                problems.append(Problem(where, f"scope must be 'unit' or 'value:<field id>', got "
+                                               f"{a.scope!r}"))
+            if not a.match:
+                problems.append(Problem(where, "a shared anchor (scope value:<field>) says which "
+                                               "data key the value is matched on (match)"))
+
 
 def _check_version(t: Template, problems: List[Problem]) -> None:
     """The definition has a version of its own, and it is semver.

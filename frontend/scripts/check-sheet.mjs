@@ -133,10 +133,42 @@ for (const u of UNITS) {
 }
 eq(field("SU003", "descrizione").text, "Foundation of the walls", "SU003 DESCRIZIONE = the node's description");
 eq(field("SU003", "posteriore_a").value, ["SU050"], "SU003 POSTERIORE A = SU050 (is_after →)");
-ok(field("SU003", "definizione").lens, "DEFINIZIONE of the v10 read through the lens (a PropertyNode «definition»)");
+// MICRO-J §C (em_qualia_types 1.6.12): the v10's PropertyNode «definition» is
+// an INTERPRETATION under its historical name — INTERPRETAZIONE reads it,
+// DEFINIZIONE (the element, a term) never does and says where it went
+eq(field("SU003", "definizione").state, "empty", "DEFINIZIONE: the element is empty, the old property is not read as it");
+eq(field("SU003", "definizione").how.key, "sheet.how.elementAlias", "…and the box says where the old property went");
+eq(field("SU003", "interpretazione").text, "Foundation of the external walls", "INTERPRETAZIONE reads the «definition» PropertyNode");
+eq(field("SU003", "interpretazione").how.key, "sheet.how.lensAlias", "…through the lens, under its historical name, said");
 eq(field("SU003", "ente_responsabile").state, "silent", "ENTE RESPONSABILE: not in the graph (blocked_on)");
-eq(field("SU003", "anno").state, "open", "ANNO: hangs on an anchor the definition does not define");
-eq(field("SU003", "periodo").state, "ambiguous", "PERIODO and FASE share has_first_epoch: unattributed");
+// 3.0.0 (SPEC §2.5): ANNO hangs on a DEFINED act — empty until the act is there
+eq(field("SU003", "anno").state, "empty", "ANNO: the excavation act, not in the v10 yet");
+eq(field("SU003", "anno").how.key, "sheet.how.actNone", "…and it says so");
+eq(field("SU003", "responsabile_compilazione").readonly?.key, "sheet.ro.actFirst", "a responsible waits for its act");
+// 3.0.0 (SPEC §2.4): no box is undecided any more on the v10
+for (const u of UNITS) eq(S.fillCounts(read(u)).ambiguous, [], `${u}: nothing undecided`);
+{
+  // FASE is the sub-epoch of PERIODO: a unit whose first epoch has a parent
+  const subEdges = st.liveEdges().filter((e) => e.edge_type === "has_sub_epoch");
+  const phases = new Set(subEdges.map((e) => e.target));
+  const inPhase = st.liveNodes().find((n) => S.isSheetUnit(n) && st.liveEdges().some((e) => e.source === n.id && e.edge_type === "has_first_epoch" && phases.has(e.target)));
+  ok(subEdges.length > 0 && !!inPhase, `the v10 has ${subEdges.length} sub-epochs and a unit in one`);
+  if (inPhase) {
+    const rr = S.readUnit(def, G(), inPhase.id, "it");
+    const ph = st.liveEdges().find((e) => e.source === inPhase.id && e.edge_type === "has_first_epoch" && phases.has(e.target)).target;
+    const par = subEdges.find((e) => e.target === ph).source;
+    eq([rr.fields.get("periodo").nodes, rr.fields.get("fase").nodes], [[par], [ph]], `${inPhase.name}: PERIODO the parent epoch, FASE the child`);
+  }
+  const plain = byName("SU003");
+  eq(read("SU003").fields.get("fase").state, "empty", "SU003: an epoch without a parent is PERIODO, FASE empty");
+  ok(read("SU003").fields.get("periodo").state === "filled" || !st.liveEdges().some((e) => e.source === plain.id && e.edge_type === "has_first_epoch"), "SU003: PERIODO filled from its first epoch");
+}
+{
+  // MISURE accepts the dimensional qualia: a height is MISURE's without a sign
+  const withH = st.liveNodes().find((n) => S.isSheetUnit(n) && S.readUnit(def, G(), n.id, "it").fields.get("misure").state === "filled");
+  ok(!!withH, `MISURE read from the accepted qualia (${withH?.name ?? "none"})`);
+  if (withH) ok(S.readUnit(def, G(), withH.id, "it").fields.get("misure").value.every((r) => def.recipe.fields.misure.property.accepts.includes(r.qualia)), "…only qualia it accepts");
+}
 eq(field("USV106", "formazione_segno").value, undefined, "a USVn is neither positiva nor negativa");
 
 // 4 · edit → undo
@@ -155,11 +187,11 @@ eq([sc.nodes[0], sc.lens ?? false], [lensProp, false], "…and it is now this bo
 ok(/w3id.org\/extendedmatrix\/vocab\/us-stato-conservazione/.test(st.node(lensProp).description), "a concept of the provisional vocabulary, not the word");
 st.undo();
 ok(field("SU003", "stato_conservazione").lens, "undo: the old value, unmarked");
-ok(apply(S.planEdit(def, G(), su3, "interpretazione", "Fondazione perimetrale", "it")), "INTERPRETAZIONE (new property)");
-eq(st.doc.graph.nodes.length, n0 + 1, "one PropertyNode");
+ok(apply(S.planEdit(def, G(), su3, "interpretazione", "Fondazione perimetrale", "it")), "INTERPRETAZIONE (the old «definition» property)");
+eq(st.doc.graph.nodes.length, n0, "it changes where it lives: no second node");
 eq(field("SU003", "interpretazione").text, "Fondazione perimetrale", "read back by its mark");
 st.undo();
-eq(st.doc.graph.nodes.length, n0, "undo: gone");
+eq(field("SU003", "interpretazione").text, "Foundation of the external walls", "undo: back");
 ok(apply(S.planEdit(def, G(), su3, "definizione", "fondazione in muratura", "it")) || true, "DEFINIZIONE");
 const dv = byName("SU003").data.definition;
 ok(dv && (dv.concept || dv.label), "the element data.definition written");
@@ -175,7 +207,39 @@ eq(field("USV106", "attivita").text, act1.name, "…its edge, its pointer by rol
 st.undo();
 eq(JSON.stringify(st.doc.graph), before, "five edits, five undos: the graph as it was");
 eq(S.planEdit(def, G(), su3, "us", "SU999", "it").refused.key, "sheet.ro.identity", "the number is not changed from the sheet");
-eq(S.planEdit(def, G(), su3, "anno", "2024", "it").refused.key, "sheet.ro.anchor", "an anchor not defined: not saved, said");
+// 3.0.0 · the acts (SPEC §2.5): a date makes the act, one delta, one undo
+const e0 = st.doc.graph.edges.length;
+ok(apply(S.planEdit(def, G(), su3, "data_rilevamento", "2013-07-12", "it")), "DATA RILEVAMENTO written");
+const rec = S.actOf(def, G(), su3, "recording_act");
+eq([rec?.node_type, rec?.data?.act_kind, rec?.data?.act_start], ["ActivityNodeGroup", "recording", "2013-07-12"], "…the recording act, its kind, its time");
+eq([st.doc.graph.nodes.length, st.doc.graph.edges.length], [n0 + 1, e0 + 1], "one act, one is_in_activity");
+eq(field("SU003", "data_rilevamento").text, "2013-07-12", "…read back");
+eq(field("SU003", "attivita").nodes.includes(rec.id), false, "an act is not ATTIVITÀ");
+ok(apply(S.planEdit(def, G(), su3, "anno", "2013", "it")), "ANNO written");
+const exc = S.actOf(def, G(), su3, "excavation_activity");
+eq([exc?.data?.act_kind, exc?.data?.act_start], ["excavation", 2013], "the excavation act of 2013");
+const su4 = byName("SU004").id;
+ok(apply(S.planEdit(def, G(), su4, "anno", "2013", "it")), "SU004: the same year");
+eq(S.actOf(def, G(), su4, "excavation_activity")?.id, exc.id, "…the SAME excavation act (shared by year)");
+st.undo(); st.undo(); st.undo();
+eq(JSON.stringify(st.doc.graph), before, "the acts undone: the graph as it was");
+// 3.0.0 · the record status (SPEC §5)
+ok(apply(S.planStatus(def, su3, "revised")), "the record status written");
+eq(read("SU003").status.key, "revised", "…read back");
+eq(S.recordOf(def, read("SU003")).status, "revised", "…and in the record for the print");
+st.undo();
+eq(read("SU003").status.key, null, "undo: not said");
+// MICRO-J §C · the migration: one delta, one undo, ids untouched
+const legacy = S.legacyProperties(G());
+eq(legacy.length, 99, "the v10's 99 PropertyNodes «definition»");
+ok(apply(S.planLegacyRename(G())), "renamed as one delta");
+eq(S.legacyProperties(G()).length, 0, "none left");
+const renamed = st.node(legacy[0].id);
+eq([renamed.name, renamed.data.property_type], ["interpretation", "interpretation"], "same id, the new name");
+eq(field("SU003", "interpretazione").how.key, "sheet.how.lensProperty", "INTERPRETAZIONE reads it by its own name now");
+st.undo();
+eq(S.legacyProperties(G()).length, 99, "undo: all 99 back");
+eq(JSON.stringify(st.doc.graph), before, "migration undone: the graph as it was");
 
 // 5 · relations ↔ edges
 const p1 = S.planRefAdd(def, G(), su3, "copre", "SU050");

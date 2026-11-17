@@ -3,7 +3,7 @@
   "format_version": "1",
   "header": {
     "id": "iccd-us-2021",
-    "version": "2.0.1",
+    "version": "3.0.0",
     "standard": {
       "authority": "ICCD",
       "code": "US",
@@ -158,21 +158,48 @@
           "de"
         ],
         "provisional_for": "iccd-us-affidabilita"
+      },
+      {
+        "id": "em-place-level",
+        "authority": "Extended Matrix",
+        "status": "resolvable",
+        "origin": "originated",
+        "version": "0.1.0",
+        "uri": "https://w3id.org/extendedmatrix/vocab/place-level/",
+        "license": "CC BY 4.0"
+      },
+      {
+        "id": "em-documentation-act",
+        "authority": "Extended Matrix",
+        "status": "resolvable",
+        "origin": "originated",
+        "version": "0.1.0",
+        "uri": "https://w3id.org/extendedmatrix/vocab/documentation-act/",
+        "license": "CC BY 4.0"
+      },
+      {
+        "id": "em-record-status",
+        "authority": "Extended Matrix",
+        "status": "resolvable",
+        "origin": "originated",
+        "version": "0.1.0",
+        "uri": "https://w3id.org/extendedmatrix/vocab/record-status/",
+        "license": "CC BY 4.0"
       }
     ],
-    "digest": "sha256:4802d763044f3eb47e08a118f94a0f194b4489d0dd129e1002482837a66bd0fb",
+    "digest": "sha256:1c78ba15bb59770a2e8c11f730db739b1564b3a59d6a24ea4b67dab959746989",
     "datamodel": {
-      "nodes": "1.6.46",
+      "nodes": "1.6.47",
       "node_registry": "1.6.41",
       "connections": "1.6.55",
       "visual_rules": "1.6.47",
-      "qualia": "1.6.11",
-      "translations": "1.16",
-      "digest": "sha256:5c5dcf150e758d734fe3f778d95ff7791f6257725828b4dc4cdb842a4d307ffd",
+      "qualia": "1.6.12",
+      "translations": "1.17",
+      "digest": "sha256:5f48e71d48850da08200c7516ddf355a75abd4dab77a02728d82bb8390b97af8",
       "files": {
         "nodes": {
-          "digest": "sha256:1b987b65e96116ca8bbc0c640a971cfb93270598a93e10a7690d06c983f70ed3",
-          "version": "1.6.46"
+          "digest": "sha256:5dc72aec337b166ada9ef536747a8f55b585411dfbbf5c6f37a9b07740524d8e",
+          "version": "1.6.47"
         },
         "node_registry": {
           "digest": "sha256:5669c0824d7149e22a25d424645b3b78b7c698c5338f3fd639d75c60b31483da",
@@ -183,14 +210,14 @@
           "version": "1.6.55"
         },
         "qualia": {
-          "digest": "sha256:f7ac5853dddacd222e6b4eb75fe943a6a44e594742100160e6fad97f7c69da9c",
-          "version": "1.6.11"
+          "digest": "sha256:bfabd911a2b4d01c4b06cceff4f6171e35e18db8054cc7255ff43f1131392d95",
+          "version": "1.6.12"
         }
       },
       "em_ttl": "1.6.26",
-      "s3dgraphy": "1.6.0.dev114",
+      "s3dgraphy": "1.6.0.dev115",
       "taken_from": {
-        "git_commit": "7ffdc4ae58bdadc8b029ea998358c2b19d369db3",
+        "git_commit": "ac75461598229630c34165a9a9f19b304ce7bcd5",
         "git_dirty": false
       },
       "snapshot": "registry/s3dgraphy-snapshot.json"
@@ -2066,6 +2093,25 @@
         },
         "when_empty": "not decided by the definition",
         "note": "decided when the unit is CREATED: update_field addresses name, description and data.* only, so an existing unit's node_type cannot be changed by an operation of this vocabulary"
+      },
+      "record_status": {
+        "em_json": "data.record_status",
+        "scheme": "em-record-status",
+        "values": [
+          "from_field",
+          "revised"
+        ],
+        "steps": [
+          {
+            "emit": {
+              "op": "update_field",
+              "node_id": "$unit",
+              "field": "data.record_status",
+              "value": "$record.status"
+            },
+            "when": "given"
+          }
+        ]
       }
     },
     "fields": {
@@ -2086,39 +2132,22 @@
       "anno": {
         "verdict": "property",
         "each": false,
-        "resolve": {
-          "$prop": {
-            "mint": true
-          }
+        "element": {
+          "name": "act_start",
+          "declared_on": "ActivityNodeGroup",
+          "value": "date"
         },
         "steps": [
           {
             "emit": {
-              "op": "add_node",
-              "node": {
-                "id": "$prop",
-                "node_type": "property",
-                "name": "campaign_year",
-                "description": "$value",
-                "data": {
-                  "property_type": "campaign_year"
-                }
-              }
-            }
-          },
-          {
-            "emit": {
-              "op": "add_edge",
-              "edge_type": "has_property",
-              "source": "$anchor.excavation_activity",
-              "target": "$prop"
+              "op": "update_field",
+              "node_id": "$anchor.excavation_activity",
+              "field": "data.act_start",
+              "value": "$value"
             }
           }
         ],
-        "property": {
-          "property_type": "campaign_year",
-          "registered_qualia": false
-        }
+        "scheme": null
       },
       "ufficio_mic": {
         "verdict": "none",
@@ -2182,7 +2211,11 @@
           "$node": {
             "find": {
               "node_type": "LocationNodeGroup",
-              "name": "$value"
+              "name": "$value",
+              "data": {
+                "kind": "toponym",
+                "level": "sito"
+              }
             },
             "create": true
           }
@@ -2194,7 +2227,11 @@
               "node": {
                 "id": "$node",
                 "node_type": "LocationNodeGroup",
-                "name": "$value"
+                "name": "$value",
+                "data": {
+                  "kind": "toponym",
+                  "level": "sito"
+                }
               }
             },
             "when": "created"
@@ -2220,6 +2257,10 @@
             "predicate": "http://www.cidoc-crm.org/cidoc-crm/P53_has_former_or_current_location",
             "subject": "source"
           }
+        },
+        "where": {
+          "kind": "toponym",
+          "level": "sito"
         }
       },
       "area": {
@@ -2229,7 +2270,11 @@
           "$node": {
             "find": {
               "node_type": "LocationNodeGroup",
-              "name": "$value"
+              "name": "$value",
+              "data": {
+                "kind": "study",
+                "level": "area"
+              }
             },
             "create": true
           }
@@ -2241,7 +2286,11 @@
               "node": {
                 "id": "$node",
                 "node_type": "LocationNodeGroup",
-                "name": "$value"
+                "name": "$value",
+                "data": {
+                  "kind": "study",
+                  "level": "area"
+                }
               }
             },
             "when": "created"
@@ -2267,6 +2316,10 @@
             "predicate": "http://www.cidoc-crm.org/cidoc-crm/P53_has_former_or_current_location",
             "subject": "source"
           }
+        },
+        "where": {
+          "kind": "study",
+          "level": "area"
         }
       },
       "saggio": {
@@ -2276,7 +2329,11 @@
           "$node": {
             "find": {
               "node_type": "LocationNodeGroup",
-              "name": "$value"
+              "name": "$value",
+              "data": {
+                "kind": "study",
+                "level": "saggio"
+              }
             },
             "create": true
           }
@@ -2288,7 +2345,11 @@
               "node": {
                 "id": "$node",
                 "node_type": "LocationNodeGroup",
-                "name": "$value"
+                "name": "$value",
+                "data": {
+                  "kind": "study",
+                  "level": "saggio"
+                }
               }
             },
             "when": "created"
@@ -2314,6 +2375,10 @@
             "predicate": "http://www.cidoc-crm.org/cidoc-crm/P53_has_former_or_current_location",
             "subject": "source"
           }
+        },
+        "where": {
+          "kind": "study",
+          "level": "saggio"
         }
       },
       "ambiente": {
@@ -2322,8 +2387,12 @@
         "resolve": {
           "$node": {
             "find": {
-              "node_type": "FunctionalUnitNodeGroup",
-              "name": "$value"
+              "node_type": "LocationNodeGroup",
+              "name": "$value",
+              "data": {
+                "kind": "functional",
+                "level": "ambiente"
+              }
             },
             "create": true
           }
@@ -2334,8 +2403,12 @@
               "op": "add_node",
               "node": {
                 "id": "$node",
-                "node_type": "FunctionalUnitNodeGroup",
-                "name": "$value"
+                "node_type": "LocationNodeGroup",
+                "name": "$value",
+                "data": {
+                  "kind": "functional",
+                  "level": "ambiente"
+                }
               }
             },
             "when": "created"
@@ -2343,24 +2416,28 @@
           {
             "emit": {
               "op": "add_edge",
-              "edge_type": "is_in_functional_unit",
+              "edge_type": "is_in_location",
               "source": "$unit",
               "target": "$node"
             }
           }
         ],
         "node": {
-          "class": "FunctionalUnitNodeGroup",
-          "node_type": "FunctionalUnitNodeGroup"
+          "class": "LocationNodeGroup",
+          "node_type": "LocationNodeGroup"
         },
         "edge": {
           "canonical": true,
           "symmetric": false,
-          "reverse": "includes_in_functional_unit",
+          "reverse": "includes_location",
           "rdf": {
-            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P46i_forms_part_of",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P53_has_former_or_current_location",
             "subject": "source"
           }
+        },
+        "where": {
+          "kind": "functional",
+          "level": "ambiente"
         }
       },
       "posizione": {
@@ -2407,7 +2484,11 @@
           "$node": {
             "find": {
               "node_type": "LocationNodeGroup",
-              "name": "$value"
+              "name": "$value",
+              "data": {
+                "kind": "study",
+                "level": "settore"
+              }
             },
             "create": true
           }
@@ -2419,7 +2500,11 @@
               "node": {
                 "id": "$node",
                 "node_type": "LocationNodeGroup",
-                "name": "$value"
+                "name": "$value",
+                "data": {
+                  "kind": "study",
+                  "level": "settore"
+                }
               }
             },
             "when": "created"
@@ -2445,6 +2530,10 @@
             "predicate": "http://www.cidoc-crm.org/cidoc-crm/P53_has_former_or_current_location",
             "subject": "source"
           }
+        },
+        "where": {
+          "kind": "study",
+          "level": "settore"
         }
       },
       "quadrato": {
@@ -2454,7 +2543,11 @@
           "$node": {
             "find": {
               "node_type": "LocationNodeGroup",
-              "name": "$value"
+              "name": "$value",
+              "data": {
+                "kind": "study",
+                "level": "quadrato"
+              }
             },
             "create": true
           }
@@ -2466,7 +2559,11 @@
               "node": {
                 "id": "$node",
                 "node_type": "LocationNodeGroup",
-                "name": "$value"
+                "name": "$value",
+                "data": {
+                  "kind": "study",
+                  "level": "quadrato"
+                }
               }
             },
             "when": "created"
@@ -2492,6 +2589,10 @@
             "predicate": "http://www.cidoc-crm.org/cidoc-crm/P53_has_former_or_current_location",
             "subject": "source"
           }
+        },
+        "where": {
+          "kind": "study",
+          "level": "quadrato"
         }
       },
       "quote": {
@@ -2529,7 +2630,17 @@
         ],
         "property": {
           "per_item_from": "$item.qualia",
-          "box": "elevation"
+          "box": "elevation",
+          "accepts": [
+            "elevation",
+            "elevation_relative",
+            "elevation_min_absolute",
+            "elevation_max_absolute",
+            "elevation_min_relative",
+            "elevation_max_relative",
+            "elevation_min_usm",
+            "elevation_max_usm"
+          ]
         },
         "defaults": {
           "$item.qualia": "elevation"
@@ -2594,9 +2705,17 @@
           "$node": {
             "find": {
               "node_type": "document",
-              "url": "$item"
+              "any": [
+                {
+                  "name": "$item"
+                },
+                {
+                  "url": "$item"
+                }
+              ]
             },
-            "create": true
+            "create": true,
+            "when_missing": "created by url, never by name: a document is numbered by the door"
           }
         },
         "steps": [
@@ -2644,9 +2763,17 @@
           "$node": {
             "find": {
               "node_type": "document",
-              "url": "$item"
+              "any": [
+                {
+                  "name": "$item"
+                },
+                {
+                  "url": "$item"
+                }
+              ]
             },
-            "create": true
+            "create": true,
+            "when_missing": "created by url, never by name: a document is numbered by the door"
           }
         },
         "steps": [
@@ -2694,9 +2821,17 @@
           "$node": {
             "find": {
               "node_type": "document",
-              "url": "$item"
+              "any": [
+                {
+                  "name": "$item"
+                },
+                {
+                  "url": "$item"
+                }
+              ]
             },
-            "create": true
+            "create": true,
+            "when_missing": "created by url, never by name: a document is numbered by the door"
           }
         },
         "steps": [
@@ -2744,9 +2879,17 @@
           "$node": {
             "find": {
               "node_type": "document",
-              "url": "$item"
+              "any": [
+                {
+                  "name": "$item"
+                },
+                {
+                  "url": "$item"
+                }
+              ]
             },
-            "create": true
+            "create": true,
+            "when_missing": "created by url, never by name: a document is numbered by the door"
           }
         },
         "steps": [
@@ -2793,7 +2936,11 @@
         "resolve": {
           "$item": {
             "find": {
-              "human_key": "$item",
+              "any": [
+                {
+                  "name": "$item"
+                }
+              ],
               "kind": "special_find_record"
             },
             "when_missing": "not decided by the definition"
@@ -3113,7 +3260,19 @@
         ],
         "property": {
           "per_item_from": "$item.qualia",
-          "box": "measurements"
+          "box": "measurements",
+          "accepts": [
+            "height",
+            "width",
+            "depth",
+            "diameter",
+            "length",
+            "thickness",
+            "weight",
+            "volume",
+            "area",
+            "circumference"
+          ]
         }
       },
       "stato_conservazione": {
@@ -3715,7 +3874,8 @@
               "edge_type": "has_first_epoch",
               "source": "$unit",
               "target": "$node"
-            }
+            },
+            "when": "empty:fase"
           }
         ],
         "node": {
@@ -3731,7 +3891,8 @@
             "extension": "https://w3id.org/em/ontology#firstAttestedInEpoch",
             "subject": "source"
           }
-        }
+        },
+        "yields_to": "fase"
       },
       "fase": {
         "verdict": "node",
@@ -3741,7 +3902,8 @@
             "find": {
               "node_type": "EpochNode",
               "id": "$value.ref",
-              "name": "$value"
+              "name": "$value",
+              "sub_epoch_of": "$field.periodo.node"
             },
             "create": true
           }
@@ -3755,6 +3917,15 @@
                 "node_type": "EpochNode",
                 "name": "$value"
               }
+            },
+            "when": "created"
+          },
+          {
+            "emit": {
+              "op": "add_edge",
+              "edge_type": "has_sub_epoch",
+              "source": "$field.periodo.node",
+              "target": "$node"
             },
             "when": "created"
           },
@@ -3780,7 +3951,11 @@
             "extension": "https://w3id.org/em/ontology#firstAttestedInEpoch",
             "subject": "source"
           }
-        }
+        },
+        "sub_epoch_of": "periodo",
+        "after": [
+          "periodo"
+        ]
       },
       "attivita": {
         "verdict": "node",
@@ -4063,7 +4238,7 @@
             "emit": {
               "op": "add_edge",
               "edge_type": "has_author",
-              "source": "$unit",
+              "source": "$anchor.excavation_activity",
               "target": "$node"
             }
           }
@@ -4081,44 +4256,30 @@
             "extension": "https://w3id.org/em/ontology#hasAuthor",
             "subject": "source"
           }
-        }
+        },
+        "after": [
+          "anno"
+        ]
       },
       "data_rilevamento": {
         "verdict": "property",
         "each": false,
-        "resolve": {
-          "$prop": {
-            "mint": true
-          }
+        "element": {
+          "name": "act_start",
+          "declared_on": "ActivityNodeGroup",
+          "value": "date"
         },
         "steps": [
           {
             "emit": {
-              "op": "add_node",
-              "node": {
-                "id": "$prop",
-                "node_type": "property",
-                "name": "field_recording_date",
-                "description": "$value",
-                "data": {
-                  "property_type": "field_recording_date"
-                }
-              }
-            }
-          },
-          {
-            "emit": {
-              "op": "add_edge",
-              "edge_type": "has_property",
-              "source": "$anchor.recording_act",
-              "target": "$prop"
+              "op": "update_field",
+              "node_id": "$anchor.recording_act",
+              "field": "data.act_start",
+              "value": "$value"
             }
           }
         ],
-        "property": {
-          "property_type": "field_recording_date",
-          "registered_qualia": false
-        }
+        "scheme": null
       },
       "responsabile_compilazione": {
         "verdict": "node",
@@ -4149,7 +4310,7 @@
             "emit": {
               "op": "add_edge",
               "edge_type": "has_author",
-              "source": "$unit",
+              "source": "$anchor.recording_act",
               "target": "$node"
             }
           }
@@ -4172,39 +4333,22 @@
       "data_rielaborazione": {
         "verdict": "property",
         "each": false,
-        "resolve": {
-          "$prop": {
-            "mint": true
-          }
+        "element": {
+          "name": "act_start",
+          "declared_on": "ActivityNodeGroup",
+          "value": "date"
         },
         "steps": [
           {
             "emit": {
-              "op": "add_node",
-              "node": {
-                "id": "$prop",
-                "node_type": "property",
-                "name": "revision_date",
-                "description": "$value",
-                "data": {
-                  "property_type": "revision_date"
-                }
-              }
-            }
-          },
-          {
-            "emit": {
-              "op": "add_edge",
-              "edge_type": "has_property",
-              "source": "$anchor.revision_act",
-              "target": "$prop"
+              "op": "update_field",
+              "node_id": "$anchor.revision_act",
+              "field": "data.act_start",
+              "value": "$value"
             }
           }
         ],
-        "property": {
-          "property_type": "revision_date",
-          "registered_qualia": false
-        }
+        "scheme": null
       },
       "responsabile_rielaborazione": {
         "verdict": "node",
@@ -4235,7 +4379,7 @@
             "emit": {
               "op": "add_edge",
               "edge_type": "has_author",
-              "source": "$unit",
+              "source": "$anchor.revision_act",
               "target": "$node"
             }
           }
@@ -4259,36 +4403,201 @@
     "anchors": {
       "excavation_activity": {
         "declared_by": [
-          "anno"
+          "anno",
+          "responsabile_scientifico"
         ],
-        "defined": false
+        "defined": true,
+        "node": {
+          "class": "ActivityNodeGroup",
+          "node_type": "ActivityNodeGroup"
+        },
+        "where": {
+          "act_kind": "excavation"
+        },
+        "scope": "value:anno",
+        "resolve": {
+          "$anchor.excavation_activity": {
+            "find": {
+              "node_type": "ActivityNodeGroup",
+              "data": {
+                "act_kind": "excavation",
+                "act_start": "$values.anno"
+              }
+            },
+            "create": true,
+            "when": "a field that hangs on it has a value"
+          }
+        },
+        "steps": [
+          {
+            "emit": {
+              "op": "add_node",
+              "node": {
+                "id": "$anchor.excavation_activity",
+                "node_type": "ActivityNodeGroup",
+                "name": "$values.anno",
+                "data": {
+                  "act_kind": "excavation",
+                  "act_start": "$values.anno"
+                }
+              }
+            },
+            "when": "created"
+          },
+          {
+            "emit": {
+              "op": "add_edge",
+              "edge_type": "is_in_activity",
+              "source": "$unit",
+              "target": "$anchor.excavation_activity"
+            },
+            "when": "absent"
+          }
+        ],
+        "edge": {
+          "canonical": true,
+          "symmetric": false,
+          "reverse": "includes_in_activity",
+          "rdf": {
+            "extension": "https://w3id.org/em/ontology#isInActivity",
+            "subject": "source"
+          }
+        },
+        "note": "Lo scavo è uno per campagna: lo condividono le unità dello stesso anno."
       },
       "recording_act": {
         "declared_by": [
-          "data_rilevamento"
+          "data_rilevamento",
+          "responsabile_compilazione"
         ],
-        "defined": false
+        "defined": true,
+        "node": {
+          "class": "ActivityNodeGroup",
+          "node_type": "ActivityNodeGroup"
+        },
+        "where": {
+          "act_kind": "recording"
+        },
+        "scope": "unit",
+        "resolve": {
+          "$anchor.recording_act": {
+            "find": {
+              "node_type": "ActivityNodeGroup",
+              "data": {
+                "act_kind": "recording"
+              },
+              "linked_to": {
+                "unit": "$unit",
+                "edge_type": "is_in_activity"
+              }
+            },
+            "create": true,
+            "when": "a field that hangs on it has a value"
+          }
+        },
+        "steps": [
+          {
+            "emit": {
+              "op": "add_node",
+              "node": {
+                "id": "$anchor.recording_act",
+                "node_type": "ActivityNodeGroup",
+                "name": "$unit.name",
+                "data": {
+                  "act_kind": "recording"
+                }
+              }
+            },
+            "when": "created"
+          },
+          {
+            "emit": {
+              "op": "add_edge",
+              "edge_type": "is_in_activity",
+              "source": "$unit",
+              "target": "$anchor.recording_act"
+            },
+            "when": "absent"
+          }
+        ],
+        "edge": {
+          "canonical": true,
+          "symmetric": false,
+          "reverse": "includes_in_activity",
+          "rdf": {
+            "extension": "https://w3id.org/em/ontology#isInActivity",
+            "subject": "source"
+          }
+        },
+        "note": "Un rilevamento per unità: la scheda compilata sul campo."
       },
       "revision_act": {
         "declared_by": [
-          "data_rielaborazione"
+          "data_rielaborazione",
+          "responsabile_rielaborazione"
         ],
-        "defined": false
+        "defined": true,
+        "node": {
+          "class": "ActivityNodeGroup",
+          "node_type": "ActivityNodeGroup"
+        },
+        "where": {
+          "act_kind": "revision"
+        },
+        "scope": "unit",
+        "resolve": {
+          "$anchor.revision_act": {
+            "find": {
+              "node_type": "ActivityNodeGroup",
+              "data": {
+                "act_kind": "revision"
+              },
+              "linked_to": {
+                "unit": "$unit",
+                "edge_type": "is_in_activity"
+              }
+            },
+            "create": true,
+            "when": "a field that hangs on it has a value"
+          }
+        },
+        "steps": [
+          {
+            "emit": {
+              "op": "add_node",
+              "node": {
+                "id": "$anchor.revision_act",
+                "node_type": "ActivityNodeGroup",
+                "name": "$unit.name",
+                "data": {
+                  "act_kind": "revision"
+                }
+              }
+            },
+            "when": "created"
+          },
+          {
+            "emit": {
+              "op": "add_edge",
+              "edge_type": "is_in_activity",
+              "source": "$unit",
+              "target": "$anchor.revision_act"
+            },
+            "when": "absent"
+          }
+        ],
+        "edge": {
+          "canonical": true,
+          "symmetric": false,
+          "reverse": "includes_in_activity",
+          "rdf": {
+            "extension": "https://w3id.org/em/ontology#isInActivity",
+            "subject": "source"
+          }
+        },
+        "note": "Una rielaborazione per unità."
       }
     },
-    "open": [
-      {
-        "field": "anno",
-        "what": "attaches_to 'excavation_activity': the definition names it and does not define it — the statement hangs on $anchor.excavation_activity, which the creator has to resolve"
-      },
-      {
-        "field": "data_rilevamento",
-        "what": "attaches_to 'recording_act': the definition names it and does not define it — the statement hangs on $anchor.recording_act, which the creator has to resolve"
-      },
-      {
-        "field": "data_rielaborazione",
-        "what": "attaches_to 'revision_act': the definition names it and does not define it — the statement hangs on $anchor.revision_act, which the creator has to resolve"
-      }
-    ]
+    "open": []
   }
 }

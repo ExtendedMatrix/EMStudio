@@ -6,8 +6,8 @@
 # `sync-datamodels.sh`): the app does not read another repository at runtime,
 # so the compiled form is COPIED in and committed. Never edit the copies.
 #
-#   ./scripts/sync-schede.sh                          # from the sibling checkout
-#   ./scripts/sync-schede.sh ../../stratigraph-templates
+#   ./scripts/sync-schede.sh                          # from the sibling checkouts
+#   ./scripts/sync-schede.sh ../../stratigraph-templates ../../vocabularies
 #
 # WHAT IS COPIED
 #   · the LATEST version of every REAL definition in `dist/schede/index.json`
@@ -24,6 +24,11 @@
 #     SPEC §3), one `vocabolari/<scheme>.json` each — the code StratiField's
 #     sync runs, so the two readers offer the same concepts. A `declared` scheme
 #     is vendored too, with no concepts: the box then SAYS it is declared.
+#     MICRO-J (17 Nov 2026): the schemes are read from their SOURCE,
+#     ExtendedMatrix/vocabularies (second argument, $VOCABULARIES_SRC, or the
+#     sibling checkout `vocabularies`), never from the copy inside
+#     stratigraph-templates — `Vocabularies.from_repository`. No source, no
+#     sync: a copy that might be stale is not read in its place.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,21 +41,29 @@ for cand in "${1:-}" "${1:-}/stratigraph-templates" "$GITHUB/stratigraph-templat
   [ -n "$cand" ] && [ -f "$cand/dist/schede/index.json" ] && { SRC="$(cd "$cand" && pwd)"; break; }
 done
 [ -n "$SRC" ] || { echo "no stratigraph-templates with dist/schede/index.json (give its path)" >&2; exit 1; }
+VOC=""
+for cand in "${2:-}" "${VOCABULARIES_SRC:-}" "$GITHUB/vocabularies"; do
+  [ -n "$cand" ] && [ -d "$cand/schemes" ] && [ -d "$cand/skos" ] && { VOC="$(cd "$cand" && pwd)"; break; }
+done
+[ -n "$VOC" ] || { echo "no ExtendedMatrix/vocabularies checkout (give its path as the 2nd argument)" >&2; exit 1; }
 
 PY="$SRC/.venv/bin/python"
 [ -x "$PY" ] || PY="python3"
 mkdir -p "$DST/vocabolari"
-PYTHONPATH="$SRC/src${PYTHONPATH:+:$PYTHONPATH}" "$PY" - "$SRC" "$DST" <<'EOF'
+PYTHONPATH="$SRC/src${PYTHONPATH:+:$PYTHONPATH}" "$PY" - "$SRC" "$DST" "$VOC" <<'EOF'
 import json, pathlib, shutil, subprocess, sys
 from stratigraph_templates.vocab import Vocabularies, VocabularyError
 
-src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+src, dst, voc_src = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
 dist = src / "dist" / "schede"
 index = json.loads((dist / "index.json").read_text(encoding="utf-8"))
 commit = subprocess.run(["git", "-C", str(src), "rev-parse", "--short", "HEAD"],
                         capture_output=True, text=True).stdout.strip()
+voc_commit = subprocess.run(["git", "-C", str(voc_src), "rev-parse", "--short", "HEAD"],
+                            capture_output=True, text=True).stdout.strip()
 out_index = {"format": "emstudio/schede-vendored", "format_version": "1",
              "from": {"repository": "stratigraph-templates", "commit": commit},
+             "vocabularies_from": {"repository": "ExtendedMatrix/vocabularies", "commit": voc_commit},
              "schede": {}}
 for old in [*dst.glob("*.json"), *dst.glob("vendored.ts")]:
     old.unlink()
@@ -78,14 +91,14 @@ for tid, entry in sorted(index["schede"].items()):
     print(f"  {tid:<28} {latest:<8} {head.get('digest', '')[:19]}")
 (dst / "index.json").write_text(json.dumps(out_index, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
                                 encoding="utf-8")
-vocab = Vocabularies.load()
+vocab = Vocabularies.from_repository(voc_src)
 voc = dst / "vocabolari"
 for old in voc.glob("*.json"):
     old.unlink()
 for sid, langs in sorted(wanted.items()):
     scheme = vocab.schemes.get(sid)
     if scheme is None:
-        sys.exit(f"  a vendored definition names scheme '{sid}', which stratigraph-templates does not declare")
+        sys.exit(f"  a vendored definition names scheme '{sid}', which ExtendedMatrix/vocabularies does not declare")
     concepts = []
     for uri, _labels in sorted(vocab.concepts(sid).items()):
         if scheme.uri and uri == scheme.uri:
@@ -123,7 +136,7 @@ lines += ["export const VENDORED_INDEX: unknown = index;",
           "export const VENDORED_VOCABULARIES: unknown[] = [" + ", ".join(f"v_{ident(v)}" for v in vocs) + "];", ""]
 (dst / "vendored.ts").write_text("\n".join(lines), encoding="utf-8")
 EOF
-echo "vendored from $SRC → $DST"
+echo "vendored from $SRC (vocabularies from $VOC) → $DST"
 
 # MICRO-I-STAMPA-NEL-DESKTOP (17 Nov 2026) · the PRINTER travels with what it
 # prints. The bridge prints an A4 with stratigraph-templates' own

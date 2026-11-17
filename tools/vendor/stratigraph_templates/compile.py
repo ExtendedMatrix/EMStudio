@@ -65,7 +65,10 @@ NATIVE_FIELDS = ("description",)
 #: element keeps `{concept, label}`, because the label is what the recorder saw
 #: and the datamodel's shape carries it. Only the pairing is written here; the
 #: element, its em.json place and its RDF are the datamodel's.
-ELEMENT_VALUE_TYPES = {"concept": ("term",)}
+ELEMENT_VALUE_TYPES = {"concept": ("term",),
+                       # an act's time (ActivityNodeGroup.act_start, nodes 1.6.47):
+                       # a date, or a year
+                       "date": ("date", "integer")}
 
 #: What the unit is read as when the definition does not decide its node type
 #: (no field with verdict `node_type`, the two demos): the class every unit
@@ -226,14 +229,22 @@ class _Ctx:
     def classes(self, ref: str, node_class: Optional[str] = None) -> Optional[set]:
         """The classes the node at a recipe reference can be, or None when the
         definition does not say: `$unit` is its node_type table, `$node` the
-        node the field creates, `$field.<id>.prop` a PropertyNode; `$item` of
-        an edge box and `$anchor.<name>` are found by the creator."""
+        node the field creates, `$field.<id>.prop` a PropertyNode,
+        `$field.<id>.node` the node of that box, `$anchor.<name>` the node
+        of an anchor the definition DEFINES (SPEC §2.5); `$item` of an edge
+        box and an undefined anchor are found by the creator."""
         if ref == "$unit":
             return self.unit_classes()
         if ref == "$node" and node_class:
             return {node_class}
         if ref.startswith("$field.") and ref.endswith(".prop"):
             return {PROPERTY_CLASS}
+        if ref.startswith("$field.") and ref.endswith(".node"):
+            other = self.t.field(ref.split(".")[1])
+            if other.graph and other.graph.node_type:
+                return {self.node(other.graph.node_type, f"field '{other.id}'")["class"]}
+        if ref.startswith("$anchor.") and ref[8:] in self.t.anchors:
+            return {self.node(self.t.anchors[ref[8:]].node_type, f"anchor '{ref[8:]}'")["class"]}
         return None
 
     def edge(self, name: str, where: str, ends: Tuple[Optional[set], Optional[set]] = (None, None)
@@ -289,7 +300,11 @@ class _Ctx:
                 return f"$anchor.{where}", []
             return f"$field.{fid}.prop", [fid]
         self.anchors.setdefault(where, []).append(f.id)
-        return f"$anchor.{where}", []
+        after = []
+        a = self.t.anchors.get(where)
+        if a is not None and a.scope.startswith("value:"):
+            after = [a.scope.split(":", 1)[1]]
+        return f"$anchor.{where}", [x for x in after if x != f.id]
 
 
 def _guarded(rdf: Dict[str, Any], source: Optional[set], target: Optional[set]
@@ -392,6 +407,7 @@ def _property_steps(ctx: _Ctx, f: Field, property_type: str, anchor: str,
             "per_item_from": "$item.qualia" if f.type == "quantity_list" else None,
             "registered_qualia": registered if f.type != "quantity_list" else None,
             "box": property_type if f.type == "quantity_list" else None,
+            "accepts": list(f.graph.accepts) if f.graph and f.graph.accepts else None,
         }),
     }
     if defaults:
@@ -405,6 +421,17 @@ def _unit_classes(ctx: _Ctx, where: str) -> List[str]:
     return sorted({ctx.node(nt, where)["class"] for nt in
                    next((d.graph.node_types for d in ctx.t.fields
                          if d.graph and d.graph.verdict == "node_type"), {}).values()})
+
+
+def _is_element_at(ctx: _Ctx, f: Field, name: str, anchor: str) -> bool:
+    """Whether `property_name` names a node element of the node the box
+    attaches to: the unit (`_is_unit_element`) or an anchor the definition
+    defines (an act's `act_start`, SPEC §2.5)."""
+    if anchor == "$unit":
+        return _is_unit_element(ctx, f, name)
+    rule = ctx.reg.node_elements.get(name)
+    classes = ctx.classes(anchor)
+    return bool(rule and classes and classes & set(rule.get("applies_to", [])))
 
 
 def _is_unit_element(ctx: _Ctx, f: Field, name: str) -> bool:
@@ -432,15 +459,15 @@ def _element_steps(ctx: _Ctx, f: Field, name: str, anchor: str) -> Dict[str, Any
     if not field or not (field in NATIVE_FIELDS or field.startswith("data.")):
         ctx.problems.append(f"{where}: node element '{name}' is declared with em_json {field!r}, "
                             f"which update_field cannot address (name, description, data.*)")
-    if anchor != "$unit":
-        ctx.problems.append(f"{where}: node element '{name}' is an element of the UNIT; the field "
-                            f"attaches to {anchor}")
+    if anchor != "$unit" and not (ctx.classes(anchor) or set()) & set(rule.get("applies_to", [])):
+        ctx.problems.append(f"{where}: node element '{name}' is not an element of what the field "
+                            f"attaches to ({anchor})")
     fits = ELEMENT_VALUE_TYPES.get(rule.get("value"))
     if fits is None or f.type not in fits:
         ctx.problems.append(f"{where}: node element '{name}' holds a {rule.get('value')!r} "
                             f"value, which a field of type '{f.type}' does not write "
                             f"(writes it: {list(fits or ())})")
-    unit_classes = _unit_classes(ctx, where)
+    unit_classes = _unit_classes(ctx, where) if anchor == "$unit" else []
     outside = [c for c in unit_classes if c not in rule.get("applies_to", [])]
     if outside:
         ctx.problems.append(f"{where}: node element '{name}' is declared on "
@@ -492,7 +519,7 @@ def _entry(ctx: _Ctx, f: Field) -> Dict[str, Any]:
 
     if v == "property":
         name = g.property_name or g.qualia
-        if g.property_name and _is_unit_element(ctx, f, g.property_name):
+        if g.property_name and _is_element_at(ctx, f, g.property_name, anchor):
             out = {**base, **_element_steps(ctx, f, g.property_name, anchor)}
             out["scheme"] = f.vocabulary.scheme if f.vocabulary else None
         elif name in NATIVE_FIELDS and f.type not in LIST_TYPES:
@@ -526,6 +553,20 @@ def _entry(ctx: _Ctx, f: Field) -> Dict[str, Any]:
             node = {"id": "$node", "node_type": target["node_type"],
                     "description": _value_ref(f)}
             steps = [{"emit": {"op": "add_node", "node": node}}]
+        elif f.type == "resource_ref_list" and g.find:
+            # SPEC §2.4 `find`: a document is CITED — by name (D.nn, as EM
+            # numbers its documents) and/or by url, in the declared order. A
+            # name is never created by a sheet (the door numbers documents);
+            # a url is, as below.
+            resolve = {"$node": {"find": {"node_type": target["node_type"],
+                                          "any": [{k: "$item"} for k in g.find]},
+                                 "create": "url" in g.find,
+                                 "when_missing": ("created by url, never by name: a document is "
+                                                  "numbered by the door")
+                                 if "url" in g.find else "said, not created"}}
+            node = {"id": "$node", "node_type": target["node_type"], "name": "$item",
+                    "data": {"url": "$item"}}
+            steps = [{"emit": {"op": "add_node", "node": node}, "when": "created"}]
         elif f.type == "resource_ref_list":
             # a FILE REFERENCE: found by its path, which is also its url — the
             # shape s3Dgraphy's own importer gives one (pyarchinit_importer
@@ -539,10 +580,24 @@ def _entry(ctx: _Ctx, f: Field) -> Dict[str, Any]:
             steps = [{"emit": {"op": "add_node", "node": node}, "when": "created"}]
         else:
             key = _node_key(f)
-            resolve = {"$node": {"find": {"node_type": target["node_type"], **key},
-                                 "create": True}}
+            find = {"node_type": target["node_type"], **key}
             node = {"id": "$node", "node_type": target["node_type"], "name": key["name"]}
+            if g.where:
+                # SPEC §2.4: the discriminant — found only among the nodes that
+                # carry it, created carrying it
+                find["data"] = dict(g.where)
+                node["data"] = dict(g.where)
+            if g.sub_epoch_of:
+                find["sub_epoch_of"] = f"$field.{g.sub_epoch_of}.node"
+            resolve = {"$node": {"find": find, "create": True}}
             steps = [{"emit": {"op": "add_node", "node": node}, "when": "created"}]
+            if g.sub_epoch_of:
+                parent = f"$field.{g.sub_epoch_of}.node"
+                ctx.edge("has_sub_epoch", where, (ctx.classes(parent), {target["class"]}))
+                steps.append({"emit": {"op": "add_edge", "edge_type": "has_sub_epoch",
+                                       "source": parent, "target": "$node"},
+                              "when": "created"})
+                after = after + [g.sub_epoch_of]
         src, dst = (anchor, "$node") if g.direction != "incoming" else ("$node", anchor)
         about = ctx.edge(g.edge_type, where, (ctx.classes(src, target["class"]),
                                               ctx.classes(dst, target["class"])))
@@ -550,12 +605,18 @@ def _entry(ctx: _Ctx, f: Field) -> Dict[str, Any]:
                                "source": src, "target": dst}})
         out = {**base, "each": f.type in LIST_TYPES, "resolve": resolve, "steps": steps,
                "node": target, "edge": about}
+        if g.where:
+            out["where"] = dict(g.where)
+        if g.sub_epoch_of:
+            out["sub_epoch_of"] = g.sub_epoch_of
 
     elif v == "edge":
         src, dst = (anchor, "$item") if g.direction == "outgoing" else ("$item", anchor)
         about = ctx.edge(g.edge_type, where, (ctx.classes(src), ctx.classes(dst)))
         out = {**base, "each": True,
-               "resolve": {"$item": {"find": {"human_key": "$item", "kind": g.target},
+               "resolve": {"$item": {"find": ({"any": [{k: "$item"} for k in g.find],
+                                               "kind": g.target} if g.find else
+                                              {"human_key": "$item", "kind": g.target}),
                                      "when_missing": "not decided by the definition"}},
                "steps": [{"emit": {"op": "add_edge", "edge_type": g.edge_type,
                                    "source": src, "target": dst}}],
@@ -610,15 +671,78 @@ def _check_operations(ctx: _Ctx, recipe: Dict[str, Any]) -> None:
                                     f"{sorted(allowed)}")
 
 
+def _anchor_entry(ctx: _Ctx, a, fids: List[str]) -> Dict[str, Any]:
+    """An anchor the definition DEFINES (SPEC §2.5): the node, how it is found
+    (per unit, or shared by a box's value), and the edge that ties it to the
+    unit — so the boxes that hang on it land."""
+    where = f"anchor '{a.name}'"
+    node = ctx.node(a.node_type, where)
+    ref = f"$anchor.{a.name}"
+    src, dst = ("$unit", ref) if a.direction == "incoming" else (ref, "$unit")
+    about = ctx.edge(a.edge_type, where, (ctx.classes(src), ctx.classes(dst)))
+    find: Dict[str, Any] = {"node_type": node["node_type"], "data": dict(a.where)}
+    data: Dict[str, Any] = dict(a.where)
+    if a.scope == "unit":
+        find["linked_to"] = {"unit": "$unit", "edge_type": a.edge_type}
+        name: Any = "$unit.name"
+    else:
+        fid = a.scope.split(":", 1)[1]
+        find["data"][a.match] = f"$values.{fid}"
+        data[a.match] = f"$values.{fid}"
+        name = f"$values.{fid}"
+    steps = [{"emit": {"op": "add_node", "node": {"id": ref, "node_type": node["node_type"],
+                                                  "name": name, "data": data}},
+              "when": "created"},
+             {"emit": {"op": "add_edge", "edge_type": a.edge_type, "source": src, "target": dst},
+              # a shared act found by its year may not reach THIS unit yet
+              "when": "absent"}]
+    for step in steps:
+        if step["emit"]["op"] not in ctx.reg.operations:
+            ctx.problems.append(f"{where}: operation '{step['emit']['op']}'")
+    return _drop_empty({"declared_by": fids, "defined": True, "node": node,
+                        "where": dict(a.where), "scope": a.scope,
+                        "resolve": {ref: {"find": find, "create": True,
+                                          "when": "a field that hangs on it has a value"}},
+                        "steps": steps, "edge": about, "note": a.note})
+
+
 def _recipe(ctx: _Ctx) -> Dict[str, Any]:
     recipe: Dict[str, Any] = {
         "operations": list(ctx.reg.operations),
         "unit": _unit(ctx),
         "fields": {f.id: _entry(ctx, f) for f in ctx.t.fields},
     }
-    recipe["anchors"] = {name: {"declared_by": fids, "defined": False}
-                         for name, fids in sorted(ctx.anchors.items())}
+    # SPEC §2.4: a box whose epoch is a sub-epoch of another's TAKES the unit's
+    # has_first_epoch when it has a value; the other is then reached through
+    # has_sub_epoch, and its own edge from the unit is not written
+    for f in ctx.t.fields:
+        if f.graph and f.graph.sub_epoch_of:
+            parent = recipe["fields"][f.graph.sub_epoch_of]
+            parent["yields_to"] = f.id
+            for step in parent["steps"]:
+                if step["emit"]["op"] == "add_edge" and step["emit"]["source"] == "$unit":
+                    step["when"] = f"empty:{f.id}"
+    recipe["anchors"] = {}
     for name, fids in sorted(ctx.anchors.items()):
+        a = ctx.t.anchors.get(name)
+        if a is None:
+            recipe["anchors"][name] = {"declared_by": fids, "defined": False}
+            continue
+        recipe["anchors"][name] = _anchor_entry(ctx, a, fids)
+    for name, a in sorted(ctx.t.anchors.items()):
+        if name not in ctx.anchors:
+            ctx.problems.append(f"anchor '{name}' is defined and no field attaches to it")
+    if ctx.t.record_status:
+        rs = ctx.t.record_status
+        recipe["unit"]["record_status"] = {
+            "em_json": "data.record_status", "scheme": rs.get("scheme"),
+            "values": list(rs.get("values") or []),
+            "steps": [{"emit": {"op": "update_field", "node_id": "$unit",
+                                "field": "data.record_status", "value": "$record.status"},
+                       "when": "given"}]}
+    for name, fids in sorted(ctx.anchors.items()):
+        if name in ctx.t.anchors:
+            continue
         ctx.open.append({"field": ", ".join(fids), "what": (
             f"attaches_to '{name}': the definition names it and does not define it — the "
             f"statement hangs on $anchor.{name}, which the creator has to resolve")})

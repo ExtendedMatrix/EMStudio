@@ -32,6 +32,7 @@ from .model import (
     Standard,
     Template,
     VocabularyRef,
+    Anchor,
 )
 
 
@@ -46,7 +47,9 @@ _FIELD_KEYS = {
 _GRAPH_KEYS = {
     "verdict", "node_type", "node_types", "edge_type", "direction", "qualia",
     "property_name", "attaches_to", "target", "note", "blocked_on",
+    "accepts", "where", "sub_epoch_of", "find",
 }
+_ANCHOR_KEYS = {"node_type", "edge_type", "direction", "where", "scope", "match", "note"}
 _CELL_KEYS = {"field", "block", "block_labels", "rows", "w", "label", "rotated", "style"}
 
 
@@ -88,7 +91,35 @@ def _graph(doc: Any, where: str) -> GraphBinding:
         if isinstance(blocked, dict)
         else None,
         note=doc.get("note"),
+        accepts=[str(q) for q in (doc.get("accepts") or [])],
+        where={str(k): str(v) for k, v in (doc.get("where") or {}).items()},
+        sub_epoch_of=doc.get("sub_epoch_of"),
+        find=[str(x) for x in (doc.get("find") or [])],
     )
+
+
+def _anchors(doc: Any) -> Dict[str, Anchor]:
+    if doc is None:
+        return {}
+    if not isinstance(doc, dict):
+        raise TemplateSyntaxError("template.anchors: must be a mapping name → anchor")
+    out: Dict[str, Anchor] = {}
+    for name, a in doc.items():
+        where = f"template.anchors.{name}"
+        if not isinstance(a, dict):
+            raise TemplateSyntaxError(f"{where}: must be a mapping")
+        _unknown(a, _ANCHOR_KEYS, where)
+        out[str(name)] = Anchor(
+            name=str(name),
+            node_type=str(_need(a, "node_type", where)),
+            edge_type=str(_need(a, "edge_type", where)),
+            direction=str(a.get("direction", "incoming")),
+            where={str(k): str(v) for k, v in (a.get("where") or {}).items()},
+            scope=str(a.get("scope", "unit")),
+            match=a.get("match"),
+            note=a.get("note"),
+        )
+    return out
 
 
 def _recorded_in(doc: Dict[str, Any], where: str) -> str:
@@ -265,6 +296,8 @@ def parse_template(doc: Dict[str, Any], path: Optional[str] = None) -> Template:
         vocabularies=list(t.get("vocabularies") or []),
         graph_defaults=t.get("graph") or {},
         notes=t.get("notes") or {},
+        anchors=_anchors(t.get("anchors")),
+        record_status=t.get("record_status"),
         path=path,
     )
 
@@ -345,6 +378,7 @@ def load_record(path: str | Path) -> Record:
         values=r.get("values") or {},
         field_provenance=r.get("field_provenance") or {},
         uid=r.get("uid"),
+        status=r.get("status"),
         path=str(p),
     )
 

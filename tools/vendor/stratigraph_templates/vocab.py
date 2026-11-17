@@ -79,11 +79,14 @@ class Scheme:
     #: a project keeps its own terms (``local:<slug>``, with who and when),
     #: never in our namespace (em-media-role, 14 Nov 2026). None: nobody.
     extensible: Optional[str] = None
+    #: the root `resolve.path` is relative to: this repository (the copy), or a
+    #: checkout of ExtendedMatrix/vocabularies (`Vocabularies.from_repository`)
+    base: Optional[Path] = None
 
     def skos_file(self) -> Optional[Path]:
         kind = self.resolve.get("kind")
         if kind == "skos_file":
-            return REPO_ROOT / self.resolve["path"]
+            return (self.base or REPO_ROOT) / self.resolve["path"]
         if kind == "external_skos_file":
             root = Path(os.environ.get(ICCD_STANDARDS_ENV, str(ICCD_STANDARDS_DEFAULT)))
             return root / self.resolve["path"]
@@ -203,6 +206,18 @@ class Vocabularies:
         self._concepts: Dict[str, Dict[str, Dict[str, str]]] = {}
 
     # -- loading -------------------------------------------------------------
+    @classmethod
+    def from_repository(cls, root: Path) -> "Vocabularies":
+        """The vocabularies of a checkout of their SOURCE, ExtendedMatrix/vocabularies
+        (`schemes/`, `alignments/`, paths relative to it) — what a reader that
+        vendors them should read, rather than the copy in this repository
+        (EMStudio's sync-schede.sh, MICRO-J 17 Nov 2026)."""
+        root = Path(root)
+        out = cls.load(root / "schemes", root / "alignments")
+        for s in out.schemes.values():
+            s.base = root
+        return out
+
     @classmethod
     def load(cls, schemes_dir: Path = SCHEMES_DIR, alignments_dir: Path = ALIGNMENTS_DIR) -> "Vocabularies":
         schemes: Dict[str, Scheme] = {}

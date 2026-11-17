@@ -24,6 +24,10 @@ export interface SheetViewCallbacks {
   onPick(unitId: string): void;
   onChoose(id: string): void;
   onPrint(): void;
+  /** SPEC §5 (3.0.0): the record's status set on the unit ("" = not said) */
+  onStatus?(key: string): void;
+  /** em_qualia_types 1.6.12: rename the graph's historical `definition` properties */
+  onLegacy?(): void;
 }
 
 export interface SheetViewInput {
@@ -34,6 +38,10 @@ export interface SheetViewInput {
   reading: UnitReading;
   choices: Array<{ id: string; label: string }>;
   note?: string;
+  /** the record status, said in the sheet's language: key → label */
+  statusLabels?: Record<string, string>;
+  /** how many PropertyNodes of the GRAPH carry a historical name */
+  legacy?: number;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -65,6 +73,32 @@ function head(body: HTMLElement, inp: SheetViewInput | null, cb: SheetViewCallba
     }));
     counts.dataset.skCounts = JSON.stringify(Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v.length])));
     bar.appendChild(counts);
+    const st = inp.reading.status;
+    if (st && cb.onStatus) {
+      // SPEC §5 (3.0.0): «da campo» / «rielaborato» on the unit
+      const ss = el("select", "sk-status");
+      ss.dataset.skStatus = "1";
+      ss.title = cb.t("sheet.statusTitle");
+      const none = el("option", undefined, cb.t("sheet.statusNone"));
+      none.value = "";
+      ss.appendChild(none);
+      for (const k of st.values) {
+        const o = el("option", undefined, inp.statusLabels?.[k] ?? k);
+        o.value = k;
+        if (k === st.key) o.selected = true;
+        ss.appendChild(o);
+      }
+      if (!st.key) none.selected = true;
+      ss.addEventListener("change", () => cb.onStatus!(ss.value));
+      bar.appendChild(ss);
+    }
+    if (inp.legacy && cb.onLegacy) {
+      const lb = el("button", "sk-legacy", cb.t("sheet.legacyButton", { n: inp.legacy }));
+      lb.dataset.skLegacy = "1";
+      lb.title = cb.t("sheet.legacyTitle", { n: inp.legacy });
+      lb.addEventListener("click", () => cb.onLegacy!());
+      bar.appendChild(lb);
+    }
     const pr = el("button", "sk-print", cb.t("sheet.print"));
     pr.dataset.skPrint = "1";
     pr.title = cb.t("sheet.printTitle");

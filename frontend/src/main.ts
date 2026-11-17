@@ -618,6 +618,8 @@ import {
   planRefRemove as planSheetRefRemove, readUnit as readSheetUnit, recordOf as sheetRecordOf, resolveDefinition,
   sheetLanguage, studySheetChoice, STUDY_SHEET_KEY, fillCounts as sheetFillCounts, labelIn as sheetLabelIn,
   applyPlan as applySheetActs, type Plan as SheetPlan, type CompiledDef,
+  planStatus as planSheetStatus, legacyProperties as sheetLegacyProperties,
+  planLegacyRename as planSheetLegacyRename, schemeKeyLabel as sheetSchemeKeyLabel,
 } from "./sheet";
 import { renderSheet } from "./sheet-view";
 import { isVolatile, VOLATILE_KEY } from "./volatile";
@@ -36679,6 +36681,8 @@ function renderSheetInto(body: HTMLElement, _win: Win): void {
     onPick: (id: string) => select(id),
     onChoose: (id: string) => chooseSheetDefinition(id),
     onPrint: () => { void printSheet(); },
+    onStatus: (key: string) => sheetStatus(key),
+    onLegacy: () => { void sheetLegacyRename(); },
   };
   const { def, choice, versionDiffers } = sheetDef();
   if (!store) { renderSheet(body, null, cb, sheetChoices(), null, t("sheet.noDocument")); return; }
@@ -36690,10 +36694,35 @@ function renderSheetInto(body: HTMLElement, _win: Win): void {
   if (versionDiffers) notes.push(t("sheet.versionDiffers", { asked: versionDiffers, have: def.header.version }));
   if (now.lang !== getLocale()) notes.push(t("sheet.langOf", { lang: now.lang }));
   if (selectedId && selectedId !== now.unitId) notes.push(t("sheet.stillUnit", { name: String(unit.name ?? unit.id) }));
+  const st = now.reading.status;
+  const statusLabels = st ? Object.fromEntries(st.values.map((k) => [k, sheetSchemeKeyLabel(st.scheme, k, now.lang)])) : undefined;
+  const legacy = sheetLegacyProperties({ nodes: store.liveNodes(), edges: store.liveEdges() }).length;
   renderSheet(body, {
     def, lang: now.lang, unitName: String(unit.name || unit.id), unitType: String(unit.node_type),
     reading: now.reading, choices: sheetChoices(), note: notes.join(" · ") || undefined,
+    statusLabels, legacy,
   }, cb, sheetChoices(), def.header.id);
+}
+
+/** SPEC §5 (3.0.0): the record's status on the unit, one delta. */
+function sheetStatus(key: string): boolean {
+  const now = sheetReadingNow();
+  if (!now) return false;
+  return applySheetPlan(planSheetStatus(now.def, now.unitId, key));
+}
+
+/** em_qualia_types 1.6.12 (MICRO-J §C, E.D. 17 Nov 2026): the PropertyNodes
+ *  `definition` of the EM 1.5 templates are interpretations — renamed in place
+ *  (`name`, `data.property_type`), ids and chain untouched, as ONE delta: one
+ *  undo puts them back. Asked first, with how many and where. */
+async function sheetLegacyRename(): Promise<boolean> {
+  if (!store) return false;
+  const g = { nodes: store.liveNodes(), edges: store.liveEdges() };
+  const rows = sheetLegacyProperties(g);
+  if (!rows.length) { toast(t("sheet.no.legacy")); return false; }
+  const units = [...new Set(rows.map((r) => r.unit).filter(Boolean))];
+  if (!(await askConfirm(t("sheet.legacyAsk", { n: rows.length, units: units.slice(0, 8).join(", ") + (units.length > 8 ? "…" : "") })))) return false;
+  return applySheetPlan(planSheetLegacyRename(g));
 }
 
 /** The study's choice of definition — kept on the graph-self node beside its

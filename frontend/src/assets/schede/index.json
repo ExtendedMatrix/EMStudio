@@ -2,12 +2,12 @@
  "format": "emstudio/schede-vendored",
  "format_version": "1",
  "from": {
-  "commit": "6c3e568",
+  "commit": "e036ebd",
   "repository": "stratigraph-templates"
  },
  "schede": {
   "iccd-us-2021": {
-   "digest": "sha256:4802d763044f3eb47e08a118f94a0f194b4489d0dd129e1002482837a66bd0fb",
+   "digest": "sha256:1c78ba15bb59770a2e8c11f730db739b1564b3a59d6a24ea4b67dab959746989",
    "languages": [
     "it",
     "en"
@@ -27,7 +27,11 @@
     },
     "version": "2021"
    },
-   "version": "2.0.1"
+   "version": "3.0.0"
   }
+ },
+ "vocabularies_from": {
+  "commit": "7dbb59d",
+  "repository": "ExtendedMatrix/vocabularies"
  }
 }

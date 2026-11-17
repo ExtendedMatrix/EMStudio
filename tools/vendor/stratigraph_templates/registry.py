@@ -328,7 +328,18 @@ def _node_elements(node_datamodel: Dict, classes: Dict) -> Dict[str, Dict[str, A
         for name, rule in (body.get("properties") or {}).items():
             # only what the datamodel itself calls a node element: other object
             # entries (FunctionalUnitNodeGroup.geometry_type_ref) are notes
-            if not isinstance(rule, dict) or rule.get("kind") != "node_element" or name in out:
+            if not isinstance(rule, dict) or rule.get("kind") != "node_element":
+                continue
+            if name in out:
+                # the same element declared on another branch of the tree
+                # (act_start: ExtractorNode 1.6.45, ActivityNodeGroup 1.6.47):
+                # one element, carried by both — the first declaration names it
+                if out[name]["em_json"] == rule.get("em_json"):
+                    out[name]["applies_to"] = sorted(set(out[name]["applies_to"]) |
+                                                     {c for c in parents if descends(c, cls)})
+                    out[name].setdefault("also_declared_on", []).append(cls)
+                    if out[name].get("value") is None and rule.get("value") is not None:
+                        out[name]["value"] = rule.get("value")
                 continue
             out[name] = {
                 "declared_on": cls,

@@ -123,6 +123,37 @@ class GraphBinding:
     target: Optional[str] = None        # what the other end of an edge is
     blocked_on: Optional[BlockedOn] = None
     note: Optional[str] = None
+    #: quantity_list only: the qualia a row may declare (SPEC §2.4) — a reader
+    #: knows that `height` goes in MISURE without a sign
+    accepts: List[str] = dc_field(default_factory=list)
+    #: verdict node only: what the node must carry in em.json `data` to be THIS
+    #: box's node — the discriminant of boxes reaching the same node type by the
+    #: same edge (a LocationNodeGroup's kind + level, SPEC §2.4)
+    where: Dict[str, str] = dc_field(default_factory=dict)
+    #: verdict node, EpochNode only: the epoch is a SUB-EPOCH (has_sub_epoch) of
+    #: the epoch of that other box — FASE of PERIODO (SPEC §2.4)
+    sub_epoch_of: Optional[str] = None
+    #: resource_ref_list / record_ref_list: how the cited node is found, in
+    #: order — by `name` (a document is cited as D.nn), by `url` (SPEC §2.4)
+    find: List[str] = dc_field(default_factory=list)
+
+
+@dataclass
+class Anchor:
+    """Something boxes hang on that is not the unit — an ACT of the
+    documentation (SPEC §2.5): what node it is, how it is told apart from its
+    siblings (`where`), how it reaches the unit, and how it is found."""
+    name: str
+    node_type: str
+    edge_type: str
+    direction: str = "incoming"          # incoming: unit → anchor (the unit is_in_activity of it)
+    where: Dict[str, str] = dc_field(default_factory=dict)
+    #: `unit` = one per unit (found among the anchors the unit reaches);
+    #: `value:<field>` = shared, found by that box's value (a year)
+    scope: str = "unit"
+    #: em.json `data` key the scoping value is matched on (scope value:<field>)
+    match: Optional[str] = None
+    note: Optional[str] = None
 
 
 @dataclass
@@ -307,6 +338,12 @@ class Template:
     vocabularies: List[str] = dc_field(default_factory=list)
     graph_defaults: Dict[str, Any] = dc_field(default_factory=dict)
     notes: Dict[str, Any] = dc_field(default_factory=dict)
+    #: the anchors the definition DEFINES (SPEC §2.5); one named by an
+    #: `attaches_to` and not here stays open (§9.3)
+    anchors: Dict[str, "Anchor"] = dc_field(default_factory=dict)
+    #: the scheme of the record's status on the unit (SPEC §5, `status`),
+    #: or None: the definition does not write it
+    record_status: Optional[Dict[str, str]] = None
     #: The version of THIS DEFINITION (SPEC §1.1). Empty = not declared, which the
     #: validator refuses: an unversioned definition cannot be cited by a record.
     version: str = ""
@@ -370,4 +407,7 @@ class Record:
     values: Dict[str, Any] = dc_field(default_factory=dict)
     field_provenance: Dict[str, Any] = dc_field(default_factory=dict)
     uid: Optional[str] = None
+    #: the state of the RECORD (SPEC §5): `from_field` | `revised` — the keys of
+    #: em-record-status — or None, not said
+    status: Optional[str] = None
     path: Optional[str] = None

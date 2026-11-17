@@ -78,7 +78,7 @@ export interface RecipeEntry {
   each?: boolean;
   steps?: RecipeStep[];
   resolve?: Record<string, { find?: Record<string, unknown>; create?: boolean; mint?: boolean; when_missing?: string }>;
-  property?: { property_type?: string; per_item_from?: string; box?: string; registered_qualia?: boolean };
+  property?: { property_type?: string; per_item_from?: string; box?: string; registered_qualia?: boolean; accepts?: string[] };
   defaults?: Record<string, string>;
   element?: { name: string; value?: string };
   node?: { class?: string; node_type?: string };
@@ -89,6 +89,21 @@ export interface RecipeEntry {
   scheme?: string;
   provisional?: string;
   after?: string[];
+  /** SPEC §2.4 (3.0.0): what the node carries in `data` to be this box's */
+  where?: Record<string, string>;
+  /** SPEC §2.4: this box's epoch is a sub-epoch of that box's (FASE of PERIODO) */
+  sub_epoch_of?: string;
+  /** SPEC §2.4: that box takes the unit's edge when it has a value */
+  yields_to?: string;
+}
+/** SPEC §2.5: an act a box hangs on, DEFINED by the definition. */
+export interface AnchorDef {
+  declared_by?: string[];
+  defined?: boolean;
+  node?: { class?: string; node_type?: string };
+  where?: Record<string, string>;
+  scope?: string;
+  steps?: RecipeStep[];
 }
 export interface CompiledDef {
   header: {
@@ -109,8 +124,9 @@ export interface CompiledDef {
   };
   recipe: {
     fields: Record<string, RecipeEntry>;
-    anchors?: Record<string, { declared_by?: string[]; defined?: boolean }>;
+    anchors?: Record<string, AnchorDef>;
     open?: Array<{ field: string; what: string }>;
+    unit?: { record_status?: { em_json?: string; scheme?: string; values?: string[] } };
   };
 }
 interface VocabFile {
@@ -258,6 +274,14 @@ export function conceptLabel(def: CompiledDef, fid: string, concept: string, lan
   return conceptsFor(def, fid, lang).concepts.find((c) => c.concept === concept)?.label ?? null;
 }
 
+/** A key of a module the definition names (em-record-status, em-place-level…)
+ *  said in `lang`: the concept whose IRI ends with the key. */
+export function schemeKeyLabel(scheme: string, key: string, lang: string): string {
+  const v = VOCABS.get(scheme);
+  const c = v?.concepts.find((x) => x.concept.endsWith(`/${key}`));
+  return c ? (c.labels[lang] ?? Object.values(c.labels)[0] ?? key) : key;
+}
+
 // ─────────────────────────────────────────────────────────── 2 · the reading
 
 export interface Graph { nodes: readonly EmNode[]; edges: readonly EmEdge[] }
@@ -307,6 +331,10 @@ export interface UnitReading {
   /** the unit's properties no box of this sheet reads (StratiField's `unread`):
    *  shown under the sheet, never lost in silence */
   unread: Array<{ id: string; qualia: string; value: string }>;
+  /** SPEC §5 (3.0.0): the record's status on the unit — a key of the scheme
+   *  the definition names (em-record-status), or null when not said; absent
+   *  when the definition does not write it */
+  status?: { key: string | null; scheme: string; values: string[] };
 }
 
 const dataOf = (n: EmNode | undefined): Record<string, unknown> => (n?.data ?? {}) as Record<string, unknown>;
@@ -320,6 +348,48 @@ const propValue = (n: EmNode): string => {
   return d || str(dataOf(n).value).trim();
 };
 const qualiaOf = (n: EmNode): string => str(dataOf(n).property_type || n.name);
+
+/** em_qualia_types 1.6.12 (MICRO-J §C, E.D. 17 Nov 2026): the HISTORICAL
+ *  property names and the name they are read as. The `definition` PropertyNode
+ *  of the EM 1.5 templates holds an interpretation in words; the unit's
+ *  definition is the element `data.definition`, a term. So the box
+ *  INTERPRETAZIONE reads it (through the lens, said), DEFINIZIONE never does. */
+export const PROPERTY_ALIASES: Readonly<Record<string, string>> = { definition: "interpretation" };
+const readAs = (n: EmNode): string => PROPERTY_ALIASES[qualiaOf(n)] ?? qualiaOf(n);
+
+/** SPEC §2.4: does a node carry the discriminant of a box (`where`)? And does
+ *  it carry ANY of its keys — then, not matching, it is another box's. */
+const matchesWhere = (n: EmNode, where: Record<string, string>): boolean =>
+  Object.entries(where).every(([k, v]) => str(dataOf(n)[k] ?? (n as unknown as Record<string, unknown>)[k]) === v);
+const saysWhere = (n: EmNode, where: Record<string, string>): boolean =>
+  Object.keys(where).some((k) => dataOf(n)[k] !== undefined && dataOf(n)[k] !== null);
+
+/** The edge step of an entry that ties its node to the unit (or to an act, or
+ *  to another box's node) — not FASE's `has_sub_epoch` between two epochs. */
+function mainEdge(entry: RecipeEntry): Record<string, unknown> | undefined {
+  const edges = (entry.steps ?? []).filter((s) => s.emit.op === "add_edge").map((s) => s.emit);
+  const ends = (e: Record<string, unknown>) => [str(e.source), str(e.target)];
+  return edges.find((e) => ends(e).some((x) => x === "$unit" || x.startsWith("$anchor.")))
+    ?? edges.find((e) => !str(e.source).startsWith("$field.") || str(e.source).endsWith(".prop")) ?? edges[0];
+}
+
+/** SPEC §2.5: the act of the unit an anchor names — the node of the anchor's
+ *  type, carrying its discriminant (`act_kind`), that the unit reaches by the
+ *  anchor's edge. None: the act is not in the graph yet. */
+export function actOf(def: CompiledDef, g: Graph, unitId: string, anchor: string): EmNode | null {
+  const a = def.recipe.anchors?.[anchor];
+  if (!a?.defined) return null;
+  const ix = index(g);
+  const edge = (a.steps ?? []).find((s) => s.emit.op === "add_edge")?.emit;
+  const et = str(edge?.edge_type || "is_in_activity");
+  const unitIsSource = !edge || str(edge.source) === "$unit";
+  for (const e of unitIsSource ? (ix.out.get(unitId) ?? []) : (ix.inn.get(unitId) ?? [])) {
+    if (!edgeSpellings(et).has(str(e.edge_type))) continue;
+    const n = ix.byId.get(unitIsSource ? e.target : e.source);
+    if (n && n.node_type === a.node?.node_type && matchesWhere(n, a.where ?? {})) return n;
+  }
+  return null;
+}
 
 /** A unit of the sheet's relations: a stratigraphic node that is not a
  *  continuity marker (a BR closes a life, it is not a unit one is in contact
@@ -417,7 +487,7 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
   for (const rows of minted.values()) rows.sort((a, b) => Number(markOf(a).index ?? 0) - Number(markOf(b).index ?? 0));
   const claimed = new Set([...minted.values()].flat().map((p) => p.id));
   const used = new Set<string>();
-  const byQualia = (q: string): EmNode[] => props.filter((p) => !claimed.has(p.id) && !used.has(p.id) && qualiaOf(p) === q);
+  const byQualia = (q: string): EmNode[] => props.filter((p) => !claimed.has(p.id) && !used.has(p.id) && readAs(p) === q);
 
   const nameOf = (n: EmNode | undefined): string => str(n?.name).trim();
 
@@ -491,6 +561,27 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
     }
 
     const steps = entry.steps ?? [];
+    const onAct = steps.length === 1 && steps[0].emit.op === "update_field" && str(steps[0].emit.node_id).startsWith("$anchor.");
+    if (onAct) {
+      // SPEC §2.5 (3.0.0): ANNO and the two dates are the TIME of an act
+      const anchor = str(steps[0].emit.node_id).slice("$anchor.".length);
+      const field = str(steps[0].emit.field);
+      if (!def.recipe.anchors?.[anchor]?.defined) {
+        r.state = "open";
+        r.how = { key: "sheet.how.anchor", p: { anchor } };
+        r.readonly = { key: "sheet.ro.anchor", p: { anchor } };
+        done();
+        continue;
+      }
+      const act = actOf(def, g, unitId, anchor);
+      const raw = act ? (field.startsWith("data.") ? dataOf(act)[field.slice(5)] : (act as unknown as Record<string, unknown>)[field]) : undefined;
+      if (act) r.nodes = [act.id];
+      if (raw !== undefined && raw !== null && raw !== "")
+        r.value = f.type === "integer" && /^-?\d+$/.test(str(raw)) ? Number(raw) : str(raw);
+      r.how = { key: act ? "sheet.how.act" : "sheet.how.actNone", p: { anchor, field, act: str(act?.name) } };
+      done();
+      continue;
+    }
     const native = steps.length === 1 && steps[0].emit.op === "update_field" && steps[0].emit.node_id === "$unit";
     if (native) {
       const field = str(steps[0].emit.field);
@@ -504,14 +595,22 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
         // THE LENS on an element: a graph written before `definition` became an
         // element of the node (nodes 1.6.9) carries it as a PropertyNode of the
         // same name — read, said, never translated into the element on its own
-        const lensProps = byQualia(entry.element.name);
-        if (lensProps.length) {
-          lensProps.forEach((p) => used.add(p.id));
-          r.value = { label: propValue(lensProps[0]) };
-          r.lens = true;
-          r.nodes = lensProps.map((p) => p.id);
-          r.how = { key: "sheet.how.lensElement", p: { field, qualia: entry.element.name } };
-        } else r.how = { key: "sheet.how.nativeEmpty", p: { field } };
+        // em_qualia_types 1.6.12: a PropertyNode of the element's name is the
+        // HISTORICAL spelling of another property (definition → interpretation)
+        // — never read as the element; the box says where it went
+        const alias = PROPERTY_ALIASES[entry.element.name];
+        const legacy = alias ? props.filter((p) => qualiaOf(p) === entry.element!.name) : [];
+        if (legacy.length) r.how = { key: "sheet.how.elementAlias", p: { field, qualia: entry.element.name, to: alias } };
+        else {
+          const lensProps = byQualia(entry.element.name);
+          if (lensProps.length) {
+            lensProps.forEach((p) => used.add(p.id));
+            r.value = { label: propValue(lensProps[0]) };
+            r.lens = true;
+            r.nodes = lensProps.map((p) => p.id);
+            r.how = { key: "sheet.how.lensElement", p: { field, qualia: entry.element.name } };
+          } else r.how = { key: "sheet.how.nativeEmpty", p: { field } };
+        }
       } else r.how = { key: "sheet.how.nativeEmpty", p: { field } };
       done();
       continue;
@@ -533,6 +632,13 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
         nodes = byQualia(q);
         if (nodes.length) r.lens = true;
       }
+      const accepts = entry.property?.accepts ?? [];
+      if (!nodes.length && accepts.length) {
+        // SPEC §2.4 (3.0.0): the qualia the box accepts — `height` is MISURE's
+        nodes = props.filter((p) => !claimed.has(p.id) && !used.has(p.id) && accepts.includes(readAs(p)));
+        if (nodes.length) r.lens = true;
+      }
+      const viaAlias = nodes.some((p) => PROPERTY_ALIASES[qualiaOf(p)] !== undefined);
       nodes.forEach((p) => used.add(p.id));
       r.nodes = nodes.map((p) => p.id);
       const valued = nodes.filter((p) => propValue(p) !== "");
@@ -555,13 +661,17 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
       }
       r.how = { key: r.lens ? "sheet.how.lensProperty" : (q ? "sheet.how.property" : "sheet.how.propertyRows"), p: { qualia: q ?? "—" } };
       if (!entry.property?.property_type && !q && entry.each)
-        r.how = { key: "sheet.how.propertyRows", p: { box: str(entry.property?.box) } };
+        r.how = accepts.length
+          ? { key: r.lens ? "sheet.how.lensAccepts" : "sheet.how.accepts", p: { box: str(entry.property?.box), qualia: accepts.join(", ") } }
+          : { key: "sheet.how.propertyRows", p: { box: str(entry.property?.box) } };
+      if (viaAlias)
+        r.how = { key: "sheet.how.lensAlias", p: { qualia: q ?? "—", old: Object.keys(PROPERTY_ALIASES).filter((k) => PROPERTY_ALIASES[k] === q).join(", ") } };
       done();
       continue;
     }
 
     // a node of its own, reached by an edge
-    const edgeStep = steps.find((s) => s.emit.op === "add_edge")?.emit;
+    const edgeStep = mainEdge(entry);
     const nodeType = str(entry.node?.node_type || (entry.resolve?.["$node"]?.find?.node_type));
     if (!edgeStep) { r.state = "silent"; r.how = { key: "sheet.how.none", p: { why: "" } }; done(); continue; }
     let from = unitId;
@@ -577,23 +687,56 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
       }
       from = base.nodes[0];
     }
-    const outgoing = src === "$unit" || src.startsWith("$field.");
+    if (src.startsWith("$anchor.")) {
+      // SPEC §2.5: the responsible of an ACT — the act first, then its author
+      const anchor = src.slice("$anchor.".length);
+      const act = actOf(def, g, unitId, anchor);
+      if (!act) {
+        r.how = { key: "sheet.how.actNone", p: { anchor, field: str(edgeStep.edge_type), act: "" } };
+        r.readonly = { key: "sheet.ro.actFirst", p: { anchor } };
+        done();
+        continue;
+      }
+      from = act.id;
+    }
+    const outgoing = src === "$unit" || src.startsWith("$field.") || src.startsWith("$anchor.");
     const et = str(edgeStep.edge_type);
     const pointed = links(fid);
     const found: EmNode[] = [];
     const unattributed: EmNode[] = [];
+    const where = entry.where;
+    const parentEpoch = (n: EmNode): EmNode | undefined => (ix.inn.get(n.id) ?? [])
+      .filter((e) => edgeSpellings("has_sub_epoch").has(str(e.edge_type)))
+      .map((e) => ix.byId.get(e.source)).find((p) => p?.node_type === "EpochNode");
     for (const e of outgoing ? (ix.out.get(from) ?? []) : (ix.inn.get(from) ?? [])) {
       if (!edgeSpellings(et).has(str(e.edge_type))) continue;
       const other = ix.byId.get(outgoing ? e.target : e.source);
       if (!other || other.node_type !== nodeType) continue;
       if (pointed) { if (pointed.includes(other.id)) found.push(other); continue; }
+      if (entry.yields_to || entry.sub_epoch_of) {
+        // SPEC §2.4 (3.0.0): FASE is the sub-epoch of PERIODO — the unit's
+        // first epoch is the phase when it has a parent, the period otherwise
+        const parent = parentEpoch(other);
+        if (entry.yields_to) { const p = parent ?? other; if (!found.includes(p)) found.push(p); }
+        else if (parent && !found.includes(other)) found.push(other);
+        continue;
+      }
+      if (where) {
+        // SPEC §2.4: the discriminant decides; a node that carries another
+        // value of it is another box's, one that carries none is unattributed
+        if (matchesWhere(other, where)) { found.push(other); continue; }
+        if (saysWhere(other, where)) continue;
+      } else if (dataOf(other).act_kind) continue; // an ACT (SPEC §2.5) is not ATTIVITÀ
       const m = markOf(other);
       if (m.field) { if (m.field === fid && (!m.template || m.template === def.header.id)) found.push(other); continue; }
       if (rivals(def, et, nodeType) <= 1) found.push(other);
       else unattributed.push(other);
     }
     r.nodes = found.map((n) => n.id);
-    const shown = (n: EmNode): string => f.type === "longtext" ? str(n.description) : (f.type === "resource_ref_list" ? str(dataOf(n).url || n.name) : nameOf(n));
+    const byName = Array.isArray(entry.resolve?.["$node"]?.find?.any)
+      && Object.keys((entry.resolve!["$node"]!.find!.any as Array<Record<string, unknown>>)[0] ?? {})[0] === "name";
+    const shown = (n: EmNode): string => f.type === "longtext" ? str(n.description)
+      : (f.type === "resource_ref_list" ? (byName ? str(n.name || dataOf(n).url) : str(dataOf(n).url || n.name)) : nameOf(n));
     if (found.length) {
       if (f.type === "resource_ref_list") r.value = found.map(shown);
       else if (f.type === "person_ref" || f.type === "actor_ref") r.value = { name: nameOf(found[0]) };
@@ -611,7 +754,9 @@ export function readUnit(def: CompiledDef, g: Graph, unitId: string, lang: strin
   const unread = props.filter((p) => !used.has(p.id) && !claimed.has(p.id))
     .map((p) => ({ id: p.id, qualia: qualiaOf(p), value: propValue(p) }))
     .sort((a, b) => a.qualia.localeCompare(b.qualia));
-  return { unitId, fields, unread };
+  const rs = def.recipe.unit?.record_status;
+  const status = rs ? { key: str(unitData.record_status) || null, scheme: str(rs.scheme), values: rs.values ?? [] } : undefined;
+  return { unitId, fields, unread, ...(status ? { status } : {}) };
 }
 
 /** The measure of MICRO-G: how many of the boxes are full, which are empty. */
@@ -629,7 +774,8 @@ export function recordOf(def: CompiledDef, reading: UnitReading): Record<string,
     if (r.value === undefined || r.value === null || r.value === "") continue;
     values[r.fid] = r.value;
   }
-  return { template: def.header.id, template_version: def.header.version, values };
+  return { template: def.header.id, template_version: def.header.version,
+           ...(reading.status?.key ? { status: reading.status.key } : {}), values };
 }
 
 // ─────────────────────────────────────────────────────────── 3 · the edit
@@ -686,6 +832,9 @@ export function planEdit(def: CompiledDef, g: Graph, unitId: string, fid: string
   if (f.type === "date" && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return refuse("sheet.no.date", { v });
   if (f.type === "choice" && v && !(f.options ?? []).some((o) => o.value === v)) return refuse("sheet.no.choice", { v });
 
+  const onAct = steps.length === 1 && steps[0].emit.op === "update_field" && str(steps[0].emit.node_id).startsWith("$anchor.");
+  if (onAct) return planActTime(def, g, unitId, str(steps[0].emit.node_id).slice("$anchor.".length),
+                                str(steps[0].emit.field), f.type === "integer" && v ? Number(v) : v);
   const native = steps.length === 1 && steps[0].emit.op === "update_field" && steps[0].emit.node_id === "$unit";
   if (native) {
     const field = str(steps[0].emit.field);
@@ -727,37 +876,131 @@ export function planEdit(def: CompiledDef, g: Graph, unitId: string, fid: string
   // a node of its own (context: a location, a functional unit, an activity…;
   // a person; a document): found by name, never invented where the recipe says
   // it is somebody else's to make
-  const edgeStep = steps.find((s) => s.emit.op === "add_edge")?.emit;
+  const edgeStep = mainEdge(entry);
   const nodeType = str(entry.node?.node_type);
-  if (!edgeStep || !nodeType || str(edgeStep.source) !== "$unit") return refuse("sheet.no.shape");
+  const src = str(edgeStep?.source);
+  if (!edgeStep || !nodeType || !(src === "$unit" || src.startsWith("$anchor."))) return refuse("sheet.no.shape");
   if (f.type === "resource_ref_list" || f.type === "record_ref_list") return refuse("sheet.no.rows");
+  // SPEC §2.5: a responsible is the author of an ACT — the box hangs on it
+  const from = src === "$unit" ? unitId : actOf(def, g, unitId, src.slice("$anchor.".length))?.id;
+  if (!from) return refuse("sheet.ro.actFirst", { anchor: src.slice("$anchor.".length) });
   const et = str(edgeStep.edge_type);
   const ix = index(g);
   const acts: Act[] = [];
   const notes: Plan["notes"] = [];
   // the edges of THIS box that are there now: they go
   for (const id of r.nodes) {
-    const e = (ix.out.get(unitId) ?? []).find((x) => x.target === id && edgeSpellings(et).has(str(x.edge_type)));
+    const e = (ix.out.get(from) ?? []).find((x) => x.target === id && edgeSpellings(et).has(str(x.edge_type)));
     if (e) acts.push({ op: "delEdge", edge: e });
   }
   let targetId: string | null = null;
   if (v) {
-    const same = g.nodes.filter((n) => n.node_type === nodeType && str(n.name).trim().toLowerCase() === v.toLowerCase());
+    const same = g.nodes.filter((n) => n.node_type === nodeType && str(n.name).trim().toLowerCase() === v.toLowerCase()
+      && (!entry.where || matchesWhere(n, entry.where) || !saysWhere(n, entry.where)));
     if (same.length > 1) return refuse("sheet.no.manyNamed", { v, type: nodeType, n: String(same.length) });
     if (same.length === 1) targetId = same[0].id;
     else if (f.type === "person_ref" || f.type === "actor_ref" || nodeType === "EpochNode")
       return refuse("sheet.no.person", { v, type: nodeType });
     else {
       targetId = `__new__:${fid}`;
-      acts.push({ op: "addNode", node: { id: targetId, node_type: nodeType, name: v, description: "", data: { [MARK]: markFor(def, fid) } } });
+      // SPEC §2.4: created carrying the box's discriminant (a place's kind + level)
+      acts.push({ op: "addNode", node: { id: targetId, node_type: nodeType, name: v, description: "", data: { ...(entry.where ?? {}), [MARK]: markFor(def, fid) } } });
       notes.push({ key: "sheet.note.created", p: { v, type: nodeType } });
     }
-    if (!(ix.out.get(unitId) ?? []).some((x) => x.target === targetId && edgeSpellings(et).has(str(x.edge_type))))
-      acts.push({ op: "addEdge", source: unitId, target: targetId, edgeType: et });
+    if (!(ix.out.get(from) ?? []).some((x) => x.target === targetId && edgeSpellings(et).has(str(x.edge_type))))
+      acts.push({ op: "addEdge", source: from, target: targetId, edgeType: et });
   }
   // the pointer BY ROLE: from now on this box's node is this one
   acts.push({ op: "setField", nodeId: unitId, field: `data.${LINKS}.${fid}`, value: targetId ? [targetId] : [] });
   return { acts, notes };
+}
+
+/**
+ * SPEC §2.5 (3.0.0): the TIME of an act changes (ANNO, DATA RILEVAMENTO, DATA
+ * RIELABORAZIONE → `data.act_start`). The act of the unit is found by its
+ * discriminant; when there is none it is made — an ActivityNodeGroup carrying
+ * `act_kind`, tied to the unit by the anchor's edge — as the recipe's anchor
+ * says (`create: true`). A SHARED act (the excavation, `scope: value:anno`) is
+ * the one of that year: the unit moves to it, or a new one is made for the year.
+ */
+export function planActTime(def: CompiledDef, g: Graph, unitId: string, anchor: string, field: string,
+                            value: string | number): Plan {
+  const a = def.recipe.anchors?.[anchor];
+  if (!a?.defined || !a.node?.node_type) return refuse("sheet.ro.anchor", { anchor });
+  const edge = (a.steps ?? []).find((s) => s.emit.op === "add_edge")?.emit;
+  const et = str(edge?.edge_type || "is_in_activity");
+  const ix = index(g);
+  const act = actOf(def, g, unitId, anchor);
+  const key = field.startsWith("data.") ? field.slice(5) : field;
+  const empty = value === "" || value === null || value === undefined;
+  const scope = str(a.scope || "unit");
+  const notes: Plan["notes"] = [];
+  if (scope === "unit" || empty) {
+    if (act) return { acts: [{ op: "setField", nodeId: act.id, field, value: empty ? "" : value }], notes };
+    if (empty) return { acts: [], notes };
+  }
+  const acts: Act[] = [];
+  let target: string | null = null;
+  if (scope !== "unit") {
+    // shared: the act of THAT value (an excavation is one per year)
+    const same = g.nodes.filter((n) => n.node_type === a.node!.node_type && matchesWhere(n, a.where ?? {})
+      && str(dataOf(n)[key]) === str(value) && !dataOf(n).removed);
+    if (act && same.some((n) => n.id === act.id)) return { acts: [], notes };
+    if (act) {
+      const old = (ix.out.get(unitId) ?? []).find((e) => e.target === act.id && edgeSpellings(et).has(str(e.edge_type)));
+      if (old) acts.push({ op: "delEdge", edge: old });
+    }
+    if (same.length) target = same[0].id;
+  }
+  if (!target) {
+    const unit = ix.byId.get(unitId);
+    target = `__new__:act:${anchor}`;
+    acts.push({ op: "addNode", node: { id: target, node_type: a.node.node_type,
+      name: scope === "unit" ? `${str(unit?.name)} · ${anchor}` : str(value), description: "",
+      data: { ...(a.where ?? {}), [key]: value } } });
+    notes.push({ key: "sheet.note.actCreated", p: { anchor, v: str(value) } });
+  } else if (scope === "unit") acts.push({ op: "setField", nodeId: target, field, value });
+  acts.push({ op: "addEdge", source: unitId, target, edgeType: et });
+  return { acts, notes };
+}
+
+/** SPEC §5 (3.0.0): the record's status on the unit (`data.record_status`), a
+ *  key of the scheme the definition names — or cleared. */
+export function planStatus(def: CompiledDef, unitId: string, key: string): Plan {
+  const rs = def.recipe.unit?.record_status;
+  if (!rs) return refuse("sheet.no.status");
+  if (key && !(rs.values ?? []).includes(key)) return refuse("sheet.no.choice", { v: key });
+  return { acts: [{ op: "setField", nodeId: unitId, field: str(rs.em_json || "data.record_status"), value: key }], notes: [] };
+}
+
+/** em_qualia_types 1.6.12 (MICRO-J §C): the PropertyNodes of the graph spelled
+ *  with a HISTORICAL name (`definition`), with their unit — what the migration
+ *  would rename. The same rule as s3dgraphy.migrations.definition_to_interpretation. */
+export function legacyProperties(g: Graph): Array<{ id: string; from: string; to: string; value: string; unit: string }> {
+  const ix = index(g);
+  const out: Array<{ id: string; from: string; to: string; value: string; unit: string }> = [];
+  for (const n of g.nodes) {
+    if (n.node_type !== "property" || dataOf(n).removed) continue;
+    const old = [str(n.name).trim().toLowerCase(), str(dataOf(n).property_type).trim().toLowerCase()].find((x) => PROPERTY_ALIASES[x]);
+    if (!old) continue;
+    const unit = (ix.inn.get(n.id) ?? []).find((e) => e.edge_type === "has_property");
+    out.push({ id: n.id, from: old, to: PROPERTY_ALIASES[old], value: propValue(n), unit: str(ix.byId.get(unit?.source ?? "")?.name) });
+  }
+  return out.sort((a, b) => a.unit.localeCompare(b.unit, undefined, { numeric: true }));
+}
+
+/** The migration as ONE plan (one delta, one undo): `name` and
+ *  `data.property_type` renamed in place, ids and chain untouched. `keep`: ids
+ *  a person decided to leave as they are. */
+export function planLegacyRename(g: Graph, keep: readonly string[] = []): Plan {
+  const rows = legacyProperties(g).filter((r) => !keep.includes(r.id));
+  if (!rows.length) return refuse("sheet.no.legacy");
+  const acts: Act[] = [];
+  for (const r of rows) {
+    acts.push({ op: "update", nodeId: r.id, patch: { name: r.to } });
+    acts.push({ op: "setField", nodeId: r.id, field: "data.property_type", value: r.to });
+  }
+  return { acts, notes: [{ key: "sheet.note.legacyRenamed", p: { n: String(rows.length) } }] };
 }
 
 /** Which unit a typed reference means — never invented, never guessed between
@@ -842,11 +1085,11 @@ export function applyPlan(st: StoreLike, plan: Plan,
   };
   st.batch(() => {
     for (const a of plan.acts) {
-      if (a.op === "update") st.updateNode(a.nodeId, a.patch as Partial<EmNode>);
+      if (a.op === "update") st.updateNode(id(a.nodeId), a.patch as Partial<EmNode>);
       else if (a.op === "setField") {
         const v = Array.isArray(a.value) ? a.value.map((x) => id(String(x))) : a.value;
-        if (v === "" || v === null || v === undefined || (Array.isArray(v) && !v.length)) st.clearField(a.nodeId, a.field);
-        else st.setField(a.nodeId, a.field, v);
+        if (v === "" || v === null || v === undefined || (Array.isArray(v) && !v.length)) st.clearField(id(a.nodeId), a.field);
+        else st.setField(id(a.nodeId), a.field, v);
       } else if (a.op === "setProp") {
         st.setPropertyValue(a.propId, a.value);
         if (a.mark) withMark(a.propId, a.mark);
