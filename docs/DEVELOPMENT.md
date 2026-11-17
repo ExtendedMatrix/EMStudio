@@ -149,6 +149,15 @@ Measured on an M-series Mac, same code, only the flags differing:
   `./dev.sh` runs from the venv, nothing is frozen) — the packaged app shows the
   typed document icon, which is the pre-existing behaviour.
 - **boto3** (`s3dgraphy[s3]`) — `/ingest-s3` + `/presign` (the S3 object store, RustFS in dev); 501 without it.
+- **stratigraph_templates** — **required**, not optional: «Stampa A4…» of a
+  recording sheet (`POST /sheet/render`, `tools/em_sheet.py`). Pure Python +
+  PyYAML, **vendored** in `tools/vendor/` by `frontend/scripts/sync-schede.sh`
+  from the same commit as the compiled definitions, so the freeze needs no
+  checkout of stratigraph-templates. +0.25 MB (measured 17 Nov 2026, 70 105 936 →
+  70 358 576 bytes). **WeasyPrint is excluded**: the desktop's PDF is the print
+  dialog's «Save as PDF»; the app prints through a window of its own
+  (`print_html`, `src-tauri/src/main.rs`), because WKWebView does not print an
+  iframe. `check-bridge.sh` asks the binary for a two-sided A4.
 - **python-docx** (`s3dgraphy[docx]`) — the **Word export**, i.e. the app's
   `Esporta ▸ Word`. Pure Python, nothing native, ~500 kB: there is no reason to
   ship without it, and `build-bridge.sh` says so when it is missing. It needs

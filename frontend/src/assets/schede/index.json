@@ -2,7 +2,7 @@
  "format": "emstudio/schede-vendored",
  "format_version": "1",
  "from": {
-  "commit": "3b22594",
+  "commit": "6c3e568",
   "repository": "stratigraph-templates"
  },
  "schede": {

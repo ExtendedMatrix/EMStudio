@@ -406,7 +406,11 @@ fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             }
             let url = payload.url().as_str();
             if is_app_url(url) {
-                *APP_PAGE.lock().unwrap() = Some(url.to_string());
+                // an `about:blank` (a detached window) or a `data:` page (the
+                // print window) is the app's, but not the page to go back to
+                if !url.starts_with("about:") && !url.starts_with("data:") {
+                    *APP_PAGE.lock().unwrap() = Some(url.to_string());
+                }
                 return;
             }
             let back = APP_PAGE.lock().unwrap().clone()
@@ -923,6 +927,77 @@ fn detached_close(app: tauri::AppHandle, label: String) -> bool {
     app.get_webview_window(&label).map(|w| w.destroy().is_ok()).unwrap_or(false)
 }
 
+/// MICRO-I-STAMPA-NEL-DESKTOP · `text` as the body of a `data:` URL: every
+/// byte but the unreserved ones percent-encoded (RFC 3986), UTF-8 kept whole.
+fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 3 / 2);
+    for b in text.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// MICRO-I-STAMPA-NEL-DESKTOP · the window «Stampa…» prints from.
+const PRINT_LABEL: &str = "print";
+
+/// MICRO-I-STAMPA-NEL-DESKTOP · print an HTML page (the A4 of a recording
+/// sheet, stratigraph-templates' `render.sheet_html(mode="print")`) with the
+/// SYSTEM's print dialog — whose «Save as PDF» is the desktop's PDF: the
+/// sidecar carries no WeasyPrint.
+///
+/// Not `iframe.contentWindow.print()`, which is what the browser does: in the
+/// WKWebView it returns at once and nothing opens (measured 17 Nov 2026 in a
+/// debug build, tauri 2.11.5 / wry 0.55.1: the app's windows, counted for 22 s,
+/// stay one). WKWebView implements no `window.print()`; Tauri replaces only the
+/// MAIN frame's with its `print` command, which prints the whole webview — the
+/// app, not the sheet. So the sheet gets a window of its own, its HTML loaded as
+/// a `data:` URL (Cargo feature `webview-data-url`), and once it has loaded
+/// wry's `printOperationWithPrintInfo:` runs on it as a sheet of that window:
+/// measured, the system's print panel opens over it. Not `about:blank` with the
+/// HTML written in, as a detached window's: such a window reports no page load
+/// (measured), so nothing would say when to print. WebKit paginates the A4 by
+/// the page's own `@page` (two pages, recto and verso, 210 × 297 mm: see
+/// MICRO-I's report). The window stays: it is the A4's preview, closed by hand.
+/// `async` on purpose: a synchronous command runs on the main thread, and a
+/// window built there waits for the event loop it is blocking (measured: the
+/// invoke never answered, no window came).
+#[tauri::command]
+async fn print_html(app: tauri::AppHandle, html: String, title: String) -> Result<(), String> {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    if let Some(old) = app.get_webview_window(PRINT_LABEL) {
+        let _ = old.destroy();
+    }
+    let url = format!("data:text/html;charset=utf-8,{}", percent_encode(&html))
+        .parse()
+        .map_err(|e| format!("{e}"))?;
+    let once = Arc::new(AtomicBool::new(false));
+    tauri::WebviewWindowBuilder::new(&app, PRINT_LABEL, tauri::WebviewUrl::External(url))
+        .title(&title)
+        .inner_size(860.0, 1000.0)
+        .on_page_load(move |window, payload| {
+            if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                || once.swap(true, Ordering::SeqCst)
+            {
+                return;
+            }
+            // the page has loaded (nothing in it to fetch); the print is asked of
+            // the main thread from outside this callback, which runs on it
+            std::thread::spawn(move || {
+                if let Err(e) = window.print() {
+                    eprintln!("[emstudio] the print dialog did not open: {e}");
+                }
+            });
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// MICRO-OVERLAY-PER-FINESTRA p.0 · where the main and the detached windows
 /// are, in logical points of the desktop (top-left origin): WKWebView's
 /// `window.screenX/screenY` are not the window's (measured 24 Oct: 0 and the
@@ -1077,7 +1152,8 @@ fn main() {
             clear_llm_key,
             update_install,
             detached_close,
-            window_frames
+            window_frames,
+            print_html
         ])
         .setup(|app| {
             if let Some(port) = app.config().build.dev_url.as_ref().and_then(|u| u.port()) {

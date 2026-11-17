@@ -1,0 +1,23 @@
+{
+ "format": "emstudio/vendored-python",
+ "format_version": "1",
+ "stratigraph_templates": {
+  "commit": "6c3e568",
+  "files": {
+   "LICENSE": "6fc9e709ccbfe0d77fbffa2427a983282be2eb88e47b1cdb49f21a83b4d1e665",
+   "__init__.py": "7cfe6ea1d96d33828033b65e91f28e543dde071fab71758893a14b1aaaf58ec0",
+   "cli.py": "ff202252df21fdb0e0673a7cafff329d5f4abc11678d4f93f75cf361088021ca",
+   "compile.py": "ce2d68e2ce617ee839bce0678677177445ad503cf4e07a3e212f13cd1e64aafd",
+   "idai_extract.py": "84c7c57a76761d44a190aec661931e9d3be862de17c89e108810a47328ba4948",
+   "loader.py": "9c4b6e10789ce18f80bdc13661454b1f63e9ea20f1338d59efd6224deba45bee",
+   "model.py": "448ac1e2d764efd74fb89d51bab1a9e71702d2c0b0b2ea32b4246cbf8b69063a",
+   "registry.py": "1f7c515b4ef218d5999bbedc8fe6d200e81f3d309ac9e5c468c29966195a900a",
+   "render.py": "05f7ecf20b9cfcb4b85565eff1bf9ad8840c7b9664eff7c4c8d0d5674e0a9eba",
+   "validate.py": "3144313284d2e3cc4bff48a4cef3b761768b23f82ba8aab2b52d33c3b3878e7d",
+   "vocab.py": "77dc55be0ec0c545c7e6777526ff02a7612a297290d64a385d3f9315a0a3581d",
+   "xsd_extract.py": "be3b0a02933c7ca0bcb2f169fccdc38dae4e7b51a2102a188bb6c4f4a97eb00b"
+  },
+  "license": "EUPL-1.2",
+  "repository": "stratigraph-templates"
+ }
+}

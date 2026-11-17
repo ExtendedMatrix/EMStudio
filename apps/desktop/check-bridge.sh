@@ -80,8 +80,37 @@ ask GET  "/geo/crs-info?epsg=3844" - "/geo/crs-info (em_geotiles + PROJ's databa
 ask POST /geo/frame '{"epsg":3844,"x":327372.56,"y":448682.65}' "/geo/frame · the site's frame (em_geotiles)"
 ask GET  /tiles/globe-min - "/tiles/globe-min (em_geotiles)"
 
+# MICRO-I-STAMPA-NEL-DESKTOP · «Stampa A4…» of a recording sheet: the first
+# definition the page vendors, an empty record, printed by the frozen
+# stratigraph_templates. «ok» is not enough: the A4 is a recto AND a verso.
+DEFS="$HERE/../../frontend/src/assets/schede"
+SHEET_BODY="$ROOT/sheet-body.json"
+if "$PY" - "$DEFS" "$SHEET_BODY" <<'EOF'
+import json, sys, pathlib
+defs = pathlib.Path(sys.argv[1])
+tid = sorted(json.loads((defs / "index.json").read_text(encoding="utf-8"))["schede"])[0]
+d = json.loads((defs / f"{tid}.json").read_text(encoding="utf-8"))
+json.dump({"definition": d, "record": {"template": tid, "values": {}}, "lang": "it", "pdf": True},
+          open(sys.argv[2], "w", encoding="utf-8"))
+EOF
+then
+  out="$(curl -s -m 90 -X POST -H "$O" -H 'Content-Type: application/json' --data-binary "@$SHEET_BODY" "$B/sheet/render" -w '\n%{http_code}')" || true
+  code="${out##*$'\n'}"
+  out="${out%$'\n'*}"
+  sides="$(printf '%s' "$out" | "$PY" -c 'import json,sys; o=json.load(sys.stdin); print(o.get("html","").count("class=\"side\""))' 2>/dev/null || echo 0)"
+  if [[ "$code" == 200 && "$out" == *'"ok": true'* && "$sides" -ge 2 ]]; then
+    echo "  ✓ /sheet/render · the A4 of a sheet, $sides sides (stratigraph_templates)"
+  else
+    echo "  ✗ /sheet/render · the A4 of a sheet — HTTP $code, $sides sides ${out:0:300}"
+    FAILED=1
+  fi
+else
+  echo "  ✗ /sheet/render · no vendored definition under $DEFS"
+  FAILED=1
+fi
+
 if [[ "$FAILED" != 0 ]]; then
-  echo "✗ the frozen bridge cannot do what the app asks of it (see above): an app that places no tileset is not released"
+  echo "✗ the frozen bridge cannot do what the app asks of it (see above): an app that places no tileset, or prints no sheet, is not released"
   exit 1
 fi
-echo "✓ the frozen bridge answers the geo routes"
+echo "✓ the frozen bridge answers the geo routes and prints a sheet"

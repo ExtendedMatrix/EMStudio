@@ -446,6 +446,7 @@ import {
   onDesktopDragDrop,
   pathIsDir,
   savePdf,
+  printHtml,
 } from "./tauri";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): the horizons as
 // bands, making room in the epochs, the site and its door (experimental.ts)
@@ -36848,7 +36849,10 @@ function openSheetPrint(name: string, def: CompiledDef,
   bar.appendChild(title);
   const info = document.createElement("span");
   info.className = "sk-print-info";
-  info.textContent = answer.pdf_b64 ? t("sheet.printPages", { n: String(answer.pages ?? "?") }) : t("sheet.printNoPdf", { why: answer.why ?? "" });
+  // MICRO-I-STAMPA-NEL-DESKTOP · the desktop's sidecar has no WeasyPrint, on
+  // purpose: there the PDF is the print dialog's, and the line says how
+  info.textContent = answer.pdf_b64 ? t("sheet.printPages", { n: String(answer.pages ?? "?") })
+    : isTauri() ? t("sheet.printPdfDesktop") : t("sheet.printNoPdf", { why: answer.why ?? "" });
   bar.appendChild(info);
   const frame = document.createElement("iframe");
   frame.className = "sk-print-frame";
@@ -36860,7 +36864,11 @@ function openSheetPrint(name: string, def: CompiledDef,
     b.addEventListener("click", run);
     bar.appendChild(b);
   };
-  btn(t("sheet.printSystem"), () => frame.contentWindow?.print(), "print");
+  btn(t("sheet.printSystem"), () => {
+    if (!isTauri()) { frame.contentWindow?.print(); return; }
+    printHtml(answer.html ?? "", title.textContent ?? name)
+      .catch((e) => toast(t("sheet.printFailed", { why: String((e as Error).message ?? e) })));
+  }, "print");
   if (answer.pdf_b64) btn(t("sheet.savePdf"), async () => {
     const bytes = Uint8Array.from(atob(answer.pdf_b64!), (c) => c.charCodeAt(0));
     const file = `${def.header.standard.code}_${name}.pdf`.replace(/[^\w.-]+/g, "_");

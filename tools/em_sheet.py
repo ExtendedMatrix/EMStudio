@@ -7,10 +7,14 @@ read off the graph; this rebuilds the template from the compiled visual half
 `stratigraph-templates print` command use. Nothing of the sheet is drawn here.
 
 Where the package comes from, first hit wins: an importable
-`stratigraph_templates` (installed), `STRATIGRAPH_TEMPLATES_SRC`, the sibling
-checkout `../stratigraph-templates/src`. None: the answer says so (501), the
-page says it. The PDF needs WeasyPrint: without it the HTML still comes back
-(the system's print dialog makes the PDF), and `why` says what is missing.
+`stratigraph_templates` (installed — and in the desktop's frozen sidecar, where
+build-bridge.sh puts the vendored copy), `STRATIGRAPH_TEMPLATES_SRC`, the copy
+vendored beside this file (`tools/vendor/stratigraph_templates`, synced by
+frontend/scripts/sync-schede.sh from the same commit as the definitions,
+MICRO-I-STAMPA-NEL-DESKTOP). None: the answer says so (501), the page says it.
+The PDF needs WeasyPrint: without it the HTML still comes back (the system's
+print dialog makes the PDF), and `why` says what is missing. The desktop's
+sidecar carries no WeasyPrint, on purpose (pango is heavy): it prints.
 No s3dgraphy in here: a test can run this with the templates' own venv.
 """
 
@@ -28,7 +32,7 @@ def _templates():
         import stratigraph_templates  # noqa: F401
     except ImportError:
         for cand in (os.environ.get("STRATIGRAPH_TEMPLATES_SRC"),
-                     str(pathlib.Path(__file__).resolve().parents[2] / "stratigraph-templates" / "src")):
+                     str(pathlib.Path(__file__).resolve().parent / "vendor")):
             if cand and (pathlib.Path(cand) / "stratigraph_templates").is_dir():
                 sys.path.insert(0, cand)
                 break

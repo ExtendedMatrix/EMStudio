@@ -14,7 +14,11 @@ authors = ["Emanuel Demetrescu <emanuel.demetrescu@cnr.it>"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `webview-data-url` · MICRO-I-STAMPA-NEL-DESKTOP: the A4 of a sheet is printed
+# from a window of its own whose page is a `data:` URL (main.rs `print_html`) —
+# an `about:blank` one reports no page load. One crate more (data-url, from the
+# servo/rust-url project); the HTML parser it uses was already in the lock.
+tauri = { version = "2", features = ["webview-data-url"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"

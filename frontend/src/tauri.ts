@@ -196,6 +196,13 @@ export async function savePdf(bytes: Uint8Array, defaultName: string): Promise<s
   return path;
 }
 
+/** MICRO-I-STAMPA-NEL-DESKTOP · the A4 printed by the system's dialog from a
+ *  window of its own (main.rs `print_html`): in the WKWebView an iframe's
+ *  `print()` does nothing. The dialog's «Save as PDF» is the desktop's PDF. */
+export async function printHtml(html: string, title: string): Promise<void> {
+  await invoke("print_html", { html, title });
+}
+
 /** Set the OS window title (dirty-state indicator lives here on desktop). */
 export async function setWindowTitle(title: string): Promise<void> {
   try {

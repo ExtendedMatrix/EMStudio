@@ -72,6 +72,29 @@ esac
 WORK="$(mktemp -d)"
 echo "Building em-bridge sidecar for $TRIPLE …"
 
+# MICRO-I-STAMPA-NEL-DESKTOP (17 Nov 2026) · «Stampa A4…» of a recording sheet.
+# POST /sheet/render prints with stratigraph-templates' own renderer
+# (tools/em_sheet.py → render.sheet_html), and without it the packaged app
+# answered 501. The package is PURE PYTHON + PyYAML and is VENDORED in
+# tools/vendor (frontend/scripts/sync-schede.sh, the same commit as the compiled
+# definitions the page sends), so the freeze needs no checkout of
+# stratigraph-templates — the release runner has none. em_sheet finds it by a
+# runtime sys.path, which the analysis cannot follow: hence `--paths` and the
+# hidden imports. REQUIRED, like certifi: a print button that answers 501 is not
+# shipped (check-bridge.sh asks /sheet/render of the binary). WeasyPrint is
+# EXCLUDED on purpose (pango + cairo, native and heavy): the desktop's PDF is the
+# system print dialog's «Save as PDF», and the page offers «Save PDF…» only when
+# a bridge has WeasyPrint (the dev bridge may).
+VENDOR="$EMSTUDIO/tools/vendor"
+[[ -f "$VENDOR/stratigraph_templates/render.py" ]] || { echo "no vendored stratigraph_templates in $VENDOR (run frontend/scripts/sync-schede.sh)"; exit 1; }
+"$PY" -c "import yaml" 2>/dev/null || { echo "PyYAML missing: $PY -m pip install pyyaml (the sheet's printer reads its definitions with it)"; exit 1; }
+SHEET_ARGS=(--paths "$VENDOR" --hidden-import stratigraph_templates
+            --hidden-import stratigraph_templates.loader --hidden-import stratigraph_templates.model
+            --hidden-import stratigraph_templates.render --hidden-import yaml
+            --exclude-module weasyprint)
+echo "  · bundling 'stratigraph_templates' @ $("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["stratigraph_templates"]["commit"])' "$VENDOR/VENDORED.json") (Stampa A4 of a sheet; no WeasyPrint)"
+
+
 # Bundle the S3 SDK (boto3) only if it is installed in the build venv, so the
 # shared object-store endpoints (/ingest-s3, /presign) work offline in the desktop
 # sidecar. If [s3] wasn't installed, skip it — those endpoints then 501
@@ -208,6 +231,7 @@ fi
   ${PREVIEW_ARGS[@]+"${PREVIEW_ARGS[@]}"} \
   ${DOCX_ARGS[@]+"${DOCX_ARGS[@]}"} \
   ${FIGURE_ARGS[@]+"${FIGURE_ARGS[@]}"} \
+  "${SHEET_ARGS[@]}" \
   --exclude-module pandas --exclude-module numpy --exclude-module openpyxl \
   --exclude-module fitz --exclude-module pymupdf --exclude-module pymupdf.mupdf \
   --distpath "$WORK/dist" --workpath "$WORK/build" --specpath "$WORK" \

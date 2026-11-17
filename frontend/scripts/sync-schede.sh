@@ -124,4 +124,32 @@ lines += ["export const VENDORED_INDEX: unknown = index;",
 (dst / "vendored.ts").write_text("\n".join(lines), encoding="utf-8")
 EOF
 echo "vendored from $SRC → $DST"
-git -C "$FRONTEND" status --short -- src/assets/schede | head -40
+
+# MICRO-I-STAMPA-NEL-DESKTOP (17 Nov 2026) · the PRINTER travels with what it
+# prints. The bridge prints an A4 with stratigraph-templates' own
+# `render.sheet_html`, and the desktop's sidecar is frozen where there is no
+# checkout of stratigraph-templates (release.yml builds from the published
+# s3dgraphy wheel; the package is on no index). So the package is copied here
+# from the SAME commit as the definitions above, byte for byte, with its licence
+# (EUPL-1.2, compatible with EMStudio's GPL-3.0): tools/em_sheet.py imports it,
+# apps/desktop/build-bridge.sh freezes it. Never edit the copy: run the sync.
+VENDOR="$FRONTEND/../tools/vendor"
+rm -rf "$VENDOR/stratigraph_templates"
+mkdir -p "$VENDOR/stratigraph_templates"
+cp "$SRC"/src/stratigraph_templates/*.py "$VENDOR/stratigraph_templates/"
+cp "$SRC/LICENSE" "$VENDOR/stratigraph_templates/LICENSE"
+"$PY" - "$SRC" "$VENDOR" <<'EOF'
+import hashlib, json, pathlib, subprocess, sys
+src, vendor = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+pkg = vendor / "stratigraph_templates"
+commit = subprocess.run(["git", "-C", str(src), "rev-parse", "--short", "HEAD"],
+                        capture_output=True, text=True).stdout.strip()
+stamp = {"format": "emstudio/vendored-python", "format_version": "1",
+         "stratigraph_templates": {"repository": "stratigraph-templates", "commit": commit,
+                                   "license": "EUPL-1.2",
+                                   "files": {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                                             for p in sorted(pkg.iterdir())}}}
+(vendor / "VENDORED.json").write_text(json.dumps(stamp, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+print(f"  renderer stratigraph_templates @ {commit}: {len(stamp['stratigraph_templates']['files'])} files → tools/vendor")
+EOF
+git -C "$FRONTEND" status --short -- src/assets/schede ../tools/vendor | head -40

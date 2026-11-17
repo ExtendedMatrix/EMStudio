@@ -417,13 +417,16 @@ jobs:
           # and Pillow the thumbnails — both bundle-if-present in build-bridge.sh.
           # certifi is REQUIRED there: the frozen bridge's HTTPS verifies with it
           # (MICRO-BRIDGE-CERTIFICATI; before, it came in only through pyproj).
+          # pyyaml is REQUIRED too: the sheet's printer (stratigraph_templates,
+          # vendored in tools/vendor) reads with it — «Stampa A4…» in the app
+          # (MICRO-I-STAMPA-NEL-DESKTOP; check-bridge.sh asks /sheet/render).
           # No sqlalchemy: GraphML import does not need it from s3dgraphy dev29
           # (tools/requirements.txt says why, and since when).
           # A runner's index can lag the gate's by a minute (dev.19, macOS
           # arm64): the script waits and retries, one log line per attempt,
           # before it calls the pin absent.
           PIN_ATTEMPTS=10 PIN_DELAY=30 scripts/pip-install-pinned.sh "$VPY" "$PIN" \
-            pyinstaller pandas lxml python-docx Pillow certifi
+            pyinstaller pandas lxml python-docx Pillow certifi pyyaml
           echo "VPY=$VPY" >> "$GITHUB_ENV"
 
       - name: Sidecar · lay the wheel out the way build-bridge.sh reads it
