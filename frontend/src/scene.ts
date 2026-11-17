@@ -156,6 +156,10 @@ export interface SceneGroup {
   headerH: number;
   title: string;
   folded: boolean;
+  /** MICRO-Q p.1 · placed by the hand: the layout leaves it where it was left */
+  pinned?: boolean;
+  /** MICRO-Q p.1 · a fixed group out of its epoch's band (Matrix): the band's label */
+  outOfLane?: string | null;
 }
 
 export interface Scene {

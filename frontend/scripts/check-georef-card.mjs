@@ -205,6 +205,61 @@ M.setLocale?.("it");
   ok(card.querySelector("[data-gr-crs-name]").textContent.includes("mai 4326"), "…said: not georeferenced, never 4326");
   stores.pop();
 
+  // ── 2b · MICRO-Q p.0 «Applica a tutti i grafi del file…» ──────────────────
+  {
+    const third = { id: "terzo", label: "terzo", store: new M.DocumentStore({ graph: graphSection("terzo", null) }) };
+    stores.push(third);
+    M.chooseGraph("romania");
+    paint();
+    const btn = card.querySelector("[data-gr-apply-all='romania']");
+    ok(!!btn, "«Applica a tutti i grafi del file…» in the graph's section (a file of more graphs)");
+    const plan = M.applyAllPlan(ro, stores);
+    eq(plan.map((r) => [r.id, r.effect]), [["paestum", "overwrite"], ["terzo", "georeference"]], "the plan: paestum (32633) will be overwritten, terzo georeferenced; the source not listed");
+    ok(plan[0].from.startsWith("EPSG:32633 · 500400, 4474500") && plan[0].to.startsWith("EPSG:3844 · 327372, 448682"), "…each row: the value now → the new one");
+    const paBefore = JSON.stringify(pa.store.geoPositionNode());
+    const roDepth = ro.store.undoDepth, paDepth = pa.store.undoDepth;
+    // Cancel: nothing written
+    btn.dispatchEvent(new Event("click"));
+    await new Promise((r) => setTimeout(r, 0));
+    let dlg = document.querySelector("[data-app-dialog='georef-apply-all']");
+    ok(!!dlg, "the click shows a summary first (never automatic)");
+    eq([...dlg.querySelectorAll("[data-gr-aa-row]")].map((r) => [r.dataset.grAaRow, r.dataset.grAaEffect]), [["paestum", "overwrite"], ["terzo", "georeference"]], "…graph by graph");
+    ok(dlg.querySelector("[data-gr-aa-row='paestum']").textContent.includes("verrà sovrascritto"), "…another system said «verrà sovrascritto»");
+    ok(dlg.querySelector("[data-gr-aa-row='paestum']").classList.contains("overwrite"), "…and marked");
+    dlg.querySelector("[data-dialog-cancel]").dispatchEvent(new Event("click"));
+    await new Promise((r) => setTimeout(r, 0));
+    eq(JSON.stringify(pa.store.geoPositionNode()), paBefore, "Cancel: paestum untouched");
+    ok(!third.store.geoPositionNode(), "Cancel: terzo untouched");
+    // Apply
+    const nLogs = logs.length;
+    card.querySelector("[data-gr-apply-all='romania']").dispatchEvent(new Event("click"));
+    await new Promise((r) => setTimeout(r, 0));
+    dlg = document.querySelector("[data-app-dialog='georef-apply-all']");
+    dlg.querySelector("[data-dialog-ok]").dispatchEvent(new Event("click"));
+    await new Promise((r) => setTimeout(r, 0));
+    const pd = pa.store.geoPositionNode().data, td = third.store.geoPositionNode()?.data;
+    eq([pd.epsg, pd.shift_x, pd.shift_y, pd.rotation_reference], [3844, 327372, 448682, "grid"], "Apply: paestum's GeoPositionNode now says romania's");
+    eq([td?.epsg, td?.shift_x, td?.shift_y], [3844, 327372, 448682], "Apply: terzo georeferenced with the same values");
+    ok(!JSON.stringify(M.buildContainer({ graphs: stores.map((x) => ({ id: x.id, doc: x.store.doc })), activeGraphId: "romania" }).header ?? {}).includes("epsg"), "…copied into each graph: the file gets no system");
+    eq(logs.length, nLogs + 1, "one Log line");
+    eq(logs.at(-1)[1].sort(), ["geo_paestum", "geo_terzo"], "…on each GeoPositionNode changed (their history)");
+    eq([ro.store.undoDepth - roDepth, pa.store.undoDepth - paDepth], [1, 1], "one step in each store (the source an empty one)");
+    // ONE undo — in the source graph, where the person stands — takes back all
+    ro.store.undo();
+    eq(JSON.stringify(pa.store.geoPositionNode()), paBefore, "one undo: paestum back to the byte");
+    ok(!third.store.geoPositionNode(), "…terzo back to not georeferenced");
+    ro.store.redo();
+    eq([pa.store.geoPositionNode().data.epsg, third.store.geoPositionNode()?.data.epsg], [3844, 3844], "one redo: all of them again");
+    pa.store.undo();
+    eq(JSON.stringify(pa.store.geoPositionNode()), paBefore, "an undo in another graph of the link: all back too");
+    ok(!third.store.geoPositionNode() && ro.store.undoDepth === roDepth, "…terzo and the source too");
+    // nothing to apply: a notice, no write
+    const same = { id: "same", label: "same", store: new M.DocumentStore({ graph: graphSection("same", 3844, 327372, 448682) }) };
+    eq(M.applyAllPlan(ro, [ro, same])[0].effect, "same", "a graph already the same: «già uguale»");
+    eq(M.applyGeorefToAll(ro, [ro, same]).length, 0, "…nothing written");
+    stores.pop();
+  }
+
   // ── 3 · the models ───────────────────────────────────────────────────────
   M.chooseGraph("romania");
   paint();

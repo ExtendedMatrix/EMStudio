@@ -19,6 +19,14 @@
 //! ```
 //!
 //! then READ the diff before committing it.
+//!
+//! Re-blessed 17 Nov 2026 (MICRO-Q p.2, «il layout non comprime abbastanza»):
+//! a group's walls and bottom 14 → 12 and its title room 28 → 26 — what the
+//! Matrix draws around a group (views/matrix.ts) — and the lanes' insets
+//! 24 → 16. Canvas 5044 × 1984 → 4992 × 1850, every node of the fixture moved by
+//! those amounts only. The rest of p.2 (the pieces packed bottom-left up to the
+//! drawing's width, a group's over-wide row folded From-Sketch too) leaves this
+//! fixture identical: it has one piece per lane and no over-wide group row.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;

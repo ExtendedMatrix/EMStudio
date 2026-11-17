@@ -7,6 +7,36 @@ that asked for one.
 ## [Unreleased]
 
 ### Changed
+- **Groups that stay where they are dropped, and a more compact layout**
+  (MICRO-Q-GRUPPI-E-LAYOUT, E.D. 17 November 2026). *The cause of the return*:
+  a group's drop wrote its move only into the archival layout
+  (`layout.positions`, `moveNodesBy`), four times (once per pass of
+  `settleDropped`), while the Matrix draws its view layout — the group was drawn
+  at its old place at once, and reopened elsewhere. Now the move goes to both by
+  the same delta, and the group is FIXED in the same step: `layout.pinned` (the
+  lock nodes already had) with its and its members' Rects in `layout.positions`
+  as drawn. em-core keeps a pinned group rigid at its sketch Rects and makes
+  room around it: the first block of each lane that meets it, and everything
+  right of it, goes right; inside an open group its siblings first, then the
+  grown group in its lane. A group dragged into another band is moved, not
+  re-dated (no lane lit): out of its epoch's band its border is dashed amber and
+  its tooltip says so. «Riordina il gruppo» (its menu) frees it, «Riordina tutto»
+  frees every fixed group; undo/redo. In the Graph a group's disc carries its
+  members (hand positions, one undo step — the view history carries the
+  Graph's positions too). The layout (em-core): the pieces of a lane packed
+  bottom-left on a skyline (they were on next-fit shelves) up to the drawing's
+  width (second pass), a group's over-wide row folded to about a square of its
+  content, From-Sketch too (USM487 of the Basilica: 352 SF on one row 42 238
+  wide → 2 754), group walls/title 14/28 → 12/26 (what the Matrix draws) and lane
+  insets 24 → 16. Basilica: drawing 712 → 80 Mpx², edges −42 %, crossings −5 %;
+  v10: 11.0 → 9.4 Mpx². Sweeps From-Sketch, node gap 24 and layer 32 measured
+  and refused. `layout_snapshot` re-blessed (pads and insets only).
+  «Applica a tutti i grafi del file…» in the card «Georeferenziazione»: a
+  summary graph by graph (now → after, «verrà sovrascritto» on another system),
+  a confirmation, ONE undo step across the graphs' stores
+  (`DocumentStore.linked`), a Log line on each GeoPositionNode; the values copied
+  into each graph, none on the file. `scripts/check-group-pin.mjs`,
+  `check-georef-card.mjs`, `crates/em-core/examples/layout_metrics.rs`.
 - **The georeference, visible and editable, per graph and per model**
   (MICRO-P-GEOREF-PER-GRAFO, E.D. 17 November 2026). The card
   «Georeferenziazione» (⌖ in the Space's bar, File ▸ Georeferenziazione…, «Apri

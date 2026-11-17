@@ -2723,6 +2723,14 @@ window.__EM_SCENE__ = () => {
     const n = scene()?.byId.get(id);
     return n ? { x: n.x, y: n.y, w: n.w, h: n.h } : null;
   },
+  /** MICRO-Q p.1 · the groups as drawn: world box, canvas box, fixed, out of their epoch's band */
+  groupBoxes: () => {
+    const s = scene();
+    const vp = viewport();
+    return (s?.groups ?? []).map((g) => ({ id: g.id, title: g.title, x: g.x, y: g.y, w: g.w, h: g.h,
+      sx: g.x * vp.scale + vp.x, sy: g.y * vp.scale + vp.y, sw: g.w * vp.scale, sh: g.h * vp.scale,
+      pinned: !!g.pinned, outOfLane: g.outOfLane ?? null }));
+  },
   laneAt: (id: string) => {
     const s = scene();
     const n = s?.byId.get(id);
@@ -2957,6 +2965,11 @@ window.__EM_SCENE__ = () => {
   folded: () => [...(store?.doc.layout?.folded_groups ?? [])],
   setValue: (id: string, v: string) => store?.setPropertyValue(id, v),
   compactAll: () => runCompact(),
+  /** MICRO-Q p.1 · «Riordina tutto» (the canvas menu's), and the Graph's hand positions */
+  reflowAll: () => layoutAll(false),
+  graphOverride: (id: string) => graphOverrides.get(id) ?? null,
+  /** MICRO-Q p.2 · the view layout's input and output (JSON), for the metrics */
+  viewLayoutIO: () => JSON.stringify({ input: lastViewInput, output: matrixViewLayout }),
   viewNow: () => {
     const g = windowsOf().find((w) => w.type === "graph" && winAreas.has(w.id));
     const prev = activeWin().id;
@@ -7417,6 +7430,7 @@ function buildScenesNow(): void {
     // unit, its instances, their cards) moves the block it covers, as in the
     // horizons — but what the hand placed stays where the hand left it
     if (sc && EXPERIMENTAL) makeRoom(sc, 24, (id) => handPlaced.has(id));
+    markPinnedGroups(sc);
     return sc;
   };
   const sharedCont = overlayShown(overlaysOf("matrix"), "continuity");
@@ -7577,6 +7591,8 @@ function matrixTighterThanDefault(): boolean {
  */
 let matrixViewSig = "";
 let matrixViewQueued = false;
+/** MICRO-Q p.2 · the last input of the view layout (graph drawn + sketch) */
+let lastViewInput: { graph: unknown; layout: unknown } | null = null;
 function matrixViewSigNow(): string {
   if (!store) return "";
   const d = store.doc;
@@ -7657,6 +7673,8 @@ async function refreshMatrixViewLayout(): Promise<void> {
       nodes: [...nodes, ...epochs],
       edges: [...kept, ...extra],
     } as EmDocument["graph"];
+    // MICRO-Q p.2 · what em-core is given, for a probe that measures the layout
+    lastViewInput = { graph: subGraph, layout: doc.layout ?? null };
     // seed with the archival layout (From-Sketch) so kept nodes barely move
     const out = await perfTimeAsync("runLayout", () =>
       computeLayout(subGraph, doc.layout ?? undefined),
@@ -7920,12 +7938,26 @@ function wireStore(s: DocumentStore): void {
   // MICRO-CORSIA-GRUPPI p.1 · the Matrix's view layout goes with each undo step:
   // an undo or a redo puts the positions back as they were, and does not ask
   // em-core for a new view layout (it did: the restored layout is a new object)
+  // MICRO-Q p.1 · …and the Graph's hand positions (a group dragged there with
+  // its members is one step too)
   s.setViewHistory({
-    take: () => (s === store && matrixViewLayout ? JSON.stringify(matrixViewLayout) : null),
+    take: () => (s === store ? JSON.stringify({ matrix: matrixViewLayout, graph: [...graphOverrides] }) : null),
     restore: (v) => {
       if (s !== store) return;
-      matrixViewLayout = JSON.parse(v) as import("./types").EmLayout;
-      matrixViewSig = matrixViewSigNow();
+      const o = JSON.parse(v) as { matrix?: import("./types").EmLayout | null; graph?: [string, { x: number; y: number }][] };
+      if (o.matrix) {
+        matrixViewLayout = o.matrix;
+        matrixViewSig = matrixViewSigNow();
+      }
+      if (o.graph) {
+        const same = JSON.stringify([...graphOverrides]) === JSON.stringify(o.graph);
+        if (!same) {
+          graphOverrides.clear();
+          for (const [id, p] of o.graph) graphOverrides.set(id, p);
+          if (graphAlgorithm === "force") for (const id of liquidSim.pos.keys()) if (!graphOverrides.has(id)) liquidSim.release(id);
+          persistViewPositions("graph");
+        }
+      }
     },
   });
   s.onChange(() => {
@@ -14664,7 +14696,9 @@ function dropOptionsFor(primary: string): Omit<DropOptions, "alt"> {
 function liveDropTarget(wx: number, wy: number, alt: boolean): DropTarget | null {
   const s = scene();
   if (!s || !dragDropOpts) return null;
-  return dropTargetAt(s, wx, wy, { ...dragDropOpts, alt });
+  const t = dropTargetAt(s, wx, wy, { ...dragDropOpts, alt });
+  // MICRO-Q p.1 · a group's drag never takes a lane: it is a move (no lane lit)
+  return t?.kind === "lane" && dragIsGroupMove ? null : t;
 }
 
 /** Membership moves of a drop into a group (D2 inverse); returns how many. */
@@ -14773,8 +14807,8 @@ function settleDropped(
       if (!want || !got) return;
       const dx = want.x - got.x;
       const dy = want.y - got.y;
-      if (Math.abs(dx) + Math.abs(dy) <= 0.5) return;
-      st.moveNodesBy(groupIds, dx, dy, false);
+      if (Math.abs(dx) + Math.abs(dy) <= 0.5) { if (pass) pinGroupHere(primary, groupIds); return; }
+      moveGroupBy(groupIds, dx, dy);
       continue;
     }
     let done = true;
@@ -14789,6 +14823,101 @@ function settleDropped(
       moveOneByDelta(id, dx, dy, false);
     }
     if (done) return;
+  }
+  if (groupMove) pinGroupHere(primary, groupIds);
+}
+
+/**
+ * MICRO-Q p.1 (E.D. on dev.128: «trascinando un gruppo, torna da solo al suo
+ * posto al ridisegno successivo») · THE CAUSE: the group's drop wrote its move
+ * with `moveNodesBy`, i.e. only into the ARCHIVAL layout (`layout.positions`),
+ * while since MICRO-PULIZIA p.5 the Matrix draws its VIEW layout
+ * (`matrixViewLayout`, em-core on what it draws). The rebuild after the release
+ * drew the group where the view still had it — its old place — and each of the
+ * four passes of `settleDropped`, finding it unmoved, wrote the delta into the
+ * archive again (VSF155 on the v10: dragged +145, the archive +582, the drawing
+ * 0). At the next opening the view was laid out again on that archive, and the
+ * group landed somewhere else again.
+ *
+ * Now the move goes where the Matrix draws AND into the archive, by the same
+ * delta (what `moveOneByDelta` does for a node), for the group and every node
+ * it carries.
+ */
+function moveGroupBy(ids: readonly string[], dx: number, dy: number): void {
+  const st = store!;
+  st.moveNodesBy([...ids], dx, dy, false);
+  const vp = matrixViewLayout?.positions;
+  if (vp && view === "matrix")
+    for (const id of ids) {
+      const r = vp[id];
+      if (r) vp[id] = { ...r, x: r.x + dx, y: r.y + dy };
+    }
+}
+
+/**
+ * MICRO-Q p.1 · …and the group is FIXED where the hand left it: in the layout's
+ * `pinned` (the lock a node already had: em-core keeps a pinned group rigid at
+ * its sketch Rects and lays the rest out around it, `layout.rs`), its Rects and
+ * its members' in `layout.positions` — the same place a single node's hand
+ * position lives — written as the Matrix draws them, so the next opening lays
+ * the view out with the group exactly there. Part of the drop's step.
+ */
+function pinGroupHere(primary: string, ids: readonly string[]): void {
+  const st = store!;
+  if (view !== "matrix" || inContext()) return;
+  const layout = (st.doc.layout ??= {});
+  const arch = (layout.positions ??= {});
+  const vp = matrixViewLayout?.positions;
+  if (vp) for (const id of ids) if (vp[id]) arch[id] = { ...vp[id] };
+  if (!st.isPinned(primary)) st.setPinned([primary], true, false);
+}
+
+/** MICRO-Q p.1 · the nodes a group carries (its primary containment, nested) */
+function groupDescendants(groupId: string): string[] {
+  if (!store) return [];
+  const mm = buildMembership(store.doc);
+  const acc: string[] = [];
+  const stack = [groupId];
+  while (stack.length) {
+    const g = stack.pop()!;
+    for (const m of mm.childrenOf.get(g) ?? [])
+      if (m !== groupId && !acc.includes(m)) { acc.push(m); stack.push(m); }
+  }
+  return acc;
+}
+
+/** MICRO-Q p.1 · the groups of the scene fixed by the hand, and the warning of
+ *  one out of its epoch's band (the move is allowed; the border says it) */
+function markPinnedGroups(sc: Scene | null): void {
+  if (!sc?.groups?.length || !store) return;
+  const pinned = new Set(store.doc.layout?.pinned ?? []);
+  if (!pinned.size) return;
+  const laneIds = new Set(sc.lanes.map((l) => l.id));
+  const laneOf = (epoch: string | null | undefined): string | null => {
+    let e = epoch ?? null;
+    for (let i = 0; e && i < 8; i++) {
+      if (laneIds.has(e)) return e;
+      e = store!.parentEpoch(e) ?? null;
+    }
+    return null;
+  };
+  const firstEpoch = (id: string): string | null =>
+    store!.doc.graph.edges.find((e) => e.edge_type === "has_first_epoch" && e.source === id)?.target ?? null;
+  for (const g of sc.groups) {
+    if (!pinned.has(g.id)) continue;
+    g.pinned = true;
+    // its epoch: its own, else the one most of its members are born in
+    let lane = laneOf(firstEpoch(g.id));
+    if (!lane) {
+      const count = new Map<string, number>();
+      for (const m of groupDescendants(g.id)) {
+        const l = laneOf(firstEpoch(m));
+        if (l) count.set(l, (count.get(l) ?? 0) + 1);
+      }
+      lane = [...count.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] ?? null;
+    }
+    const l = lane ? sc.lanes.find((x) => x.id === lane) : undefined;
+    g.outOfLane = l && (g.y < l.y - 1 || g.y + g.h > l.y + l.height + 1) ? l.label : null;
   }
 }
 
@@ -15335,7 +15464,11 @@ function commitNodeDrag(wx: number, wy: number, alt: boolean): void {
       if (reassign?.kind === "group") {
         const n = dropIntoGroup(ids, reassign.group.id);
         if (n) message = `${names(ids)} → ${reassign.group.title}`;
-      } else if (reassign?.kind === "lane") {
+      } else if (reassign?.kind === "lane" && !dragIsGroupMove) {
+        // MICRO-Q p.1 · a GROUP dragged into another band is MOVED, not
+        // re-dated: it stays fixed there and its border says it left its
+        // epoch's band (E.D.: «lo spostamento è permesso»); its epoch changes
+        // where epochs change (the Inspector, «Sposta in epoca…»)
         const targets = epochTargetsFor(ids);
         if (targets.length) {
           st.setFirstEpoch(targets, reassign.epochId);
@@ -15387,6 +15520,7 @@ function cancelDrag(): boolean {
     dragMode = "none";
     dragGate = null;
     graphDragBefore = null;
+    graphDragMembers = null;
     dragNodeId = null;
     buildScenes();
     draw();
@@ -59804,7 +59938,9 @@ async function runLayout(fresh: boolean, target: DocumentStore | null = store,
                          all = false,
                          /** TAVOLO 2 · computed because the document came without
                           *  one: not a step of anybody's history */
-                         initial = false): Promise<void> {
+                         initial = false,
+                         /** MICRO-Q p.1 · «Riordina tutto»: the groups the hand fixed are freed */
+                         releaseGroups = false): Promise<void> {
   // F4 · the store asked for, held across the awaits (see `reassertSizes`)
   const st = target;
   if (!st) return;
@@ -59812,7 +59948,9 @@ async function runLayout(fresh: boolean, target: DocumentStore | null = store,
   // ask for): the remembered re-stack is recomputed from the new positions
   if (st === store) reflowMatrix();
   const { computeLayout } = await import("./emcore");
-  const prev = st.doc.layout;
+  const freed = releaseGroups ? new Set(pinnedGroups(st)) : new Set<string>();
+  const prev0 = st.doc.layout;
+  const prev = freed.size && prev0 ? { ...prev0, pinned: (prev0.pinned ?? []).filter((id) => !freed.has(id)) } : prev0;
   // Pins & anchors are INTENT, not computed geometry — they must survive every
   // Layout, including a fresh (Alt) one. On fresh we drop the manual position
   // arrangement but still pass pins/anchors so em-core resolves them (a rule
@@ -59865,8 +60003,11 @@ async function layoutAll(fresh: boolean): Promise<void> {
       await refreshMatrixViewLayout();
       toast(t("tst.layoutFiltered"));
     } else {
-      await runLayout(fresh, store, true); // store.setLayout → onChange → buildScenes + draw
+      // MICRO-Q p.1 · «Riordina tutto» frees the groups the hand fixed
+      const freed = pinnedGroups();
+      await runLayout(fresh, store, true, false, true); // store.setLayout → onChange → buildScenes + draw
       toast(fresh ? t("tst.layoutFresh") : t("tst.layoutSketch"));
+      if (freed.length) logInfo(t("grp.reflowedAll", { n: String(freed.length) }), freed);
     }
   } catch (e) {
     toast(t("l.layoutFailed", { why: String(e instanceof Error ? e.message : e) }));
@@ -59905,7 +60046,7 @@ function togglePin(ids: string[], pinning = !ids.every((id) => store!.isPinned(i
  * In the projections that place nodes themselves (Graph, DTC, Multigraph) a
  * manual position is an override; forgetting it is the whole reorder.
  */
-async function reflowNodes(ids: string[]): Promise<void> {
+async function reflowNodes(ids: string[], unpin: string[] = []): Promise<void> {
   if (!store || !ids.length) return;
   if (view !== "matrix" || inContext()) {
     const ov = canvasOverrides();
@@ -59915,7 +60056,10 @@ async function reflowNodes(ids: string[]): Promise<void> {
     draw();
     return;
   }
-  const prev = store.doc.layout;
+  const prev0 = store.doc.layout;
+  // MICRO-Q p.1 · «Riordina» on a group FREES it: its pin goes in the same step
+  const freed = new Set(unpin);
+  const prev = freed.size && prev0 ? { ...prev0, pinned: (prev0.pinned ?? []).filter((id) => !freed.has(id)) } : prev0;
   const drop = new Set(ids.filter((id) => !(prev?.pinned ?? []).includes(id)));
   if (!drop.size) {
     toast(t("ctx.reflowPinned"));
@@ -59942,6 +60086,32 @@ async function reflowNodes(ids: string[]): Promise<void> {
   } catch (e) {
     toast(t("l.layoutFailed", { why: String(e instanceof Error ? e.message : e) }));
   }
+}
+
+/** MICRO-Q p.1 · «Riordina» of a group: its pin removed and its place, and its
+ *  members', given back to the layout — ONE step (undo pins it back). In the
+ *  Graph: the group's disc and its members' hand positions forgotten. */
+function reflowGroup(groupId: string): Promise<void> {
+  const ids = [groupId, ...groupDescendants(groupId)];
+  return reflowNodes(ids, [groupId]).then(() => {
+    logInfo(t("grp.reflowed", { name: String(store?.node(groupId)?.name ?? groupId) }), [groupId]);
+  });
+}
+
+/** MICRO-Q p.1 · a node drawn as a group: a group type, or a node others are
+ *  part of (a US/VSF container, invariant 5) */
+function isGroupLike(id: string, st: DocumentStore | null = store): boolean {
+  if (!st) return false;
+  if (isGroupType(st.node(id)?.node_type) || scenes.matrix?.groupsById?.has(id)) return true;
+  return (buildMembership(st.doc).childrenOf.get(id)?.length ?? 0) > 0;
+}
+
+/** MICRO-Q p.1 · the groups the hand fixed (pinned group nodes) */
+function pinnedGroups(st: DocumentStore | null = store): string[] {
+  const pins = st?.doc.layout?.pinned ?? [];
+  if (!st || !pins.length) return [];
+  const mm = buildMembership(st.doc);
+  return pins.filter((id) => isGroupType(st.node(id)?.node_type) || (mm.childrenOf.get(id)?.length ?? 0) > 0);
 }
 
 /** The nodes drawn in a lane (its phases included): what «Riordina la corsia»
@@ -60592,6 +60762,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const ddy = d.dy / vp.scale;
       const s = scene();
       const targets = new Set<string>([dragNodeId]);
+      // MICRO-Q p.1 · a group's disc carries its members (and stays, with them)
+      if (view === "graph" && isGroupLike(dragNodeId))
+        for (const m of graphDragMembers ??= groupDescendants(dragNodeId)) targets.add(m);
       if (graphLiquid) {
         for (const ed of store.doc.graph.edges) {
           if (ed.source === dragNodeId) targets.add(ed.target);
@@ -60791,6 +60964,20 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         : hit.node.node_type === "property" && store
           ? propertyHoverValue(store, hit.node.id).slice(0, 220)
           : String(hit.node.description ?? "").slice(0, 220);
+      // MICRO-Q p.1 · a group the hand fixed says so, and that it left its band
+      const sg = s.groupsById?.get(hit.id);
+      if (sg?.pinned) {
+        const pin = document.createElement("div");
+        pin.className = "tt-pinned";
+        pin.textContent = t("grp.pinnedTip");
+        tooltip.appendChild(pin);
+        if (sg.outOfLane) {
+          const w = document.createElement("div");
+          w.className = "tt-warn";
+          w.textContent = t("grp.outOfLane", { epoch: sg.outOfLane });
+          tooltip.appendChild(w);
+        }
+      }
       placeTooltip(e);
       tooltip.classList.remove("hidden");
     } else {
@@ -60929,6 +61116,12 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         const sn = moved ? scene()?.byId.get(dragNodeId) : undefined;
         if (sn) graphOverrides.set(dragNodeId, { x: sn.x, y: sn.y });
         else liquidSim.release(dragNodeId);
+        // MICRO-Q p.1 · …and the members a group's disc carried stay with it
+        for (const m of graphDragMembers ?? []) {
+          const mn = moved ? scene()?.byId.get(m) : undefined;
+          if (mn) graphOverrides.set(m, { x: mn.x, y: mn.y });
+          else liquidSim.release(m);
+        }
         if (graphLiquid && store)
           for (const ed of store.doc.graph.edges) {
             if (ed.source === dragNodeId) liquidSim.release(ed.target);
@@ -60945,6 +61138,17 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         if (view === "dtc") showCardIn(null, dragNodeId);
       }
       else if (moved) {
+        // MICRO-Q p.1 · the Graph's move is a step: the positions before it
+        // (taken at the press) go in the snapshot, undo/redo put them back
+        if (view === "graph" && graphDragBefore && store) {
+          const after = new Map(graphOverrides);
+          graphOverrides.clear();
+          for (const [k, v] of graphDragBefore) graphOverrides.set(k, v);
+          store.viewStep();
+          graphOverrides.clear();
+          for (const [k, v] of after) graphOverrides.set(k, v);
+          lastTouchedStore = store;
+        }
         persistViewPositions();
         // the overrides were written during the drag; ONE rebuild settles the
         // projection on them (edges re-routed, minimap, other windows)
@@ -60954,6 +61158,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       dragNodeId = null;
       dragGate = null;
       graphDragBefore = null;
+      graphDragMembers = null;
       graphLiquid = false;
       return;
     }
@@ -61266,6 +61471,8 @@ let dragDropOpts: Omit<DropOptions, "alt"> | null = null;
 let dragStartTarget: DropTarget | null = null;
 let dropTarget: DropTarget | null = null;
 let graphDragBefore: Map<string, { x: number; y: number }> | null = null;
+/** MICRO-Q p.1 · the members a group's disc carries in the Graph (at the press) */
+let graphDragMembers: string[] | null = null;
 let graphLiquid = false; // Shift held at graph-drag start → drag the cluster
 let dragMemberIds: string[] | null = null;
 // true = group-drag (move the group node, members follow); false = multi-select
@@ -62538,7 +62745,10 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
       menu.appendChild(sep);
     }
   }
-  item(t("ctx.reflowNode"), () => void reflowNodes(ids));
+  // MICRO-Q p.1 · a group: «Riordina il gruppo» frees it (fixed by a drag)
+  const oneGroup = ids.length === 1 && isGroupLike(ids[0]) ? ids[0] : null;
+  if (oneGroup) item(t(store.isPinned(oneGroup) ? "grp.reflowPinned" : "grp.reflow"), () => void reflowGroup(oneGroup)).dataset.cmd = "reflow-group";
+  else item(t("ctx.reflowNode"), () => void reflowNodes(ids));
   // MICRO-TESTATE-COERENTI p.12 · the one command, from the Matrix and the Graph too
   item(t("em.ctxMove"), () => openEpochMoveMenu(false, { x: clientX, y: clientY }, ids)).dataset.cmd = "epoch-move";
   item(t("em.ctxExtend"), () => openEpochMoveMenu(true, { x: clientX, y: clientY }, ids)).dataset.cmd = "epoch-extend";

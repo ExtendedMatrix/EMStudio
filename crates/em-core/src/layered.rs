@@ -84,6 +84,9 @@ pub(crate) struct LaneCtx<'a> {
     pub sweeps: u32,
     /// rows of leaves wider than this are folded onto extra ranks
     pub wrap_w: f64,
+    /// MICRO-Q p.2 · the width the lane's pieces may fill (the drawing's, known
+    /// after a first pass over the lanes); 0 = the lane's own rule
+    pub shelf_w: f64,
     /// node index → is it in the Matrix's outer ring (`geometry::is_outer_ring`)
     pub outer: &'a [bool],
     /// the network simplex's price of one rank of a group's height, against 1
@@ -102,6 +105,12 @@ const SINKS_ONLY: bool = false;
 /// the lane is as wide as the SUM of each column's widest row (10.7k on Templu
 /// Mare v2), set aside it is the widest row of units plus the groups (9.3k).
 const GROUPS_ASIDE: bool = true;
+/// MICRO-Q p.2 · crossing reduction on a From-Sketch layout too (see the sweeps)
+const SKETCH_SWEEPS: bool = false;
+/// MICRO-Q p.2 · over-wide rows folded on a From-Sketch layout too
+const SKETCH_WRAP: bool = true;
+/// MICRO-Q p.2 · a group's over-wide row folds to about a square of its content
+const GROUP_ROW_WRAP: bool = true;
 
 #[derive(Clone)]
 struct Item {
@@ -212,25 +221,101 @@ fn layout_part(
     keyed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(&b.1)));
     let area: f64 = keyed.iter().map(|(_, _, b)| b.w * b.h).sum();
     let widest = keyed.iter().map(|(_, _, b)| b.w).fold(0.0, f64::max);
-    let target = if ctx.wrap_w > 0.0 { ctx.wrap_w } else { (area.sqrt() * 1.9).max(1600.0) }.max(widest);
     let gap = ctx.gap_x * 2.0;
     let shelf_gap = ctx.sub_gap * 2.0 + ctx.group_header;
-    let (mut x, mut y, mut shelf_h, mut w) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let sizes: Vec<(f64, f64)> = keyed.iter().map(|(_, _, b)| (b.w, b.h)).collect();
+    // MICRO-Q p.2 (E.D., 17 Nov 2026: «non comprime abbastanza») · the pieces
+    // were put on SHELVES (next-fit: left to right, a new shelf below when the
+    // target width is reached): a small piece after a tall one opened a new
+    // shelf, and the hole beside a short piece stayed empty — on the v10 a lone
+    // unit at the end of the first shelf made the whole Matrix 4 524 wide. Now
+    // they are packed BOTTOM-LEFT on a skyline, in the same order (the sketch's,
+    // so the hand's order is kept): each piece where it sits highest, leftmost
+    // on ties, so the small ones fill the holes beside and under the big ones.
+    // The target width is the one, among a few around the old rule's, that
+    // gives the smallest lane (deterministic: the first smallest wins).
+    let fixed_target = ctx.wrap_w > 0.0 || ctx.shelf_w > 0.0;
+    let rule = if ctx.shelf_w > 0.0 { ctx.shelf_w } else if ctx.wrap_w > 0.0 { ctx.wrap_w } else { (area.sqrt() * 1.9).max(1600.0) };
+    let factors: &[f64] = if fixed_target { &[1.0] } else { &[1.0, 0.85, 0.7, 0.6, 0.5, 1.2] };
+    let mut best: Option<(f64, f64, f64, Vec<(f64, f64)>)> = None;
+    for &f in factors {
+        let target = (rule * f).max(widest);
+        let at = skyline_pack(&sizes, target, gap, shelf_gap);
+        let w = at.iter().zip(&sizes).map(|(p, s)| p.0 + s.0).fold(0.0, f64::max);
+        let h = at.iter().zip(&sizes).map(|(p, s)| p.1 + s.1).fold(0.0, f64::max);
+        if best.as_ref().map_or(true, |b| w * h < b.0 * b.1 - 1e-6) {
+            best = Some((w, h, target, at));
+        }
+    }
+    let (w, h, _, at) = best.unwrap();
     let mut places = Vec::new();
     let mut cycle_edges = Vec::new();
-    for (_, _, b) in keyed {
-        if x > 0.0 && x + b.w > target {
-            y += shelf_h + shelf_gap;
-            x = 0.0;
-            shelf_h = 0.0;
-        }
+    for ((_, _, b), (x, y)) in keyed.into_iter().zip(at) {
         places.extend(b.places.into_iter().map(|(m, px, py, pw, ph)| (m, px + x, py + y, pw, ph)));
         cycle_edges.extend(b.cycle_edges);
-        w = w.max(x + b.w);
-        shelf_h = shelf_h.max(b.h);
-        x += b.w + gap;
     }
-    Block { w, w_main: w, h: y + shelf_h, places, cycle_edges }
+    Block { w, w_main: w, h, places, cycle_edges }
+}
+
+/// MICRO-Q p.2 · bottom-left skyline packing of boxes (w, h), in their order,
+/// within `target` (a box wider than it starts at 0): each box where its top
+/// is lowest, leftmost on ties; `gap` kept to the right of a box, `vgap` under.
+fn skyline_pack(sizes: &[(f64, f64)], target: f64, gap: f64, vgap: f64) -> Vec<(f64, f64)> {
+    // the skyline: (x0, x1, y) segments covering [0, ∞), left to right
+    let mut sky: Vec<(f64, f64, f64)> = vec![(0.0, f64::INFINITY, 0.0)];
+    let mut out = Vec::with_capacity(sizes.len());
+    for &(w, h) in sizes {
+        let span = w + gap;
+        let mut pick: Option<(f64, f64)> = None; // (y, x)
+        for i in 0..sky.len() {
+            let x = sky[i].0;
+            if x > 0.0 && x + w > target {
+                break;
+            }
+            let mut y = 0.0f64;
+            for s in &sky[i..] {
+                if s.0 >= x + span {
+                    break;
+                }
+                y = y.max(s.2);
+            }
+            if pick.map_or(true, |(py, px)| y < py - 1e-9 || ((y - py).abs() <= 1e-9 && x < px)) {
+                pick = Some((y, x));
+            }
+        }
+        let (y, x) = pick.unwrap_or((sky.iter().map(|s| s.2).fold(0.0, f64::max), 0.0));
+        out.push((x, y));
+        // raise the skyline over [x, x + span) to y + h + vgap
+        let (a, b, top) = (x, x + span, y + h + vgap);
+        let mut next: Vec<(f64, f64, f64)> = Vec::with_capacity(sky.len() + 2);
+        for &(s0, s1, sy) in &sky {
+            if s1 <= a || s0 >= b {
+                next.push((s0, s1, sy));
+                continue;
+            }
+            if s0 < a {
+                next.push((s0, a, sy));
+            }
+            if s1 > b {
+                next.push((b, s1, sy));
+            }
+        }
+        next.push((a, b, top));
+        next.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+        // merge neighbours of one height
+        let mut merged: Vec<(f64, f64, f64)> = Vec::with_capacity(next.len());
+        for seg in next {
+            if let Some(last) = merged.last_mut() {
+                if (last.2 - seg.2).abs() <= 1e-9 && (last.1 - seg.0).abs() <= 1e-9 {
+                    last.1 = seg.1;
+                    continue;
+                }
+            }
+            merged.push(seg);
+        }
+        sky = merged;
+    }
+    out
 }
 
 /// The top-level nodes of a part grouped by connection (deterministic: each
@@ -620,12 +705,20 @@ fn layout_component(
         let area: f64 = items.iter().filter(|it| it.kids.is_none()).map(|it| (it.w + ctx.gap_x) * (it.h + ctx.sub_gap)).sum();
         (area.sqrt() * 1.9).max(1600.0)
     };
-    if !ctx.sketching {
-        // per (container, rank): the leaves, in node order
+    // MICRO-Q p.2 · folded From-Sketch too (only a fresh layout folded: on
+    // Basilica the archive is From-Sketch, and USM487 drew its 352 SF on ONE
+    // row 42 238 wide), in the sketch's order there
+    if !ctx.sketching || SKETCH_WRAP {
+        // per (container, rank): the leaves, in node order (the sketch's x when sketching)
         let mut rows: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
         for i in 0..n_items {
             if !is_group(i) {
                 rows.entry((top_r[i], items[i].parent)).or_default().push(i);
+            }
+        }
+        if ctx.sketching {
+            for row in rows.values_mut() {
+                row.sort_by(|&a, &b| sketch_x(items[a].node).partial_cmp(&sketch_x(items[b].node)).unwrap_or(std::cmp::Ordering::Equal).then(a.cmp(&b)));
             }
         }
         // ranks are processed bottom-up so an insertion does not shift a row
@@ -643,6 +736,14 @@ fn layout_component(
         for (r, parent) in keys {
             let row = &rows[&(r, parent)];
             let total: f64 = row.iter().map(|&i| items[i].w + ctx.gap_x).sum();
+            // MICRO-Q p.2 · inside a GROUP the row folds to about a square of
+            // what it holds (a group is a column: its widest row is its width)
+            let wrap_w = if parent != ROOT && GROUP_ROW_WRAP {
+                let a: f64 = row.iter().map(|&i| (items[i].w + ctx.gap_x) * (items[i].h + ctx.sub_gap)).sum();
+                wrap_w.min((a.sqrt() * 1.9).max(1200.0))
+            } else {
+                wrap_w
+            };
             if total <= wrap_w || row.len() < 2 {
                 continue;
             }
@@ -914,7 +1015,12 @@ fn layout_component(
         }
         total
     };
-    if !ctx.sketching && ords.len() > 1 {
+    // MICRO-Q p.2 · the sweeps run From-Sketch too (they did only on a fresh
+    // layout: the Matrix's view layout, always seeded by the archive, never
+    // reduced a crossing). They START from the sketch's order and a new order
+    // is kept only when it crosses strictly less — an order that crosses no
+    // more than the hand's stays the hand's (invariant 8)
+    if (!ctx.sketching || SKETCH_SWEEPS) && ords.len() > 1 {
         let mut best = slots.clone();
         let mut best_c = crossings(&pos);
         for it in 0..ctx.sweeps.max(1) {

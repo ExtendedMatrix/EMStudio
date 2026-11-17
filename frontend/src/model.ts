@@ -64,7 +64,14 @@ interface Snapshot {
   /** TAVOLO 2 · in a room (`DocumentStore.liveHistory`): the operations the step
    *  emitted — what an undo of it has to answer with operations of its own */
   ops?: GraphOp[];
+  /** MICRO-Q p.0 · a step written in several stores by ONE gesture (the
+   *  georeference applied to every graph of a file): undoing it in one undoes
+   *  it in all — `DocumentStore.linked` */
+  link?: StepLink;
 }
+
+/** MICRO-Q p.0 · the stores that took one step together */
+export interface StepLink { stores: DocumentStore[] }
 
 /** TAVOLO 2 · what an undo or a redo did in a room, for the Log. */
 export interface LiveHistoryNote {
@@ -692,6 +699,15 @@ export class DocumentStore {
     return out;
   }
 
+  /** MICRO-Q p.1 · a step of the VIEW alone (positions kept outside the
+   *  document, as the Graph's): the snapshot — with the view's `take()` — is
+   *  taken now, nothing of the document is written. Not in a room. */
+  viewStep(): void {
+    if (this.live || this.batchDepth > 0) return;
+    this.checkpoint();
+    this.recording = null;
+  }
+
   /** how many undo steps are held — a probe for «one gesture, one step» */
   get undoDepth(): number {
     return this.undoStack.length;
@@ -719,27 +735,82 @@ export class DocumentStore {
   }
 
   undo(): void {
-    if (this.live) {
-      this.liveStep(this.undoStack, this.redoStack, "undo");
-      return;
-    }
-    const s = this.undoStack.pop();
-    if (!s) return;
-    this.redoStack.push(this.take());
-    this.restore(s);
-    this.emit();
+    this.linkedStep(this.undoStack, this.redoStack, () => {
+      if (this.live) {
+        this.liveStep(this.undoStack, this.redoStack, "undo");
+        return;
+      }
+      const s = this.undoStack.pop();
+      if (!s) return;
+      this.redoStack.push(this.take());
+      this.restore(s);
+      this.emit();
+    }, (o) => o.undo());
   }
 
   redo(): void {
-    if (this.live) {
-      this.liveStep(this.redoStack, this.undoStack, "redo");
-      return;
+    this.linkedStep(this.redoStack, this.undoStack, () => {
+      if (this.live) {
+        this.liveStep(this.redoStack, this.undoStack, "redo");
+        return;
+      }
+      const s = this.redoStack.pop();
+      if (!s) return;
+      this.undoStack.push(this.take());
+      this.restore(s);
+      this.emit();
+    }, (o) => o.redo());
+  }
+
+  /** MICRO-Q p.0 · inside a linked undo/redo: the other stores are walked once */
+  private static linking = false;
+
+  /** MICRO-Q p.0 · an undo (redo) of a LINKED step: the step taken here, the
+   *  link carried to the opposite stack, then the same step taken in every
+   *  other store of the link whose top step is still that link's */
+  private linkedStep(from: Snapshot[], to: Snapshot[], step: () => void, other: (o: DocumentStore) => void): void {
+    const link = from[from.length - 1]?.link;
+    const before = to.length;
+    step();
+    if (!link) return;
+    if (to.length > before) to[to.length - 1].link = link;
+    if (DocumentStore.linking) return;
+    DocumentStore.linking = true;
+    try {
+      for (const o of link.stores) {
+        if (o === this) continue;
+        const stack = from === this.undoStack ? o.undoStack : o.redoStack;
+        if (stack[stack.length - 1]?.link === link) other(o);
+      }
+    } finally {
+      DocumentStore.linking = false;
     }
-    const s = this.redoStack.pop();
-    if (!s) return;
-    this.undoStack.push(this.take());
-    this.restore(s);
-    this.emit();
+  }
+
+  /**
+   * MICRO-Q p.0 · ONE gesture written in several stores (each graph of a file
+   * has its own): `fn` writes, then the step each store took is tied to the
+   * others' — an undo in any of them takes back all of them, a redo puts all
+   * back. A store that took more than one step keeps the first (the state
+   * before the gesture). `origin`: stores where the gesture was made without
+   * writing (the graph the values come from) — they take an EMPTY step in the
+   * link, so ⌘Z where the person stands takes the gesture back too. Returns
+   * the stores that changed.
+   */
+  static linked(stores: DocumentStore[], fn: () => void, origin: DocumentStore[] = []): DocumentStore[] {
+    const depth = new Map(stores.map((s) => [s, s.undoStack.length]));
+    fn();
+    const moved = stores.filter((s) => s.undoStack.length > depth.get(s)!);
+    // the first snapshot is the state before the gesture; later ones go
+    for (const s of moved) s.undoStack.length = depth.get(s)! + 1;
+    const extra = moved.length ? origin.filter((s) => !moved.includes(s) && !s.live) : [];
+    for (const s of extra) { s.checkpoint(); s.recording = null; }
+    const all = [...moved, ...extra];
+    if (all.length > 1) {
+      const link: StepLink = { stores: all };
+      for (const s of all) s.undoStack[s.undoStack.length - 1].link = link;
+    }
+    return moved;
   }
 
   /**

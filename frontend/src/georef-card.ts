@@ -29,7 +29,8 @@
  * are never rewritten, only the transformation from their frame to the graph's.
  */
 import { t } from "./i18n";
-import type { DocumentStore } from "./model";
+import { DocumentStore } from "./model";
+import { openDialog } from "./app-dialog";
 import type { EmNode } from "./types";
 import { readFrame, makeFrame, type FileFrame } from "./file-frame";
 import {
@@ -277,6 +278,7 @@ export function renderGeorefCard(card: HTMLElement, deps: GeorefCardDeps, redraw
     return;
   }
   const { epsg, d, write } = renderGraphFields(gsec, g, geo, deps, redraw);
+  if (graphs.length > 1) gsec.appendChild(applyAllButton(g, graphs, deps));
 
   // the models first (their datums decide whether the datum is said open)
   const models = deps.models(st);
@@ -335,6 +337,119 @@ function renderGraphFields(gsec: HTMLElement, g: GeorefGraph, geo: EmNode, deps:
   }
 
   return { epsg, d, write };
+}
+
+// ── MICRO-Q p.0 · «Applica a tutti i grafi del file…» ───────────────────────
+// E.D. (17 Nov 2026): a command that makes sense and DESTROYS — so it is never
+// automatic: a summary graph by graph (the value now → the new one), the graphs
+// in another system said «will be overwritten», a confirmation, ONE undo step
+// for all of them, the Log and each node's history told. The rule stays: the
+// values are COPIED into each graph's GeoPositionNode; nothing becomes a value
+// of the file.
+
+/** the fields copied from one graph's GeoPositionNode into the others (shift Z
+ *  is not: Z 0 is the convention, the heights are in the models) */
+export const GEO_COPY_FIELDS = ["epsg", "shift_x", "shift_y", "rotation", "rotation_reference", "datum_operation"] as const;
+
+export interface ApplyAllRow {
+  id: string;
+  label: string;
+  /** the georeference now, in words («EPSG:3844 · 327372, 4986270» / not georeferenced) */
+  from: string;
+  to: string;
+  /** what the copy does to it */
+  effect: "overwrite" | "update" | "georeference" | "same";
+}
+
+const geoWords = (d: Record<string, unknown> | null): string => {
+  const e = d ? epsgOf(d) : null;
+  if (!d || e === null) return d && (num(d.shift_x) || num(d.shift_y)) ? `${t("gr.notGeoref")} · ${fmtCoord(num(d.shift_x))}, ${fmtCoord(num(d.shift_y))}` : t("gr.notGeoref");
+  const rot = num(d.rotation);
+  return `EPSG:${e} · ${fmtCoord(num(d.shift_x))}, ${fmtCoord(num(d.shift_y))}${rot ? ` · ${fmtCoord(rot)}°` : ""}`
+    + (typeof d.datum_operation === "string" ? ` · ${d.datum_operation}` : "");
+};
+
+/** the patch that makes a GeoPositionNode say what `src` says (a field `src`
+ *  lacks is removed — `null` in `setGeoreference`) */
+export function geoCopyPatch(src: Record<string, unknown>): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  for (const k of GEO_COPY_FIELDS) p[k] = src[k] === undefined ? null : JSON.parse(JSON.stringify(src[k]));
+  if (p.rotation_reference === null) p.rotation_reference = "grid";
+  return p;
+}
+
+/** the summary of «apply to every graph», graph by graph, the source excluded */
+export function applyAllPlan(src: GeorefGraph, graphs: GeorefGraph[]): ApplyAllRow[] {
+  const sd = (src.store.geoPositionNode()?.data ?? {}) as Record<string, unknown>;
+  const se = epsgOf(sd);
+  const to = geoWords(sd);
+  const canon = (d: Record<string, unknown>) => JSON.stringify(GEO_COPY_FIELDS.map((k) => k === "rotation_reference" ? (d[k] ?? "grid") : k === "epsg" ? epsgOf(d) : d[k] ?? null));
+  return graphs.filter((g) => g.id !== src.id).map((g) => {
+    const d = (g.store.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
+    const e = d ? epsgOf(d) : null;
+    const effect: ApplyAllRow["effect"] = d && canon(d) === canon(sd) ? "same"
+      : e === null ? "georeference" : e !== se ? "overwrite" : "update";
+    return { id: g.id, label: g.label, from: geoWords(d), to, effect };
+  });
+}
+
+/** writes the source's georeference into every other graph of the file: ONE
+ *  linked step (an undo in any graph takes back all). Returns the graphs written. */
+export function applyGeorefToAll(src: GeorefGraph, graphs: GeorefGraph[]): GeorefGraph[] {
+  const sd = (src.store.geoPositionNode()?.data ?? {}) as Record<string, unknown>;
+  const patch = geoCopyPatch(sd);
+  const plan = new Map(applyAllPlan(src, graphs).map((r) => [r.id, r]));
+  const targets = graphs.filter((g) => plan.has(g.id) && plan.get(g.id)!.effect !== "same");
+  const moved = DocumentStore.linked(targets.map((g) => g.store), () => {
+    for (const g of targets) g.store.setGeoreference(patch);
+  }, [src.store]);
+  return targets.filter((g) => moved.includes(g.store));
+}
+
+function applyAllButton(src: GeorefGraph, graphs: GeorefGraph[], deps: GeorefCardDeps): HTMLElement {
+  const b = el("button", "insp-btn gr-apply-all", t("gr.applyAll")) as HTMLButtonElement;
+  b.type = "button";
+  b.dataset.grApplyAll = src.id;
+  b.title = t("gr.applyAllHint");
+  b.addEventListener("click", () => { void confirmApplyAll(src, graphs, deps); });
+  return b;
+}
+
+/** the summary, the question, and — only on «Applica» — the copy */
+export async function confirmApplyAll(src: GeorefGraph, graphs: GeorefGraph[], deps: GeorefCardDeps): Promise<boolean> {
+  const rows = applyAllPlan(src, graphs);
+  const body = el("div", "gr-apply-plan");
+  const table = document.createElement("table");
+  table.className = "gr-apply-table";
+  const hr = document.createElement("tr");
+  for (const h of [t("gr.aaGraph"), t("gr.aaNow"), t("gr.aaNew"), ""]) hr.appendChild(el("th", "", h));
+  table.appendChild(hr);
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    tr.dataset.grAaRow = r.id;
+    tr.dataset.grAaEffect = r.effect;
+    if (r.effect === "overwrite") tr.className = "overwrite";
+    tr.append(el("td", "", r.label), el("td", "", r.from), el("td", "", r.effect === "same" ? "—" : r.to),
+      el("td", `gr-aa-effect ${r.effect}`, t(`gr.aa.${r.effect}`)));
+    table.appendChild(tr);
+  }
+  body.appendChild(table);
+  const n = rows.filter((r) => r.effect !== "same").length;
+  const over = rows.filter((r) => r.effect === "overwrite").length;
+  if (over) body.appendChild(el("div", "georef-warn", t("gr.aaOverwriteWarn", { n: String(over) })));
+  body.appendChild(el("p", "insp-hint", t("gr.aaRule")));
+  const a = await openDialog({
+    title: t("gr.applyAllTitle", { name: src.label }),
+    message: n ? t("gr.aaQuestion", { n: String(n) }) : t("gr.aaNothing"),
+    body, kind: "georef-apply-all", ok: n ? t("gr.aaOk") : t("dlg.ok"), cancel: n ? undefined : null, danger: over > 0,
+  });
+  if (!a.ok || !n) return false;
+  const written = applyGeorefToAll(src, graphs);
+  if (!written.length) return false;
+  const msg = t("gr.aaDone", { name: src.label, n: String(written.length), graphs: written.map((g) => g.label).join(", ") });
+  deps.log(msg, written.map((g) => g.store.geoPositionNode()?.id).filter((x): x is string => !!x));
+  deps.done(msg, src.store);
+  return true;
 }
 
 /** MICRO-P-GEOREF-PER-GRAFO p.4 · the GeoPositionNode's Inspector: its data

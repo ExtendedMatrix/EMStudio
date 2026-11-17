@@ -61,6 +61,10 @@ pub struct LayoutOptions {
     pub wrap_width: f64,
     /// v5 · network simplex weight of a group's height (1 = an edge's)
     pub group_weight: i64,
+    /// the room kept around a group's members (its walls and its bottom)
+    pub group_pad: f64,
+    /// the room a group's title bar takes above its first row
+    pub group_header: f64,
 }
 
 impl Default for LayoutOptions {
@@ -81,7 +85,9 @@ impl Default for LayoutOptions {
             straighten: false,
             respect_groups: true,
             group_compaction_strong: true,
-            lane_min_insets: 24.0,
+            // MICRO-Q p.2 · 24 → 16: measured on the v10 and Basilica, smaller
+            // drawings with fewer crossings and shorter edges
+            lane_min_insets: 16.0,
             compact_lanes: true,
             default_node_w: 90.0,
             default_node_h: 32.0,
@@ -89,9 +95,18 @@ impl Default for LayoutOptions {
             barycenter_sweeps: 8,
             wrap_width: 0.0,
             group_weight: 1,
+            // MICRO-Q p.2 · 14/28 → 12/26: the Matrix draws a group's outline 12
+            // around its members and 26 above them (views/matrix.ts GROUP_PAD,
+            // GROUP_HEADER + 6): the engine kept 2 more on every side of every
+            // group, nested ones included
+            group_pad: 12.0,
+            group_header: 26.0,
         }
     }
 }
+
+/// MICRO-Q p.2 · the lanes' pieces packed up to the drawing's width (second pass)
+const PACK_TO_DRAWING: bool = true;
 
 /// Edge types along which a paradata node inherits the lane of its "anchor".
 /// Directions as canonically stored: unit --has_property--> property,
@@ -602,11 +617,12 @@ pub fn compute_with_sketch(
     let node_h = opts.default_node_h;
     let gap_x = opts.node_to_node;
     let sub_gap = opts.layer_to_layer * 0.45;
-    let group_pad = 14.0f64;
+    let group_pad = opts.group_pad;
     // the room a group's title bar takes above its first row: the Matrix draws
-    // the outline 26 units above its highest member (views/matrix.ts), so the
-    // engine keeps 28 — a nested group opening on the same row stacks another
-    let group_header = 28.0f64;
+    // the outline 26 units above its highest member (views/matrix.ts), and the
+    // engine keeps exactly that (MICRO-Q p.2; it kept 28) — a nested group
+    // opening on the same row stacks another
+    let group_header = opts.group_header;
     let closed_w = 150.0f64;
     let closed_h = 40.0f64;
     let sketching = opts.use_sketch && sketch.is_some();
@@ -660,6 +676,7 @@ pub fn compute_with_sketch(
         sketching,
         sweeps: opts.barycenter_sweeps,
         wrap_w: opts.wrap_width,
+        shelf_w: 0.0,
         outer: &outer,
         group_weight: opts.group_weight,
     };
@@ -702,6 +719,23 @@ pub fn compute_with_sketch(
         max_w = max_w.max(block.w);
         max_main_w = max_main_w.max(block.w_main);
         lane_blocks.push(Some(block));
+    }
+    // MICRO-Q p.2 · a second pass: a lane narrower than the drawing packs its
+    // pieces up to the drawing's width (it was its own: Basilica's lanes stacked
+    // shelves under a lane 42 238 wide). Kept only when the lane gets lower.
+    if PACK_TO_DRAWING {
+        let fill = crate::layered::LaneCtx { shelf_w: max_main_w, ..lane_ctx };
+        for l in 0..lane_count {
+            let Some(old) = &lane_blocks[l] else { continue };
+            if old.w_main >= max_main_w - 1.0 {
+                continue;
+            }
+            let b = crate::layered::layout_lane(&fill, &top_of_lane[l], &sketch_x);
+            if b.h < old.h - 0.5 && b.w_main <= max_main_w + 0.5 {
+                max_w = max_w.max(b.w);
+                lane_blocks[l] = Some(b);
+            }
+        }
     }
     let mut y_cursor = 0.0f64;
     for l in 0..lane_count {
@@ -766,10 +800,156 @@ pub fn compute_with_sketch(
     // Pinned nodes are immovable: after the flow has placed everything, snap
     // each pinned node back to its sketch Rect so a re-layout never shifts it.
     // (Empty unless the document pins nodes, so the layout contract is intact.)
+    //
+    // MICRO-Q p.1 (E.D., 17 Nov 2026: «il gruppo resta dove lo lasci, il layout
+    // automatico rispetta i gruppi fissati e dispone il resto intorno") · a
+    // pinned GROUP is rigid: the group and every node it contains keep their
+    // sketch Rects (one the sketch lacks moves by the group's own delta). Then
+    // the rest makes room: in every lane, the first top-level block (a node and
+    // what it contains) that meets a pinned box — a gap around it — goes to the
+    // right of it, and every block right of that one goes by the same amount,
+    // so the order of the lane and its spacing are kept.
+    let mut canvas_w = max_row_w;
     if let Some(s) = sketch {
+        let desc_of = |g: usize| -> Vec<usize> {
+            let mut out = Vec::new();
+            let mut stack = vec![g];
+            while let Some(c) = stack.pop() {
+                for &k in &children_of[c] {
+                    if k != g && !out.contains(&k) {
+                        out.push(k);
+                        stack.push(k);
+                    }
+                }
+            }
+            out
+        };
+        let mut fixed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        let mut boxes: Vec<(usize, Rect)> = Vec::new();
         for id in &s.pinned {
-            if let Some(r) = s.positions.get(id) {
-                positions.insert(id.clone(), r.clone());
+            let Some(r) = s.positions.get(id) else { continue };
+            let flow = positions.get(id).cloned();
+            positions.insert(id.clone(), r.clone());
+            let Some(&p) = node_ix.get(id.as_str()) else { continue };
+            fixed.insert(p);
+            let (dx, dy) = flow.map(|f| (r.x - f.x, r.y - f.y)).unwrap_or((0.0, 0.0));
+            let mut bb = r.clone();
+            for d in desc_of(p) {
+                if hidden[d] {
+                    continue;
+                }
+                let did = &graph.nodes[d].id;
+                let nr = match (s.positions.get(did), positions.get(did)) {
+                    (Some(sr), _) => sr.clone(),
+                    (None, Some(f)) => Rect { x: f.x + dx, y: f.y + dy, w: f.w, h: f.h },
+                    _ => continue,
+                };
+                let (x1, y1) = ((bb.x + bb.w).max(nr.x + nr.w), (bb.y + bb.h).max(nr.y + nr.h));
+                bb.x = bb.x.min(nr.x);
+                bb.y = bb.y.min(nr.y);
+                bb.w = x1 - bb.x;
+                bb.h = y1 - bb.y;
+                positions.insert(did.clone(), nr);
+                fixed.insert(d);
+            }
+            boxes.push((p, bb));
+        }
+        // the room made around an obstacle among `cands` (each a block: the node
+        // and what it contains), left to right
+        let make_room = |positions: &mut std::collections::BTreeMap<String, Rect>,
+                         bb: &Rect,
+                         cands: &[usize],
+                         skip: &std::collections::BTreeSet<usize>| {
+            let mut blocks: Vec<(f64, f64, f64, f64, Vec<usize>)> = Vec::new();
+            for &t in cands {
+                if skip.contains(&t) || hidden[t] {
+                    continue;
+                }
+                let mut ms = vec![t];
+                ms.extend(desc_of(t).into_iter().filter(|&d| !hidden[d] && !skip.contains(&d)));
+                let (mut l, mut r, mut u, mut b) =
+                    (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+                for &m in &ms {
+                    if let Some(q) = positions.get(&graph.nodes[m].id) {
+                        l = l.min(q.x);
+                        r = r.max(q.x + q.w);
+                        u = u.min(q.y);
+                        b = b.max(q.y + q.h);
+                    }
+                }
+                if l.is_finite() {
+                    blocks.push((l, r, u, b, ms));
+                }
+            }
+            blocks.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let meets = |k: &(f64, f64, f64, f64, Vec<usize>)| {
+                k.0 < bb.x + bb.w + gap_x
+                    && bb.x - gap_x < k.1
+                    && k.2 < bb.y + bb.h + gap_x
+                    && bb.y - gap_x < k.3
+            };
+            let Some(first) = blocks.iter().position(meets) else { return };
+            let shift = bb.x + bb.w + gap_x - blocks[first].0;
+            if shift <= 0.0 {
+                return;
+            }
+            for k in &blocks[first..] {
+                for &m in &k.4 {
+                    if let Some(q) = positions.get_mut(&graph.nodes[m].id) {
+                        q.x += shift;
+                    }
+                }
+            }
+        };
+        let bbox_of = |positions: &std::collections::BTreeMap<String, Rect>, root: usize| -> Option<Rect> {
+            let (mut l, mut r, mut u, mut b) =
+                (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+            for m in std::iter::once(root).chain(desc_of(root)) {
+                if hidden[m] {
+                    continue;
+                }
+                if let Some(q) = positions.get(&graph.nodes[m].id) {
+                    l = l.min(q.x);
+                    r = r.max(q.x + q.w);
+                    u = u.min(q.y);
+                    b = b.max(q.y + q.h);
+                }
+            }
+            l.is_finite().then(|| Rect { x: l, y: u, w: r - l, h: b - u })
+        };
+        boxes.sort_by(|a, b| a.1.x.partial_cmp(&b.1.x).unwrap_or(std::cmp::Ordering::Equal));
+        for (p, bb) in &boxes {
+            // inside an open group: its siblings make room in the group first,
+            // then the group — grown — is the obstacle its lane makes room for
+            let parent = |i: usize| match direct_of[i] {
+                Some(q) if q != i && !hidden[q] && !is_epoch[q] => Some(q),
+                _ => None,
+            };
+            let (mut obstacle, mut root) = (bb.clone(), *p);
+            if let Some(q) = parent(*p) {
+                make_room(&mut positions, bb, &children_of[q], &fixed);
+                let mut top = q;
+                while let Some(u) = parent(top) {
+                    top = u;
+                }
+                let Some(ob) = bbox_of(&positions, top) else { continue };
+                obstacle = ob;
+                root = top;
+            }
+            let mut skip = fixed.clone();
+            skip.insert(root);
+            for top in &top_of_lane {
+                make_room(&mut positions, &obstacle, top, &skip);
+            }
+        }
+        if !s.pinned.is_empty() {
+            for (i, nd) in graph.nodes.iter().enumerate() {
+                if outer[i] {
+                    continue;
+                }
+                if let Some(q) = positions.get(&nd.id) {
+                    canvas_w = canvas_w.max(q.x + q.w);
+                }
             }
         }
     }
@@ -838,7 +1018,7 @@ pub fn compute_with_sketch(
     Layout {
         canvas: crate::model::Canvas {
             title: graph.name.clone(),
-            width: max_row_w,
+            width: canvas_w,
             height: y_cursor,
         },
         swimlanes,
@@ -1229,6 +1409,124 @@ mod tests {
         assert_eq!(out.positions["B"].x, -777.0, "pinned x is kept exactly");
         assert_eq!(out.positions["B"].y, -555.0, "pinned y is kept exactly");
         assert_eq!(out.pinned, vec!["B".to_string()], "pinned set persists");
+    }
+
+    #[test]
+    fn pinned_group_is_rigid_and_the_lane_makes_room() {
+        // MICRO-Q p.1 · a group dragged by the hand and pinned: it and its
+        // members keep their sketch Rects through a re-layout, and the other
+        // blocks of the lane that it meets move right of it (their order kept)
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![
+                epoch("EP1", 100.0),
+                node("ACT", "ActivityNodeGroup"),
+                node("A", "US"),
+                node("B", "US"),
+                node("C", "US"),
+                node("D", "US"),
+            ],
+            edges: vec![
+                edge("e1", "has_first_epoch", "A", "EP1"),
+                edge("e2", "has_first_epoch", "B", "EP1"),
+                edge("e3", "has_first_epoch", "C", "EP1"),
+                edge("e4", "has_first_epoch", "D", "EP1"),
+                edge("m1", "is_in_activity", "A", "ACT"),
+                edge("m2", "is_in_activity", "B", "ACT"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        let mut opts = LayoutOptions::default();
+        let base = compute(&g, &opts);
+        // the group and its members moved by the hand (+40, +12) onto the
+        // place of the free units, and pinned
+        let mut sketch = base.clone();
+        let free_left = ["C", "D"].iter().map(|k| base.positions[*k].x).fold(f64::INFINITY, f64::min);
+        let gx = base.positions["ACT"].x;
+        let dx = free_left - gx + 40.0;
+        for k in ["ACT", "A", "B"] {
+            let r = sketch.positions.get_mut(k).unwrap();
+            r.x += dx;
+            r.y += 12.0;
+        }
+        sketch.pinned = vec!["ACT".into()];
+        opts.use_sketch = true;
+        let out = compute_with_sketch(&g, &opts, Some(&sketch));
+        for k in ["ACT", "A", "B"] {
+            assert_eq!(out.positions[k].x, sketch.positions[k].x, "{k}: x kept (rigid group)");
+            assert_eq!(out.positions[k].y, sketch.positions[k].y, "{k}: y kept (rigid group)");
+        }
+        let gb = &out.positions["ACT"];
+        let right = ["ACT", "A", "B"].iter().map(|k| out.positions[*k].x + out.positions[*k].w).fold(f64::NEG_INFINITY, f64::max);
+        let top = ["ACT", "A", "B"].iter().map(|k| out.positions[*k].y).fold(f64::INFINITY, f64::min);
+        let bottom = ["ACT", "A", "B"].iter().map(|k| out.positions[*k].y + out.positions[*k].h).fold(f64::NEG_INFINITY, f64::max);
+        for k in ["C", "D"] {
+            let r = &out.positions[k];
+            let apart = r.x >= right || r.x + r.w <= gb.x || r.y >= bottom || r.y + r.h <= top;
+            assert!(apart, "{k} does not overlap the pinned group");
+        }
+        assert_eq!(out.pinned, vec!["ACT".to_string()], "pinned set persists");
+        assert!(out.canvas.width >= right, "the canvas reaches the pinned group");
+    }
+
+    #[test]
+    fn pinned_nested_group_makes_room_among_its_siblings() {
+        // MICRO-Q p.1 · a container (V, its parts X, Y) inside an activity, moved
+        // by the hand onto its sibling U and pinned: U makes room inside the
+        // activity, and the activity, grown, does not cover the free unit D
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![
+                epoch("EP1", 100.0),
+                node("ACT", "ActivityNodeGroup"),
+                node("V", "VSF"),
+                node("X", "US"),
+                node("Y", "US"),
+                node("U", "US"),
+                node("D", "US"),
+            ],
+            edges: vec![
+                edge("e1", "has_first_epoch", "V", "EP1"),
+                edge("e2", "has_first_epoch", "X", "EP1"),
+                edge("e3", "has_first_epoch", "Y", "EP1"),
+                edge("e4", "has_first_epoch", "U", "EP1"),
+                edge("e5", "has_first_epoch", "D", "EP1"),
+                edge("p1", "is_part_of", "X", "V"),
+                edge("p2", "is_part_of", "Y", "V"),
+                edge("m1", "is_in_activity", "V", "ACT"),
+                edge("m2", "is_in_activity", "U", "ACT"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        let mut opts = LayoutOptions::default();
+        let base = compute(&g, &opts);
+        let mut sketch = base.clone();
+        let (dx, dy) = (base.positions["U"].x - base.positions["V"].x + 10.0, base.positions["U"].y - base.positions["V"].y);
+        for k in ["V", "X", "Y"] {
+            let r = sketch.positions.get_mut(k).unwrap();
+            r.x += dx;
+            r.y += dy;
+        }
+        sketch.pinned = vec!["V".into()];
+        opts.use_sketch = true;
+        let out = compute_with_sketch(&g, &opts, Some(&sketch));
+        let bbox = |ks: &[&str]| {
+            let l = ks.iter().map(|k| out.positions[*k].x).fold(f64::INFINITY, f64::min);
+            let r = ks.iter().map(|k| out.positions[*k].x + out.positions[*k].w).fold(f64::NEG_INFINITY, f64::max);
+            let t = ks.iter().map(|k| out.positions[*k].y).fold(f64::INFINITY, f64::min);
+            let b = ks.iter().map(|k| out.positions[*k].y + out.positions[*k].h).fold(f64::NEG_INFINITY, f64::max);
+            (l, r, t, b)
+        };
+        let apart = |a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)| a.1 <= b.0 || b.1 <= a.0 || a.3 <= b.2 || b.3 <= a.2;
+        for k in ["V", "X", "Y"] {
+            assert_eq!(out.positions[k].x, sketch.positions[k].x, "{k}: kept");
+        }
+        assert!(apart(bbox(&["V", "X", "Y"]), bbox(&["U"])), "U made room inside the activity");
+        assert!(apart(bbox(&["ACT", "V", "X", "Y", "U"]), bbox(&["D"])), "the grown activity does not cover D");
     }
 
     #[test]

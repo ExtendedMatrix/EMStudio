@@ -1061,6 +1061,15 @@ export function render(
         drawLabels,
         glyphFor(n.node.node_type, n.node.data as Record<string, unknown> | undefined),
       );
+      // MICRO-Q p.1 · a fixed group out of its epoch's band: a warning outline
+      if (group.outOfLane) {
+        ctx.save();
+        ctx.strokeStyle = "#e0a000";
+        ctx.lineWidth = 2.4 / vp.scale;
+        ctx.setLineDash([7 / vp.scale, 4 / vp.scale]);
+        ctx.strokeRect(group.x - 4, group.y - 4, group.w + 8, group.h + 8);
+        ctx.restore();
+      }
       if (isSel(n) || n.id === state.hoverId) {
         const active = n.id === state.selectedId || n.instanceOf === state.selectedId;
         ctx.strokeStyle = active ? accentColor() : isSel(n) ? canvasTheme().selectSoft : canvasTheme().hoverSoft;

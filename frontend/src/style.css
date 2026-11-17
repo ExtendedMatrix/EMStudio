@@ -12164,3 +12164,13 @@ button.uo-col { cursor: pointer; }
 .sk-print-bar { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
 .sk-print-bar .sk-print-info { flex: 1; color: var(--text-muted); font-size: 12px; }
 .sk-print-frame { flex: 1; border: 0; background: #888; }
+/* MICRO-Q p.0 · «Applica a tutti i grafi del file…»: the summary */
+.gr-apply-all { margin-top: 6px; }
+.gr-apply-table { border-collapse: collapse; font-size: 12px; margin: 4px 0 8px; }
+.gr-apply-table th, .gr-apply-table td { text-align: left; padding: 2px 8px; border-bottom: 1px solid var(--border); }
+.gr-apply-table tr.overwrite td { background: color-mix(in srgb, var(--warn, #d08a00) 14%, transparent); }
+.gr-aa-effect.overwrite { color: var(--warn, #b06a00); font-weight: 600; }
+.gr-aa-effect.same { color: var(--text-muted); }
+/* MICRO-Q p.1 · a fixed group's lines in the tooltip */
+#tooltip .tt-pinned { margin-top: 4px; color: var(--text-muted); }
+#tooltip .tt-warn { margin-top: 2px; color: #b07800; font-weight: 600; }
