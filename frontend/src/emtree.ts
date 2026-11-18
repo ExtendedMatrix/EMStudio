@@ -26,6 +26,7 @@
  * bug that shows up as "the wrong document saved over the right one".
  */
 
+import type { Presentation } from "./presentation";
 import { shownCode } from "./hdto";
 // MICRO-CONTENTS-3 G8 · counts with their plural (i18n is a leaf module)
 import { tn } from "./i18n";
@@ -262,6 +263,9 @@ export interface OpenFile {
    * in: what a copy's provenance names.
    */
   nodeRead?: { node: string; room: string; title: string; cursor: string | null; takenAt: string | null } | null;
+  /** MICRO-T · the file's presentation (its colour schemes, and the one each
+   *  graph uses): read with it, written back with it (presentation.ts) */
+  presentation?: Presentation | null;
 }
 
 /** Inside the desktop shell (Tauri), read as `tauri.ts::isTauri` does — not

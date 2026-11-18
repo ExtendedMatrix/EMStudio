@@ -89,9 +89,9 @@ const MAIN = readFileSync(`${SRC}main.ts`, "utf8");
 const FILE_ORDER = ["new", "newProject", "openProject", "reorderProject", "closeProject", "revealDoc", "open", "openRecent▸", "openReplace", "close", "—",
   "save", "saveAs", "saveAll", "pin", "—",
   // MICRO-E p.1 · «Porta dentro…», the one door, before Import
-  "door",
+  "door", "georef",
   "import▸", "import/importGraphml", "import/importMapping",
-  "export▸", "export/exportSvg", "export/exportTtl", "integrate", "relocate", "collect", "—",
+  "export▸", "export/exportSvg", "export/exportTtl", "integrate", "relocate", "collect", "cleanFile", "—",
   "createRoom", "bringIntoRoom", "consolidate", "composeFromGraph"];
 
 for (const platform of ["web", "mac", "win", "linux"]) {

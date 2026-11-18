@@ -9101,6 +9101,12 @@ button.cw-lab:hover { text-decoration: underline; }
 .cw-n { font-variant-numeric: tabular-nums; opacity: 0.85; }
 .cw-sep { height: 1px; background: var(--border); margin: 4px 0; }
 .cw-io { border-top: 1px solid var(--border); padding-top: 6px; }
+/* MICRO-T · «Nel file»: the schemes the em.json carries */
+.cw-file { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+.cw-file-h { font-weight: 600; font-size: 0.8rem; margin-bottom: 4px; }
+.cw-fs { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 6px; padding: 1px 2px; border-radius: 4px; }
+.cw-fs.active .cw-lab { font-weight: 600; }
+.cw-fs.active .cw-n { color: var(--accent, #2a6fdb); }
 .scn-ov .miss { color: var(--danger); }
 .scn-ov .ref { color: var(--warn); }
 .scn-ov .ok { color: var(--ok); }

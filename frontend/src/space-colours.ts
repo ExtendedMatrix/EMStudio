@@ -20,9 +20,10 @@
  * The legend (colour, value, number): a click isolates, another hides, a third
  * gives back. The epochs' colours are the GRAPH's (a change is a delta and an
  * undo, made by the caller); a property scheme is a VIEW: it lives in a .emc
- * (EM Tools' format, `s3dgraphy.color_schemes`, parity in check-colours.mjs)
- * and the last used, per person and document, in this machine's preferences —
- * never in the em.json.
+ * (EM Tools' format, `s3dgraphy.color_schemes`, parity in check-colours.mjs),
+ * the last used, per person and document, in this machine's preferences, and —
+ * MICRO-T, 18 Nov 2026 — when the person keeps it there, in the em.json's
+ * `presentation` section, apart from the graphs (presentation.ts).
  *
  * Colours here are as SEEN (hex, sRGB). The .emc holds Blender's scene-linear
  * floats (gamma 2.2, as EM Tools' `hex_to_rgb`); the scene's materials take

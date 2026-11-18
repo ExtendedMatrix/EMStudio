@@ -184,6 +184,11 @@ import { presenceIndex } from "./epoch-presence";
 import { RAMPS, applyRamp, colourPlan, emcOfState, emcRead, hexToLinear, legendClick, legendShows, loadColourState, mix as colourMix,
          propertyNames, propertyValues, saveColourState, startProperty, type ColourPlan, type ColourState, type RampType } from "./space-colours";
 import { ColoursWindow } from "./colours-window";
+import {
+  activeScheme, addScheme, clonePresentation, emcFileName, emcText, emptyPresentation, mergePresentation,
+  presentationSummary, removeScheme, schemeNameOfFile, schemeNames, schemeOfState, setActive, stateFromScheme,
+  type Presentation,
+} from "./presentation";
 import { clearFiltersHiding, installTableTools } from "./table-tools";
 import {
   HAS_PARADATA_NODEGROUP,
@@ -8489,6 +8494,11 @@ function loadContainerDocument(
       adoptMemberAsSlot(member, sourceName, into?.path ?? null, into?.id ?? null);
     }
     if (into) into.dirty = true;
+    // MICRO-T · their colour schemes come along into the same file
+    if (into && parsed.presentation && schemeNames(parsed.presentation).length) {
+      into.presentation ??= emptyPresentation();
+      mergePresentation(into.presentation, parsed.presentation);
+    }
     if (mine.shelf) { adoptProjectShelf(mine.shelf); if (into && !shelfHomeFileId) shelfHomeFileId = into.id; }
     toast(t("container.merged", {
       added: String(report.addedGraphs.length),
@@ -8559,6 +8569,8 @@ function loadContainerDocument(
   // P3 · and its version comes with it — per FILE: two files, two histories.
   // Integrating somebody else's project does NOT adopt their revision number.
   file.version = parsed.version;
+  // MICRO-T · the colour schemes the file carries, kept with it
+  file.presentation = parsed.presentation && schemeNames(parsed.presentation).length ? parsed.presentation : null;
   for (const member of parsed.members) {
     file.onDisk[member.id] = {
       ...(member.doc.graph as unknown as Record<string, unknown>),
@@ -9970,6 +9982,7 @@ function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): Re
     shelf: writesShelf ? projectShelfSection() : retainedShelf,
     corpus: writesCorpus ? projectCorpusSection() : retainedCorpus,
     periodizations: writesPeriodizations ? projectPeriodizationsSection() : retainedPeriodizations,
+    presentation: file?.presentation ?? null,
     activeGraphId: activeSlot
       ? String((activeSlot.store.doc.graph as Record<string, unknown>).graph_id ?? activeSlot.id)
       : null,
@@ -24764,6 +24777,7 @@ document
 document.getElementById("btn-tool-chronology")?.addEventListener("click", () => openChronology());
 // MICRO-S · Tools ▸ Colori…: the window «Colori» on the active Space
 document.getElementById("btn-tool-colours")?.addEventListener("click", () => openColoursWindow());
+document.getElementById("btn-clean-file")?.addEventListener("click", () => void cleanFilePresentation());
 document
   .getElementById("drop-hint-stratiminer")
   ?.addEventListener("click", (e) => {
@@ -35189,14 +35203,169 @@ function sideTab(tab: HTMLElement, dir: 1 | -1, open: () => void): void {
 // ── MICRO-E p.6 · the visual manager of the proxies (space-colours.ts) ──────
 //
 // The state of «Colori ▾» per window and document; the last used kept per
-// person and document in this machine's preferences, never in the em.json.
+// person and document in this machine's preferences. MICRO-T · a graph whose
+// file names a colour scheme of its own (`presentation`) opens with that one.
 const spaceColourStates = new Map<string, ColourState>();
 const colourDocKey = (): string => String(store?.doc.graph.graph_id ?? "doc");
 function spaceColoursOf(winId: string): ColourState {
   const k = `${winId}\u0000${colourDocKey()}`;
   let s = spaceColourStates.get(k);
-  if (!s) { s = loadColourState(editorHand().orcid, colourDocKey()); spaceColourStates.set(k, s); }
+  if (!s) {
+    s = loadColourState(editorHand().orcid, colourDocKey());
+    // MICRO-T · a graph whose file names its colour scheme opens with it
+    const act = activeScheme(emtree.activeFile()?.presentation, colourDocKey());
+    if (act) {
+      try { s = stateFromScheme(s, act.scheme, fileValueCodes(act.scheme.metadata.property_name)); }
+      catch (err) { logWarn(t("cw.fileBad", { s: act.name, why: (err as Error).message })); }
+    }
+    spaceColourStates.set(k, s);
+  }
   return s;
+}
+
+// ── MICRO-T · the colour schemes INSIDE the em.json (presentation.ts) ───────
+//
+// The file of the graph shown keeps them (`OpenFile.presentation`); every
+// change is the file's (dirty, written by Save) and one step that «Annulla»
+// takes back. They are a way of looking: no node, no edge, no version.
+
+/** `{label: code of its term}` of a property's values in the graph shown.
+ *  WHERE a node keeps the code of its value is MICRO-U's: until then a value
+ *  has none, and the schemes colour by text — the one seam is `valueCodeOf`. */
+function fileValueCodes(prop: string): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  for (const n of store?.doc.graph.nodes ?? []) {
+    if (n.node_type !== "property" || n.name !== prop) continue;
+    const label = String(n.description ?? "").trim();
+    if (label && !out.has(label)) out.set(label, valueCodeOf(n));
+  }
+  return out;
+}
+function valueCodeOf(_node: unknown): string | null { return null; }
+
+/** a change to the file's schemes: one step, «Annulla» puts back the before */
+function changePresentation(msg: string, fn: (p: Presentation) => void): void {
+  const file = emtree.activeFile();
+  if (!file) { toast(t("cw.fileNone")); return; }
+  const before = file.presentation ? clonePresentation(file.presentation) : null;
+  const wasDirty = file.dirty;
+  const p = file.presentation ?? emptyPresentation();
+  fn(p);
+  file.presentation = schemeNames(p).length ? p : null;
+  file.dirty = true;
+  updateToolbar(); refreshEMTree();
+  coloursWindow.repaint(true);
+  logInfo(msg);
+  toastUndoWith(msg, () => {
+    file.presentation = before;
+    file.dirty = wasDirty;
+    updateToolbar(); refreshEMTree();
+    coloursWindow.repaint(true);
+    logInfo(t("cw.fileUndone"));
+  });
+}
+function fileSchemesNow(): { file: string; schemes: Array<{ name: string; property: string; values: number; active: boolean }> } | null {
+  const file = emtree.activeFile();
+  if (!file) return null;
+  const p = file.presentation;
+  const gid = colourDocKey();
+  return { file: file.name, schemes: p ? schemeNames(p).map((name) => ({
+    name, property: p.colour_schemes[name].metadata.property_name,
+    values: Object.keys(p.colour_schemes[name].color_mapping).length,
+    active: p.active_colour_scheme[gid] === name })) : [] };
+}
+function useFileScheme(name: string | null): void {
+  const w = coloursSpaceWin();
+  const gid = colourDocKey();
+  if (name == null) { changePresentation(t("cw.fileUnused"), (p) => setActive(p, gid, null)); return; }
+  const sch = emtree.activeFile()?.presentation?.colour_schemes[name];
+  if (!sch) return;
+  if (w) { setSpaceColours(w.id, stateFromScheme(spaceColoursOf(w.id), sch, fileValueCodes(sch.metadata.property_name))); refreshSurfaces("scene"); }
+  changePresentation(t("cw.fileUsed", { s: name }), (p) => setActive(p, gid, name));
+}
+async function keepSchemeInFile(): Promise<void> {
+  const w = coloursSpaceWin();
+  const cs = w ? spaceColoursOf(w.id) : null;
+  if (!cs || cs.mode !== "property" || !cs.property || !emtree.activeFile()) return;
+  const name = (await askText(t("cw.fileKeepAsk"), cs.property))?.trim();
+  if (!name) return;
+  const emc = schemeOfState(emcOfState(cs, String(store?.doc.graph.graph_id ?? "")), fileValueCodes(cs.property));
+  const p = emtree.activeFile()?.presentation;
+  const replace = !!p && name in p.colour_schemes
+    && await askConfirm(t("cw.fileReplaceAsk", { s: name }));
+  const gid = colourDocKey();
+  changePresentation(t("cw.fileKept", { s: name }), (pp) => { const got = addScheme(pp, name, emc, replace); setActive(pp, gid, got); });
+}
+function dropFileScheme(name: string): void {
+  changePresentation(t("cw.fileDropped", { s: name }), (p) => { removeScheme(p, name); });
+}
+/** «Espelli in una cartella…»: one .emc per scheme (the desktop writes them in
+ *  the folder chosen; the browser downloads them), then asks whether to take
+ *  them out of the file */
+async function expelFileSchemes(): Promise<void> {
+  const file = emtree.activeFile();
+  const p = file?.presentation;
+  if (!file || !p || !schemeNames(p).length) return;
+  const names = schemeNames(p);
+  if (isTauri()) {
+    const folder = await pickFolder(file.path ? paths.dirname(file.path) : undefined);
+    if (!folder) return;
+    for (const n of names) await writeEmJson(paths.join(folder, emcFileName(n)), emcText(p.colour_schemes[n]));
+    logInfo(t("cw.fileExpelled", { n: String(names.length), where: folder }));
+  } else {
+    for (const n of names) downloadBlob(new Blob([emcText(p.colour_schemes[n])], { type: "application/json" }), emcFileName(n), "application/json");
+    logInfo(t("cw.fileExpelled", { n: String(names.length), where: t("cw.fileDownloads") }));
+  }
+  if (await askConfirm(t("cw.fileExpelAsk", { n: String(names.length) }), { ok: t("cw.fileExpelRemove"), cancel: t("cw.fileExpelKeep"), kind: "expel-schemes" }))
+    changePresentation(t("cw.fileRemoved", { n: String(names.length) }), (pp) => { for (const n of names) removeScheme(pp, n); });
+}
+/** «Importa nel file…»: each .emc chosen becomes a scheme of the file, named
+ *  after its file */
+async function importFileSchemes(d: Document = document): Promise<void> {
+  if (!emtree.activeFile()) { toast(t("cw.fileNone")); return; }
+  const got: Array<{ name: string; doc: unknown }> = [];
+  if (isTauri()) {
+    const picked = await pickFiles(t("cw.fileImport"));
+    for (const path of picked ?? []) {
+      try { got.push({ name: schemeNameOfFile(path), doc: JSON.parse((await readEmJsonPath(path))?.text ?? "") }); }
+      catch (err) { toast(t("col.badEmc", { why: `${baseName(path)}: ${(err as Error).message}` })); }
+    }
+  } else {
+    const files = await new Promise<File[]>((resolve) => {
+      const input = d.createElement("input");
+      input.type = "file"; input.multiple = true; input.accept = ".emc,application/json";
+      input.onchange = () => resolve([...(input.files ?? [])]);
+      input.click();
+    });
+    for (const f of files) {
+      try { got.push({ name: schemeNameOfFile(f.name), doc: JSON.parse(await f.text()) }); }
+      catch (err) { toast(t("col.badEmc", { why: `${f.name}: ${(err as Error).message}` })); }
+    }
+  }
+  if (!got.length) return;
+  importSchemesNow(got);
+}
+/** the documents read, taken into the file (one step); a broken one is said */
+function importSchemesNow(got: Array<{ name: string; doc: unknown }>): void {
+  const bad: string[] = [];
+  changePresentation(t("cw.fileImported", { n: String(got.length) }), (p) => {
+    for (const g of got) {
+      try { addScheme(p, g.name, g.doc); }
+      catch (err) { bad.push(`${g.name}: ${(err as Error).message}`); }
+    }
+  });
+  for (const b of bad) toast(t("col.badEmc", { why: b }));
+}
+
+/** File ▸ «Pulisci il file…»: the presentation out of the file, after saying
+ *  what it holds; one step that «Annulla» takes back */
+async function cleanFilePresentation(): Promise<void> {
+  const file = emtree.activeFile();
+  const sum = presentationSummary(file?.presentation);
+  if (!file || !sum.schemes) { await tell(t("pres.cleanNothing", { f: file?.name ?? "—" })); return; }
+  const what = t("pres.cleanWhat", { n: String(sum.schemes), a: String(sum.active) });
+  if (!(await askConfirm(t("pres.cleanAsk", { f: file.name, what }), { danger: true, ok: t("pres.cleanOk"), kind: "clean-file" }))) return;
+  changePresentation(t("pres.cleaned", { f: file.name, what }), (p) => { for (const n of schemeNames(p)) removeScheme(p, n); });
 }
 function setSpaceColours(winId: string, s: ColourState): void {
   spaceColourStates.set(`${winId}\u0000${colourDocKey()}`, s);
@@ -35247,7 +35416,8 @@ const coloursWindow = new ColoursWindow({
   setEpochColour: (id, hex) => { store?.setField(id, "data.color", hex); },
   select: (units) => { selectMany(units); toast(tn("cw.selected", units.length)); },
   // «created», as the menu writes it: the graph's id (EM Tools writes its .blend)
-  saveEmc: (doc, name) => (doc.metadata.created ||= String(store?.doc.graph.graph_id ?? ""), downloadBlob(new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }), name, "application/json")),
+  // MICRO-T · written as «Espelli» writes it (keys sorted): the same scheme, the same bytes
+  saveEmc: (doc, name) => (doc.metadata.created ||= String(store?.doc.graph.graph_id ?? ""), downloadBlob(new Blob([emcText(doc)], { type: "application/json" }), name, "application/json")),
   pickEmc: (d = document) => new Promise((resolve) => {
     const input = d.createElement("input");
     input.type = "file";
@@ -35262,7 +35432,13 @@ const coloursWindow = new ColoursWindow({
   toast: (m) => toast(m),
   isWriting: (el) => isWritingField(el),
   systemWindow: (pop, onClosed) => adoptSystemWindow(pop, onClosed),
-  rev: () => `${store?.rev ?? ""}|${spaceVersion}|${colourDocKey()}`,
+  rev: () => `${store?.rev ?? ""}|${spaceVersion}|${colourDocKey()}|${JSON.stringify(emtree.activeFile()?.presentation ?? null)}`,
+  fileSchemes: () => fileSchemesNow(),
+  useFileScheme: (name) => useFileScheme(name),
+  keepInFile: () => void keepSchemeInFile(),
+  dropFromFile: (name) => dropFileScheme(name),
+  expelSchemes: () => void expelFileSchemes(),
+  importSchemes: (d) => void importFileSchemes(d),
 });
 /** open the window «Colori» on a Space window (none: the active one) */
 function openColoursWindow(winId?: string): void {
@@ -35892,7 +36068,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       sv.onclick = () => {
         if (!cs.property) return;
         const doc = emcOfState(cs, String(st.doc.graph.graph_id ?? ""));
-        downloadBlob(new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }), `${cs.property.replace(/[^\w.-]+/g, "_")}.emc`, "application/json");
+        downloadBlob(new Blob([emcText(doc)], { type: "application/json" }), `${cs.property.replace(/[^\w.-]+/g, "_")}.emc`, "application/json");
       };
       const op = document.createElement("button");
       op.type = "button";

@@ -143,6 +143,8 @@ export const MENUS: MenuDef[] = [
       cmd("relocate", "fs.relocate", "btn-relocate-files", { title: "fs.relocateTitle" }),
       // MICRO-WINDOWS-MODELLI p.5 · Maya's «Collect Files», Blender's «Pack Resources»
       cmd("collect", "fs.collect", "btn-collect-files", { title: "fs.collectTitle" }),
+      // MICRO-T · the presentation section out of the file, after saying what it holds
+      cmd("cleanFile", "pres.clean", "btn-clean-file", { title: "pres.cleanTitle" }),
       sep,
       cmd("createRoom", "room.createItem", "btn-create-room", { title: "room.createItemTitle" }),
       cmd("bringIntoRoom", "room.bringItem", "btn-bring-into-room", { title: "room.bringItemTitle" }),

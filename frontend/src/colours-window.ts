@@ -15,7 +15,12 @@
  *  - EM Tools' two special values, always at the bottom with their colour and
  *    number: «ha la proprietà, valore vuoto», «non ha la proprietà» (which may
  *    also leave the unit as it is);
- *  - the .emc, EM Tools' file, saved and opened with both of them.
+ *  - the .emc, EM Tools' file, saved and opened with both of them;
+ *  - MICRO-T (E.D., 18 Nov 2026) · «Nel file»: the schemes the em.json itself
+ *    carries (presentation.ts), the one this graph uses marked; «Usa» makes
+ *    one this graph's, «Tieni nel file…» keeps the scheme on screen there,
+ *    «Espelli in una cartella…» writes one .emc per scheme (then asks whether
+ *    to take them out), «Importa nel file…» takes .emc files in.
  *
  * WHERE IT LIVES. A panel floating in the page, dragged by its bar and resized
  * by its corner; where it was and how big, in this machine's preferences.
@@ -57,10 +62,25 @@ export interface ColoursHost {
   /** a system window just opened: the host learns it (on the desktop the page
    *  cannot close it by itself) and says when the shell closed it */
   systemWindow?(pop: Window, onClosed: () => void): { close(): void };
+  /** MICRO-T · the schemes of the file of the graph shown (null: the graph is
+   *  in no file yet) */
+  fileSchemes?(): { file: string; schemes: FileScheme[] } | null;
+  /** this graph uses that scheme of its file (null: none) */
+  useFileScheme?(name: string | null): void;
+  /** the scheme on screen kept in the file (asks the name) */
+  keepInFile?(): void;
+  dropFromFile?(name: string): void;
+  /** «Espelli in una cartella…» (all the file's schemes) */
+  expelSchemes?(): void;
+  /** «Importa nel file…»: .emc files chosen by the person */
+  importSchemes?(doc: Document): void;
   /** what the content depends on besides the state (the document's revision,
    *  the resident files): the same → the window is not rebuilt */
   rev(): string;
 }
+
+/** MICRO-T · a scheme of the file, as the window lists it */
+export interface FileScheme { name: string; property: string; values: number; active: boolean }
 
 /** where the window was: the page's panel and the system window */
 export interface ColoursWindowPref {
@@ -101,6 +121,57 @@ const HEX = /^#[0-9a-f]{6}$/i;
  * Rebuilt whole on every change: it is a few dozen rows.
  */
 export function coloursContent(doc: Document, host: ColoursHost): HTMLElement {
+  const box = modeContent(doc, host);
+  if (host.fileSchemes && host.state() && host.space()) box.appendChild(fileSection(doc, host));
+  return box;
+}
+
+/** MICRO-T · «Nel file»: the schemes the em.json carries */
+function fileSection(doc: Document, host: ColoursHost): HTMLElement {
+  const t = host.t;
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] => {
+    const e = doc.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  };
+  const btn = (label: string, key: string, fn: () => void, title?: string): HTMLButtonElement => {
+    const b = el("button", "", label);
+    b.type = "button";
+    b.dataset[key] = "1";
+    if (title) b.title = title;
+    b.onclick = fn;
+    return b;
+  };
+  const sec = el("div", "cw-file");
+  sec.dataset.cwFile = "1";
+  sec.appendChild(el("div", "cw-file-h", t("cw.file")));
+  const fs = host.fileSchemes!();
+  if (!fs) { sec.appendChild(el("p", "cw-hint", t("cw.fileNone"))); return sec; }
+  if (!fs.schemes.length) sec.appendChild(el("p", "cw-hint", t("cw.fileEmpty", { f: fs.file })));
+  for (const s of fs.schemes) {
+    const r = el("div", "cw-fs" + (s.active ? " active" : ""));
+    r.dataset.cwFileScheme = s.name;
+    const lab = el("span", "cw-lab", s.name);
+    lab.title = t("cw.fileSchemeHint", { p: s.property, n: host.fmtN(s.values) });
+    r.appendChild(lab);
+    r.appendChild(el("span", "cw-n", s.active ? t("cw.fileActive") : s.property));
+    r.appendChild(s.active
+      ? btn(t("cw.fileUnuse"), "cwUnuse", () => host.useFileScheme?.(null), t("cw.fileUnuseHint"))
+      : btn(t("cw.fileUse"), "cwUse", () => host.useFileScheme?.(s.name), t("cw.fileUseHint")));
+    r.appendChild(btn("×", "cwDrop", () => host.dropFromFile?.(s.name), t("cw.fileDrop", { s: s.name })));
+    sec.appendChild(r);
+  }
+  const io = el("div", "cw-row cw-io");
+  const cs = host.state();
+  if (cs?.mode === "property" && cs.property) io.append(btn(t("cw.fileKeep"), "cwKeep", () => host.keepInFile?.(), t("cw.fileKeepHint")), " ");
+  if (fs.schemes.length) io.append(btn(t("cw.fileExpel"), "cwExpel", () => host.expelSchemes?.(), t("cw.fileExpelHint")), " ");
+  io.append(btn(t("cw.fileImport"), "cwImport", () => host.importSchemes?.(doc), t("cw.fileImportHint")));
+  sec.appendChild(io);
+  return sec;
+}
+
+function modeContent(doc: Document, host: ColoursHost): HTMLElement {
   const t = host.t;
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] => {
     const e = doc.createElement(tag);

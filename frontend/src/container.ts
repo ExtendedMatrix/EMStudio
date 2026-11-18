@@ -38,6 +38,7 @@ import { sha256Hex } from "./sha256";
 import { contentSignature, mergePayloads } from "./crdt";
 import { isPeriodizationsSection, PERIODIZATIONS_MEMBER_ID } from "./horizons";
 import { EXPERIMENTAL } from "./experimental";
+import { PRESENTATION_KEY, presentationSection, readPresentation, type Presentation } from "./presentation";
 
 /** EXPERIMENTAL · the Periodizations member read apart, by its marker, like the
  *  shelf and the DTC corpus (reading rule 5, §3). Off — the default, the switch
@@ -85,6 +86,8 @@ export interface ContainerDoc {
   active_graph_id?: string;
   layout?: Record<string, unknown>;
   version?: ProjectVersion;
+  /** MICRO-T · ways of looking at the graphs (the colour schemes): presentation.ts */
+  presentation?: Record<string, unknown>;
 }
 
 /** One member, ready for a DocumentStore: the per-graph document shape. */
@@ -113,6 +116,8 @@ export interface ParsedContainer {
   version: ProjectVersion | null;
   /** F4 · the graphs of an OLD file that got no layout and are laid out afresh */
   freshLayouts: string[];
+  /** MICRO-T · the colour schemes the file carries (empty: none) */
+  presentation?: Presentation;
   warnings: string[];
 }
 
@@ -260,7 +265,8 @@ export function newCorpusSection(id: string = DTC_CORPUS_MEMBER_ID): GraphSectio
  * has ONE shape to handle instead of two.
  */
 export function parseContainer(doc: unknown): ParsedContainer {
-  const warnings: string[] = [];
+  // MICRO-T · the presentation, read the same for both shapes
+  const { presentation, warnings } = readPresentation(doc);
   if (!isContainer(doc)) {
     const single = doc as EmDocument | null;
     if (!single?.graph?.nodes) {
@@ -272,7 +278,7 @@ export function parseContainer(doc: unknown): ParsedContainer {
     return { members: [{ id, doc: single }], shelf: null, corpus: null,
              activeGraphId: id, wasLegacy: true,
              version: readVersion((single as unknown as ContainerDoc).version),
-             freshLayouts: [], warnings };
+             freshLayouts: [], presentation, warnings };
   }
 
   const header = doc.header ?? { format: "em.json", version: "1.0" };
@@ -342,7 +348,7 @@ export function parseContainer(doc: unknown): ParsedContainer {
     );
   }
   return { members, shelf, corpus, periodizations, activeGraphId, wasLegacy: false,
-           version: readVersion(doc.version), freshLayouts: fresh, warnings };
+           version: readVersion(doc.version), freshLayouts: fresh, presentation, warnings };
 }
 
 /**
@@ -359,6 +365,8 @@ export function buildContainer(input: {
   /** MICRO-LAB orizzonti · the horizons member, written back under its own id */
   periodizations?: GraphSection | null;
   activeGraphId?: string | null;
+  /** MICRO-T · the file's colour schemes (written only when it has some) */
+  presentation?: Presentation | null;
 }): ContainerDoc {
   const graphs: Record<string, GraphSection> = {};
   for (const { id, doc } of input.graphs) {
@@ -407,6 +415,8 @@ export function buildContainer(input: {
   // graph's that had one — on San Pietro, an empty seed's.
   const activeLayout = input.graphs.find((g) => g.id === active)?.doc.layout;
   if (hasLayout(activeLayout)) out.layout = activeLayout as Record<string, unknown>;
+  const pres = presentationSection(input.presentation);
+  if (pres) out[PRESENTATION_KEY as "presentation"] = pres;
   return out;
 }
 
