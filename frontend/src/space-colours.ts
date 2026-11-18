@@ -11,7 +11,11 @@
  *    «still existing», MICRO-C);
  *  - **Proprietà**: a property, its values with the number of units, a colour
  *    by hand per value or a SCALE (EM Tools' own, `em_color_ramps.json`;
- *    numbers on a continuous scale); units without it grey, «senza valore».
+ *    numbers on a continuous scale between a min and a max); and EM Tools' two
+ *    special values, each with its own colour: «ha la proprietà, valore vuoto»
+ *    (`empty property <p> node`) and «non ha la proprietà» (`no property <p>
+ *    node`) — the second may also leave the unit as it is (its type's colour).
+ *    MICRO-S (E.D., 18 Nov 2026): the two were one grey «senza valore» before.
  *
  * The legend (colour, value, number): a click isolates, another hides, a third
  * gives back. The epochs' colours are the GRAPH's (a change is a delta and an
@@ -32,8 +36,15 @@ export type RampType = "sequential" | "diverging" | "qualitative";
 export interface Ramp { name: string; description: string; colors: string[] }
 export const RAMPS = (RAMPS_JSON as unknown as { ramps: Record<RampType, Record<string, Ramp>> }).ramps;
 export const GAMMA = 2.2;
-/** the grey of a unit without the property (and of an epoch without a colour) */
+/** the grey of an epoch without a colour, and of a value with no colour yet */
 export const NO_VALUE_GREY = "#9A9A9A";
+/** the two special values' colour when none was chosen: EM Tools'
+ *  `DEFAULT_COLOR` (0.5, 0.5, 0.5) — linear, so seen as #BABABA (MICRO-S) */
+export const SPECIAL_GREY = "#BABABA";
+/** .emc metadata key: the units without the property are left as they are.
+ *  EM Tools reads only `metadata.property_name`: an old one ignores it (and
+ *  colours them with the `no property` entry, which is always written). */
+export const EMC_LEAVE_NONE = "no_property_untouched";
 
 // ── colour ──────────────────────────────────────────────────────────────────
 
@@ -95,6 +106,20 @@ export function propertyNames(g: { nodes: N[]; edges: E[] }, units: string[]): A
   return [...by].map(([name, s]) => ({ name, units: s.size })).sort((a, b) => b.units - a.units || a.name.localeCompare(b.name));
 }
 
+/** MICRO-S · what the values are: numbers (all of them, the specials aside) or text */
+export type ValueKind = "numeric" | "text" | "none";
+export function valueKind(prop: string, values: Iterable<string>): ValueKind {
+  const real = [...new Set(values)].filter((v) => !isSentinel(prop, v));
+  return !real.length ? "none" : real.every(isNumeric) ? "numeric" : "text";
+}
+/** is this scale for numbers? (a numeric scale on text follows the alphabet: said, MICRO-S) */
+export const isNumericScale = (type: RampType): boolean => type !== "qualitative";
+/** the scale a property starts with: text → the first qualitative, numbers → the first sequential */
+export function defaultRamp(kind: ValueKind): { type: RampType; name: string } {
+  const type: RampType = kind === "numeric" ? "sequential" : "qualitative";
+  return { type, name: Object.keys(RAMPS[type])[0] };
+}
+
 // ── the scales (EM Tools' VISUAL_OT_apply_color_ramp) ──────────────────────
 
 const numericKey = (v: string): number => (isNumeric(v) ? Number(v) : -Infinity);
@@ -125,17 +150,33 @@ export function continuousColour(x: number, lo: number, hi: number, type: RampTy
   return mix(colors[i], colors[i + 1], t - i);
 }
 
+/** the min and max of a property's numbers (null: they are not numbers) */
+export function valueRange(prop: string, values: Iterable<string>): { lo: number; hi: number } | null {
+  const real = [...new Set(values)].filter((v) => !isSentinel(prop, v));
+  if (!real.length || !real.every(isNumeric)) return null;
+  const ns = real.map(Number);
+  return { lo: Math.min(...ns), hi: Math.max(...ns) };
+}
+
 /** a scale over a property's values: numbers (all but the sentinels) on the
- *  continuous scale when the scale is sequential or diverging, else EM Tools' spread */
-export function rampScheme(prop: string, values: string[], type: RampType, name: string): Map<string, string> {
+ *  continuous scale when the scale is sequential or diverging — between `range`
+ *  (the window's min/max) or the values' own —, else EM Tools' spread. The two
+ *  special values are NOT the scale's (MICRO-S): they keep their own colours,
+ *  so they are never in the result. A qualitative scale with more values than
+ *  colours goes round (EM Tools' spread would give neighbours one colour). */
+export function rampScheme(prop: string, values: string[], type: RampType, name: string,
+                           range?: { lo: number; hi: number } | null): Map<string, string> {
   const real = [...new Set(values)].filter((v) => !isSentinel(prop, v));
   const out = new Map<string, string>();
-  if (type !== "qualitative" && real.length > 1 && real.every(isNumeric)) {
-    const ns = real.map(Number);
-    const lo = Math.min(...ns), hi = Math.max(...ns);
+  if (type !== "qualitative" && real.length > 0 && real.every(isNumeric)) {
+    const own = valueRange(prop, real)!;
+    const { lo, hi } = range && Number.isFinite(range.lo) && Number.isFinite(range.hi) ? range : own;
     for (const v of real) out.set(v, continuousColour(Number(v), lo, hi, type, name));
+  } else if (type === "qualitative" && real.length > RAMPS[type][name].colors.length) {
+    const colors = RAMPS[type][name].colors;
+    const sorted = [...real].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    sorted.forEach((v, i) => out.set(v, colors[i % colors.length]));
   } else for (const [v, c] of assignRamp(real, type, name)) out.set(v, c);
-  for (const v of values) if (isSentinel(prop, v)) out.set(v, NO_VALUE_GREY);
   return out;
 }
 
@@ -144,15 +185,18 @@ export function rampScheme(prop: string, values: string[], type: RampType, name:
 export interface Emc { metadata: { property_name: string; created?: string; description?: string; [k: string]: unknown };
   color_mapping: Record<string, number[]> }
 
-export function emcDocument(prop: string, scheme: Map<string, string> | Record<string, string>, created = ""): Emc {
+/** the .emc of a scheme. `extra` goes into `metadata` (s3dgraphy's
+ *  `emc_document(extra=…)`): EM Tools reads only `property_name` there. */
+export function emcDocument(prop: string, scheme: Map<string, string> | Record<string, string>, created = "",
+                            extra?: Record<string, unknown>): Emc {
   const entries = scheme instanceof Map ? [...scheme] : Object.entries(scheme);
   return {
-    metadata: { property_name: prop, created, description: `Color mapping for ${prop} values` },
+    metadata: { property_name: prop, created, description: `Color mapping for ${prop} values`, ...(extra ?? {}) },
     color_mapping: Object.fromEntries(entries.map(([v, h]) => [v, [...hexToLinear(h), 1.0]])),
   };
 }
 
-export function emcRead(doc: unknown): { property: string; scheme: Map<string, string> } {
+export function emcRead(doc: unknown): { property: string; scheme: Map<string, string>; leaveNone: boolean } {
   const d = doc as Partial<Emc> | null;
   const prop = d?.metadata?.property_name;
   const m = d?.color_mapping;
@@ -162,7 +206,18 @@ export function emcRead(doc: unknown): { property: string; scheme: Map<string, s
     if (!Array.isArray(c) || c.length < 3) throw new Error(`not a colour for «${v}»`);
     scheme.set(String(v), linearToHex(c));
   }
-  return { property: prop, scheme };
+  return { property: prop, scheme, leaveNone: d?.metadata?.[EMC_LEAVE_NONE] === true };
+}
+
+/** MICRO-S · the .emc of a property state: the values' colours AND the two
+ *  special values, always (the ones never chosen with EM Tools' grey), so an
+ *  EM Tools that reads it colours them as here; «leave as it is» in metadata. */
+export function emcOfState(cs: ColourState, created = ""): Emc {
+  const prop = cs.property ?? "";
+  const scheme: Record<string, string> = { ...cs.scheme };
+  scheme[emptyValueKey(prop)] ??= SPECIAL_GREY;
+  scheme[noValueKey(prop)] ??= SPECIAL_GREY;
+  return emcDocument(prop, scheme, created, cs.leaveNone ? { [EMC_LEAVE_NONE]: true } : undefined);
 }
 
 // ── the plan: a colour per unit, and the legend ─────────────────────────────
@@ -174,13 +229,21 @@ export interface ColourState {
   /** value → hex seen (by hand or from a scale) */
   scheme: Record<string, string>;
   ramp: { type: RampType; name: string } | null;
+  /** MICRO-S · the min and max of a numeric scale (null: the values' own) */
+  range?: { lo: number; hi: number } | null;
+  /** MICRO-S · the units without the property keep their type's colour */
+  leaveNone?: boolean;
   /** the legend: one key isolated, keys hidden (not saved: a gesture of the moment) */
   isolated?: string | null;
   hidden?: string[];
 }
-export const defaultColourState = (): ColourState => ({ mode: "em", variant: "birth", property: null, scheme: {}, ramp: null, isolated: null, hidden: [] });
+export const defaultColourState = (): ColourState => ({ mode: "em", variant: "birth", property: null, scheme: {}, ramp: null, range: null, leaveNone: false, isolated: null, hidden: [] });
 
-export interface LegendEntry { key: string; colour: string; label: string; count: number; faded?: number; epochId?: string; none?: boolean }
+export interface LegendEntry { key: string; colour: string; label: string; count: number; faded?: number; epochId?: string; none?: boolean;
+  /** MICRO-S · a property's special value: «valore vuoto» or «non ha la proprietà» */
+  special?: "empty" | "none";
+  /** «non ha la proprietà» left as it is: no colour of the scheme */
+  untouched?: boolean }
 export interface ColourPlan {
   /** unit → colour seen; absent = the type's own (mode EM) */
   colour: Map<string, string>;
@@ -229,23 +292,70 @@ export function colourPlan(state: ColourState, units: string[], ctx: {
     return { colour, faded, keyOf, legend, ...(state.variant === "new" && ctx.bornHere ? { counts: { born, survived } } : {}) };
   }
   if (state.mode === "property" && state.property && ctx.values) {
-    const prop = state.property;
-    const count = new Map<string, number>();
+    const rows = propertyRows(state, units, ctx.values);
     for (const u of units) {
-      const v = ctx.values.get(u) ?? noValueKey(prop);
-      const key = v === emptyValueKey(prop) ? noValueKey(prop) : v;
+      const key = ctx.values.get(u) ?? noValueKey(state.property);
       keyOf.set(u, key);
-      count.set(key, (count.get(key) ?? 0) + 1);
-      colour.set(u, state.scheme[key] ?? NO_VALUE_GREY);
+      const c = colourOfKey(state, key);
+      if (c) colour.set(u, c);
     }
-    const keys = [...count.keys()].filter((k) => !isSentinel(prop, k));
-    keys.sort((a, b) => (keys.every(isNumeric) ? Number(a) - Number(b) : a.localeCompare(b, undefined, { numeric: true })));
-    for (const k of keys) legend.push({ key: k, colour: state.scheme[k] ?? NO_VALUE_GREY, label: k, count: count.get(k)! });
-    const none = count.get(noValueKey(prop));
-    if (none) legend.push({ key: noValueKey(prop), colour: state.scheme[noValueKey(prop)] ?? NO_VALUE_GREY, label: "", count: none, none: true });
+    for (const r of rows) if (r.count) legend.push(r);
     return { colour, faded, keyOf, legend };
   }
   return { colour, faded, keyOf, legend };
+}
+
+/** MICRO-S · the colour of a property's value or special value (null: left as it is) */
+export function colourOfKey(state: ColourState, key: string): string | null {
+  const prop = state.property ?? "";
+  if (key === noValueKey(prop)) return state.leaveNone ? null : state.scheme[key] ?? SPECIAL_GREY;
+  if (key === emptyValueKey(prop)) return state.scheme[key] ?? SPECIAL_GREY;
+  return state.scheme[key] ?? NO_VALUE_GREY;
+}
+
+/** MICRO-S · the window's list: every value found on the units with its number
+ *  of units and its colour (numbers in order, text alphabetical), then the two
+ *  special values ALWAYS, with their number (0 too) — the legend keeps the
+ *  rows with units. */
+export function propertyRows(state: ColourState, units: string[], values: Map<string, string>): LegendEntry[] {
+  const prop = state.property ?? "";
+  const count = new Map<string, number>();
+  for (const u of units) {
+    const k = values.get(u) ?? noValueKey(prop);
+    count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  const keys = [...count.keys()].filter((k) => !isSentinel(prop, k));
+  const numeric = keys.length > 0 && keys.every(isNumeric);
+  keys.sort((a, b) => (numeric ? Number(a) - Number(b) : a.localeCompare(b, undefined, { numeric: true })));
+  const out: LegendEntry[] = keys.map((k) => ({ key: k, colour: colourOfKey(state, k)!, label: k, count: count.get(k)! }));
+  const ek = emptyValueKey(prop), nk = noValueKey(prop);
+  out.push({ key: ek, colour: colourOfKey(state, ek)!, label: "", count: count.get(ek) ?? 0, special: "empty" });
+  out.push({ key: nk, colour: state.scheme[nk] ?? SPECIAL_GREY, label: "", count: count.get(nk) ?? 0, none: true, special: "none",
+    ...(state.leaveNone ? { untouched: true } : {}) });
+  return out;
+}
+
+/** MICRO-S · a property chosen: its starting scheme — the scale of its kind
+ *  (text: qualitative, numbers: sequential between min and max), the special
+ *  values with EM Tools' grey. */
+export function startProperty(state: ColourState, prop: string, values: Iterable<string>): ColourState {
+  const vals = [...values];
+  const kind = valueKind(prop, vals);
+  const ramp = defaultRamp(kind);
+  const range = kind === "numeric" ? valueRange(prop, vals) : null;
+  const scheme = Object.fromEntries(rampScheme(prop, vals, ramp.type, ramp.name, range));
+  scheme[emptyValueKey(prop)] = SPECIAL_GREY;
+  scheme[noValueKey(prop)] = SPECIAL_GREY;
+  return { ...state, mode: "property", property: prop, scheme, ramp, range, leaveNone: false, isolated: null, hidden: [] };
+}
+
+/** MICRO-S · a scale applied: the values' colours from it, the specials' kept */
+export function applyRamp(state: ColourState, values: Iterable<string>, type: RampType, name: string,
+                          range?: { lo: number; hi: number } | null): ColourState {
+  const prop = state.property ?? "";
+  const specials = Object.fromEntries(Object.entries(state.scheme).filter(([k]) => isSentinel(prop, k)));
+  return { ...state, ramp: { type, name }, range: range ?? null,
+    scheme: { ...Object.fromEntries(rampScheme(prop, [...values], type, name, range)), ...specials } };
 }
 
 /** the legend's gesture: normal → isolated → hidden → normal */

@@ -181,8 +181,9 @@ import {
 } from "./logpanel";
 import { DocumentStore, editorHand, setRoomAuthor, stripYedDrawing } from "./model";
 import { presenceIndex } from "./epoch-presence";
-import { RAMPS, colourPlan, emcDocument, emcRead, hexToLinear, legendClick, legendShows, loadColourState, mix as colourMix,
-         propertyNames, propertyValues, rampScheme, saveColourState, type ColourPlan, type ColourState, type RampType } from "./space-colours";
+import { RAMPS, applyRamp, colourPlan, emcOfState, emcRead, hexToLinear, legendClick, legendShows, loadColourState, mix as colourMix,
+         propertyNames, propertyValues, saveColourState, startProperty, type ColourPlan, type ColourState, type RampType } from "./space-colours";
+import { ColoursWindow } from "./colours-window";
 import { clearFiltersHiding, installTableTools } from "./table-tools";
 import {
   HAS_PARADATA_NODEGROUP,
@@ -24761,6 +24762,8 @@ document
   ?.addEventListener("click", openStratiMiner);
 // AUDIT N5 · Strumenti ▸ Verifica la cronologia
 document.getElementById("btn-tool-chronology")?.addEventListener("click", () => openChronology());
+// MICRO-S · Tools ▸ Colori…: the window «Colori» on the active Space
+document.getElementById("btn-tool-colours")?.addEventListener("click", () => openColoursWindow());
 document
   .getElementById("drop-hint-stratiminer")
   ?.addEventListener("click", (e) => {
@@ -28537,7 +28540,10 @@ function closeSystemWindow(p: Popout): void {
 }
 /** MICRO-OVERLAY-PER-FINESTRA p.0 · the popouts opened on the desktop whose
  *  label the shell has not said yet, oldest first (one `window.open` at a time) */
-const labelWaiting: Popout[] = [];
+const labelWaiting: Array<{ label?: string; gone: boolean }> = [];
+/** MICRO-S · the other system windows the page opened (the window «Colori»):
+ *  their label, and what to do when the shell closes them */
+const otherSystemWindows = new Set<{ label?: string; gone: boolean; onClosed: () => void }>();
 void onDetachedWindows(
   (label) => {
     const p = labelWaiting.shift();
@@ -28548,8 +28554,26 @@ void onDetachedWindows(
   (label) => {
     const p = [...popouts.values()].find((x) => x.label === label);
     if (p) popoutGone(p.win.id);
+    const o = [...otherSystemWindows].find((x) => x.label === label);
+    if (o) { otherSystemWindows.delete(o); if (!o.gone) { o.gone = true; o.onClosed(); } }
   },
 );
+/** MICRO-S · a system window opened by `window.open` outside the detached
+ *  windows: on the desktop its label is learnt (in order) so the page can close
+ *  it — `close()` from the page does nothing on macOS — and its closing by the
+ *  shell is heard */
+function adoptSystemWindow(pop: Window, onClosed: () => void): { close(): void } {
+  const rec: { label?: string; gone: boolean; onClosed: () => void } = { gone: false, onClosed };
+  if (isTauri()) { labelWaiting.push(rec); otherSystemWindows.add(rec); }
+  return {
+    close: () => {
+      rec.gone = true;
+      otherSystemWindows.delete(rec);
+      try { pop.close(); } catch { /* already closing */ }
+      if (rec.label) void closeDetachedWindow(rec.label);
+    },
+  };
+}
 
 /** «Back into the main window»: the window's twin takes half of the main
  *  window's focused area (or the first one), and the system window closes. */
@@ -35188,6 +35212,67 @@ function colourEpochs(sp: Space): Array<{ id: string; name: string; color: strin
   }
   return out;
 }
+// ── MICRO-S · the window «Colori»: a panel in the page (or a system window of
+// its own), working on the scheme of ONE Space window — the one it was opened
+// from, else the active Space, else the first ──
+let coloursSpaceId: string | null = null;
+function coloursSpaceWin(): Win | null {
+  const scenes = windowsOf().filter((w) => w.type === "scene");
+  const act = activeWin();
+  return scenes.find((w) => w.id === coloursSpaceId) ?? (act.type === "scene" ? act : scenes[0]) ?? null;
+}
+function coloursSpaceNow(): { win: Win; sp: Space; ep: string } | null {
+  const win = coloursSpaceWin(), sp = currentSpace();
+  const ep = sp ? spaceEpochOf(sp) : null;
+  return win && sp && ep ? { win, sp, ep } : null;
+}
+const coloursWindow = new ColoursWindow({
+  t: (k, v) => t(k, v),
+  fmtN: (n) => fmtN(n),
+  space: () => {
+    const win = coloursSpaceWin();
+    if (!win) return null;
+    const sp = currentSpace(), ep = sp ? spaceEpochOf(sp) : null;
+    return { winId: win.id, epoch: sp && ep ? sp.summary(ep)?.epoch.name ?? null : null };
+  },
+  state: () => { const w = coloursSpaceWin(); return w ? spaceColoursOf(w.id) : null; },
+  set: (s) => { const w = coloursSpaceWin(); if (!w) return; setSpaceColours(w.id, s); refreshSurfaces("scene"); },
+  units: () => { const c = coloursSpaceNow(); return c ? c.sp.summary(c.ep)?.withProxy ?? [] : []; },
+  propertyNames: () => { const c = coloursSpaceNow(); return c && store ? propertyNames(store.doc.graph as never, c.sp.summary(c.ep)?.withProxy ?? []) : []; },
+  values: (prop) => { const c = coloursSpaceNow(); return c && store ? propertyValues(store.doc.graph as never, prop, c.sp.summary(c.ep)?.withProxy ?? []) : new Map(); },
+  plan: () => {
+    const c = coloursSpaceNow();
+    return c && store ? spaceColourPlan(store, c.sp, c.ep, c.sp.summary(c.ep)?.withProxy ?? [], spaceColoursOf(c.win.id)) : null;
+  },
+  setEpochColour: (id, hex) => { store?.setField(id, "data.color", hex); },
+  select: (units) => { selectMany(units); toast(tn("cw.selected", units.length)); },
+  // «created», as the menu writes it: the graph's id (EM Tools writes its .blend)
+  saveEmc: (doc, name) => (doc.metadata.created ||= String(store?.doc.graph.graph_id ?? ""), downloadBlob(new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }), name, "application/json")),
+  pickEmc: (d = document) => new Promise((resolve) => {
+    const input = d.createElement("input");
+    input.type = "file";
+    input.accept = ".emc,application/json";
+    input.onchange = async () => {
+      const f = input.files?.[0];
+      if (!f) { resolve(null); return; }
+      try { resolve(JSON.parse(await f.text())); } catch (err) { toast(t("col.badEmc", { why: (err as Error).message })); resolve(null); }
+    };
+    input.click();
+  }),
+  toast: (m) => toast(m),
+  isWriting: (el) => isWritingField(el),
+  systemWindow: (pop, onClosed) => adoptSystemWindow(pop, onClosed),
+  rev: () => `${store?.rev ?? ""}|${spaceVersion}|${colourDocKey()}`,
+});
+/** open the window «Colori» on a Space window (none: the active one) */
+function openColoursWindow(winId?: string): void {
+  if (winId) coloursSpaceId = winId;
+  else if (activeWin().type === "scene") coloursSpaceId = activeWin().id;
+  if (!coloursSpaceWin()) { toast(t("cw.noSpace")); return; }
+  coloursWindow.open();
+  coloursWindow.repaint(true);
+}
+
 /** the plan of the units drawn in the epoch shown */
 function spaceColourPlan(st: DocumentStore, sp: Space, epochId: string, units: string[], cs: ColourState): ColourPlan {
   if (cs.mode === "em") return colourPlan(cs, units, { epochs: [], firstOf: () => null });
@@ -35703,6 +35788,15 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const cs = spaceColoursOf(win.id);
     const box = document.createElement("div");
     box.className = "col-body";
+    // MICRO-S · the window to work in; this menu stays the quick way
+    const ow = document.createElement("button");
+    ow.type = "button";
+    ow.className = "col-openwin";
+    ow.dataset.colWindow = "1";
+    ow.textContent = t("cw.openWindow");
+    ow.title = t("cw.openWindowTip");
+    ow.onclick = () => { closeColours(); openColoursWindow(win.id); };
+    box.appendChild(ow);
     const seg = document.createElement("div");
     seg.className = "col-modes";
     for (const m of ["em", "epochs", "property"] as const) {
@@ -35755,8 +35849,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         o.value = cs.property; o.textContent = cs.property; o.selected = true;
         sel.appendChild(o);
       }
-      sel.onchange = () => setColours({ ...cs, property: sel.value || null, isolated: null, hidden: [],
-        scheme: sel.value === cs.property ? cs.scheme : {} });
+      // MICRO-S · a property chosen starts with the scale of its kind and the two special values
+      sel.onchange = () => {
+        if (!sel.value) { setColours({ ...cs, property: null, scheme: {}, ramp: null, range: null, isolated: null, hidden: [] }); return; }
+        if (sel.value !== cs.property) setColours(startProperty(cs, sel.value, propertyValues(st.doc.graph as never, sel.value, units).values()));
+      };
       row.appendChild(sel);
       box.appendChild(row);
       // the scale: EM Tools' own; a number goes on the continuous scale
@@ -35780,8 +35877,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       ap.onclick = () => {
         if (!cs.property) return;
         const [type, name] = rsel.value.split("/") as [RampType, string];
-        const vals = [...new Set(propertyValues(st.doc.graph as never, cs.property, units).values())];
-        setColours({ ...cs, ramp: { type, name }, scheme: Object.fromEntries(rampScheme(cs.property, vals, type, name)) });
+        setColours(applyRamp(cs, propertyValues(st.doc.graph as never, cs.property, units).values(), type, name, cs.range ?? null));
       };
       sr.append(`${t("col.scale")} `, rsel, " ", ap);
       box.appendChild(sr);
@@ -35795,7 +35891,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       sv.disabled = !cs.property || !Object.keys(cs.scheme).length;
       sv.onclick = () => {
         if (!cs.property) return;
-        const doc = emcDocument(cs.property, cs.scheme, String(st.doc.graph.graph_id ?? ""));
+        const doc = emcOfState(cs, String(st.doc.graph.graph_id ?? ""));
         downloadBlob(new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }), `${cs.property.replace(/[^\w.-]+/g, "_")}.emc`, "application/json");
       };
       const op = document.createElement("button");
@@ -35811,7 +35907,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
           if (!f) return;
           try {
             const r = emcRead(JSON.parse(await f.text()));
-            setColours({ ...spaceColoursOf(win.id), mode: "property", property: r.property, scheme: Object.fromEntries(r.scheme), ramp: null, isolated: null, hidden: [] });
+            setColours({ ...spaceColoursOf(win.id), mode: "property", property: r.property, scheme: Object.fromEntries(r.scheme), leaveNone: r.leaveNone, ramp: null, range: null, isolated: null, hidden: [] });
             toast(t("col.opened", { p: r.property, n: String(r.scheme.size) }));
           } catch (err) { toast(t("col.badEmc", { why: (err as Error).message })); }
         };
@@ -35889,8 +35985,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       const sw = document.createElement("input");
       sw.type = "color";
       sw.className = "scn-legend-sw";
-      sw.value = /^#[0-9a-f]{6}$/i.test(e.colour) ? e.colour : "#9a9a9a";
-      sw.title = e.epochId ? t("col.epochColour", { e: e.label }) : t("col.valueColour", { v: e.label || t("col.noValue") });
+      sw.value = /^#[0-9a-f]{6}$/i.test(e.colour) ? e.colour.toLowerCase() : "#9a9a9a";
+      // MICRO-S · the two special values of a property, each its own row
+      const special = e.special === "empty" ? t("cw.empty") : e.special === "none" ? t("cw.none") : "";
+      sw.title = e.epochId ? t("col.epochColour", { e: e.label }) : t("col.valueColour", { v: e.label || special || t("col.noValue") });
+      if (e.untouched) { sw.disabled = true; sw.title = t("cw.leaveNoneHint"); r.classList.add("untouched"); }
       sw.addEventListener("click", (ev) => ev.stopPropagation());
       sw.addEventListener("change", () => {
         const hex = sw.value.toUpperCase();
@@ -35900,7 +35999,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       });
       const lab = document.createElement("span");
       lab.className = "scn-legend-lab";
-      lab.textContent = e.none ? t(cs.mode === "epochs" ? "col.noEpoch" : "col.noValue") : e.label;
+      lab.textContent = special || (e.none ? t(cs.mode === "epochs" ? "col.noEpoch" : "col.noValue") : e.label);
       const n = document.createElement("span");
       n.className = "scn-legend-n";
       n.textContent = e.faded ? `${fmtN(e.count)} (${fmtN(e.faded)}↓)` : fmtN(e.count);
@@ -36417,6 +36516,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const cs = spaceColoursOf(win.id);
     const cplan = spaceColourPlan(st, sp, sum.epoch.id, sum.withProxy, cs);
     paintLegend(cs, cplan);
+    // MICRO-S · the window «Colori» follows the Space it colours
+    if (coloursWindow.isOpen && coloursSpaceWin()?.id === win.id) coloursWindow.repaint();
     const colourOfProxy = (u: string, type: string | undefined) => {
       const base = { rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined, threed: nodeThreedStyle(type) };
       const hex = cplan.colour.get(u);

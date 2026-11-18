@@ -34,7 +34,7 @@ const vals = ["1", "3", "2", C.noValueKey("quota")];
 const rs = C.rampScheme("quota", vals, "sequential", "blues");
 eq(rs.get("1"), C.RAMPS.sequential.blues.colors[0], "the lowest, the scale's first");
 eq(rs.get("3"), C.RAMPS.sequential.blues.colors.at(-1), "the highest, its last");
-eq(rs.get(C.noValueKey("quota")), C.NO_VALUE_GREY, "without the property: grey");
+ok(!rs.has(C.noValueKey("quota")), "MICRO-S: the special values are not the scale's (they keep their own colour)");
 // ── 4 · the .emc
 const emc = C.emcDocument("material", new Map([["stone", "#E41A1C"]]), "x.em.json");
 eq(Object.keys(emc), ["metadata", "color_mapping"], "EM Tools' two keys");
@@ -51,8 +51,10 @@ eq([...pv], [["u1", "stone"], ["u2", C.emptyValueKey("material")], ["u3", C.noVa
 eq(C.propertyNames(g, units), [{ name: "material", units: 2 }], "the properties the units have");
 let st = { ...C.defaultColourState(), mode: "property", property: "material", scheme: { stone: "#E41A1C" } };
 let plan = C.colourPlan(st, units, { epochs: [], firstOf: () => null, values: pv });
-eq(plan.legend.map((l) => [l.label, l.count, !!l.none]), [["stone", 1, false], ["", 2, true]], "legend: the value, and «senza valore» (empty or absent)");
-eq(plan.colour.get("u3"), C.NO_VALUE_GREY, "no value: grey");
+// MICRO-S · the two special values, one row each (they were one «senza valore»)
+eq(plan.legend.map((l) => [l.label, l.count, l.special ?? null]), [["stone", 1, null], ["", 1, "empty"], ["", 1, "none"]], "legend: the value, «valore vuoto», «non ha la proprietà»");
+eq(plan.colour.get("u3"), C.SPECIAL_GREY, "no property: EM Tools' grey");
+eq(plan.colour.get("u2"), C.SPECIAL_GREY, "empty value: EM Tools' grey");
 const eps = [{ id: "E1", name: "I", color: "#FF0000" }, { id: "E2", name: "II", color: "#00FF00" }, { id: "E3", name: "III", color: "#0000FF" }];
 const first = { u1: "E1", u2: "E2", u3: "E2" };
 st = { ...C.defaultColourState(), mode: "epochs", variant: "new" };
