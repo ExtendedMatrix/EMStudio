@@ -93,6 +93,10 @@ pub(crate) struct LaneCtx<'a> {
     /// for one rank of an edge: higher, shorter groups (they stack instead of
     /// standing side by side), longer edges
     pub group_weight: i64,
+    /// MICRO-R · the inquiry's strategies (all off by default)
+    pub inquiry: crate::layout::Inquiry,
+    /// MICRO-R · node index → its sketch (x, w), when sketching
+    pub sketch_box: &'a [Option<(f64, f64)>],
 }
 
 const ROOT: usize = usize::MAX;
@@ -857,6 +861,78 @@ fn layout_component(
             ords.push(Ord { rank: top_r[i], container: items[i].parent, item: Some(i), key: base_key(i) });
         }
     }
+    // MICRO-R · B and C: where a leaf starts in its row, from what it is tied to
+    // (before the dummies, which interpolate their ends' keys)
+    if ctx.inquiry.b_beside_neighbour || ctx.inquiry.c_group_side {
+        let mut nb: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n_items];
+        for &(a, b) in &item_edges {
+            if dropped_items.contains(&(a, b)) {
+                continue;
+            }
+            nb[a].insert(b);
+            nb[b].insert(a);
+        }
+        // where an item is along the row: a leaf its key, a group its centre
+        let span = |i: usize| -> Option<(f64, f64)> { ctx.sketch_box[items[i].node] };
+        let centre = |i: usize, ords: &Vec<Ord>| -> f64 {
+            if is_group(i) {
+                span(i).map(|(x, w)| x + w / 2.0).unwrap_or_else(|| base_key(i))
+            } else {
+                ords[ord_of_item[i]].key
+            }
+        };
+        // B · a leaf tied to ONE node: beside it (a pair of such leaves: the
+        // second follows the first)
+        if ctx.inquiry.b_beside_neighbour {
+            for i in 0..n_items {
+                if is_group(i) || nb[i].len() != 1 {
+                    continue;
+                }
+                let j = *nb[i].iter().next().unwrap();
+                if !is_group(j) && nb[j].len() == 1 && j > i {
+                    continue;
+                }
+                let k = if is_group(j) { centre(j, &ords) } else { ords[ord_of_item[j]].key + 0.5 };
+                ords[ord_of_item[i]].key = k;
+            }
+        }
+        // C · a sibling group between a leaf and all it is tied to: the leaf
+        // goes on their side of it (they are inside it: the nearer side)
+        if ctx.inquiry.c_group_side && ctx.sketching {
+            for i in 0..n_items {
+                if is_group(i) || nb[i].is_empty() {
+                    continue;
+                }
+                let r = top_r[i];
+                let mut sibs: Vec<(f64, f64, usize)> = (0..n_items)
+                    .filter(|&g| is_group(g) && items[g].parent == items[i].parent && top_r[g] <= r && r <= bot_r[g])
+                    .filter_map(|g| span(g).map(|(x, w)| (x, w, g)))
+                    .collect();
+                sibs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal).then(a.2.cmp(&b.2)));
+                for (gx, gw, g) in sibs {
+                    let key = ords[ord_of_item[i]].key;
+                    let cs: Vec<(f64, bool)> = nb[i].iter().map(|&j| (centre(j, &ords), j == g || is_ancestor(g, j))).collect();
+                    let left = |c: &(f64, bool)| !c.1 && c.0 < gx;
+                    let right = |c: &(f64, bool)| !c.1 && c.0 > gx + gw;
+                    let to = if cs.iter().all(|c| c.1) {
+                        let m = cs.iter().map(|c| c.0).sum::<f64>() / cs.len() as f64;
+                        if m < gx + gw / 2.0 { -1 } else { 1 }
+                    } else if cs.iter().all(left) {
+                        -1
+                    } else if cs.iter().all(right) {
+                        1
+                    } else {
+                        0
+                    };
+                    if to < 0 && key >= gx {
+                        ords[ord_of_item[i]].key = gx - 0.5;
+                    } else if to > 0 && key < gx {
+                        ords[ord_of_item[i]].key = gx + 0.5;
+                    }
+                }
+            }
+        }
+    }
     // adjacency between consecutive ranks (for the barycenter and the crossings)
     let mut up_adj: Vec<Vec<usize>> = Vec::new(); // ord → ords in rank − 1
     let mut dn_adj: Vec<Vec<usize>> = Vec::new(); // ord → ords in rank + 1
@@ -1020,7 +1096,8 @@ fn layout_component(
     // reduced a crossing). They START from the sketch's order and a new order
     // is kept only when it crosses strictly less — an order that crosses no
     // more than the hand's stays the hand's (invariant 8)
-    if (!ctx.sketching || SKETCH_SWEEPS) && ords.len() > 1 {
+    let d_on = ctx.inquiry.d_median_transpose;
+    if (!ctx.sketching || SKETCH_SWEEPS || d_on) && ords.len() > 1 {
         let mut best = slots.clone();
         let mut best_c = crossings(&pos);
         for it in 0..ctx.sweeps.max(1) {
@@ -1034,7 +1111,17 @@ fn layout_component(
                         continue;
                     }
                     let nb = if down { &up_adj[o] } else { &dn_adj[o] };
-                    let v = if nb.is_empty() { pos[o] } else { nb.iter().map(|&x| pos[x]).sum::<f64>() / nb.len() as f64 };
+                    let v = if nb.is_empty() {
+                        pos[o]
+                    } else if d_on {
+                        // MICRO-R · D: the median (Gansner et al.), not the mean
+                        let mut v: Vec<f64> = nb.iter().map(|&x| pos[x]).collect();
+                        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                        let m = v.len() / 2;
+                        if v.len() % 2 == 1 { v[m] } else { (v[m - 1] + v[m]) / 2.0 }
+                    } else {
+                        nb.iter().map(|&x| pos[x]).sum::<f64>() / nb.len() as f64
+                    };
                     bary.insert(o, v);
                 }
                 // a group's key at this rank: the mean of its order nodes here
@@ -1052,7 +1139,8 @@ fn layout_component(
                     match s {
                         Slot::O(o) => *bary.get(&o).unwrap_or(&pos[o]),
                         Slot::G(g) => {
-                            if GROUPS_ASIDE && items[g].parent == ROOT {
+                            // MICRO-R · D From-Sketch: the groups stay where the sketch has them
+                            if GROUPS_ASIDE && items[g].parent == ROOT && !(d_on && ctx.sketching) {
                                 1e9 + gkey[g]
                             } else {
                                 gsum.get(&g).map(|(s, n)| s / *n as f64).unwrap_or(gkey[g] * rlen[r] as f64)
@@ -1082,6 +1170,43 @@ fn layout_component(
                     }
                 }
                 flatten(&slots, &mut pos, &mut rlen);
+                // MICRO-R · D: adjacent transpositions of two order nodes of one
+                // container, kept when they cross less with the rows around
+                if d_on {
+                    let local = |u: usize, v: usize, pos: &Vec<f64>| -> u64 {
+                        let mut c = 0u64;
+                        for adj in [&up_adj, &dn_adj] {
+                            for &a in &adj[u] {
+                                for &b in &adj[v] {
+                                    if pos[a] > pos[b] {
+                                        c += 1;
+                                    }
+                                }
+                            }
+                        }
+                        c
+                    };
+                    for per in slots.iter_mut() {
+                        let Some(list) = per.get_mut(&r) else { continue };
+                        let mut improved = true;
+                        let mut guard = 0;
+                        while improved && guard < 8 {
+                            improved = false;
+                            guard += 1;
+                            for k in 0..list.len().saturating_sub(1) {
+                                if let (Slot::O(u), Slot::O(v)) = (list[k], list[k + 1]) {
+                                    if local(v, u, &pos) < local(u, v, &pos) {
+                                        list.swap(k, k + 1);
+                                        let t = pos[u];
+                                        pos[u] = pos[v];
+                                        pos[v] = t;
+                                        improved = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             // the groups' global order, from where their contents went
             let mut acc: Vec<(f64, usize)> = vec![(0.0, 0); n_items];
@@ -1239,7 +1364,50 @@ fn layout_component(
         for v in knb.iter_mut() {
             v.sort_unstable();
         }
-        for pass in 0..12 {
+        // MICRO-R · A: the median of the neighbours with PRIORITY (the most tied
+        // first: a node with more edges is placed, the others align on it), not
+        // bounded by the compact envelope; the kids tied to nothing are then
+        // pulled to the left, against what precedes them
+        if ctx.inquiry.a_median_x {
+            let mut prio: Vec<usize> = (0..nk).collect();
+            prio.sort_by(|&a, &b| knb[b].len().cmp(&knb[a].len()).then(a.cmp(&b)));
+            let mut done = vec![false; nk];
+            for pass in 0..16 {
+                let seq: Vec<usize> = if pass % 2 == 0 { prio.clone() } else { prio.iter().rev().copied().collect() };
+                for &u in &seq {
+                    if knb[u].is_empty() {
+                        continue;
+                    }
+                    let mut cs: Vec<f64> = knb[u].iter().map(|&v| x[v] + wk[v] / 2.0).collect();
+                    cs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let m = if cs.len() % 2 == 1 { cs[cs.len() / 2] } else { (cs[cs.len() / 2 - 1] + cs[cs.len() / 2]) / 2.0 };
+                    let want = m - wk[u] / 2.0;
+                    let lo = pred[u].iter().map(|&(p, len)| x[p] + len).fold(f64::NEG_INFINITY, f64::max);
+                    let hi = succ[u].iter().map(|&(s, len)| x[s] - len).fold(f64::INFINITY, f64::min);
+                    if lo <= hi {
+                        x[u] = want.max(lo).min(hi);
+                    }
+                    done[u] = true;
+                }
+                // a kid that moves pushes its successors (separation kept)
+                for &u in &topo {
+                    for &(p, len) in &pred[u] {
+                        if x[p] + len > x[u] {
+                            x[u] = x[p] + len;
+                        }
+                    }
+                }
+            }
+            for &u in &topo {
+                if !done[u] {
+                    let lo = pred[u].iter().map(|&(p, len)| x[p] + len).fold(f64::NEG_INFINITY, f64::max);
+                    if lo.is_finite() {
+                        x[u] = lo;
+                    }
+                }
+            }
+        }
+        for pass in 0..if ctx.inquiry.a_median_x { 0 } else { 12 } {
             let seq: Vec<usize> = if pass % 2 == 0 { topo.clone() } else { topo.iter().rev().copied().collect() };
             for &u in &seq {
                 if knb[u].is_empty() {

@@ -65,6 +65,43 @@ pub struct LayoutOptions {
     pub group_pad: f64,
     /// the room a group's title bar takes above its first row
     pub group_header: f64,
+    /// MICRO-R · the strategies of the layout inquiry, every one OFF by default
+    pub inquiry: Inquiry,
+}
+
+/// MICRO-R (E.D., 18 Nov 2026: «dove mettere i nodi» — USV158 on the v10, after
+/// «Disponi» right of VSF142, its edge behind the box) · the strategies the
+/// inquiry measured, one switch each, all OFF by default: the app's layout does
+/// not change unless one is switched on. The report says what each one did
+/// (s3Dgraphy/.claude/wip/reports/2026-11-18-REPORT-indagine-layout.md).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Inquiry {
+    /// A · x by the median of the neighbours with priority (degree first),
+    /// not bounded by the compact envelope, then a pull to the left
+    pub a_median_x: bool,
+    /// B · a leaf tied to ONE node sits beside it in its row (its sketch order
+    /// is that node's)
+    pub b_beside_neighbour: bool,
+    /// C · a leaf whose neighbours all lie on one side of a sibling group goes
+    /// on that side (inside it: the side nearer to them), so its edge does not
+    /// cross the box
+    pub c_group_side: bool,
+    /// D · crossing reduction From-Sketch too: median sweeps + adjacent
+    /// transpositions, groups kept as blocks in their sketch order, kept only
+    /// when the engine counts fewer crossings
+    pub d_median_transpose: bool,
+    /// G · a node with no epoch of its own (it fell into the trailing lane)
+    /// takes the OLDEST lane of the nodes its edges come from, when no edge of
+    /// its goes to a lane above that one (no edge turns upward)
+    pub g_lane_from_sources: bool,
+}
+
+impl Inquiry {
+    /// «A,B,C,D» (any subset, any case) → the switches
+    pub fn parse(s: &str) -> Self {
+        let has = |c: char| s.split(|x: char| x == ',' || x == '+' || x.is_whitespace()).any(|t| t.eq_ignore_ascii_case(&c.to_string()));
+        Inquiry { a_median_x: has('A'), b_beside_neighbour: has('B'), c_group_side: has('C'), d_median_transpose: has('D'), g_lane_from_sources: has('G') }
+    }
 }
 
 impl Default for LayoutOptions {
@@ -101,6 +138,7 @@ impl Default for LayoutOptions {
             // group, nested ones included
             group_pad: 12.0,
             group_header: 26.0,
+            inquiry: Inquiry::default(),
         }
     }
 }
@@ -475,6 +513,46 @@ pub fn compute_with_sketch(
             break;
         }
     }
+    // MICRO-R · G: the oldest lane among the sources of a lane-less node
+    if opts.inquiry.g_lane_from_sources {
+        let skip = |t: &str| {
+            membership_edge(t) || t == "has_first_epoch" || CHAIN_EDGES.contains(&t)
+                || matches!(t, "has_same_time" | "is_physically_equal_to" | "equals" | "bonded_to" | "is_bonded_to" | "contrasts_with")
+        };
+        for _ in 0..4 {
+            let mut changed = false;
+            let mut src_max: Vec<Option<usize>> = vec![None; n];
+            let mut tgt_min: Vec<Option<usize>> = vec![None; n];
+            for e in &graph.edges {
+                if skip(e.edge_type.as_str()) || spatial_edge(e) {
+                    continue;
+                }
+                let (Some(&s), Some(&t)) = (node_ix.get(e.source.as_str()), node_ix.get(e.target.as_str())) else { continue };
+                if let Some(ls) = lane[s] {
+                    if lane_of_epoch.contains_key(&s) { continue; }
+                    src_max[t] = Some(src_max[t].map_or(ls, |m: usize| m.max(ls)));
+                }
+                if let Some(lt) = lane[t] {
+                    if lane_of_epoch.contains_key(&t) { continue; }
+                    tgt_min[s] = Some(tgt_min[s].map_or(lt, |m: usize| m.min(lt)));
+                }
+            }
+            for i in 0..n {
+                if lane[i].is_some() || graph.nodes[i].node_type == "epoch" || graph.nodes[i].node_type == "EpochNode" || spatial[i] {
+                    continue;
+                }
+                if let Some(l) = src_max[i] {
+                    if tgt_min[i].map_or(true, |m| m >= l) {
+                        lane[i] = Some(l);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
     let lane: Vec<usize> = lane
         .into_iter()
         .map(|l| l.unwrap_or(unassigned_lane))
@@ -633,6 +711,12 @@ pub fn compute_with_sketch(
             .unwrap_or(f64::MAX)
     };
 
+    // MICRO-R · the sketch's Rect of every node (C reads a group's span)
+    let sketch_box: Vec<Option<(f64, f64)>> = graph
+        .nodes
+        .iter()
+        .map(|nd| if sketching { sketch.and_then(|l| l.positions.get(&nd.id)).map(|r| (r.x, r.w)) } else { None })
+        .collect();
     // node index → the box it is drawn with as a LEAF (its type's geometry, or
     // the square glyph box when the node draws a glyph of its own: EM1/EM2)
     let leaf_box: Vec<(f64, f64)> = graph
@@ -679,6 +763,8 @@ pub fn compute_with_sketch(
         shelf_w: 0.0,
         outer: &outer,
         group_weight: opts.group_weight,
+        inquiry: opts.inquiry,
+        sketch_box: &sketch_box,
     };
 
     // top-level members per lane: alive nodes whose primary parent is
@@ -1409,6 +1495,62 @@ mod tests {
         assert_eq!(out.positions["B"].x, -777.0, "pinned x is kept exactly");
         assert_eq!(out.positions["B"].y, -555.0, "pinned y is kept exactly");
         assert_eq!(out.pinned, vec!["B".to_string()], "pinned set persists");
+    }
+
+    #[test]
+    fn inquiry_puts_a_leaf_on_its_neighbours_side_of_a_group() {
+        // MICRO-R · the shape of USV158 on the v10: P → L and P → V, V a group
+        // (a VSF with its SF), all three in one activity. A sketch that has L
+        // over V's span (the hand left it in P's column, P drawn above V's
+        // middle) sorts L after V — right of the box, its edge across it. Off
+        // by default; B and C put it back on P's side, before V.
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![
+                epoch("EP1", 100.0),
+                node("ACT", "ActivityNodeGroup"),
+                node("P", "USVn"),
+                node("L", "VSF"),
+                node("V", "VSF"),
+                node("T1", "SF"),
+                node("T2", "SF"),
+            ],
+            edges: vec![
+                edge("e1", "has_first_epoch", "P", "EP1"),
+                edge("e2", "has_first_epoch", "L", "EP1"),
+                edge("e3", "has_first_epoch", "V", "EP1"),
+                edge("m1", "is_in_activity", "P", "ACT"),
+                edge("m2", "is_in_activity", "L", "ACT"),
+                edge("m3", "is_in_activity", "V", "ACT"),
+                edge("m4", "is_part_of", "T1", "V"),
+                edge("m5", "is_part_of", "T2", "V"),
+                edge("a1", "is_after", "P", "L"),
+                edge("a2", "is_after", "P", "V"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        assert_eq!(Inquiry::default(), Inquiry::parse(""), "every strategy off by default");
+        assert_eq!(LayoutOptions::default().inquiry, Inquiry::default());
+        let p = Inquiry::parse("b, C+d");
+        assert!(!p.a_median_x && p.b_beside_neighbour && p.c_group_side && p.d_median_transpose && !p.g_lane_from_sources);
+        let mut opts = LayoutOptions::default();
+        let base = compute(&g, &opts);
+        let mut sketch = base.clone();
+        let v = base.positions["V"].clone();
+        sketch.positions.get_mut("P").unwrap().x = v.x - 200.0;
+        sketch.positions.get_mut("L").unwrap().x = v.x + v.w / 2.0;
+        opts.use_sketch = true;
+        let off = compute_with_sketch(&g, &opts, Some(&sketch));
+        assert!(off.positions["L"].x > off.positions["V"].x + off.positions["V"].w, "off: L right of V (as on the v10)");
+        for s in ["B", "C", "B,C,D"] {
+            opts.inquiry = Inquiry::parse(s);
+            let on = compute_with_sketch(&g, &opts, Some(&sketch));
+            assert!(on.positions["L"].x + on.positions["L"].w <= on.positions["V"].x, "{s}: L left of V, beside P");
+            let again = compute_with_sketch(&g, &opts, Some(&sketch));
+            assert_eq!(serde_json::to_string(&on).unwrap(), serde_json::to_string(&again).unwrap(), "{s}: deterministic");
+        }
     }
 
     #[test]
