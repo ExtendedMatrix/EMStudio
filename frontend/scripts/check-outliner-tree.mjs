@@ -260,4 +260,28 @@ if (path) {
   ok(L3.at(-2)?.trim().startsWith("Abbozzi") && rows3.at(-1).skey === "sketch:k1", "the sketches out of the epochs, at the bottom");
   ok(!rows3.some((r) => r.label === "D.01.61" && r.key.includes("sp/Y15")), "no extractor where its document publishes nothing");
 }
+// MICRO-PL07 p.0 (E.D. 18 Nov 2026) · the units alive in an epoch without a proxy, which
+// the Space's summary listed over the scene: a closed branch of the epoch, «Senza proxy (n)»,
+// its count in its label (no «a / b» of the rows), each unit a row that selects it; the
+// Space's own list when it gives one (facts.withoutProxy), else the epoch's units minus the proxies
+{
+  const t4 = { ...texts, space: { proxies: "Proxy", models: "Modelli", rmdoc: "RMDoc", rmsf: "RMSF", gis: "GIS",
+    withoutProxy: (n) => `Senza proxy (${n})`, withoutProxyTitle: "senza proxy" } };
+  const flat = (f, toggled = new Set()) => O.flattenOutliner({ sources: [{ ...sources[0], graphs: [{ ...sources[0].graphs[0], facts: f }] }],
+    opts: { ...O.DEFAULT_OPTS, space: true }, texts: t4, toggled });
+  let rows = flat(facts);
+  const np = rows.find((r) => r.key === "s1|sp/E1/nopx");
+  ok(!!np && np.kind === "group" && /^Senza proxy \(\d+\)$/.test(np.label) && !np.count && np.title === "senza proxy", "«Senza proxy (n)» under the epoch, its count in the label");
+  ok(!rows.some((r) => r.key.startsWith("s1|sp/E1/nopx/")), "…closed by default");
+  ok(!rows.some((r) => r.key === "s1|sp/-/nopx"), "…not under «no epoch»");
+  rows = flat(facts, new Set(["s1|sp/E1/nopx"]));
+  const kids = rows.filter((r) => r.key.startsWith("s1|sp/E1/nopx/")).map((r) => r.label);
+  ok(kids.includes("US2") && kids.includes("USV10") && !kids.includes("US1"), "…opened: the units without a proxy, not the one with");
+  ok(rows.filter((r) => r.key.startsWith("s1|sp/E1/nopx/")).every((r) => r.id), "…each a row that selects its unit");
+  rows = flat(() => ({ ...facts(), withoutProxy: (ep) => (ep === "E1" ? ["US2"] : []) }), new Set(["s1|sp/E1/nopx"]));
+  eq(rows.find((r) => r.key === "s1|sp/E1/nopx")?.label, "Senza proxy (1)", "the Space's own list wins");
+  ok(!rows.some((r) => r.key === "s1|sp/E0/nopx"), "an epoch with every unit proxied (or none): no branch");
+  rows = flat(() => ({ ...facts(), withoutProxy: () => [] }));
+  ok(!rows.some((r) => r.key.endsWith("/nopx")), "nothing without a proxy: no branch");
+}
 console.log(`check-outliner-tree: ${checks} checks OK`);

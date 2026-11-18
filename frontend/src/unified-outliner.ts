@@ -74,6 +74,8 @@ export interface UnifiedDeps {
   /** MICRO-PL02 · a property's «controlled vocabulary» mark (◆ ◆? ◇) and its
    *  words; null: none (the page's cache: `vocab-marks.ts`) */
   vocabMark?: (row: URow) => { state: string; glyph: string; tip: string } | null;
+  /** MICRO-PL07 p.0 · a GIS layer's tools (opacity, a DEM's surface and contours) */
+  gisMenu?: (row: URow, anchor: HTMLElement) => void;
 }
 
 /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · what the old Outliner of the scene did on
@@ -90,6 +92,10 @@ export interface SpaceRowDeps {
   altMenu: (row: URow, at: { x: number; y: number }) => void;
   failed: (row: URow) => string | null;
   failMenu: (row: URow, at: { x: number; y: number }) => void;
+  /** MICRO-PL07 p.0 · the state of a model's (or a proxy's) FILE when it is not
+   *  resident — «nessun file», «manca il file», «solo referenziato» — said by a
+   *  sign on its row (the Space's summary said it over the scene); null: resident */
+  fileState?: (row: URow) => { state: string; title: string } | null;
   isolated: () => string | null;
   isolate: (row: URow) => void;
   frame: (row: URow) => void;
@@ -115,6 +121,9 @@ export interface UnifiedApi {
   rows: () => URow[];
   /** for the checks: paint the rows in sight now (what a scroll frame does) */
   paintNow: () => void;
+  /** MICRO-PL07 p.0 · the Space's summary clicked: the epoch's branch opened,
+   *  scrolled to the top and lit for a moment; false when no row is the epoch */
+  revealEpoch: (epochId: string) => boolean;
   destroy: () => void;
 }
 
@@ -169,6 +178,9 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   let bands: Array<{ epoch: string; odd: boolean; first: boolean } | null> = [];
   let drawnFrom = -1, drawnTo = -1, drawnSel: string | null | undefined, drawnGen = -1;
   let gen = 0;
+  /** MICRO-PL07 p.0 · the row lit for a moment (the epoch the Space's summary pointed at) */
+  let flashKey: string | null = null;
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
   let queued = false;
 
   const build = (): void => {
@@ -201,6 +213,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     if (r.skey && keys) { if (keys.has(r.skey)) el.classList.add("uo-sel"); }
     else if (r.id && r.id === sel && (r.kind === "node" || r.kind === "sub" || r.kind === "group" || r.kind === "gis")) el.classList.add("uo-sel");
     if (r.skey) el.dataset.skey = r.skey;
+    if (flashKey && r.key === flashKey) el.classList.add("uo-flash");
     el.style.top = `${i * ROW_H}px`;
     el.style.paddingLeft = `${4 + r.depth * 12}px`;
     el.dataset.key = r.key;
@@ -294,6 +307,16 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     }
     const S = d.space;
     if (S && (r.skey || r.kind === "node")) {
+      const fst = r.skey && !r.ghost ? S.fileState?.(r) ?? null : null;
+      if (fst) {
+        const f = document.createElement("span");
+        f.className = `uo-fstate uo-fstate-${fst.state}`;
+        f.dataset.fstate = fst.state;
+        f.textContent = fst.state === "reference" ? "↗" : "⚠";
+        f.title = fst.title;
+        f.setAttribute("aria-label", fst.title);
+        tail.appendChild(f);
+      }
       const failed = r.skey ? S.failed(r) : null;
       if (failed) {
         const f = document.createElement("button");
@@ -416,7 +439,9 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
         cols.appendChild(k);
       } else blank("pin");
     }
-    if (r.kind === "source" || r.kind === "graph" || r.kind === "aux") {
+    // MICRO-PL07 p.0 · a GIS layer's «⋯»: its opacity, a DEM's surface and contours
+    // (they were in the Space's «Visibilità ▾», which keeps only what is seen)
+    if (r.kind === "source" || r.kind === "graph" || r.kind === "aux" || (r.kind === "gis" && !!r.gis && !!d.gisMenu)) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "uo-menu";
@@ -476,7 +501,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       return;
     }
     const m = t.closest<HTMLElement>("[data-menu]");
-    if (m) { e.stopPropagation(); d.menu(r, m); return; }
+    if (m) { e.stopPropagation(); if (r.kind === "gis" && r.gis && d.gisMenu) d.gisMenu(r, m); else d.menu(r, m); return; }
     const box = (x: HTMLElement) => { const b = x.getBoundingClientRect(); return { x: b.left, y: b.bottom + 2 }; };
     const w = t.closest<HTMLElement>("[data-warn]");
     if (w) { e.stopPropagation(); d.warnMenu?.(r, box(w)); return; }
@@ -616,9 +641,11 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     }
     // MICRO-TESTATE-COERENTI p.12 · a node's row: the menu of the selection
     // («Sposta in epoca…», «Estendi a epoca…»)
-    if (!r || !(r.kind === "source" || r.kind === "graph" || r.kind === "aux" || ((r.kind === "node" || r.kind === "sub") && r.id))) return;
+    if (!r || !(r.kind === "source" || r.kind === "graph" || r.kind === "aux" || ((r.kind === "node" || r.kind === "sub") && r.id)
+      || (r.kind === "gis" && !!r.gis && !!d.gisMenu))) return;
     e.preventDefault();
-    d.menu(r, (e.target as HTMLElement).closest<HTMLElement>(".uo-row") ?? root);
+    const at = (e.target as HTMLElement).closest<HTMLElement>(".uo-row") ?? root;
+    if (r.kind === "gis" && r.gis && d.gisMenu) d.gisMenu(r, at); else d.menu(r, at);
   });
   // ↑ ↓ move the selection over the rows that select, ← → close and open
   root.addEventListener("keydown", (e) => {
@@ -673,7 +700,19 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     },
     rows: () => rows,
     paintNow: () => paint(),
-    destroy() { ro?.disconnect(); root.remove(); },
+    revealEpoch(epochId) {
+      let i = rows.findIndex((r) => r.id === epochId && r.kind === "group" && r.glyph === "EpochNode");
+      if (i < 0) return false;
+      if (rows[i].parent && !rows[i].open) { toggleOpen(rows[i]); i = rows.findIndex((r) => r.id === epochId && r.kind === "group" && r.glyph === "EpochNode"); }
+      if (i < 0) return false;
+      scroll.scrollTop = i * ROW_H;
+      flashKey = rows[i].key;
+      clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => { flashKey = null; paint(true); }, 1600);
+      paint(true);
+      return true;
+    },
+    destroy() { clearTimeout(flashTimer); ro?.disconnect(); root.remove(); },
   };
 }
 

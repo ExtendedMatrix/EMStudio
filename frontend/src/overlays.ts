@@ -52,6 +52,8 @@ export type OverlayKey =
   | "s3_labels_rm"
   | "s3_labels_proxy"
   | "s3_labels_sketch"
+  // MICRO-PL07 p.0 · the epoch's summary line over the scene (on by default)
+  | "s3_epoch_summary"
   | "s3_axis_x"
   | "s3_axis_y"
   | "s3_axis_z"
@@ -181,6 +183,9 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     { key: "s3_labels_rm", kind: "representation_model" },
     { key: "s3_labels_proxy", kind: "proxy" },
     { key: "s3_labels_sketch", text: "◇" },
+    // MICRO-PL07 p.0 (E.D. 18 Nov 2026) · the one closed line «epoch · n models ·
+    // proxies n of m» over the scene: on by default, here to take it away too
+    { key: "s3_epoch_summary", text: "≡" },
   ] },
   // MICRO-TESTATE-COERENTI p.1 (E.D., 13 Nov 2026: «non vedevo i proxy, erano spenti, e
   // non trovavo dove riaccenderli» — three places) · the CATEGORIES of objects are

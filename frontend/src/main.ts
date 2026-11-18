@@ -13108,6 +13108,8 @@ function unifiedFacts(): ThreeFacts {
     };
     v.x3d = extractors3d(doc);
     v.docLit = (docId, epochId) => docLitIn(docId, epochId);
+    // MICRO-PL07 p.0 · «Senza proxy (46)»: the Space's own count, the one its summary said
+    v.withoutProxy = (epochId) => currentSpace()?.summary(epochId)?.without ?? null;
   }
   unifiedFactsMemo = { store: st, rev: st.rev, sp, v };
   v.sketches = sp ? listSketches().map((x) => ({ id: x.id, name: x.name })) : [];
@@ -14206,7 +14208,8 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
                     studyOnly: t("gis.studyOnly"),
                     space: { proxies: t("uo.sp.proxies"), models: t("uo.sp.models"), rmdoc: t("uo.sp.rmdoc"), rmsf: t("uo.sp.rmsf"), gis: t("uo.sp.gis"),
                              x3d: t("uo.sp.x3d"), sketches: t("s3.sketches"), x3dOff: t("uo.x3dGhost"),
-                             survives: (from) => t("uo.sp.survives", { from }), survivesMark: "⟲" },
+                             survives: (from) => t("uo.sp.survives", { from }), survivesMark: "⟲",
+                             withoutProxy: (n) => t("uo.sp.withoutProxy", { n: String(n) }), withoutProxyTitle: t("uo.sp.withoutProxyTitle") },
                     container: { alternative: t("uo.c.alternative"), livesIn: (e) => t("uo.c.livesIn", { epochs: e }),
                                  outOfStep: (n, theirs, ref) => t("al.epochsOut", { n: String(n), theirs, ref }), follows: t("uo.c.follows"),
                                  ownChoice: (e) => t("uo.c.ownChoice", { epochs: e }) } }),
@@ -14246,6 +14249,7 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
       for (const x of g) x.setShown(id, on);
     },
     menu: (r, anchor) => unifiedMenu(r, anchor),
+    gisMenu: (r, anchor) => openGisTools(r, anchor),
     mark: (r) => {
       if (r.glyphText) {
         const el = document.createElement("span");
@@ -14315,6 +14319,65 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
   };
 }
 
+/** MICRO-PL07 p.0 · a click on the Space's summary line: every Outliner open goes
+ *  to the epoch (its branch opened, scrolled to the top, lit for a moment) */
+function revealEpochInOutliner(epochId: string): void {
+  let done = false;
+  for (const api of unifiedApis.values()) done = api.revealEpoch(epochId) || done;
+  if (!done) toast(t("s3.sumNoOutliner"));
+}
+
+/** MICRO-PL07 p.0 (E.D. 18 Nov 2026) · a model's or a proxy's FILE when it is
+ *  not resident («nessun file», «manca il file», «solo referenziato», «rifiutato»):
+ *  the sign on its Outliner row, where the Space's summary used to say it over
+ *  the scene. A proxy drawn from the graph (hulls, spheres) has no file to miss. */
+function spaceFileStateOf(key: string | undefined): { state: string; title: string } | null {
+  const sp = key ? currentSpace() : null;
+  if (!sp || !key) return null;
+  let st: string | null = null;
+  if (key.startsWith("rm:")) {
+    const r = sp.rms.find((x) => x.id === key.slice(3));
+    if (!r) return null;
+    st = r.resource?.state ?? "none";
+  } else if (key.startsWith("proxy:")) {
+    st = sp.proxies.get(key.slice(6))?.resource?.state ?? null;
+  }
+  if (!st || st === "resident") return null;
+  return { state: st, title: t("uo.sp.fileState", { state: t(`space.st.${st}`) }) };
+}
+
+/** MICRO-PL07 p.0 · a GIS layer's tools from its Outliner row («⋯», right
+ *  click): the Space's GIS panel — each layer's opacity, a DEM's surface and
+ *  contours, a document's sheets framed — which «Visibilità ▾» no longer holds */
+let gisToolsEl: HTMLElement | null = null;
+function closeGisTools(): void {
+  gisToolsEl?.remove(); gisToolsEl = null;
+  document.removeEventListener("pointerdown", gisToolsOutside, true);
+  document.removeEventListener("keydown", gisToolsKey, true);
+}
+function gisToolsOutside(e: Event): void { if (gisToolsEl && !gisToolsEl.contains(e.target as Node)) closeGisTools(); }
+function gisToolsKey(e: KeyboardEvent): void { if (e.key === "Escape" && gisToolsEl) { e.stopPropagation(); closeGisTools(); } }
+function openGisTools(r: URow, anchor: HTMLElement): void {
+  closeGisTools();
+  const g = [...gisSpaces.values()][0];
+  if (!g) { toast(t("uo.gisNoSpace")); return; }
+  const m = document.createElement("div");
+  m.className = "ctx-menu vis-menu gis-tools";
+  m.dataset.gisTools = r.gis ?? "";
+  m.title = t("uo.gisTools");
+  const b = anchor.getBoundingClientRect();
+  m.style.left = `${Math.max(8, Math.min(b.left, innerWidth - 380))}px`;
+  m.style.top = `${b.bottom + 2}px`;
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) m.addEventListener(ev, (e) => e.stopPropagation());
+  m.appendChild(g.section());
+  document.body.appendChild(m);
+  keepOnScreen(m);
+  gisToolsEl = m;
+  if (r.gis) m.querySelector(`[data-gis-row="${CSS.escape(r.gis)}"], [data-gis-doc="${CSS.escape(r.gis)}"]`)?.classList.add("vis-flash");
+  document.addEventListener("pointerdown", gisToolsOutside, true);
+  document.addEventListener("keydown", gisToolsKey, true);
+}
+
 /** MICRO-TESTATE-COERENTI p.2 · the category of «Visibilità ▾» a Space key falls in */
 function categoryOfKey(k: string): OverlayKey | null {
   if (k.startsWith("proxy:")) return "s3_proxies";
@@ -14373,6 +14436,7 @@ function spaceRowDeps(): SpaceRowDeps {
     alt: (r) => { const g = groupOfRow(r); return g ? altWord(g, altModeOf(g)) : null; },
     altMenu: (r, at) => { const g = groupOfRow(r); if (g) spaceMenu(at.x, at.y, r.label, altMenuEntries(g)); },
     failed: (r) => (r.skey ? modelFailureOf(r.skey) ?? null : null),
+    fileState: (r) => spaceFileStateOf(r.skey),
     failMenu: (r, at) => spaceMenu(at.x, at.y, r.label, failMenuEntries({ failed: r.skey ? modelFailureOf(r.skey) : undefined })),
     isolated: () => spaceIsolated,
     isolate: (r) => { if (!r.skey) return; spaceIsolated = spaceIsolated === r.skey ? null : r.skey; refreshSurfaces("scene"); refreshSurfaces("outliner"); },
@@ -36241,38 +36305,51 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       });
       const nm = document.createElement("span");
       nm.textContent = t(`vis.cat.${k}`);
+      lab.append(cb, nm);
+      // MICRO-PL07 p.0 · every row the same three columns: the category, its
+      // count, its opacity (an empty cell where opacity means nothing)
       const n = document.createElement("span");
       n.className = "vis-count";
       n.dataset.visCount = String(counts[k] ?? 0);
       n.textContent = String(counts[k] ?? 0);
       n.title = t("vis.countTitle");
-      lab.append(cb, nm, n);
-      r.appendChild(lab);
+      r.append(lab, n);
       const value = VIS_OPACITY[k];
       if (value) {
         const op = document.createElement("input");
         op.type = "range"; op.min = "0.05"; op.max = "1"; op.step = "0.01";
         op.className = "sol-lay-op";
+        op.dataset.visOpacity = k;
         op.value = String(overlayValue(ovs(), value));
         op.title = t("lay.opacity");
         op.addEventListener("change", () => setOverlays("space", withValue(ovs(), value, Number(op.value)), win.id));
         r.appendChild(op);
+      } else {
+        const none = document.createElement("span");
+        none.className = "vis-op-none";
+        r.appendChild(none);
       }
       box.appendChild(r);
     }
-    // the territory and the GIS (EPSG, a GIS file brought into the graph): a row of the menu
-    const geo = document.createElement("details");
-    geo.className = "vis-geo";
-    geo.dataset.visRow = "territory";
-    geo.open = visGeoOpen;
-    geo.addEventListener("toggle", () => { visGeoOpen = geo.open; });
-    const gs = document.createElement("summary");
-    gs.textContent = `${t("vis.cat.territory")}${geoSpace.isOn() ? "" : ` · ${t("vis.offShort")}`}`;
-    geo.append(gs, geoSpace.section(), gisSpace.section());
-    box.appendChild(geo);
+    // MICRO-PL07 p.0 (E.D. 18 Nov 2026: «resti solo visibilità») · the territory,
+    // on or off with its opacity, a row like the others. The GIS block (its EPSG,
+    // its layers, «Porta dentro…») is gone from here: the georeference is the
+    // card «Georeferenziazione…» (the link below), the GIS layers are seen and
+    // switched in the Outliner (their «⋯»: opacity, a DEM's surface and contours),
+    // a file comes in through File and the Space's «+»
+    box.appendChild(geoSpace.section());
+    const gr = document.createElement("button");
+    gr.type = "button";
+    gr.className = "link vis-georef";
+    gr.dataset.visGeoref = "1";
+    gr.textContent = t("vis.georef");
+    const gd = (store?.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
+    const ge = gd ? epsgOf(gd) : null;
+    gr.title = ge === null ? t("gr.openNone") : t("gr.open", { epsg: String(ge) });
+    gr.addEventListener("click", (e) => { e.stopPropagation(); closeVis(); openGeorefCard(); });
+    box.appendChild(gr);
     return box;
   };
-  let visGeoOpen = false;
   let visMenu: HTMLElement | null = null;
   const closeVis = () => { visMenu?.remove(); visMenu = null; document.removeEventListener("pointerdown", visOutside, true); document.removeEventListener("keydown", visKey, true); };
   const visOutside = (e: Event) => { const el = e.target as HTMLElement; if (visMenu && !visMenu.contains(el) && !el.closest("[data-vis]")) closeVis(); };
@@ -36280,7 +36357,6 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   const redrawVis = () => { if (visMenu) { visMenu.replaceChildren(visibilityBody()); } refresh(); };
   const openVis = (anchor: HTMLElement, territory = false) => {
     if (visMenu) { closeVis(); return; }
-    if (territory) visGeoOpen = true;
     const m = document.createElement("div");
     m.className = "ctx-menu vis-menu";
     m.dataset.visMenu = win.id;
@@ -36292,6 +36368,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     document.body.appendChild(m);
     keepOnScreen(m);
     visMenu = m;
+    if (territory) m.querySelector<HTMLElement>('[data-vis-row="territory"]')?.classList.add("vis-flash");
     document.addEventListener("pointerdown", visOutside, true);
     document.addEventListener("keydown", visKey, true);
   };
@@ -36880,22 +36957,6 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       return;
     }
     const st = store;
-    const nm = (id: string) => String(st.node(id)?.name ?? id);
-    const list = (ids: string[]) => ids.map((id) => `<button type="button" class="link" data-go="${escapeHtml(id)}">${escapeHtml(nm(id))}</button>`).join(", ");
-    // the summary: RMs present, n proxies of m units, what is without, missing,
-    // referenced. MICRO-SPAZIO-3D · with the Outliner open the models are
-    // listed there: the summary says how many, not each one
-    const rmPart = !sum.rms.length ? `<span class="miss">${escapeHtml(t("space.noRm"))}</span>`
-      : showT && sum.rms.length > 3
-        ? `<span data-sum="rms">${escapeHtml(t("s3.rmCount", { n: String(sum.rms.length),
-            ok: String(sum.rms.filter((r) => r.resource?.state === "resident").length) }))}</span>`
-        : sum.rms.map((r) => `RM <button type="button" class="link" data-go="${escapeHtml(r.id)}">${escapeHtml(r.name)}</button>`
-          + ` <span class="${r.resource?.state === "resident" ? "ok" : r.resource?.state === "reference" ? "ref" : "miss"}">(${escapeHtml(t(`space.st.${r.resource?.state ?? "none"}`))})</span>`).join(", ");
-    overlay.classList.remove("hidden");
-    // MICRO-SPAZIO-3D-3 p.9 · the summary reduced to its title line (a triangle, as «Forme base»)
-    // MICRO-SPAZIO-COMPATTO p.4 · folded by default (a chip on the view's line): «summary:open» unfolds it
-    const folded = !(prefs.collapsed ?? []).includes("summary:open");
-    const fold = `<button type="button" class="scn-fold" data-fold="summary" aria-expanded="${!folded}">${folded ? "▸" : "▾"}</button>`;
     // MICRO-TESTATE-COERENTI p.2 · a category switched off that has something in this
     // epoch is said on the line, with the same link that turns it back on
     // MICRO-C-CORREZIONI-ED · what the view's filter hides and the Outliner
@@ -36908,31 +36969,31 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         + hiddenHere.map((k) => `<button type="button" class="link vis-cat-off" data-cat-on="${k}" title="${escapeHtml(t("vis.rowOff", { cat: t(`vis.cat.${k}`) }))}">⊘ ${escapeHtml(t("vis.hiddenCat", { cat: t(`vis.cat.${k}`), n: String(cnt0[k]) }))}</button>`).join(", ")
         + ` · <button type="button" class="link" data-follow-outliner="1" title="${escapeHtml(t("vis.mode.outlinerTitle"))}">${escapeHtml(t("vis.mode.outliner"))}</button></span>`
       : "";
-    overlay.classList.toggle("folded", folded);
-    if (folded) overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${escapeHtml(t("s3.foldedSummary", { rm: String(sum.rms.length), px: String(sum.withProxy.length), n: String(sum.units.length) }))}`
-      + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "") + catsOff;
-    else overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${rmPart}<br>`
-      + `${escapeHtml(t(spaceBandsWin() ? "space.proxiesHz" : "space.proxies", { n: String(sum.withProxy.length), m: String(sum.units.length) }))}`
-      + (sum.inScene.length ? ` <span class="ref" data-sum="inScene">${escapeHtml(t("space.inScene", { n: String(sum.inScene.length) }))}</span>` : "")
-      + (sum.without.length ? ` · <span class="miss" data-sum="without">${escapeHtml(t("space.without"))}: ${list(sum.without)}</span>` : "")
-      + (sum.missing.length ? ` · <span class="miss" data-sum="missing">${escapeHtml(t("space.missingFiles"))}: ${list(sum.missing)}</span>` : "")
-      + (spaceUnanswered.size ? ` · <span class="ref" data-sum="waiting">${escapeHtml(t("space.waitingFiles", { n: String(spaceUnanswered.size) }))}</span>` : "")
-      + (sum.refused.length ? ` · <span class="miss" data-sum="refused">${escapeHtml(t("space.refusedFiles"))}: ${list(sum.refused)}</span>` : "")
-      + (sum.reference.length ? ` · <span class="ref" data-sum="reference">${escapeHtml(t("space.referenceOnly"))}: ${list(sum.reference)}</span>` : "")
+    // MICRO-PL07 p.0 (E.D. 18 Nov 2026: «ripete quello che c'è nell'Outliner e copre
+    // la scena») · the summary is ONE closed line — epoch · n models · proxies n of
+    // m — and never opens into a list over the scene. What only it said went into
+    // the Outliner: a model's file state is a sign on its row, the units alive here
+    // without a proxy are the epoch's branch «Senza proxy (46)». A click on the
+    // line takes the Outliner to the epoch. Overlays ▸ Text «Riepilogo dell'epoca»
+    // takes it away. Kept on the line: the states of THIS view (a category it
+    // hides, an isolated object, the free sketches, the 3d_obj folder's offer).
+    const sumOn = space3dShown("s3_epoch_summary", win.id);
+    overlay.classList.toggle("hidden", !sumOn);
+    overlay.classList.add("folded");
+    overlay.dataset.sumEpoch = sum.epoch.id;
+    const counts = t("s3.foldedSummary", { rm: String(sum.rms.length), px: String(sum.withProxy.length), n: String(sum.units.length) });
+    overlay.innerHTML = !sumOn ? "" : `<b>${escapeHtml(sum.epoch.name)}</b> · <span data-sum="counts">${escapeHtml(counts)}</span>`
       + (spaceIsolated ? ` · <button type="button" class="link" data-unisolate="1">${escapeHtml(t("s3.showAll"))}</button>` : "")
       // MICRO-SPAZIO-3D-3 p.6 · the free sketches, a light warning that opens their list
       + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "")
       + proxyFolderOffer(sum.without) + catsOff;
-    // MICRO-PANNELLI-LATERALI p.2 · folded, the line may be shortened: the whole in the tooltip
-    if (folded) overlay.title = (overlay.textContent ?? "").replace(/^▸/, ""); else overlay.removeAttribute("title");
-    overlay.querySelector<HTMLButtonElement>("[data-fold=summary]")?.addEventListener("click", (e) => {
-      e.stopPropagation(); foldPanel("summary:open", folded);
-    });
-    // the chip as a whole opens it (its links stay links)
-    overlay.onclick = folded ? (e) => { if (!(e.target as HTMLElement).closest("button")) { e.stopPropagation(); foldPanel("summary:open", true); } } : null;
-    overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
-      e.stopPropagation(); select(b.dataset.go!); refreshInspector();
-    }));
+    // MICRO-PANNELLI-LATERALI p.2 · the line may be shortened: the whole in the tooltip, and what a click does
+    overlay.title = t("s3.sumGoOutliner", { line: `${sum.epoch.name} · ${counts}` });
+    overlay.onclick = (e) => {
+      if ((e.target as HTMLElement).closest("button")) return;
+      e.stopPropagation();
+      revealEpochInOutliner(sum.epoch.id);
+    };
     overlay.querySelectorAll<HTMLButtonElement>("[data-cat-on]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation();
       turnCategoryOn(b.dataset.catOn as OverlayKey);
@@ -37062,7 +37123,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (!px || !shown(`proxy:${u}`)) continue;
         if (!legendShows(cs, cplan, u)) continue;
         const type = st.node(u)?.node_type;
-        const common = { kind: "proxy" as const, id: u, label: nm(u), decor: decorOf(u),
+        const common = { kind: "proxy" as const, id: u, label: String(st.node(u)?.name ?? u), decor: decorOf(u),
           // NIGHT-TAGLI-E-NEUTRE · the type's 3D style (em_visual_rules threed): USN, USNt and the rest
           // MICRO-E p.6 · …or the colour «Colori ▾» gives it
           ...colourOfProxy(u, type),
@@ -37111,7 +37172,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         line.appendChild(b);
       }
       overlay.appendChild(line);
-      if (folded) overlay.title = `${overlay.title}\n${line.textContent}`;
+      overlay.classList.remove("hidden");   // MICRO-PL07 p.0 · said even with the summary taken away
+      overlay.title = `${overlay.title}\n${line.textContent}`;
     }
     handle.update(items);
     handle.syncSketches();
@@ -37133,6 +37195,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       b.addEventListener("click", (e) => { e.stopPropagation(); handle.frame(); line.remove(); });
       line.appendChild(b);
       overlay.appendChild(line);
+      overlay.classList.remove("hidden");   // MICRO-PL07 p.0 · said even with the summary taken away
     }, 2500);
     // …and a scene of tilesets only whose roots have not arrived says it too,
     // once they had their time (the scene's own reading of its layers)
@@ -37151,6 +37214,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         return t(l?.status.failed || l?.status.tileError ? "space.why.tilesFailed" : "space.why.tilesNone", { name: x.label, err: String(l?.status.failed ?? l?.status.tileError ?? "") });
       }).join(" · ")}`;
       overlay.appendChild(line);
+      overlay.classList.remove("hidden");
     }, 12000);
   };
   refresh();

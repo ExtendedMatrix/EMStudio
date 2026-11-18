@@ -640,7 +640,9 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     section() {
       sect.textContent = "";
       const row = document.createElement("div");
-      row.className = "sol-lay-row";
+      // MICRO-PL07 p.0 · a row of «Visibilità ▾» like the others (name · count · opacity)
+      row.className = "sol-lay-row vis-row vis-terr";
+      row.dataset.visRow = "territory";
       const lab = document.createElement("label");
       const cb = document.createElement("input");
       cb.type = "checkbox";
@@ -664,7 +666,13 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       pn.textContent = `${t("geo.layers")} ${s.panel ? "▾" : "▸"}`;
       pn.setAttribute("aria-pressed", String(s.panel));
       pn.disabled = !globe;
-      row.append(lab, op, pn);
+      // MICRO-PL07 p.0 · the count's cell is empty (the territory is one); the
+      // globe's «Livelli» (basemaps, terrain: what the territory shows) only
+      // when the globe is there, on a line of its own
+      const nc = document.createElement("span");
+      nc.className = "vis-count";
+      row.append(lab, nc, op);
+      if (globe) { pn.classList.add("vis-terr-layers"); row.appendChild(pn); }
       sect.append(row, panel);
       draw();
       return sect;

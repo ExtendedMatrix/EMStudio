@@ -114,6 +114,9 @@ export interface ThreeFacts {
   docLit?: (docId: string, epochId: string) => boolean;
   /** …the sketches of the session, not yet given to a unit */
   sketches?: Array<{ id: string; name: string }>;
+  /** MICRO-PL07 p.0 · the units alive in an epoch without a proxy, as the
+   *  Space's summary counts them (`Space.summary(epoch).without`) */
+  withoutProxy?: (epochId: string) => string[] | null;
 }
 
 export interface VersionIn { id: string; name: string; drawn: boolean; chosen: boolean; level?: string; uses?: string[]; auto?: boolean }
@@ -165,7 +168,9 @@ export interface Texts {
     /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 */
     x3d?: string; sketches?: string; x3dOff?: string;
     /** MICRO-TESTATE-COERENTI p.7 · a unit that survives in the epoch, not born there */
-    survives?: (from: string) => string; survivesMark?: string };
+    survives?: (from: string) => string; survivesMark?: string;
+    /** MICRO-PL07 p.0 · «Senza proxy (46)» under an epoch, and its tooltip */
+    withoutProxy?: (n: number) => string; withoutProxyTitle?: string };
   /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 · a container's alternative, a member out
    *  of its epoch, a container out of step */
   container?: { alternative: string; livesIn: (epochs: string) => string; outOfStep: (n: number, theirs: string, ref: string) => string; follows: string;
@@ -694,8 +699,21 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
       }
       return out2;
     };
+    // MICRO-PL07 p.0 (E.D. 18 Nov 2026: the Space's summary listed them over the
+    // scene) · the units alive in the epoch that have no proxy, a branch of the
+    // epoch, closed: «Senza proxy (46)», each unit a row that selects it
+    const withoutProxy = (at: string, units: EmNode[]): TNode[] => {
+      if (at === "-" || !W.withoutProxy) return [];
+      const ids = facts.withoutProxy?.(at) ?? units.filter((u) => !facts.proxies.has(u.id)).map((u) => u.id);
+      const us = ids.map((id) => byId.get(id)).filter((n): n is EmNode => !!n).sort(byName);
+      if (!us.length) return [];
+      return [{ row: { key: k(`sp/${at}/nopx`), kind: "group", label: W.withoutProxy(us.length), glyphText: "⊘", count: "",
+        ...(W.withoutProxyTitle ? { title: W.withoutProxyTitle } : {}) },
+        kids: us.map((u) => leaf(u, `sp/${at}/nopx/${u.id}`, true)), def: false }];
+    };
     const block = (at: string, units: EmNode[], inEp: (id: string) => boolean, gis: boolean): TNode[] => [
       ...typeGroup(at, "px", W.proxies, units.filter((u) => facts.proxies.has(u.id)).sort(byName).map((u) => pxLeaf(u, at)), undefined, "proxy"),
+      ...withoutProxy(at, units),
       ...typeGroup(at, "models", W.models, modelsIn(at, inEp), "representation_model"),
       ...typeGroup(at, "rmdoc", W.rmdoc, subOf(at, rmdocMap, docs, inEp, "representation_model_doc"), "representation_model_doc"),
       ...typeGroup(at, "rmsf", W.rmsf, subOf(at, facts.rmsf, finds, inEp, "representation_model_sf"), "representation_model_sf"),
@@ -835,7 +853,8 @@ export function flattenOutliner(b: BuildIn): URow[] {
     if (grey && (t.row.kind === "node" || t.row.kind === "sub") && !presentOf(t)) row.absent = true;
     const gm = geoOf(t);
     if (gm) row.geo = gm;
-    if (t.row.kind === "dim" || (t.row.kind === "group" && !t.row.id)) {
+    // (a count given by the row itself is kept: «Senza proxy (46)» says it in its label)
+    if ((t.row.kind === "dim" || (t.row.kind === "group" && !t.row.id)) && t.row.count === undefined) {
       const c = counts(t);
       row.count = b.opts.sync3d ? `${c.present} / ${c.all}` : String(c.all);
     }

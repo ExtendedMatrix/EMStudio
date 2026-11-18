@@ -11941,8 +11941,22 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 .vis-menu { min-width: 280px; max-width: 360px; padding: 6px 8px; }
 .vis-menu .vis-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 .vis-menu .vis-row label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-.vis-menu .vis-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
-.vis-menu .vis-count { margin-left: auto; opacity: .7; font-variant-numeric: tabular-nums; }
+/* MICRO-PL07 p.0 · every row the same three columns — the category, its count,
+   its opacity (an empty cell where opacity means nothing) — the territory too */
+.vis-menu .vis-row { display: grid; grid-template-columns: minmax(0, 1fr) 4ch 84px; align-items: center; column-gap: 8px; padding: 2px 0; flex-wrap: nowrap; }
+.vis-menu .vis-row > .sol-lay-op, .vis-menu .vis-row > .vis-op-none { width: 84px; margin: 0; }
+.vis-menu .vis-row > .vis-terr-layers { grid-column: 1 / -1; justify-self: start; }
+.vis-menu .vis-count { margin-left: 0; text-align: right; opacity: .7; font-variant-numeric: tabular-nums; }
+/* the small buttons of the menu stay small: «.ctx-menu button» made them bars
+   as wide as the panel (the «?» above all) */
+.vis-menu .help-glyph { display: inline-flex; width: 16px; height: 16px; padding: 0; border: 1px solid var(--border); border-radius: 50%;
+  background: var(--bg-elevated); justify-content: center; text-align: center; flex: none; }
+.vis-menu .sol-btn { display: inline-flex; width: auto; padding: 1px 8px; border: 1px solid var(--border-strong); background: var(--bg-panel); }
+.vis-menu .sol-btn:hover { background: var(--bg-hover); }
+.vis-menu .vis-head .help-glyph { margin-left: auto; }
+.vis-menu button.vis-georef { display: inline-block; width: auto; margin-top: 6px; padding: 2px 0; border: 0; border-bottom: 1px dotted currentColor; border-radius: 0;
+  background: none; color: var(--info-ink); }
+.vis-menu .sol-lay-geo { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
 .vis-menu .vis-row.vis-flash, .vis-menu .vis-flash { outline: 2px solid var(--accent); outline-offset: 1px; }
 .vis-menu details.vis-geo > summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
 /* p.2 · an Outliner row whose category is off: attenuated, its mark turns it on */
@@ -12302,3 +12316,10 @@ button.uo-col { cursor: pointer; }
 .vl-scope { display: flex; flex-direction: column; gap: 2px; }
 .vl-scope .dim { opacity: 0.5; }
 .vl-note, .vl-none { font-size: 0.76rem; opacity: 0.85; margin: 0; }
+
+/* ── MICRO-PL07 p.0 · the epoch's summary, one closed line; what it said, in the Outliner ── */
+.scn-ov.folded { cursor: pointer; }
+.uo-fstate { flex: none; padding: 0 3px; font-size: 11.5px; line-height: 1; color: #c27a00; cursor: help; }
+.uo-fstate-reference { color: var(--text-muted); }
+.uo-row.uo-flash { box-shadow: inset 0 0 0 2px var(--accent); }
+.gis-tools { min-width: 320px; max-width: 420px; max-height: 70vh; overflow: auto; }

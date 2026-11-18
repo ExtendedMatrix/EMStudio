@@ -271,18 +271,9 @@ export function mountGisSpace(d: GisSpaceDeps): GisSpace {
       row(l.id, `${l.format === "geotiff" ? "▦" : "◇"} ${l.name}`, what);
     }
     panel.appendChild(list);
-    // bring a file into the graph
-    const addH = document.createElement("div");
-    addH.className = "sol-lay-sub";
-    addH.textContent = t("gis.bringTitle");
-    panel.appendChild(addH);
-    const add = document.createElement("div");
-    add.className = "geo-add";
-    // MICRO-E p.1 · the field with «;» is gone: the one door, «Porta dentro…»
-    // (its window reads each file, asks the document, its date, CRS + shift)
+    // MICRO-PL07 p.0 (E.D. 18 Nov 2026) · «Porta dentro…» is no longer here: a GIS
+    // file comes in through File and the Space's «+», the one door (MICRO-E p.1)
     void typed;
-    add.append(btn(t("door.menu"), "door", t("door.menuHint")));
-    panel.appendChild(add);
     if (inspects.length) panel.appendChild(documentBox());
     if (inspect) {
       const box = document.createElement("div");
