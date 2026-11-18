@@ -1013,7 +1013,8 @@ struct WindowFrame {
 }
 #[tauri::command]
 fn window_frames(app: tauri::AppHandle) -> Vec<WindowFrame> {
-    app.webview_windows()
+    let mut out: Vec<WindowFrame> = app
+        .webview_windows()
         .into_iter()
         .filter(|(label, _)| label == "main" || is_detached_label(label))
         .filter_map(|(label, w)| {
@@ -1022,7 +1023,103 @@ fn window_frames(app: tauri::AppHandle) -> Vec<WindowFrame> {
             let s = w.inner_size().ok()?.to_logical::<f64>(k);
             Some(WindowFrame { label, x: p.x, y: p.y, w: s.width, h: s.height })
         })
-        .collect()
+        .collect();
+    // MICRO-PL09 p.0 · `screen`: the visible area (work area) of the screen the
+    // main window is on — where a palette window is kept (the page's own
+    // `screen.avail*` are WKWebView's, not to be trusted for the position)
+    if let Some(r) = app.get_webview_window("main").and_then(|m| work_area_of(&m)) {
+        out.push(WindowFrame { label: "screen".into(), x: r.0, y: r.1, w: r.2, h: r.3 });
+    }
+    out
+}
+
+/// MICRO-PL09 p.0 · the work area (logical points: x, y, w, h) of the screen a
+/// window is on
+fn work_area_of(w: &tauri::WebviewWindow) -> Option<(f64, f64, f64, f64)> {
+    let m = w.current_monitor().ok().flatten().or_else(|| w.primary_monitor().ok().flatten())?;
+    let k = m.scale_factor();
+    let a = m.work_area();
+    let p = a.position.to_logical::<f64>(k);
+    let s = a.size.to_logical::<f64>(k);
+    Some((p.x, p.y, s.width, s.height))
+}
+
+/// MICRO-PL09 p.0 (4b, E.D., dev.132: the detached window «Colori» went
+/// BEHIND the main window, with no way to bring it back) · a palette's window
+/// (opened by the page as «Colori» or «Vocabolari») becomes a CHILD of the
+/// main window: macOS keeps a child above its parent and moves it with it
+/// (`addChildWindow:ordered:`, NSWindowAbove), as the palettes of an app. The
+/// page asks it once the label is known (`window.open` gives the shell no
+/// popup name). Other systems: nothing yet (false) — the window stays a window
+/// of its own, brought forward by `detached_front`.
+#[tauri::command]
+fn detached_keep_above(app: tauri::AppHandle, label: String) -> bool {
+    if !is_detached_label(&label) {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let (Some(main), Some(child)) = (app.get_webview_window("main"), app.get_webview_window(&label)) else {
+            return false;
+        };
+        let _ = app.run_on_main_thread(move || {
+            if let (Ok(p), Ok(c)) = (main.ns_window(), child.ns_window()) {
+                // SAFETY: two live NSWindow pointers of this app, on the main thread
+                unsafe {
+                    let p = p as *mut objc2::runtime::AnyObject;
+                    let c = c as *mut objc2::runtime::AnyObject;
+                    let _: () = objc2::msg_send![p, addChildWindow: c, ordered: 1isize];
+                }
+            }
+        });
+        true
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
+    }
+}
+
+/// MICRO-PL09 p.0 (4b) · «Apri la finestra Colori…» with the window already
+/// open: in front, and — when its title bar is off every screen (a place
+/// remembered from WKWebView's wrong numbers, a screen unplugged) — moved into
+/// the main window's screen
+#[tauri::command]
+fn detached_front(app: tauri::AppHandle, label: String) -> bool {
+    if !is_detached_label(&label) {
+        return false;
+    }
+    let Some(w) = app.get_webview_window(&label) else {
+        return false;
+    };
+    let k = w.scale_factor().unwrap_or(1.0);
+    let at = w.outer_position().map(|p| p.to_logical::<f64>(k)).ok();
+    let size = w.outer_size().map(|s| s.to_logical::<f64>(k)).ok();
+    if let (Some(at), Some(size)) = (at, size) {
+        let bar = |m: &tauri::Monitor| {
+            let s = m.scale_factor();
+            let p = m.work_area().position.to_logical::<f64>(s);
+            let z = m.work_area().size.to_logical::<f64>(s);
+            // the title bar (its first 28 points, 80 of its width) on this screen
+            at.x + size.width.min(80.0) > p.x && at.x < p.x + z.width - 40.0 && at.y >= p.y - 1.0 && at.y + 28.0 <= p.y + z.height
+        };
+        let seen = w.available_monitors().map(|ms| ms.iter().any(bar)).unwrap_or(true);
+        if !seen {
+            if let Some(main) = app.get_webview_window("main") {
+                if let Some((x, y, ww, hh)) = work_area_of(&main) {
+                    let mk = main.scale_factor().unwrap_or(1.0);
+                    let mp = main.outer_position().map(|p| p.to_logical::<f64>(mk)).ok();
+                    let nx = mp.map(|p| p.x + 80.0).unwrap_or(x + 80.0).clamp(x, (x + ww - size.width).max(x));
+                    let ny = mp.map(|p| p.y + 80.0).unwrap_or(y + 80.0).clamp(y, (y + hh - size.height).max(y));
+                    let _ = w.set_position(tauri::LogicalPosition::new(nx, ny));
+                }
+            }
+        }
+    }
+    let _ = w.unminimize();
+    let _ = w.show();
+    w.set_focus().is_ok()
 }
 
 fn build_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -1153,6 +1250,8 @@ fn main() {
             update_install,
             detached_close,
             window_frames,
+            detached_keep_above,
+            detached_front,
             print_html
         ])
         .setup(|app| {

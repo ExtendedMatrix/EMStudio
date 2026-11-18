@@ -62,6 +62,10 @@ serde_json = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+# MICRO-PL09 p.0 · a palette's window («Colori», «Vocabolari») made a CHILD of
+# the main window (`addChildWindow:ordered:`, main.rs `detached_keep_above`).
+# Already in the lock (tao and wry use it): no new crate.
+objc2 = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
