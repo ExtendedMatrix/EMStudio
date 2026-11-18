@@ -384,7 +384,7 @@ export interface SpaceSceneOptions {
   /** MICRO-VIEWER-UNICO p.4 · a plain left click (or a double click) with a
    *  tool armed: the surface under it — or null — goes to the caller FIRST;
    *  true = the click was the tool's (nothing is picked, no zoom) */
-  onTool?: (hit: { point: V3; normal: V3 | null; key: string } | null, dbl: boolean) => boolean;
+  onTool?: (hit: { point: V3; normal: V3 | null; key: string; vertex?: V3 | null } | null, dbl: boolean) => boolean;
   /** …the marks to draw, read at every frame (cheap: a few points), and a click on one */
   marks?: () => SceneMark[];
   onMark?: (id: string) => void;
@@ -1522,6 +1522,19 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!hit.normal || !hit.object) return null;
         const n = hit.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
         return arr(n);
+      };
+      /** MICRO-PL10 (W7) · the mesh's vertex nearest the point hit, among the
+       *  three of the face (a tool with `snap: vertex`); null off a mesh */
+      const nearestVertex = (hit: Hit): V3 | null => {
+        const pos = hit.object?.geometry?.attributes?.position;
+        if (!hit.face || !pos) return null;
+        let best: V3 | null = null, bd = Infinity;
+        for (const i of [hit.face.a, hit.face.b, hit.face.c]) {
+          const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(hit.object.matrixWorld);
+          const d = v.distanceTo(hit.point);
+          if (d < bd) { bd = d; best = arr(v); }
+        }
+        return best;
       };
       probe.__spaceHit = (x: number, y: number) => {
         const hh = hitsAt(x, y)[0];
@@ -3715,7 +3728,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // MICRO-VIEWER-UNICO p.4 · a tool armed: a plain left click is its
         if (opts.onTool && button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
           const hh = hitsAt(e.clientX, e.clientY).find((q) => q.kind !== "sketch") ?? null;
-          if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}` } : null, false)) return;
+          if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh) } : null, false)) return;
         }
         // MICRO-3DTILES · «Più dettaglio qui» armed on a tileset: the click is its
         // (MICRO-SPAZIO-COMPATTO · the bar in the popover or its twin in the Inspector)
@@ -3795,7 +3808,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (undoable && performance.now() - undoable.t < DOUBLE_MS) { lastPick = undoable.prev; opts.onPickUndo?.(); }
         undoable = null;
         const hh = hitsAt(e.clientX, e.clientY)[0];
-        if (opts.onTool?.(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}` } : null, true)) return;
+        if (opts.onTool?.(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh) } : null, true)) return;
         if (!hh) return;
         opts.onBeforeJump?.();
         applyCam(detailZoom(camState(), arr(hh.point), FOV));

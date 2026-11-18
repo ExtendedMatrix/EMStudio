@@ -89,6 +89,10 @@ EXAMPLE="$HERE/../../../em-profiles/examples/esempio-statuaria"
 if [[ -d "$EXAMPLE" ]]; then
   ask POST /extensions/preview "{\"path\":\"$EXAMPLE\"}" "/extensions/preview · an example package, nothing written (schema, tomli)"
 fi
+# MICRO-PL10 (W7) · /pose/* answers: the declared combiners of an empty
+# document (em_pose, s3dgraphy.annotation.combiners in the bundle)
+POSE_DOC='{"header":{"format":"em.json","version":"1.1","schema_version":2},"graphs":{"g":{"graph_id":"g","name":"g","nodes":[],"edges":[]}},"active_graph_id":"g"}'
+ask POST /pose/compute "{\"doc\":$POSE_DOC,\"declared\":[]}" "/pose/compute · an empty document (em_pose)"
 
 # MICRO-I-STAMPA-NEL-DESKTOP · «Stampa A4…» of a recording sheet: the first
 # definition the page vendors, an empty record, printed by the frozen

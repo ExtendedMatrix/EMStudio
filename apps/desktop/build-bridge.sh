@@ -222,6 +222,8 @@ fi
 # s3dgraphy.extensions and s3dgraphy.profiles): the profiles' JSON schemas are
 # data, not modules (--collect-submodules does not bring them), and the
 # envelope em-extension.toml is read with tomli on this Python (3.9: no tomllib).
+# MICRO-PL10 (W7) · /pose/* (em_pose over s3dgraphy.annotation.extractors and
+# combiners: already in --collect-submodules s3dgraphy).
 "$PY" -m PyInstaller --onefile --name em-bridge \
   --paths "$S3/src" --collect-submodules s3dgraphy \
   --add-data "$SRC/JSON_config${SEP}s3dgraphy/JSON_config" \
@@ -230,7 +232,7 @@ fi
   --add-data "$SRC/profiles/schema${SEP}s3dgraphy/profiles/schema" \
   --hidden-import lxml --hidden-import lxml.etree --hidden-import lxml._elementpath \
   --collect-submodules rdflib --copy-metadata rdflib \
-  --hidden-import em_net --hidden-import em_optimize --hidden-import em_blender --hidden-import em_geotiles --hidden-import em_gis --hidden-import em_sheet --hidden-import em_vocab --hidden-import em_extensions --hidden-import tomli --hidden-import certifi --collect-data certifi \
+  --hidden-import em_net --hidden-import em_optimize --hidden-import em_blender --hidden-import em_geotiles --hidden-import em_gis --hidden-import em_sheet --hidden-import em_vocab --hidden-import em_extensions --hidden-import em_pose --hidden-import tomli --hidden-import certifi --collect-data certifi \
   ${S3_ARGS[@]+"${S3_ARGS[@]}"} \
   ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} \
   ${PREVIEW_ARGS[@]+"${PREVIEW_ARGS[@]}"} \

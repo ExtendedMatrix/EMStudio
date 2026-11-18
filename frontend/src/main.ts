@@ -187,7 +187,7 @@ import { ColoursWindow, screenArea, type SystemWindow } from "./colours-window";
 // MICRO-U · vocabularies installed like fonts, the double value, «Collega a vocabolario…»
 import { declareVocabularies, isControlled, termOf, termPatch } from "./vocab-terms";
 import { VocabState, linkDialog, valueTermEl, vocabContent, type VocabHost } from "./vocab-ui";
-import { ExtensionsState, declareProfiles, declaredOf, formsOf, nameOfIri, qualiaOf, stringsOf, type OverlayDoc } from "./extensions-state";
+import { ExtensionsState, declareProfiles, declaredOf, formsOf, labelIn as extLabelIn, nameOfIri, qualiaOf, stringsOf, typeLabel as packageTypeLabel, type OverlayDoc } from "./extensions-state";
 import { extensionsContent, extensionsFilter, type ExtWindowHost } from "./extensions-window";
 import { VocabMarkCache, vocabMarkOf, type VocabMarkCtx } from "./vocab-marks";
 import {
@@ -209,6 +209,8 @@ import {
   paradataGroupRenameOnAttach,
   renameOnAttach,
   composedPropertyName,
+  nextExtractorOrdinal,
+  ordinalTag,
   type NameCheck,
 } from "./naming";
 import {
@@ -325,6 +327,10 @@ import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type 
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
 import { CLICKS, readingOf as reading3dOf, VIEWER_3D_TOOLS, type ReadTexts, type Viewer3dTool } from "./viewer-annot";
+import { canClose, clickCount, clickVerdict, registerSpaceTool, snapped, spaceTool, spaceTools, unregisterOrigin,
+         type SpaceToolSpec } from "./space-tools";
+import { farFromExpected, ghostsOf, missingOf, nextPoint, packageToolsOf, pointLabel, poseStateOf, posesOn,
+         type PackageTool, type SetPoint } from "./space-pose";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
 import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, withPivot, xfToPose, type Xf } from "./transform3d";
 import { renderTransformForm, type TransformFormTexts } from "./transform-ui";
@@ -4574,6 +4580,7 @@ function renderInspectorInto(host: HTMLElement): void {
     renderCatalogueLine(host, owning, selectedId);       // …and a catalogue's state
     renderAltLabels(host, owning, selectedId);           // A1 · its other labels
     renderChainSection(host, chainUi(owning), selectedId); // CATENA
+    renderPoseSection(host, owning, selectedId);         // MICRO-PL10 · a landmark pose: placed, missing
     const chip = aiChipFor(selectedId);
     if (chip) host.querySelector(".insp-head .insp-chip")?.after(chip);
     renderReviewLine(host, selectedId);   // TRADUZIONI · waits for / verified by
@@ -18159,7 +18166,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 78;   // 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 79;   // 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -36108,6 +36115,8 @@ function applyExtOverlay(ov: OverlayDoc | null): void {
   const forms = formsOf(ov, lang).filter((f) => f.def).map((f) => f.def!);
   setRuntimeDefinitions(forms as never);
   extFormsAdded = new Set(forms.map((d) => d.header.id));
+  // MICRO-PL10 (W7) · its extractor types and landmark sets as 3D tools
+  syncPackageTools(ov);
   extWindow.repaint(true);
   const f = emtree.activeFile();
   if (f && extState.missing.length && !extMissingSaid.has(f.id)) {
@@ -57603,8 +57612,13 @@ interface VwScene {
   /** the Space the ladders were weighed on (it is read again when a file's state changes) */
   sp: Space;
   framed: boolean;
-  /** the trace in progress (Parte 4) */
-  trace: { tool: Viewer3dTool | null; vertices: V3[] };
+  /** the trace in progress (Parte 4): `tool` is an id of the register of the
+   *  3D tools (MICRO-PL10, `space-tools.ts`: the six of the Viewer, a package's) */
+  trace: { tool: string | null; vertices: V3[] };
+  /** MICRO-PL10 (W7) · the guided pose of a landmark set, while its tool is on */
+  pose?: VwPose | null;
+  /** a package's placement on its way to the bridge: a click waits */
+  posing?: boolean;
   /** what happened, timed from the mount (the report's measures) */
   events: Array<{ t: number; what: string; url?: string }>;
   t0: number;
@@ -57790,16 +57804,22 @@ function vwMarks(win: Win, s: VwScene): SceneMark[] {
   const out: SceneMark[] = [];
   for (const x of chain.readingsOfDocument(st.doc, s.docId)) {
     const g = chain.geometryOf(st.doc, x);
-    if (!g || !chain.isGlbKind(g.kind)) continue;
-    const vs = readingVertices(g);
+    // MICRO-PL10 · a package's surface (the core's since W3): a closed ring
+    const ring = vwSurfaceOf(st, x);
+    if (!ring && (!g || !chain.isGlbKind(g.kind))) continue;
+    const vs = ring?.vertices ?? (g ? readingVertices(g) : null);
     if (!vs?.length) continue;
-    const region = g.regionId ? st.node(g.regionId) : null;
+    const regionId = ring?.regionId ?? g?.regionId ?? null;
+    const region = regionId ? st.node(regionId) : null;
     const rd = (region?.data ?? {}) as Record<string, unknown>;
-    const plane = !!rd.plane;
+    const plane = !!rd.plane || !!ring;
     const res = chain.resultOf(st.doc, x);
-    out.push({ id: x, kind: plane && vs.length >= 3 ? "plane" : g.kind, vertices: vs.map((p) => [p[0], p[1], p[2]] as V3),
-      label: `${String(st.node(x)?.name ?? x)}${res ? ` · ${res}` : ""}`, selected: x === sel || g.regionId === sel });
+    // a canonical point says which point it is, not its three coordinates
+    const lm = ((st.node(x)?.data ?? {}) as Record<string, unknown>).landmark as { label?: string } | undefined;
+    out.push({ id: x, kind: plane && vs.length >= 3 ? "plane" : (g?.kind as SceneMark["kind"]) ?? "point", vertices: vs.map((p) => [p[0], p[1], p[2]] as V3),
+      label: `${String(st.node(x)?.name ?? x)}${lm?.label ? ` · ${lm.label}` : res ? ` · ${res}` : ""}`, selected: x === sel || regionId === sel });
   }
+  out.push(...vwPoseMarks(s));
   if (s.trace.vertices.length)
     out.push({ id: "draft", kind: s.trace.vertices.length > 1 ? "polyline" : "point", vertices: s.trace.vertices.map((p) => [p[0], p[1], p[2]] as V3), label: "", draft: true });
   void win;
@@ -57814,32 +57834,44 @@ const VW_READ_TEXTS = (): ReadTexts => ({
   length: (m) => t("vw.read.length", { m }),
 });
 
-/** A click of a 3D tool on the document's scene. */
-function vwToolClick(win: Win, s: VwScene, hit: { point: V3; normal: V3 | null; key: string } | null, dbl: boolean): boolean {
-  const tool = s.trace.tool;
-  if (!tool || !store || !s.docId) return false;
-  const st = store;
+/** A click of a 3D tool on the document's scene — any tool of the register
+ *  (MICRO-PL10): its clicks, its snap; the six of the Viewer write here, a
+ *  package's through the bridge (`vwFinishPackage`, `vwPlaceLandmark`). */
+function vwToolClick(win: Win, s: VwScene, hit: { point: V3; normal: V3 | null; key: string; vertex?: V3 | null } | null, dbl: boolean): boolean {
+  const spec = spaceTool(s.trace.tool);
+  if (!spec || !store || !s.docId) return false;
   if (dbl) {
-    if (tool === "polyline" && s.trace.vertices.length >= 2) { vwFinishTrace(win, s, null); return true; }
+    if (canClose(spec, s.trace.vertices.length)) { vwFinishAny(win, s, spec, null); return true; }
     return true;   // the second click of a double click: not a zoom while tracing
   }
+  if (spec.disabled?.()) { toast(spec.disabled()!); return true; }
+  if (s.posing) { toast(t("pose.busy")); return true; }
   if (!hit) { toast(t("vw.noSurface")); return true; }
   // the scene's frame (glTF, Y up): the datamodel's frame of a 3D region's coords
-  const p: V3 = [hit.point[0], hit.point[1], hit.point[2]];
+  const p = snapped(spec, hit);
   const last = s.trace.vertices[s.trace.vertices.length - 1];
   if (last && Math.hypot(p[0] - last[0], p[1] - last[1], p[2] - last[2]) < 1e-6) return true;
   s.trace.vertices.push(p);
-  const need = CLICKS[tool];
-  if (need && s.trace.vertices.length >= need) vwFinishTrace(win, s, hit.normal);
+  if (clickVerdict(spec, s.trace.vertices.length) === "done") vwFinishAny(win, s, spec, hit.normal);
   else refreshViewerBar(win);
-  void st;
   return true;
+}
+
+/** The trace of a tool is complete: the Viewer's own six, a package's. */
+function vwFinishAny(win: Win, s: VwScene, spec: SpaceToolSpec, normal: V3 | null): void {
+  if (spec.origin === "core") { vwFinishTrace(win, s, normal); return; }
+  const vs = s.trace.vertices.slice();
+  s.trace.vertices = [];
+  const pt = packageToolInfo.get(spec.id);
+  if (!pt) { refreshViewerBar(win); return; }
+  if (pt.kind === "landmarks") void vwPlaceLandmark(win, s, vs[0]);
+  else void vwFinishPackage(win, s, pt, vs);
 }
 
 /** The trace is complete: ONE undo step makes the extractor of the document,
  *  its region in the document's frame and the value read (`addFreeExtraction`). */
 function vwFinishTrace(win: Win, s: VwScene, normal: V3 | null): void {
-  const tool = s.trace.tool;
+  const tool = (VIEWER_3D_TOOLS as readonly string[]).includes(String(s.trace.tool)) ? s.trace.tool as Viewer3dTool : null;
   const st = store;
   const vs = s.trace.vertices.slice();
   s.trace.vertices = [];
@@ -57916,9 +57948,10 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     t0: performance.now(), urls: new Set(), preview, handle: null as unknown as SpaceSceneHandle, bridge: bridgeBaseNow };
   vwWeigh(slot, sp, win.id);
   const tool = winCurrent(win, "doc.tool");
-  slot.trace.tool = (VIEWER_3D_TOOLS as readonly string[]).includes(String(tool)) ? tool as Viewer3dTool
+  slot.trace.tool = spaceTool(String(tool ?? "")) ? String(tool)
     // a reading armed with no tool chosen: a spot height, as the Doc's point was
     : typeof winCurrent(win, "reading") === "string" ? "elevation" : null;
+  if (slot.trace.tool && spaceTool(slot.trace.tool)?.guided) vwStartPose(win, slot, slot.trace.tool);
   slot.handle = mountSpaceScene(host, {
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
@@ -58003,7 +58036,8 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     panelFolded: (k) => target.groups.some((g) => k === `strip:${g}`),
     onTool: (hit, dbl) => vwToolClick(win, slot, hit, dbl),
     marks: () => vwMarks(win, slot),
-    onMark: (id) => { select(id); refreshInspector(); },
+    // a ghost is help, never a node (MICRO-PL10)
+    onMark: (id) => { if (id.startsWith("ghost:")) return; select(id); refreshInspector(); },
   });
   viewerScenes.set(win.id, slot);
   const items0 = vwSceneItems(slot);
@@ -58085,12 +58119,13 @@ document.addEventListener("keydown", (e) => {
   const tgt = e.target as HTMLElement | null;
   if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
   for (const [winId, s] of viewerScenes) {
-    if (s.trace.tool !== "polyline" || s.trace.vertices.length < 2) continue;
+    const spec = spaceTool(s.trace.tool);
+    if (!spec || !canClose(spec, s.trace.vertices.length)) continue;
     const w = windowsOf().find((x) => x.id === winId);
     if (!w) continue;
     e.preventDefault();
     e.stopImmediatePropagation();
-    vwFinishTrace(w, s, null);
+    vwFinishAny(w, s, spec, null);
     return;
   }
 }, true);
@@ -58119,11 +58154,12 @@ function refreshViewerBar(win: Win): void {
   if (tr) tr.textContent = s.trace.tool ? vwTraceWords(s) : "";
 }
 function vwTraceWords(s: VwScene): string {
-  const tool = s.trace.tool;
-  if (!tool) return "";
+  const spec = spaceTool(s.trace.tool);
+  if (!spec) return "";
+  if (spec.guided) return vwPoseWords(s);
   const n = s.trace.vertices.length;
-  const need = CLICKS[tool];
-  return `${t(`vw.tool.${tool}`)} · ${need ? `${n}/${need}` : t("rd.vertices", { n: String(n) })} — ${t(`vw.hint.${tool}`)}`;
+  const hint = spec.hint?.() ?? "";
+  return `${spec.label()} · ${clickCount(spec, n, (k) => t("rd.vertices", { n: String(k) }))}${hint ? ` — ${hint}` : ""}`;
 }
 
 /** The parts the window scrolls: the scene first (when there are models), then
@@ -58312,20 +58348,40 @@ function vwSceneBar(win: Win, bar: HTMLElement, s: VwScene): void {
   box.className = "rd-tools vw-tools";
   box.setAttribute("role", "group");
   box.setAttribute("aria-label", t("rdt.tools"));
-  for (const tool of VIEWER_3D_TOOLS) {
-    const on = s.trace.tool === tool;
+  // MICRO-PL10 · the register of the 3D tools: the Viewer's six first, then
+  // the tools of the community packages the document reads, in a group of theirs
+  let pkgBox: HTMLElement | null = null;
+  for (const spec of spaceTools()) {
+    const on = s.trace.tool === spec.id;
+    const why = spec.disabled?.() ?? null;
     // an icon each, its name and what it reads in the tooltip (the bar is narrow)
-    const b = vwButton("win-act rd-tool vw-tool" + (on ? " on" : ""), VW_TOOL_GLYPH[tool], `${t(`vw.tool.${tool}`)} — ${t(`vw.hint.${tool}`)}`, () => {
-      s.trace.tool = on ? null : tool;
+    const title = spec.hint ? `${spec.label()} — ${spec.hint()}` : spec.label();
+    const b = vwButton("win-act rd-tool vw-tool" + (on ? " on" : "") + (spec.origin !== "core" ? " vw-tool-pkg" : ""), spec.glyph,
+                       why ? `${title}\n${why}` : title, () => {
+      s.trace.tool = on ? null : spec.id;
       s.trace.vertices = [];
+      s.pose = null;
       setWinCurrent(win, "doc.tool", s.trace.tool);
+      if (s.trace.tool && spec.guided) vwStartPose(win, s, spec.id);
       renderViewer();
     });
-    b.dataset.tool = tool;
+    b.dataset.tool = spec.id;
     b.setAttribute("aria-pressed", String(on));
-    box.appendChild(b);
+    if (why) b.classList.add("vw-tool-off");
+    if (spec.origin === "core") { box.appendChild(b); continue; }
+    if (!pkgBox) {
+      pkgBox = document.createElement("span");
+      pkgBox.className = "rd-tools vw-tools vw-tools-pkg";
+      pkgBox.dataset.vwPkgTools = "1";
+      pkgBox.setAttribute("role", "group");
+      pkgBox.setAttribute("aria-label", t("pose.pkgTools"));
+      pkgBox.title = t("pose.pkgTools");
+    }
+    pkgBox.appendChild(b);
   }
   bar.appendChild(box);
+  if (pkgBox) bar.appendChild(pkgBox);
+  if (s.pose && spaceTool(s.trace.tool)?.guided) bar.appendChild(vwPoseBar(win, s));
   const tr = document.createElement("span");
   tr.className = "rd-tools-hint";
   tr.dataset.vwTrace = "1";
@@ -58414,6 +58470,398 @@ function vwSidePanel(win: Win, s: VwScene): void {
   s.host.appendChild(np);
 }
 const VW_TOOL_GLYPH: Record<Viewer3dTool, string> = { elevation: "⌖", impost: "⊤", plane3: "◿", planeFace: "▱", line: "╱", polyline: "〰" };
+
+// ── MICRO-PL10-POSA-NELLO-SPAZIO (W7) · the register of the 3D tools ─────────
+//
+// The Viewer's six are the register's first entries (their ids and glyphs as
+// before); a community package's extractor types with a geometry and its
+// landmark sets follow, registered from the document's overlay (W6) and taken
+// away when it changes. A package's placement is written by the library
+// through the bridge (/pose/*, level 79) and applied here as ONE undo step.
+
+const VW_PRIMITIVE: Record<Viewer3dTool, SpaceToolSpec["primitive"]> = {
+  elevation: "point", impost: "point", plane3: "plane", planeFace: "plane", line: "line", polyline: "polyline" };
+for (const tool of VIEWER_3D_TOOLS)
+  registerSpaceTool({ id: tool, primitive: VW_PRIMITIVE[tool], origin: "core", snap: "surface", glyph: VW_TOOL_GLYPH[tool],
+    clicks: CLICKS[tool] ? { min: CLICKS[tool], max: CLICKS[tool] } : { min: 2, max: null },
+    label: () => t(`vw.tool.${tool}`), hint: () => t(`vw.hint.${tool}`) });
+
+/** a package's tool by its register id */
+const packageToolInfo = new Map<string, PackageTool>();
+const PKG_GLYPH: Record<string, string> = { point: "◉", line: "⟋", polyline: "⌇", surface: "⬠", volume: "⬢" };
+
+function clicksWords(c: { min: number; max: number | null }): string {
+  if (c.max === 1 && c.min === 1) return t("pose.clicks.one");
+  if (c.max != null && c.max === c.min) return t("pose.clicks.fixed", { n: String(c.max) });
+  if (c.max != null) return t("pose.clicks.range", { min: String(c.min), max: String(c.max) });
+  return t("pose.clicks.open", { n: String(c.min) });
+}
+
+/** The tools of the overlay's packages into the register (the old ones out). */
+function syncPackageTools(ov: OverlayDoc | null): void {
+  unregisterOrigin((o) => o !== "core");
+  packageToolInfo.clear();
+  for (const pt of packageToolsOf(ov as never, getLocale())) {
+    packageToolInfo.set(pt.id, pt);
+    const g = pt.geometry;
+    const landmarks = pt.kind === "landmarks";
+    registerSpaceTool({
+      id: pt.id, origin: pt.origin, guided: landmarks, snap: g.snap,
+      primitive: g.primitive === "volume" ? "point" : g.primitive,
+      clicks: landmarks ? { min: 1, max: 1 } : g.vertices,
+      glyph: landmarks ? "⁘" : PKG_GLYPH[g.primitive] ?? "◇",
+      label: () => landmarks ? t("pose.landmarksTitle", { label: pt.label, pkg: pt.origin })
+        : t("pose.toolTitle", { label: pt.label, pkg: pt.origin, prim: t(`pose.prim.${g.primitive}`), clicks: clicksWords(g.vertices) }),
+      // the overlay came from the bridge, so the bridge is there; read from the
+      // node (the web, no bridge) the package is shown but nothing is placed
+      disabled: () => pt.unplaceable ? t("pose.volumeNot") : extState.from === "node" ? t("pose.needBridge") : null,
+    });
+  }
+  if (windowsOf().some((w) => w.type === "viewer")) renderViewer();
+}
+
+/** The guided pose of a landmark set in one Viewer. */
+interface VwPose {
+  tool: string;
+  set: string;
+  label: string;
+  points: SetPoint[] | null;
+  subject: string | null;
+  current: string | null;
+  ghosts: boolean;
+  error?: string;
+}
+
+function vwPoseState(s: VwScene) {
+  const st = store;
+  if (!st || !s.pose) return null;
+  return poseStateOf(st.doc.graph as never, s.pose.set, s.docId, s.pose.subject);
+}
+
+/** The unit a pose is for: the one selected, else the one an earlier pose on
+ *  this model was for, else the only unit the document is tied to, else none. */
+function vwPoseSubject(s: VwScene, set: string): string | null {
+  const st = store;
+  if (!st) return null;
+  if (selectedId && isStratigraphicType(st.node(selectedId)?.node_type)) return selectedId;
+  const earlier = posesOn(st.doc.graph as never, set, s.docId).find((x) => x && st.node(x));
+  if (earlier) return earlier;
+  // the one unit the document documents (an edge between the two), when it is one
+  const tied = new Set<string>();
+  for (const e of st.doc.graph.edges) {
+    const other = e.target === s.docId ? e.source : e.source === s.docId ? e.target : null;
+    if (other && isStratigraphicType(st.node(other)?.node_type)) tied.add(other);
+  }
+  return tied.size === 1 ? [...tied][0] : null;
+}
+
+async function postPose<T>(route: string, body: Record<string, unknown>): Promise<{ result: T; delta: LibraryDelta | null }> {
+  const r = await fetch(`${await bridgeUrl()}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; result?: T; delta?: LibraryDelta | null };
+  if (!r.ok || !j.ok) throw Object.assign(new Error(j.error ?? `HTTP ${r.status}`), { status: r.status, said: !!j.error });
+  return { result: j.result as T, delta: j.delta ?? null };
+}
+const declaredNow = (): unknown => declaredOf((store?.doc as { header?: Record<string, unknown> } | undefined)?.header?.profiles);
+async function poseFailed(route: string, e: unknown): Promise<string> {
+  const err = e as { said?: boolean; message?: string; status?: number };
+  return err.said ? String(err.message) : bridgeWhy(route, e, err.status);
+}
+
+/** A landmark set's tool turned on: its points asked of the bridge (their
+ *  concepts' labels in the page's language), the first point to place. */
+function vwStartPose(win: Win, s: VwScene, toolId: string): void {
+  const pt = packageToolInfo.get(toolId);
+  if (!pt) return;
+  const pose: VwPose = { tool: toolId, set: pt.ref, label: pt.label, points: null, subject: vwPoseSubject(s, pt.ref), current: null, ghosts: true };
+  s.pose = pose;
+  void (async () => {
+    try {
+      const r = await fetch(`${await bridgeUrl()}/pose/points`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ declared: declaredNow(), set: pt.ref, lang: getLocale() }) });
+      const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; points?: SetPoint[]; set?: { label?: string } };
+      if (!r.ok || !j.ok) throw Object.assign(new Error(j.error ?? `HTTP ${r.status}`), { status: r.status, said: !!j.error });
+      if (s.pose !== pose) return;
+      pose.points = j.points ?? [];
+      if (j.set?.label) pose.label = j.set.label;
+      pose.current = nextPoint(pose.points, vwPoseState(s)?.placed ?? new Map());
+    } catch (e) {
+      if (s.pose === pose) pose.error = await poseFailed("/pose/points", e);
+    }
+    if (viewerScenes.get(win.id) === s) renderViewer();
+  })();
+}
+
+const sideWord = (side: string): string => (side === "right" || side === "left" ? t(`pose.side.${side}`) : side);
+function vwPointLabel(s: VwScene, id: string | null): string {
+  const p = s.pose?.points?.find((x) => x.id === id);
+  return p ? pointLabel(p, sideWord) : String(id ?? "");
+}
+
+/** «Posa il punto: esocantion (destro) · 3/6 posati» */
+function vwPoseWords(s: VwScene): string {
+  const pose = s.pose;
+  if (!pose) return "";
+  if (pose.error) return pose.error;
+  if (!pose.points) return t("pose.loading");
+  const placed = vwPoseState(s)?.placed ?? new Map();
+  const count = t("pose.placedOf", { n: String(pose.points.filter((p) => placed.has(p.id)).length), m: String(pose.points.length) });
+  const miss = missingOf(pose.points, placed);
+  if (!miss.required.length && !pose.current) return `${t("pose.done")} · ${count}`;
+  if (!miss.required.length && pose.current && placed.has(pose.current) === false && !miss.optional.includes(pose.current))
+    return `${t("pose.next", { point: vwPointLabel(s, pose.current) })} · ${count}`;
+  if (!miss.required.length && !pose.current)
+    return t("pose.doneOptional", { list: miss.optional.map((x) => vwPointLabel(s, x)).join(", ") });
+  return `${t("pose.next", { point: vwPointLabel(s, pose.current) })} · ${count}`;
+}
+
+/** The pose's own row: the unit, the point, Salta, ⇋, Attesi, Calcola. */
+function vwPoseBar(win: Win, s: VwScene): HTMLElement {
+  const pose = s.pose!;
+  const st = store!;
+  const row = document.createElement("span");
+  row.className = "vw-pose";
+  row.dataset.vwPose = pose.set;
+  for (const ev of ["pointerdown", "dblclick", "wheel"]) row.addEventListener(ev, (e) => e.stopPropagation());
+  const lab = (text: string, title: string, el: HTMLElement) => {
+    const l = document.createElement("label");
+    l.className = "vw-pose-field";
+    l.title = title;
+    l.append(document.createTextNode(text), el);
+    return l;
+  };
+  // the unit
+  const unit = document.createElement("select");
+  unit.dataset.vwPoseUnit = "1";
+  unit.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: t("pose.noUnit"), selected: !pose.subject }));
+  const units = st.doc.graph.nodes.filter((n) => isStratigraphicType(n.node_type))
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { numeric: true }));
+  for (const u of units)
+    unit.appendChild(Object.assign(document.createElement("option"), { value: u.id, textContent: String(u.name ?? u.id), selected: pose.subject === u.id }));
+  unit.addEventListener("change", (e) => {
+    e.stopPropagation();
+    pose.subject = unit.value || null;
+    if (pose.points) pose.current = nextPoint(pose.points, vwPoseState(s)?.placed ?? new Map());
+    renderViewer();
+  });
+  row.appendChild(lab(t("pose.unit"), t("pose.unitTitle"), unit));
+  if (!pose.points) return row;
+  // the point
+  const placed = vwPoseState(s)?.placed ?? new Map();
+  const point = document.createElement("select");
+  point.dataset.vwPosePoint = "1";
+  for (const p of pose.points)
+    point.appendChild(Object.assign(document.createElement("option"), { value: p.id, selected: pose.current === p.id,
+      textContent: `${placed.has(p.id) ? "✓ " : ""}${pointLabel(p, sideWord)}${p.required ? " *" : ""}` }));
+  if (!pose.current) point.selectedIndex = -1;
+  point.addEventListener("change", (e) => { e.stopPropagation(); pose.current = point.value || null; renderViewer(); });
+  row.appendChild(lab(t("pose.point"), t("pose.pointTitle"), point));
+  const skip = vwButton("win-act vw-pose-skip", t("pose.skip"), t("pose.skipTitle"), () => {
+    pose.current = nextPoint(pose.points!, vwPoseState(s)?.placed ?? new Map(), null, pose.current);
+    renderViewer();
+  });
+  skip.dataset.vwPoseSkip = "1";
+  const mirrorOf = pose.points.find((p) => p.id === pose.current)?.mirror ?? null;
+  const mirror = vwButton("win-act vw-pose-mirror", t("pose.mirror"), t("pose.mirrorTitle"), () => { pose.current = mirrorOf; renderViewer(); });
+  mirror.disabled = !mirrorOf;
+  mirror.dataset.vwPoseMirror = "1";
+  const ghosts = vwButton("win-act vw-pose-ghosts" + (pose.ghosts ? " on" : ""), t("pose.ghosts"), t("pose.ghostsTitle"), () => {
+    pose.ghosts = !pose.ghosts;
+    renderViewer();
+  });
+  ghosts.setAttribute("aria-pressed", String(pose.ghosts));
+  ghosts.dataset.vwPoseGhosts = "1";
+  const compute = vwButton("win-act vw-pose-compute", t("pose.compute"), t("pose.computeTitle"), () => { void vwPoseCompute(win, s); });
+  compute.dataset.vwPoseCompute = "1";
+  row.append(skip, mirror, ghosts, compute);
+  return row;
+}
+
+/** The name EMStudio gives a document's extractor: <document>.<NN>. */
+function nextExtractorNameOf(docId: string): string | undefined {
+  const st = store;
+  const name = String(st?.node(docId)?.name ?? "").trim();
+  return st && name ? `${name}.${ordinalTag(nextExtractorOrdinal(st.doc, name))}` : undefined;
+}
+
+/** A library's delta applied as ONE undo step, the person signing what was placed. */
+function applyPoseDelta(st: DocumentStore, delta: LibraryDelta | null, extractorId: string | null, result: string | null): void {
+  const me = identityForSigning();
+  st.batch(() => {
+    if (delta) applyDelta(st, delta, { renameCopies: true });
+    const x = extractorId ? st.node(extractorId) : null;
+    if (x && result != null) st.updateNode(x.id, { data: { ...((x.data ?? {}) as Record<string, unknown>), result } });
+    if (x && me) { const author = nauth.authorForIdentity(st, me); if (!st.hasEdge(x.id, author, "has_author")) st.addEdge(x.id, author, "has_author"); }
+  });
+}
+
+type ComputedOut = { computed: Array<{ combiner_type: string; text?: string; value: number; unit: string; produces: string; created?: boolean; changed?: boolean }>;
+  missing: Record<string, unknown[]>; errors: Record<string, string> };
+/** the values a computation wrote or changed (computing again what did not move says nothing) */
+function computedWords(c: ComputedOut | null | undefined, all = false): string[] {
+  return (c?.computed ?? []).filter((x) => all || x.created || x.changed)
+    .map((x) => t("pose.computed", { name: packageTypeLabel(extState.overlay, x.produces, getLocale()) ?? x.produces,
+      v: x.text ?? valueWords(x.value, x.unit) }));
+}
+/** «0.151 m», «2.2526» (a ratio has no unit) */
+function valueWords(v: unknown, unit: unknown): string {
+  const n = Number(v);
+  const num = Number.isFinite(n) ? n.toLocaleString(getLocale(), { maximumFractionDigits: unit === "1" || !unit ? 4 : 3, useGrouping: false }) : String(v ?? "");
+  return unit && unit !== "1" ? `${num} ${unit}` : num;
+}
+
+/** One point of a landmark set placed where the person clicked. */
+async function vwPlaceLandmark(win: Win, s: VwScene, at: V3 | undefined): Promise<void> {
+  const st = store;
+  const pose = s.pose;
+  if (!st || !s.docId || !at || !pose?.points || !pose.current) { refreshViewerBar(win); return; }
+  const point = pose.points.find((p) => p.id === pose.current)!;
+  const before = vwPoseState(s)?.placed ?? new Map();
+  const far = farFromExpected(pose.points, before, point.id, at);
+  const label = pointLabel(point, sideWord);
+  const docId = s.docId;
+  s.posing = true;
+  try {
+    const r = await postPose<{ placed: { extractor_id: string; measure: { value?: string }; replaced: string[]; recomputed: Array<{ combiner_id: string; value?: number; unit?: string }> };
+      computed?: ComputedOut }>("/pose/landmark", {
+      doc: JSON.parse(st.toJSON()), declared: declaredNow(), set: pose.set, point: point.id, on: docId, subject: pose.subject,
+      position: at, label, lang: point.label_lang ?? getLocale(), name: nextExtractorNameOf(docId), pose_name: pose.label, compute: true });
+    if (st !== store) return;
+    const pl = r.result.placed;
+    applyPoseDelta(st, r.delta, pl.extractor_id, pl.measure?.value ?? null);
+    const name = String(st.node(pl.extractor_id)?.name ?? pl.extractor_id);
+    const msg = pl.replaced?.length ? t("pose.moved", { point: label, x: name })
+      : t("pose.placed", { x: name, point: label, v: String(pl.measure?.value ?? "") });
+    logInfo(msg, [pl.extractor_id, docId]);
+    const more = [...computedWords(r.result.computed)];
+    // what the library computed again because the point moved (W4): by the quale each one produces
+    if (pl.recomputed?.length) more.push(t("pose.recomputed", { list: pl.recomputed.map((x) => {
+      const spec = ((st.node(x.combiner_id)?.data ?? {}) as { combiner?: { produces?: string } }).combiner;
+      const q = spec?.produces ?? x.combiner_id;
+      return `${packageTypeLabel(extState.overlay, q, getLocale()) ?? q} ${valueWords(x.value, x.unit)}`;
+    }).join(", ") }));
+    for (const m of more) logInfo(m, [docId]);
+    // far from where the other points expect it: said in the same notice, never refused
+    const w = far?.far ? t("pose.far", { point: label, d: far.distance.toLocaleString(getLocale(), { maximumFractionDigits: 3, useGrouping: false }), pct: String(Math.round((far.distance / far.unit) * 100)) }) : null;
+    if (w) logWarn(w);
+    toastUndo([msg, ...more, ...(w ? [w] : [])].join(" · "), st);
+    s.events.push({ t: performance.now() - s.t0, what: `pose:${point.id}` });
+    if (s.pose === pose) pose.current = nextPoint(pose.points, vwPoseState(s)?.placed ?? new Map(), point.id);
+  } catch (e) {
+    toast(await poseFailed("/pose/landmark", e));
+  } finally {
+    s.posing = false;
+  }
+  if (viewerScenes.get(win.id) === s) renderViewer();
+}
+
+/** «Calcola»: the package's combiners on the points placed. */
+async function vwPoseCompute(win: Win, s: VwScene): Promise<void> {
+  const st = store;
+  const pose = s.pose;
+  if (!st || !s.docId || !pose) return;
+  try {
+    const r = await postPose<ComputedOut>("/pose/compute", { doc: JSON.parse(st.toJSON()), declared: declaredNow(), on: s.docId, subject: pose.subject, lang: getLocale() });
+    if (st !== store) return;
+    const words = computedWords(r.result, true);
+    if (!words.length) {
+      const miss = [...new Set(Object.values(r.result.missing ?? {}).flat().map(String))];
+      toast(t("pose.computeNone", { list: miss.join(", ") || "—" }));
+      return;
+    }
+    applyPoseDelta(st, r.delta, null, null);
+    for (const m of words) logInfo(m, [s.docId]);
+    toastUndo(words.join(" · "), st);
+  } catch (e) {
+    toast(await poseFailed("/pose/compute", e));
+  }
+  if (viewerScenes.get(win.id) === s) renderViewer();
+}
+
+/** A package's extractor (a line, a path, a surface, a point) placed. */
+async function vwFinishPackage(win: Win, s: VwScene, pt: PackageTool, vs: V3[]): Promise<void> {
+  const st = store;
+  if (!st || !s.docId || !vs.length) { refreshViewerBar(win); return; }
+  const docId = s.docId;
+  s.posing = true;
+  try {
+    const r = await postPose<{ extractor_id: string; measure: { value?: string } }>("/pose/extractor", {
+      doc: JSON.parse(st.toJSON()), declared: declaredNow(), type: pt.ref, on: docId, vertices: vs, name: nextExtractorNameOf(docId) });
+    if (st !== store) return;
+    applyPoseDelta(st, r.delta, r.result.extractor_id, r.result.measure?.value ?? null);
+    const name = String(st.node(r.result.extractor_id)?.name ?? r.result.extractor_id);
+    const msg = t("pose.extracted", { x: name, type: pt.label, v: String(r.result.measure?.value ?? "") });
+    logInfo(msg, [r.result.extractor_id, docId]);
+    toastUndo(msg, st);
+    s.events.push({ t: performance.now() - s.t0, what: `extract:${pt.id}` });
+    select(r.result.extractor_id);
+    refreshInspector();
+  } catch (e) {
+    toast(await poseFailed("/pose/extractor", e));
+  } finally {
+    s.posing = false;
+  }
+  if (viewerScenes.get(win.id) === s) renderViewer();
+}
+
+/** MICRO-PL10 (W7) · the Inspector of a landmark pose (its CombinerNode) or of
+ *  one of its points: how many are placed, which are missing — an incomplete
+ *  set is saved, the Inspector says it (SPEC-pacchetto §5.4). The set's points
+ *  come from the overlay; without the package, what the graph says. */
+function renderPoseSection(host: HTMLElement, st: DocumentStore, id: string): void {
+  const n = st.node(id);
+  const d = (n?.data ?? {}) as Record<string, unknown>;
+  let lp = d.landmark_pose as { set?: string; on?: string | null; subject?: string | null } | undefined;
+  if (!lp && n?.node_type === "extractor" && d.landmark) {
+    const pose = st.doc.graph.edges.find((e) => e.target === id && e.edge_type === "combines"
+      && !!((st.node(e.source)?.data ?? {}) as Record<string, unknown>).landmark_pose);
+    lp = pose ? ((st.node(pose.source)?.data ?? {}) as Record<string, unknown>).landmark_pose as typeof lp : undefined;
+  }
+  if (!lp?.set) return;
+  const raw = ((extState.overlay?.landmark_sets ?? {}) as Record<string, { label?: unknown; set?: { label?: unknown; points?: SetPoint[] } }>)[lp.set];
+  const state = poseStateOf(st.doc.graph as never, lp.set, lp.on ?? null, lp.subject ?? null);
+  const labelOf = (pid: string): string => {
+    const x = state.placed.get(pid);
+    const lm = x ? ((st.node(x.extractorId)?.data ?? {}) as Record<string, unknown>).landmark as { label?: string } | undefined : undefined;
+    return lm?.label ?? pid;
+  };
+  const points = (raw?.set?.points ?? []).map((p) => ({ ...p, label: p.id, required: !!p.required }));
+  const setName = extLabelIn((raw?.label ?? raw?.set?.label) as never, getLocale()) || lp.set;
+  const sec = document.createElement("div");
+  sec.className = "insp-pose";
+  sec.dataset.inspPose = lp.set;
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("pose.inspPose", { set: setName, n: String(state.placed.size), m: points.length ? String(points.length) : "?" });
+  sec.appendChild(h);
+  const line = (text: string, cls: string) => { const p = document.createElement("div"); p.className = cls; p.textContent = text; sec.appendChild(p); };
+  if (points.length) {
+    const miss = missingOf(points, state.placed);
+    if (miss.required.length) line(t("pose.inspMissing", { list: miss.required.join(", ") }), "insp-pose-miss");
+    else line(t("pose.inspComplete"), "insp-pose-ok");
+    if (miss.optional.length) line(t("pose.inspMissingOpt", { list: miss.optional.join(", ") }), "insp-pose-opt");
+  }
+  line([...state.placed.keys()].map(labelOf).join(" · "), "insp-pose-placed");
+  (host.querySelector(".insp-body") ?? host).appendChild(sec);
+}
+
+/** A reading whose region is a SURFACE (a closed ring, W3): its vertices. */
+function vwSurfaceOf(st: DocumentStore, x: string): { vertices: V3[]; regionId: string } | null {
+  const r = chain.regionOfExtractor(st.doc, x);
+  const d = (r?.data ?? {}) as Record<string, unknown>;
+  if (!r || d.geometry_kind !== "surface") return null;
+  const c = chain.coordsOf(d);
+  return c && c.length >= 3 ? { vertices: c.map((p) => [p[0], p[1], p[2]] as V3), regionId: r.id } : null;
+}
+
+/** The marks of a pose: the ghosts of the points not placed (after three),
+ *  the one asked next drawn as the current. */
+function vwPoseMarks(s: VwScene): SceneMark[] {
+  const pose = s.pose;
+  if (!pose?.points || !pose.ghosts || !spaceTool(s.trace.tool)?.guided) return [];
+  const placed = vwPoseState(s)?.placed ?? new Map();
+  return ghostsOf(pose.points, placed).map((g) => ({ id: `ghost:${g.id}`, kind: "point" as const, vertices: [g.position as V3],
+    label: (g.id === pose.current ? "▸ " : "") + t("pose.ghostLabel", { point: vwPointLabel(s, g.id) }), ghost: true }));
+}
 
 /** The address of a part: in a room the store's (by its checksum), on the disk
  *  the bridge's, a web url as it is — the Doc's rule (`docSrcUrl`, `storeAddress`). */

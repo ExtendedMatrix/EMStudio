@@ -145,13 +145,16 @@ def get(route: str, q: Dict[str, List[str]]) -> Tuple[int, Dict[str, Any]]:
     return 404, {"ok": False, "error": "unknown extensions route"}
 
 
-def _overlay(body: Dict[str, Any]) -> Dict[str, Any]:
+def active_overlay(declared: Any, installed: bool = True):
+    """``(overlay, missing, problems, declared_names)`` of a document: what its
+    ``header.profiles`` declares, and with ``installed`` the newest version of
+    every other package installed here. The same overlay for the window (W6)
+    and for the Space's placing tools (W7, ``em_pose``)."""
     P = _P()
-    declared = body.get("declared") or []
-    overlay, missing, problems = P.activate(declared)
+    overlay, missing, problems = P.activate(declared or [])
     active = list(overlay)
     declared_names = {p.name for p in active}
-    if body.get("installed", True):
+    if installed:
         seen = set(declared_names)
         for row in P.installed(all_versions=False):
             name = str(row.get("name") or "")
@@ -162,6 +165,13 @@ def _overlay(body: Dict[str, Any]) -> Dict[str, Any]:
                 active.append(p)
                 seen.add(name)
         overlay = P.ProfileOverlay(active)
+    return overlay, missing, problems, declared_names
+
+
+def _overlay(body: Dict[str, Any]) -> Dict[str, Any]:
+    overlay, missing, problems, declared_names = active_overlay(body.get("declared") or [],
+                                                                bool(body.get("installed", True)))
+    active = list(overlay)
     out = overlay.as_dict(lang=str(body.get("lang") or "en"))
     # the strings in English too: a key the language lacks falls back to it
     if str(body.get("lang") or "en") != "en":

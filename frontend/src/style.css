@@ -10329,6 +10329,15 @@ tr.tt-hidden { display: none; }
 .vw-np-row.over > span { color: var(--warn, #9a6a00); }
 .vw-np-acts { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 10px; }
 .vw-tools { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+/* MICRO-PL10 (W7) · the tools of the community packages, after the Viewer's own; the guided pose's row */
+.vw-tools-pkg { padding-left: 6px; border-left: 1px solid var(--border, rgba(127,127,127,0.35)); }
+.vw-tool-pkg { font-size: 13px; }
+.vw-tool-off { opacity: 0.5; cursor: help; }
+.vw-pose { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; font-size: 11.5px; }
+.vw-pose-field { display: inline-flex; align-items: center; gap: 4px; }
+.vw-pose-field select { max-width: 190px; font-size: 11.5px; }
+.vw-pose button { font-size: 11.5px; }
+.vw-pose-ghosts.on { outline: 1px solid #ffd400; }
 /* MICRO-VIEWER-SPAZIO-EMTREE p.3 · a PDF's tools: there, off, with the reason */
 .vw-tools-off .rd-tool:disabled { opacity: 0.55; cursor: help; }
 .vw-scene { position: absolute; inset: 0; min-height: 0; }
