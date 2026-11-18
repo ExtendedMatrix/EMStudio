@@ -67,6 +67,9 @@ export interface InspectorCallbacks {
   /** MICRO-P-GEOREF-PER-GRAFO p.4 · the GeoPositionNode's own data, editable
    *  with the card's controls (and the link to the card) */
   geoNodeEditor?: (host: HTMLElement, nodeId: string) => boolean;
+  /** MICRO-PL00 · an object with a place in the Space: its georeference among
+   *  the own / inherited values (`prov`: that box) and its section «Georeferencing» */
+  georefOf?: (host: HTMLElement, nodeId: string, prov: HTMLElement | null) => void;
   onClose: () => void;
   onDeleteNode: (nodeId: string) => void;
   onDeleteEdge: (edge: EmEdge) => void;
@@ -1509,7 +1512,11 @@ export function renderInspector(
   // end, author, licence, embargo — own in plain ink, inherited in orange with
   // «da <nodo>» (s3Dgraphy's rules, `provenance.ts`). It replaces the funnel's
   // rows (FUNNEL1), which read another chain (activity tier, PDG members).
-  if (nodeId && node.node_type !== "EpochNode") renderProvenance(root, store, nodeId, cb.onJump);
+  if (nodeId && node.node_type !== "EpochNode") {
+    renderProvenance(root, store, nodeId, cb.onJump);
+    const prov = [...root.querySelectorAll<HTMLElement>(".insp-provenance")].find((b) => b.dataset.provenance === nodeId) ?? null;
+    cb.georefOf?.(root, nodeId, prov);
+  }
   // the CHRONOLOGY of a unit (TPQ / TAQ through its relations, the bridge's
   // answer) stays, under its own title
   if (nodeId && isStratigraphicType(node.node_type)) {
@@ -1542,6 +1549,8 @@ export function renderInspector(
       // `label` that repeats the type or the name is not a second fact
       if (shownAbove.has(k)) continue;
       if (geoEdited && GEO_EDITED.has(k)) continue;
+      // MICRO-PL00 · a model's own georeference is its section «Georeferencing»
+      if (k === "frame" && root.querySelector("[data-gr-object]")) continue;
       if (k === "label" && (String(v) === String(node.name ?? "") || /US \(or SU\)/.test(String(v))
           || String(v).toLowerCase() === typeLabel.toLowerCase())) continue;
       // I3 · an identifier exists for the developer only, and then out of the way

@@ -51,7 +51,8 @@ const globPlugin = {
 };
 const bundle = await esbuild.build({
   stdin: { contents: `export * from "./georef"; export * from "./georef-card"; export { readFrame, makeFrame } from "./file-frame";
-    export { DocumentStore } from "./model"; export { parseContainer, buildContainer } from "./container"; export { setLocale } from "./i18n";`,
+    export { DocumentStore } from "./model"; export { parseContainer, buildContainer } from "./container"; export { setLocale } from "./i18n";
+    export { flattenOutliner, DEFAULT_OPTS, emptyFacts } from "./outliner-tree";`,
     resolveDir: SRC, loader: "ts" },
   bundle: true, format: "esm", write: false, plugins: [globPlugin],
   loader: { ".svg": "text", ".png": "text" }, logLevel: "silent",
@@ -261,6 +262,8 @@ M.setLocale?.("it");
   }
 
   // ── 3 · the models ───────────────────────────────────────────────────────
+  // (MICRO-PL00: the card lists the exceptions only; «mostra tutti» for these)
+  M.setModelList({ all: true, query: "" });
   M.chooseGraph("romania");
   paint();
   const row = () => card.querySelector("[data-gr-model='rm_a']");
@@ -321,6 +324,132 @@ M.setLocale?.("it");
   ok(st.toJSON() !== before, "another field still changed: not restored");
   st.setGeoreference({ shift_y: 448682 });
   eq(st.toJSON(), before, "…until it is back too");
+}
+
+// ── 5 · MICRO-PL00 · the georeference ON THE OBJECT ─────────────────────────
+{
+  M.setLocale?.("it");
+  const extra = [
+    { id: "rm_a", node_type: "representation_model", name: "Templu", description: "", data: {} },
+    { id: "rm_b", node_type: "representation_model", name: "Bastione", description: "", data: { frame: { crs: "EPSG:32635", shift: [500000, 5000000, 0], source: "manual" } } },
+    { id: "rm_c", node_type: "representation_model_doc", name: "Colonna", description: "", data: {} },
+  ];
+  const sec = graphSection("temple", 3844, 327372, 448682, extra);
+  const gnode = sec.nodes.find((n) => n.node_type === "geo_position");
+  gnode.data.field_clocks = { "data.shift_x": { ts: "2026-10-23T17:36:46Z" } };
+  sec.nodes.find((n) => n.id === "rm_a").data.field_clocks = { "data.name": { ts: "2026-10-23T17:36:46Z" } };
+  const st = new M.DocumentStore({ graph: sec });
+  const g = { id: "temple", label: "Temple", store: st };
+  const logs = [];
+  let revealed = null;
+  const models = (s) => M.cardModelsOf(s.liveNodes().filter((n) => n.node_type.startsWith("representation_model")).map((n) => ({ id: n.id, name: n.name, resource: null,
+    frame: M.readFrame(n.data) ? { frame: M.readFrame(n.data), from: n.id } : null })), (id) => s.node(id));
+  const deps = { graphs: () => [g], activeId: () => "temple", models, bridge: async () => null, log: (m, ids) => logs.push([m, ids]),
+    done: () => { paint(); paintInsp(); }, help: () => document.createElement("span"), close: () => {}, reveal: (gid, id) => { revealed = [gid, id]; } };
+  // the card: the exceptions only, counted, searchable; a click reveals
+  const card = document.createElement("div");
+  document.body.appendChild(card);
+  const paint = () => M.renderGeorefCard(card, deps, paint);
+  M.setModelList({ all: false, query: "" });
+  M.chooseGraph("temple");
+  paint();
+  const box = card.querySelector("[data-gr-models]");
+  eq([box.dataset.grModels, box.dataset.grExceptions, box.dataset.grShown], ["3", "1", "1"], "the card: 3 models, 1 exception, only it listed");
+  eq([...card.querySelectorAll("[data-gr-model]")].map((r) => r.dataset.grModel), ["rm_b"], "…the one in its own system (EPSG:32635)");
+  ok(box.textContent.includes("Eccezioni (1 su 3 modelli)"), "…the count said");
+  card.querySelector("[data-gr-reveal='rm_b']").dispatchEvent(new Event("click"));
+  eq(revealed, ["temple", "rm_b"], "a click on its name: the object selected, its Inspector section opened");
+  const all = card.querySelector("[data-gr-show-all]");
+  all.checked = true;
+  all.dispatchEvent(new Event("change"));
+  eq(card.querySelector("[data-gr-models]").dataset.grShown, "3", "«mostra tutti»: every model");
+  const q = card.querySelector("[data-gr-field='model-search']");
+  q.value = "colo";
+  q.dispatchEvent(new Event("input"));
+  eq([...card.querySelectorAll("[data-gr-model]")].map((r) => r.dataset.grModel), ["rm_c"], "the search by name");
+  M.setModelList({ all: false, query: "" });
+  paint();
+
+  // the Inspector of RM «Templu»: inherited «dal grafo «Temple»», «Rendi proprio…»
+  const insp = document.createElement("div");
+  document.body.appendChild(insp);
+  let asked = 0, answer = true;
+  const hooks = { goGraph: () => { revealed = "graph"; }, openCard: () => {}, confirm: async () => { asked++; return answer; } };
+  const objOf = (id) => M.geoObjectOf(id, st.node(id)?.name ?? id, models(st), { proxy: (x) => x === "temple_US1", gis: (x) => (x === "sheet" ? { crs: "EPSG:6708" } : null) });
+  let cur = "rm_a";
+  const paintInsp = () => {
+    insp.textContent = "";
+    const o = objOf(cur);
+    if (!o) return;
+    const prov = document.createElement("div");
+    prov.className = "insp-provenance";
+    insp.appendChild(prov);
+    M.renderGeorefProvRow(prov, g, o, deps, hooks);
+    M.renderObjectGeoref(insp, g, o, deps, () => paintInsp(), hooks);
+  };
+  paintInsp();
+  const pr = () => insp.querySelector(".insp-provenance [data-rule='georef']");
+  eq([pr().dataset.level, pr().classList.contains("insp-prov-inherited")], ["graph", true], "RM inherited: among own / inherited, in orange");
+  ok(pr().textContent.includes("dal grafo «Temple»") && pr().textContent.includes("EPSG:3844 · 327372, 448682"), "…«dal grafo «Temple»», its system and shift");
+  ok(!!insp.querySelector("h3[data-sect='georef']"), "the section «Georeferenziazione»");
+  eq([insp.querySelector("[data-gr-object]").dataset.grState, insp.querySelector("[data-gr-state-label]").textContent], ["graph", "nel sistema del grafo"], "…its state said");
+  pr().querySelector("[data-gr-go-graph]").dispatchEvent(new Event("click"));
+  eq(revealed, "graph", "«dal grafo …» goes to the graph's georeference");
+  const before = st.toJSON();
+  // «Rendi proprio…» asked first; Cancel: nothing
+  answer = false;
+  pr().querySelector("[data-make-own='georef']").dispatchEvent(new Event("click"));
+  await new Promise((r) => setTimeout(r, 0));
+  eq([asked, st.toJSON() === before], [1, true], "«Rendi proprio…»: asked; Annulla writes nothing");
+  answer = true;
+  insp.querySelector("[data-gr-make-own='rm_a']").dispatchEvent(new Event("click"));
+  await new Promise((r) => setTimeout(r, 0));
+  eq(st.node("rm_a").data.frame, { crs: "EPSG:3844", shift: [327372, 448682, 0], source: "manual" }, "made own: the graph's values, nothing moves");
+  eq(pr().dataset.level, "node", "…now its own");
+  eq(insp.querySelector("[data-gr-object]").dataset.grObjOwn, "1", "…the section says it");
+  eq(logs.at(-1)[1], ["rm_a"], "…a Log line on the model (its history)");
+  const depth = st.undoDepth;
+  const ix = insp.querySelector("[data-gr-field='m-shift_x-rm_a']");
+  ix.value = "327382";
+  ix.dispatchEvent(new Event("change"));
+  eq(st.node("rm_a").data.frame.shift[0], 327382, "its own shift written");
+  eq(insp.querySelector("[data-gr-object]").dataset.grState, "graph-shift", "…«nel sistema del grafo, shift proprio (Δ 10, 0)»");
+  ok(insp.querySelector("[data-gr-state-label]").textContent.includes("Δ 10, 0"), "…the delta said");
+  eq(st.undoDepth, depth + 1, "one undo step");
+  // the card lists it among the exceptions now
+  paint();
+  eq([...card.querySelectorAll("[data-gr-model]")].map((r) => r.dataset.grModel).sort(), ["rm_a", "rm_b"], "the card: now among the exceptions");
+  // «Torna a quella del grafo»: the save identical to the byte
+  insp.querySelector("[data-gr-back='rm_a']").dispatchEvent(new Event("click"));
+  ok(!("frame" in (st.node("rm_a").data ?? {})), "«Torna a quella del grafo»: its frame removed");
+  eq(pr().dataset.level, "graph", "…inherited again");
+  eq(st.toJSON(), before, "…the save identical to the byte (no tombstone, clocks and stamps as saved)");
+  st.undo();
+  eq(st.node("rm_a").data.frame.shift[0], 327382, "one undo: its own system back");
+  st.undo(); st.undo();
+  eq(st.toJSON(), before, "…and undone to the start");
+  // a model in its own system already: back to the graph's leaves a tombstone (a real edit)
+  cur = "rm_b";
+  paintInsp();
+  eq([pr().dataset.level, insp.querySelector("[data-gr-state-label]").textContent], ["node", "riproiettato da EPSG:32635"], "RM in EPSG:32635: own, «riproiettato da EPSG:32635»");
+  // a proxy: inherited, always — no «Rendi proprio»
+  cur = "temple_US1";
+  paintInsp();
+  eq(insp.querySelector("[data-gr-object]").dataset.grObjKind, "proxy", "a unit with a proxy: the section is there");
+  ok(pr().querySelector("[data-make-own='georef']").hidden && !insp.querySelector("[data-gr-make-own]"), "…no «Rendi proprio» (a proxy follows its graph)");
+  ok(insp.querySelector(".gr-obj-why").textContent.includes("proxy"), "…the section says why");
+  // a node with no place in the Space: no section
+  eq(objOf("temple_graph_paradata"), null, "a node with no place in the Space: nothing");
+  // the Outliner: the sign on the own ones, the filter
+  const mark = (id) => (models(st).find((m) => m.id === id)?.frame ? "own" : null);
+  const src = [{ id: "f", name: "file", kind: "file", graphs: [{ slot: "temple", name: "Temple", active: true, doc: () => st.doc, facts: () => M.emptyFacts(), aux: [] }] }];
+  const texts = { dim: { units: "Unità", documents: "Documenti", authors: "Autori", epochs: "Epoche", models: "Modelli", proxies: "Proxy", gis: "GIS", aux: "Aux", paradata: "Paradati" },
+    noEpoch: "—", typeLabel: (x) => x, sourceNone: "—", empty: "—" };
+  const flat = (geoOwn) => M.flattenOutliner({ sources: src, opts: { ...M.DEFAULT_OPTS, hierarchy: "type", geoOwn }, texts, toggled: new Set(geoOwn ? [] : ["temple|dim:models"]), geoMark: mark });
+  const withGeo = (rows) => rows.filter((r) => r.geo).map((r) => r.id);
+  eq(withGeo(flat(false)).filter((x, i, a) => a.indexOf(x) === i), ["rm_b"], "the Outliner: the sign on the object with its own georeference only");
+  const only = flat(true).filter((r) => r.kind === "node").map((r) => r.id);
+  eq([...new Set(only)], ["rm_b"], "«mostra solo gli oggetti con georeferenziazione propria»: only it");
 }
 
 // ── 4 · the bridge: PROJ ────────────────────────────────────────────────────

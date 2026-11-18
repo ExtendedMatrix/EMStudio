@@ -69,6 +69,8 @@ export interface UnifiedDeps {
   card?: (row: URow) => void;
   /** p.4 · the Space's controls on a row that has something in the scene */
   space?: SpaceRowDeps;
+  /** MICRO-PL00 · a node with a georeference of its own: the words of its mark */
+  geoMark?: (id: string) => string | null;
 }
 
 /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · what the old Outliner of the scene did on
@@ -168,7 +170,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
 
   const build = (): void => {
     const opts = d.opts();
-    rows = flattenOutliner({ sources: d.sources(), opts, texts: d.texts(), toggled: d.toggled() });
+    rows = flattenOutliner({ sources: d.sources(), opts, texts: d.texts(), toggled: d.toggled(), geoMark: d.geoMark });
     // MICRO-A-PROPRIO-EREDITATO · the epochs' colours only when the Outliner is
     // organised in time (by epoch; tomorrow by computed horizons)
     const temporal = isTemporalHierarchy(opts.hierarchy);
@@ -206,6 +208,16 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     if (r.parent) { tw.textContent = r.open ? "▾" : "▸"; tw.dataset.tw = "1"; }
     el.appendChild(tw);
     if (r.kind !== "dim" && r.kind !== "empty") el.appendChild(d.mark(r));
+    if (r.geo) {
+      // MICRO-PL00 · a discreet sign after the glyph (the marks' column is the
+      // first to be cut in a narrow Outliner): a georeference of its own
+      const g = document.createElement("span");
+      g.className = "uo-geo";
+      g.dataset.geo = "own";
+      g.textContent = "⌖";
+      g.title = r.geo;
+      el.appendChild(g);
+    }
     const lab = document.createElement("span");
     lab.className = "uo-label";
     lab.textContent = r.label;
@@ -664,6 +676,8 @@ export interface HeaderWords {
   filter: string;
   paradata: string;
   help: string;
+  /** MICRO-PL00 · «only the objects with their own georeference» */
+  geoOwn?: string;
 }
 
 /** The selector «☰» and its popover: hierarchy, dimensions, sync, the absent
@@ -708,6 +722,7 @@ export function outlinerSelector(opts: () => OutlinerOpts, set: (o: OutlinerOpts
       item(w.sync, o.sync3d, "check", () => set({ ...opts(), sync3d: !opts().sync3d }), "sync", w.syncHint);
       item(w.grey, o.absent === "grey", "radio", () => set({ ...opts(), absent: "grey" }), "absent:grey");
       item(w.filter, o.absent === "filter", "radio", () => set({ ...opts(), absent: "filter" }), "absent:filter");
+      if (w.geoOwn) item(w.geoOwn, !!o.geoOwn, "check", () => set({ ...opts(), geoOwn: !opts().geoOwn }), "geo-own");
       head(w.dims);
       for (const dm of DIMS) {
         if (dm === "paradata") {
@@ -747,6 +762,7 @@ export function readOpts(v: unknown): OutlinerOpts {
     sync3d: !!o.sync3d,
     absent: o.absent === "filter" ? "filter" : "grey",
     ...(typeof o.paradata === "boolean" ? { paradata: o.paradata } : {}),
+    ...(o.geoOwn ? { geoOwn: true } : {}),
     query: "",
   };
 }

@@ -2981,6 +2981,36 @@ export class DocumentStore {
     });
   }
 
+  /** MICRO-PL00 · the nodes whose frame was changed, as they were saved */
+  private frameSaved = new Map<string, EmNode>();
+
+  /** MICRO-PL00-GEOREF-NELL-INSPECTOR · a model's OWN georeference
+   *  (`data.frame`) written, or taken away (`null`: it follows its graph's
+   *  again) — ONE undo step. As `setGeoreference`: every value back to the
+   *  saved one (out of a room) gives the node as it was saved, its clocks and
+   *  stamps too — «Make own» then «Back to the graph's» is not an edit.
+   *  False when nothing was there to take away. */
+  setFrame(nodeId: string, frame: Record<string, unknown> | null): boolean {
+    const n0 = this.node(nodeId);
+    if (!n0) return false;
+    const had = ((n0.data ?? {}) as Record<string, unknown>).frame != null;
+    if (!frame && !had) return false;
+    if (!this.dirty || !this.frameSaved.has(nodeId)) this.frameSaved.set(nodeId, JSON.parse(JSON.stringify(n0)) as EmNode);
+    return this.batch(() => {
+      if (frame) this.setField(nodeId, "data.frame", frame);
+      else this.clearField(nodeId, "data.frame");
+      const saved = this.frameSaved.get(nodeId);
+      const now = this.node(nodeId);
+      if (saved && now && !this.live) {
+        const a = saved as unknown as Record<string, unknown>, b = now as unknown as Record<string, unknown>;
+        const names = new Set([...contentFields(a), ...contentFields(b)]);
+        if ([...names].every((k) => canonicalValue(getField(a, k)) === canonicalValue(getField(b, k))))
+          (now as { data?: unknown }).data = JSON.parse(JSON.stringify(saved.data ?? {}));
+      }
+      return true;
+    });
+  }
+
   /** rule key → the s3Dgraphy datamodel CLASS of its graph-scope member node. */
   private static readonly GRAPH_SCOPE_CLASS: Record<
     "author" | "license" | "embargo",

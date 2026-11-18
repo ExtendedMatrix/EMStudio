@@ -315,7 +315,8 @@ import {
 } from "./ingress";
 import { closeIngress, ingressIsOpen, openIngress } from "./ingress-ui";
 import { proposalNow, proposeConversion, renderGeorefSection, renderSitePinProposal, type GeorefDeps } from "./georef-panel";
-import { cardModelsOf, chooseGraph, renderGeorefCard, renderGeorefInspector, type GeorefCardDeps, type GeorefGraph } from "./georef-card";
+import { cardModelsOf, chooseGraph, geoObjectOf, modelStateWords, renderGeorefCard, renderGeorefInspector, renderGeorefProvRow, renderObjectGeoref,
+  type CardModel, type GeorefCardDeps, type GeorefGraph } from "./georef-card";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
@@ -4358,6 +4359,7 @@ function renderInspectorInto(host: HTMLElement): void {
       onSetSitePosition: () => openSitePickerOnGraph(),
       geoSections: (h) => renderGeoSections(h, owning),
       geoNodeEditor: (h) => renderGeoNodeEditor(h, owning),
+      georefOf: (h, id, prov) => renderObjectGeorefInto(h, id, prov, owning),
       onClose: () => select(null),
       // DAG · act on the document the thing LIVES in: an acquisition deleted
       // from the DTC canvas is deleted from the corpus, and `store!` there would
@@ -14212,6 +14214,7 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
       for (const h of sceneHandles.values()) framed = h.frameKeys([key]) || framed;
       if (!framed && key.startsWith("proxy:")) openUnitInSpace(key.slice(6));
     },
+    geoMark: (id) => geoMarks().get(id) ?? null,
     eyeOpen: (k) => !space3dPrefs().hidden.includes(k),
     toggleEye: (k) => {
       const p = space3dPrefs();
@@ -14542,7 +14545,7 @@ function unifiedHeader(win: Win): HTMLElement[] {
     selector: t("uo.selector"), search: t("uo.search"), hierarchy: t("uo.hierarchy"),
     hier: { epoch: t("uo.hier.epoch"), alpha: t("uo.hier.alpha"), type: t("uo.hier.type") },
     dims: t("uo.dims"), dim: uoDimWords(), sync: t("uo.sync"), syncHint: t("uo.syncHint"),
-    grey: t("uo.grey"), filter: t("uo.filter"), paradata: t("uo.dim.paradata"), help: t("uo.help"),
+    grey: t("uo.grey"), filter: t("uo.filter"), paradata: t("uo.dim.paradata"), help: t("uo.help"), geoOwn: t("uo.geoOwn"),
   });
   let inp = unifiedSearchEls.get(win.id);
   if (!inp) {
@@ -23900,6 +23903,7 @@ function georefCardDeps(): GeorefCardDeps {
     done: (m, st) => { toastUndo(m, st); refreshIssues(); refreshSurfaces("scene"); refreshInspector(); paintGeorefCard(); },
     help: (text, probe) => helpGlyph(text, probe),
     close: closeGeorefCard,
+    reveal: (slotId, modelId) => revealObjectGeoref(slotId, modelId),
   };
 }
 /** the card drawn again (an answer of the bridge, a step written, an undo): the
@@ -23929,6 +23933,96 @@ function openGeorefCard(slotId?: string | null): void {
   paintGeorefCard();
 }
 document.getElementById("btn-georef")?.addEventListener("click", () => openGeorefCard());
+
+// ── MICRO-PL00-GEOREF-NELL-INSPECTOR (E.D., 18 Nov 2026) · the georeference ON THE OBJECT ──
+// Every object with a place in the Space shows, in its Inspector, the
+// georeference it inherits from its graph (like Author / Licence «from …» with
+// «Make own…») and a section «Georeferencing»: its state, its own fields, «Back
+// to the graph's». The Outliner marks the objects with one of their own; the
+// card lists only those (the exceptions).
+
+/** the graph a store is, as the card names it */
+function georefGraphOf(st: DocumentStore): GeorefGraph {
+  const slot = emtree.slots.find((sl) => sl.store === st);
+  return { id: slot?.id ?? "", label: slot ? slotLabel(slot) : "", store: st };
+}
+/** the proxies, the anchors in 3D and the GIS sheets of a graph, once per state */
+let geoExtrasMemo: { st: DocumentStore; rev: number; sp: unknown; v: { proxy: Set<string>; anchor: Set<string>; gis: Map<string, string | null> } } | null = null;
+function geoExtrasOf(st: DocumentStore): { proxy: Set<string>; anchor: Set<string>; gis: Map<string, string | null> } {
+  const rev = (st as unknown as { rev?: number }).rev ?? -1;
+  const sp = st === store ? baseSpace() : null;
+  if (geoExtrasMemo && geoExtrasMemo.st === st && geoExtrasMemo.rev === rev && geoExtrasMemo.sp === sp && rev >= 0) return geoExtrasMemo.v;
+  const proxy = new Set<string>();
+  const space = sp ?? buildSpace(st.doc, { isUnit: isStratigraphicType, resident: null, notFound: new Set(), refused: new Set(), sceneProxies: null, fromStore: !!assetStoreBase() });
+  for (const p of space?.proxies.values() ?? []) for (const q of [p, ...(p.parts ?? [])]) { proxy.add(q.unitId); proxy.add(q.propertyId); proxy.add(q.shapeId); }
+  const anchor = new Set<string>();
+  for (const xs of extractors3d(st.doc).values()) for (const x of xs) anchor.add(x.id);
+  const gis = new Map<string, string | null>();
+  for (const l of gisLayersOf(st.doc as Parameters<typeof gisLayersOf>[0])) gis.set(l.id, l.crs);
+  const v = { proxy, anchor, gis };
+  geoExtrasMemo = { st, rev, sp, v };
+  return v;
+}
+/** the models of a store with their frames (the card's reading) */
+function geoModelsOf(st: DocumentStore): CardModel[] { return georefCardDeps().models(st); }
+
+/** the Inspector's row among «Own / inherited» and its section «Georeferencing» */
+function renderObjectGeorefInto(host: HTMLElement, id: string, prov: HTMLElement | null, st: DocumentStore): void {
+  const n = st.node(id);
+  if (!n || n.node_type === "geo_position") return;
+  const ex = geoExtrasOf(st);
+  const o = geoObjectOf(id, String(n.name ?? id), geoModelsOf(st), {
+    proxy: (x) => ex.proxy.has(x), anchor: (x) => ex.anchor.has(x),
+    gis: (x) => (ex.gis.has(x) ? { crs: ex.gis.get(x) ?? null } : null),
+  });
+  if (!o) return;
+  const g = georefGraphOf(st);
+  const deps = georefCardDeps();
+  const hooks = {
+    goGraph: () => { const geo = st.geoPositionNode(); if (geo && st === store) jumpTo(geo.id); else openGeorefCard(g.id); },
+    openCard: () => openGeorefCard(g.id),
+    confirm: (msg: string, ok: string) => askConfirm(msg, { kind: "make-own-georef", ok }),
+  };
+  if (prov) renderGeorefProvRow(prov, g, o, deps, hooks);
+  renderObjectGeoref(host, g, o, deps, () => refreshInspector(), hooks);
+}
+
+/** the objects of the active graph with a georeference of their own (or local,
+ *  not georeferenced): id → the words of the Outliner's mark */
+let geoMarksMemo: { st: unknown; rev: number; sp: unknown; v: Map<string, string> } | null = null;
+function geoMarks(): Map<string, string> {
+  const st = store;
+  if (!st) return new Map();
+  const rev = (st as unknown as { rev?: number }).rev ?? -1;
+  const sp = baseSpace();
+  if (geoMarksMemo && geoMarksMemo.st === st && geoMarksMemo.rev === rev && geoMarksMemo.sp === sp && rev >= 0) return geoMarksMemo.v;
+  const v = new Map<string, string>();
+  const geo = (st.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
+  for (const m of geoModelsOf(st)) {
+    if (!m.frame) continue;
+    const f = m.frame.frame;
+    v.set(m.id, t("uo.geoMark", { what: `${modelStateWords(f, geo).words} · ${f.crs ?? t("gr.noCrsShort")} · ${f.shift.slice(0, 2).join(", ")}` }));
+  }
+  for (const [id, crs] of geoExtrasOf(st).gis) if (crs) v.set(id, t("uo.geoMark", { what: t("gr.state.gisFile", { crs }) }));
+  geoMarksMemo = { st, rev, sp, v };
+  return v;
+}
+
+/** a model's row in the card: the object selected, its «Georeferencing» open in the Inspector */
+function revealObjectGeoref(slotId: string, modelId: string): void {
+  if (emtree.active()?.id !== slotId) activateSlot(slotId);
+  if (!store?.node(modelId)) return;
+  select(modelId);
+  requestAnimationFrame(() => {
+    const h = [...document.querySelectorAll<HTMLElement>('h3.insp-sect[data-sect="georef"]')].find((x) => x.offsetParent !== null)
+      ?? document.querySelector<HTMLElement>('h3.insp-sect[data-sect="georef"]');
+    if (!h) return;
+    if (h.classList.contains("closed")) h.querySelector<HTMLElement>(".insp-sect-toggle")?.click();
+    h.scrollIntoView({ block: "start" });
+    const sec = h.nextElementSibling?.querySelector<HTMLElement>(".gr-obj");
+    if (sec) { sec.classList.add("gr-flash"); setTimeout(() => sec.classList.remove("gr-flash"), 1600); }
+  });
+}
 
 /** MICRO-P-GEOREF-PER-GRAFO p.4 · the GeoPositionNode's Inspector: the card's controls, the link */
 function renderGeoNodeEditor(host: HTMLElement, st: DocumentStore): boolean {

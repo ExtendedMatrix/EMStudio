@@ -32,7 +32,7 @@ import { t } from "./i18n";
 import { DocumentStore } from "./model";
 import { openDialog } from "./app-dialog";
 import type { EmNode } from "./types";
-import { readFrame, makeFrame, type FileFrame } from "./file-frame";
+import { makeFrame, type FileFrame } from "./file-frame";
 import {
   crsQuery, datumOpen, epsgOf, fmtCoord, modelGeoState, normaliseDatumOperation, type CrsInfo,
 } from "./georef";
@@ -48,12 +48,14 @@ export interface GeorefGraph {
 export interface CardModel {
   id: string;
   name: string;
-  /** RM, RMDoc, a tileset */
-  kind: "rm" | "rmdoc" | "tileset";
+  /** RM, RMDoc, RMSF, a tileset */
+  kind: "rm" | "rmdoc" | "rmsf" | "tileset";
   /** its frame and the node that says it (s3Dgraphy's `frame_of` order) */
   frame: { frame: FileFrame; from: string } | null;
   /** where a new frame is written: the frame's node, else the tileset's asset, else the model */
   home: string;
+  /** MICRO-PL00 · the resource it draws (selecting it selects the model too) */
+  resource?: string | null;
 }
 
 export interface GeorefCardDeps {
@@ -72,6 +74,9 @@ export interface GeorefCardDeps {
   /** the «?» of the card */
   help: (text: string, probe: string) => HTMLElement;
   close: () => void;
+  /** MICRO-PL00 · a model's row clicked: the object selected, its Inspector's
+   *  «Georeferencing» opened */
+  reveal?: (graphId: string, modelId: string) => void;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -549,40 +554,149 @@ function datumSelect(di: DatumInfo, declared: string | null, probe: string, writ
   return row;
 }
 
-/** the models of the graph, each «as the graph» or in a system of its own */
+// ── a model's georeference: the pieces the card and the Inspector share ────
+
+/** a model's own frame written (`f`) or taken away (null: «as the graph»), ONE
+ *  undo step of the graph's store, a Log line on the node that carries it */
+export function writeModelFrame(g: GeorefGraph, m: CardModel, f: FileFrame | null, msg: string, deps: GeorefCardDeps): boolean {
+  if (!g.store.setFrame(m.home, f as unknown as Record<string, unknown> | null)) return false;
+  deps.log(msg, [m.home]);
+  deps.done(msg, g.store);
+  return true;
+}
+
+/** a model's own system, starting from its graph's (nothing moves until a value changes) */
+export function makeModelOwn(g: GeorefGraph, m: CardModel, deps: GeorefCardDeps): boolean {
+  const geo = (g.store.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
+  const ge = geo ? epsgOf(geo) : null;
+  return writeModelFrame(g, m, makeFrame(ge, [num(geo?.shift_x), num(geo?.shift_y), 0], "", "manual"), t("gr.modelOwn", { name: m.name }), deps);
+}
+
+/** «Back to the graph's»: its own frame removed, it follows every change of the graph's */
+export function backToGraph(g: GeorefGraph, m: CardModel, deps: GeorefCardDeps): boolean {
+  return writeModelFrame(g, m, null, t("gr.modelAsGraph", { name: m.name, graph: g.label }), deps);
+}
+
+/** the words of where a model stands («in the graph's system», «reprojected from EPSG:xxxx», …) */
+export function modelStateWords(f: FileFrame | null, geo: Record<string, unknown> | null): { kind: string; words: string } {
+  const s = modelGeoState(f, geo);
+  const words = s.kind === "reprojected" ? t("gr.state.reprojected", { from: s.from ?? "?" })
+    : s.kind === "graph-shift" ? t("gr.state.graphShift", { dx: fmtCoord(Math.round(((f?.shift[0] ?? 0) - num(geo?.shift_x)) * 1000) / 1000),
+        dy: fmtCoord(Math.round(((f?.shift[1] ?? 0) - num(geo?.shift_y)) * 1000) / 1000) })
+    : t(`gr.state.${s.kind}`);
+  return { kind: s.kind, words };
+}
+
+/** MICRO-PL00 · an exception of its graph: a model with a system of its own
+ *  (a frame — another CRS, another shift, or none: local, not georeferenced) */
+export const isGeoException = (m: CardModel): boolean => !!m.frame;
+
+/** the graph's georeference in words («EPSG:3844 · 327372, 448682» / not georeferenced) */
+export const graphGeoWords = (st: DocumentStore): string => geoWords((st.geoPositionNode()?.data ?? null) as Record<string, unknown> | null);
+
+/** the fields of a model's OWN system (CRS, shift X/Y/Z, its datum operation
+ *  when two models of the Earth meet), drawn into `row` */
+function renderModelFields(row: HTMLElement, m: CardModel, g: GeorefGraph, graphEpsg: number | null, deps: GeorefCardDeps,
+                           redraw: () => void, otherDatum: { any: boolean }): void {
+  const f = m.frame?.frame;
+  if (!f) return;
+  const grid = el("div", "georef-grid gr-grid gr-model-grid");
+  const fe = epsgOf({ epsg: f.crs });
+  const put = (patch: Omit<Partial<FileFrame>, "datum_operation"> & { datum_operation?: string | null }, what: string) => {
+    const nf = makeFrame(patch.crs !== undefined ? patch.crs : f.crs, patch.shift ?? f.shift, f.note ?? "", "manual",
+      patch.datum_operation !== undefined ? patch.datum_operation : f.datum_operation ?? null);
+    writeModelFrame(g, m, nf, t("gr.modelChanged", { name: m.name, what }), deps);
+  };
+  cell(grid, t("gr.crs"), crsField(fe, (e) => put({ crs: e === null ? null : `EPSG:${e}`, datum_operation: null }, e === null ? t("gr.whatNoCrs") : `EPSG:${e}`), deps, `m-epsg-${m.id}`), t("gr.modelCrsHint"));
+  for (const [i, k] of (["x", "y", "z"] as const).entries())
+    cell(grid, t(`frm.shift${k.toUpperCase()}`), numberInput(f.shift[i], `m-shift_${k}-${m.id}`, (v) => {
+      const sh = [...f.shift] as [number, number, number];
+      sh[i] = v;
+      put({ shift: sh }, `${k.toUpperCase()} ${fmtCoord(v)}`);
+    }));
+  row.appendChild(grid);
+  // two models of the Earth: the recipe, open
+  if (fe !== null && graphEpsg !== null && fe !== graphEpsg) {
+    const di = datumInfo(fe, graphEpsg, [f.shift[0], f.shift[1]], redraw, deps.bridge);
+    if (di && !("error" in di && !("ok" in di))) {
+      const info = di as DatumInfo;
+      if (info.other && !info.other.same_datum && !info.other.same_grid) {
+        otherDatum.any = true;
+        const dd = el("div", "gr-model-datum");
+        dd.dataset.grModelDatum = m.id;
+        dd.appendChild(el("p", "insp-hint gr-datum-prose", t("gr.datumProse")));
+        if (info.wgs84) dd.appendChild(el("div", "insp-hint", t("gr.modelOnWgs", { graph: info.other.datum ?? "?" })));
+        else {
+          dd.appendChild(el("div", "insp-hint", t("gr.datumBetween", { a: info.datum ?? "?", b: info.other.datum ?? "?" })));
+          dd.appendChild(datumSelect(info, f.datum_operation ?? null, `m-${m.id}`, (op) => put({ datum_operation: op }, op ? t("gr.whatDatum", { op }) : t("gr.whatDatumBest"))));
+        }
+        row.appendChild(dd);
+      }
+    } else if (!di) row.appendChild(el("div", "insp-hint", t("georef.reading")));
+  }
+}
+
+/** what the card's list shows (kept across redraws): the exceptions only, or all; the words searched */
+const listState = { all: false, query: "" };
+export function setModelList(o: Partial<typeof listState>): void { Object.assign(listState, o); }
+
+/** MICRO-PL00 · the models of the graph: by default ONLY THE EXCEPTIONS (a
+ *  system of their own, or local), counted, searchable by name; a click on a
+ *  name selects the object and opens its «Georeferencing» in the Inspector;
+ *  «show all» lists every model, each «as the graph» or in a system of its own */
 function renderModels(card: HTMLElement, g: GeorefGraph, graphEpsg: number | null, deps: GeorefCardDeps, redraw: () => void,
                       otherDatum: { any: boolean } = { any: false }, models = deps.models(g.store)): HTMLElement {
   const st = g.store;
   const geo = (st.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
   const box = el("section", "ccard-box gr-models");
   box.dataset.grModels = String(models.length);
-  box.appendChild(el("div", "ccard-box-head", t("gr.models", { n: String(models.length) })));
+  const exc = models.filter(isGeoException);
+  box.dataset.grExceptions = String(exc.length);
+  box.appendChild(el("div", "ccard-box-head", t("gr.exceptions", { n: String(exc.length), all: String(models.length) })));
   card.appendChild(box);
   if (!models.length) { box.appendChild(el("div", "insp-hint", t("gr.noModels"))); return box; }
+  box.appendChild(el("div", "insp-hint gr-exc-rule", t("gr.exceptionsRule")));
+  // the search and «show all»
+  const bar = el("div", "gr-models-bar");
+  const q = document.createElement("input");
+  q.type = "search";
+  q.className = "insp-name-input gr-search";
+  q.placeholder = t("gr.searchModels");
+  q.value = listState.query;
+  q.dataset.grField = "model-search";
+  q.addEventListener("input", () => { listState.query = q.value; redraw(); });
+  const allL = el("label", "gr-show-all");
+  const all = document.createElement("input");
+  all.type = "checkbox";
+  all.checked = listState.all;
+  all.dataset.grShowAll = "1";
+  all.addEventListener("change", () => { listState.all = all.checked; redraw(); });
+  allL.append(all, " ", t("gr.showAll", { n: String(models.length) }));
+  bar.append(q, allL);
+  box.appendChild(bar);
+  const words = listState.query.trim().toLowerCase();
+  const shown = (listState.all ? models : exc).filter((m) => !words || m.name.toLowerCase().includes(words));
+  box.dataset.grShown = String(shown.length);
   const list = el("div", "gr-model-list");
   box.appendChild(list);
+  if (!shown.length) list.appendChild(el("div", "insp-hint gr-none", words ? t("gr.noMatch") : t("gr.noExceptions")));
   const nm = (id: string) => String(st.node(id)?.name ?? id);
-  const writeFrame = (m: CardModel, f: FileFrame | null, msg: string) => {
-    const has = !!readFrame((st.node(m.home)?.data ?? null) as Record<string, unknown> | null);
-    if (f) st.setField(m.home, "data.frame", f);
-    else if (has) st.clearField(m.home, "data.frame");
-    else return;
-    deps.log(msg, [m.home]);
-    deps.done(msg, st);
-  };
-  for (const m of models) {
+  for (const m of shown) {
     const row = el("div", "gr-model");
     row.dataset.grModel = m.id;
     const f = m.frame?.frame ?? null;
-    const s = modelGeoState(f, geo);
+    const s = modelStateWords(f, geo);
     row.dataset.grState = s.kind;
-    const name = el("span", "gr-model-name", m.name);
-    name.title = t(`gr.kind.${m.kind}`);
+    row.dataset.grOwn = f ? "1" : "0";
+    const name = el(deps.reveal ? "button" : "span", "gr-model-name" + (deps.reveal ? " link" : ""), m.name);
+    name.title = deps.reveal ? t("gr.revealHint") : t(`gr.kind.${m.kind}`);
+    if (deps.reveal) {
+      (name as HTMLButtonElement).type = "button";
+      name.dataset.grReveal = m.id;
+      name.addEventListener("click", () => deps.reveal!(g.id, m.id));
+    }
     const tag = el("span", "gr-model-kind", t(`gr.kind.${m.kind}`));
-    const state = el("span", `gr-state ${s.kind}`, s.kind === "reprojected" ? t("gr.state.reprojected", { from: s.from ?? "?" })
-      : s.kind === "graph-shift" ? t("gr.state.graphShift", { dx: fmtCoord(Math.round(((f?.shift[0] ?? 0) - num(geo?.shift_x)) * 1000) / 1000),
-          dy: fmtCoord(Math.round(((f?.shift[1] ?? 0) - num(geo?.shift_y)) * 1000) / 1000) })
-      : t(`gr.state.${s.kind}`));
+    const state = el("span", `gr-state ${s.kind}`, s.words);
     state.dataset.grStateLabel = s.kind;
     const mode = document.createElement("select");
     mode.dataset.grModelMode = m.id;
@@ -594,66 +708,195 @@ function renderModels(card: HTMLElement, g: GeorefGraph, graphEpsg: number | nul
       mode.appendChild(o);
     }
     mode.addEventListener("change", () => {
-      if (mode.value === "graph") writeFrame(m, null, t("gr.modelAsGraph", { name: m.name, graph: g.label }));
-      // its own: it starts from the graph's (nothing moves until a value changes)
-      else writeFrame(m, makeFrame(graphEpsg ?? null, [num(geo?.shift_x), num(geo?.shift_y), 0], "", "manual"),
-        t("gr.modelOwn", { name: m.name }));
+      if (mode.value === "graph") backToGraph(g, m, deps);
+      else makeModelOwn(g, m, deps);
     });
     const top = el("div", "gr-model-top");
     top.append(name, tag, state, mode);
     row.appendChild(top);
     if (m.frame && m.frame.from !== m.id) row.appendChild(el("div", "insp-hint gr-from", t("frm.from", { name: nm(m.frame.from) })));
-    if (f) {
-      const grid = el("div", "georef-grid gr-grid gr-model-grid");
-      const fe = epsgOf({ epsg: f.crs });
-      const put = (patch: Omit<Partial<FileFrame>, "datum_operation"> & { datum_operation?: string | null }, what: string) => {
-        const nf = makeFrame(patch.crs !== undefined ? patch.crs : f.crs, patch.shift ?? f.shift, f.note ?? "", "manual",
-          patch.datum_operation !== undefined ? patch.datum_operation : f.datum_operation ?? null);
-        writeFrame(m, nf, t("gr.modelChanged", { name: m.name, what }));
-      };
-      cell(grid, t("gr.crs"), crsField(fe, (e) => put({ crs: e === null ? null : `EPSG:${e}`, datum_operation: null }, e === null ? t("gr.whatNoCrs") : `EPSG:${e}`), deps, `m-epsg-${m.id}`), t("gr.modelCrsHint"));
-      for (const [i, k] of (["x", "y", "z"] as const).entries())
-        cell(grid, t(`frm.shift${k.toUpperCase()}`), numberInput(f.shift[i], `m-shift_${k}-${m.id}`, (v) => {
-          const sh = [...f.shift] as [number, number, number];
-          sh[i] = v;
-          put({ shift: sh }, `${k.toUpperCase()} ${fmtCoord(v)}`);
-        }));
-      row.appendChild(grid);
-      // two models of the Earth: the recipe, open
-      if (fe !== null && graphEpsg !== null && fe !== graphEpsg) {
-        const di = datumInfo(fe, graphEpsg, [f.shift[0], f.shift[1]], redraw, deps.bridge);
-        if (di && !("error" in di && !("ok" in di))) {
-          const info = di as DatumInfo;
-          if (info.other && !info.other.same_datum && !info.other.same_grid) {
-            otherDatum.any = true;
-            const dd = el("div", "gr-model-datum");
-            dd.dataset.grModelDatum = m.id;
-            dd.appendChild(el("p", "insp-hint gr-datum-prose", t("gr.datumProse")));
-            if (info.wgs84) dd.appendChild(el("div", "insp-hint", t("gr.modelOnWgs", { graph: info.other.datum ?? "?" })));
-            else {
-              dd.appendChild(el("div", "insp-hint", t("gr.datumBetween", { a: info.datum ?? "?", b: info.other.datum ?? "?" })));
-              dd.appendChild(datumSelect(info, f.datum_operation ?? null, `m-${m.id}`, (op) => put({ datum_operation: op }, op ? t("gr.whatDatum", { op }) : t("gr.whatDatumBest"))));
-            }
-            row.appendChild(dd);
-          }
-        } else if (!di) row.appendChild(el("div", "insp-hint", t("georef.reading")));
-      }
-    }
+    renderModelFields(row, m, g, graphEpsg, deps, redraw, otherDatum);
     list.appendChild(row);
   }
+  // the datum of the graph is said open when a model on another datum meets
+  // it — a model the filter hides counts too
+  for (const m of models) if (!shown.includes(m) && m.frame) renderModelFields(el("div"), m, g, graphEpsg, deps, redraw, otherDatum);
   return box;
+}
+
+// ── MICRO-PL00 · the georeference ON THE OBJECT, in its Inspector ──────────
+
+/** an object of the Space as its Inspector sees it */
+export interface GeoObject {
+  /** the node selected */
+  id: string;
+  name: string;
+  kind: CardModel["kind"] | "proxy" | "anchor" | "gis";
+  /** the model it is (or draws): its own system can be made, changed, taken back */
+  model: CardModel | null;
+  /** a GIS sheet: the system its file is written in (never «as the graph») */
+  gisCrs?: string | null;
+}
+
+/** what in the Space the node is, or null: a model (RM, RMDoc, RMSF, a
+ *  tileset — or the resource / asset / node its frame is on), a unit with a
+ *  proxy (or its geometry), an extractor anchored in 3D, a GIS sheet */
+export function geoObjectOf(nodeId: string, nodeName: string, models: CardModel[],
+                            more: { proxy?: (id: string) => boolean; anchor?: (id: string) => boolean;
+                                    gis?: (id: string) => { crs: string | null } | null }): GeoObject | null {
+  const m = models.find((x) => x.id === nodeId) ?? models.find((x) => x.home === nodeId || x.frame?.from === nodeId || x.resource === nodeId);
+  if (m) return { id: nodeId, name: m.name, kind: m.kind, model: m };
+  const gis = more.gis?.(nodeId);
+  if (gis) return { id: nodeId, name: nodeName, kind: "gis", model: null, gisCrs: gis.crs };
+  if (more.proxy?.(nodeId)) return { id: nodeId, name: nodeName, kind: "proxy", model: null };
+  if (more.anchor?.(nodeId)) return { id: nodeId, name: nodeName, kind: "anchor", model: null };
+  return null;
+}
+
+/** own (a frame of its own, a GIS file's system) or inherited from the graph */
+export const objectOwnsGeo = (o: GeoObject): boolean => o.kind === "gis" ? !!o.gisCrs : !!o.model?.frame;
+
+export interface ObjectGeoHooks {
+  /** a click on «from the graph …»: its GeoPositionNode (or the card when there is none) */
+  goGraph: () => void;
+  /** the card, on this graph */
+  openCard: () => void;
+  /** «Make own…» asked first (a dialog) */
+  confirm: (msg: string, ok: string) => Promise<boolean>;
+}
+
+/** the row «Georeferencing» among the own / inherited values (`box`: the
+ *  Inspector's «Own / inherited»): «from the graph «Temple» · EPSG:3844 …» with
+ *  «Make own…», or its own system */
+export function renderGeorefProvRow(box: HTMLElement, g: GeorefGraph, o: GeoObject, deps: GeorefCardDeps, hooks: ObjectGeoHooks): HTMLElement {
+  const own = objectOwnsGeo(o);
+  const geo = (g.store.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
+  const row = el("div", `insp-prop-row insp-prov-row ${own ? "insp-prop-own" : "insp-prov-inherited"}`);
+  row.dataset.rule = "georef";
+  row.dataset.level = own ? "node" : "graph";
+  row.appendChild(el("span", "insp-prop-rule", t("gr.title")));
+  const value = own
+    ? (o.kind === "gis" ? `${o.gisCrs}` : modelStateWords(o.model!.frame!.frame, geo).words + frameWords(o.model!.frame!.frame))
+    : graphGeoWords(g.store);
+  row.appendChild(el("span", "insp-prop-value", value));
+  row.dataset.value = value;
+  if (own) {
+    row.appendChild(el("span", "insp-prop-source", t("pv.own")));
+    row.title = `${t("gr.title")}: ${value} — ${t(o.kind === "gis" ? "gr.obj.gisOwn" : "gr.obj.ownTitle")}`;
+  } else {
+    const src = el("span", "insp-prov-src");
+    const b = el("button", "insp-prov-from insp-link", t("gr.fromGraph", { graph: g.label })) as HTMLButtonElement;
+    b.type = "button";
+    b.dataset.grGoGraph = g.id;
+    b.title = t("gr.goGraph");
+    b.addEventListener("click", () => hooks.goGraph());
+    src.appendChild(b);
+    row.appendChild(src);
+    row.title = `${t("gr.title")}: ${value} — ${t("gr.fromGraph", { graph: g.label })}`;
+    const mk = el("button", "insp-btn insp-prov-own", t("pv.makeOwn")) as HTMLButtonElement;
+    mk.type = "button";
+    mk.dataset.makeOwn = "georef";
+    if (!o.model) { mk.disabled = true; mk.hidden = true; row.title += ` · ${t(`gr.obj.why.${o.kind}`)}`; }
+    else {
+      mk.title = t("gr.makeOwnTitle");
+      mk.addEventListener("click", () => { void askMakeOwn(g, o, deps, hooks); });
+    }
+    row.appendChild(mk);
+  }
+  box.appendChild(row);
+  return row;
+}
+
+const frameWords = (f: FileFrame): string => ` · ${f.crs ?? t("gr.noCrsShort")} · ${f.shift.slice(0, 2).map(fmtCoord).join(", ")}`;
+
+async function askMakeOwn(g: GeorefGraph, o: GeoObject, deps: GeorefCardDeps, hooks: ObjectGeoHooks): Promise<boolean> {
+  if (!o.model) return false;
+  const yes = await hooks.confirm(t("gr.makeOwnAsk", { name: o.name, graph: g.label, geo: graphGeoWords(g.store) }), t("pv.makeOwnOk"));
+  return yes ? makeModelOwn(g, o.model, deps) : false;
+}
+
+/** MICRO-PL00 · the Inspector's section «Georeferencing» of an object of the
+ *  Space: where its georeference comes from (the graph's, said; or its own),
+ *  its state («in the graph's system» / «reprojected from EPSG:xxxx» /
+ *  «local, not georeferenced»), its own fields, «Back to the graph's» */
+export function renderObjectGeoref(host: HTMLElement, g: GeorefGraph, o: GeoObject, deps: GeorefCardDeps, redraw: () => void,
+                                   hooks: ObjectGeoHooks): HTMLElement {
+  const h = el("h3", "insp-sect", t("gr.title"));
+  h.dataset.sect = "georef";
+  h.append(" ", deps.help(t("gr.objHelp"), "georef-object"));
+  host.appendChild(h);
+  const sec = el("div", "gr-obj");
+  sec.dataset.grObject = o.id;
+  sec.dataset.grObjKind = o.kind;
+  const own = objectOwnsGeo(o);
+  sec.dataset.grObjOwn = own ? "1" : "0";
+  host.appendChild(sec);
+  const geo = (g.store.geoPositionNode()?.data ?? null) as Record<string, unknown> | null;
+  const ge = geo ? epsgOf(geo) : null;
+  const f = o.model?.frame?.frame ?? null;
+  const s = o.kind === "gis" ? { kind: own ? "reprojected" : ge === null ? "local" : "graph", words: own ? t("gr.state.gisFile", { crs: o.gisCrs ?? "" }) : t(`gr.state.${ge === null ? "local" : "graph"}`) }
+    : modelStateWords(f, geo);
+  sec.dataset.grState = s.kind;
+  const top = el("div", "gr-obj-top");
+  const state = el("span", `gr-state ${s.kind}`, s.words);
+  state.dataset.grStateLabel = s.kind;
+  top.appendChild(state);
+  sec.appendChild(top);
+  // where it comes from
+  const from = el("div", "insp-hint gr-obj-from");
+  from.dataset.grObjFrom = own ? "own" : "graph";
+  if (own) from.textContent = o.kind === "gis" ? t("gr.obj.gisOwn") : t("gr.obj.own", { graph: g.label, geo: graphGeoWords(g.store) });
+  else {
+    from.append(t("gr.obj.inherits") + " ");
+    const b = el("button", "insp-link insp-prov-from", t("gr.fromGraph", { graph: g.label })) as HTMLButtonElement;
+    b.type = "button";
+    b.dataset.grGoGraph = g.id;
+    b.addEventListener("click", () => hooks.goGraph());
+    from.append(b, ` · ${graphGeoWords(g.store)}`);
+  }
+  sec.appendChild(from);
+  if (o.model && f) {
+    if (o.model.frame && o.model.frame.from !== o.model.id && o.model.frame.from !== o.id)
+      sec.appendChild(el("div", "insp-hint gr-from", t("frm.from", { name: String(g.store.node(o.model.frame.from)?.name ?? o.model.frame.from) })));
+    renderModelFields(sec, o.model, g, ge, deps, redraw, { any: false });
+  }
+  const acts = el("div", "gr-obj-acts");
+  if (o.model && !f) {
+    const b = el("button", "insp-btn", t("pv.makeOwn")) as HTMLButtonElement;
+    b.type = "button";
+    b.dataset.grMakeOwn = o.id;
+    b.title = t("gr.makeOwnTitle");
+    b.addEventListener("click", () => { void askMakeOwn(g, o, deps, hooks); });
+    acts.appendChild(b);
+  } else if (o.model && f) {
+    const b = el("button", "insp-btn", t("gr.back")) as HTMLButtonElement;
+    b.type = "button";
+    b.dataset.grBack = o.id;
+    b.title = t("gr.backTitle");
+    b.addEventListener("click", () => { backToGraph(g, o.model!, deps); });
+    acts.appendChild(b);
+  } else if (o.kind !== "gis") sec.appendChild(el("p", "insp-hint gr-obj-why", t(`gr.obj.why.${o.kind}`)));
+  else sec.appendChild(el("p", "insp-hint gr-obj-why", t("gr.obj.why.gis")));
+  const card = el("button", "link gr-open-card", t("gr.openCard")) as HTMLButtonElement;
+  card.type = "button";
+  card.dataset.grOpen = "1";
+  card.addEventListener("click", () => hooks.openCard());
+  acts.appendChild(card);
+  sec.appendChild(acts);
+  return sec;
 }
 
 /** The models of a graph as the card lists them, from the Space's reading
  *  (`buildSpace`): an RM, an RMDoc, a tileset (an RM drawn as tiles, a
  *  container's own tileset); the GIS sheets have their panel */
-export function cardModelsOf(rms: Array<{ id: string; name: string; altOf?: string | null; resource: { tiles?: unknown } | null;
+export function cardModelsOf(rms: Array<{ id: string; name: string; altOf?: string | null; resource: { id?: string; tiles?: unknown } | null;
                                          frame?: { frame: FileFrame; from: string } | null; frameHome?: string | null }>,
                              nodeOf: (id: string) => EmNode | undefined): CardModel[] {
   return rms.map((r) => {
     const tiles = !!r.resource?.tiles || !!r.altOf;
     const nt = String(nodeOf(r.id)?.node_type ?? "");
-    const kind: CardModel["kind"] = tiles ? "tileset" : nt === "representation_model_doc" ? "rmdoc" : "rm";
-    return { id: r.id, name: r.name, kind, frame: r.frame ?? null, home: r.frame?.from ?? (tiles ? r.frameHome ?? r.id : r.id) };
+    const kind: CardModel["kind"] = tiles ? "tileset" : nt === "representation_model_doc" ? "rmdoc" : nt === "representation_model_sf" ? "rmsf" : "rm";
+    return { id: r.id, name: r.name, kind, frame: r.frame ?? null, home: r.frame?.from ?? (tiles ? r.frameHome ?? r.id : r.id),
+      resource: r.resource?.id ?? null };
   });
 }

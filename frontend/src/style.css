@@ -12025,6 +12025,18 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 .gr-state.local { color: var(--text-muted); font-style: italic; }
 .gr-model-datum { margin: 2px 0 0 10px; }
 .gr-insp .gr-open-card { margin: 0 0 4px; }
+/* MICRO-PL00 · the exceptions, their search; the object's own section; the Outliner's sign */
+.gr-models-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.gr-models-bar .gr-search { flex: 1 1 auto; font-size: 12px; font-weight: 400; padding: 2px 5px; margin: 0; border-color: var(--border); background: var(--bg-sunken); }
+.gr-show-all { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.gr-exc-rule { margin: 0 0 2px; }
+button.gr-model-name.link { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; font: inherit; font-weight: 600; color: var(--text); }
+.gr-obj { display: flex; flex-direction: column; gap: 4px; }
+.gr-obj .gr-f .insp-name-input { font-size: 12px; font-weight: 400; padding: 2px 5px; margin: 0; border-color: var(--border); background: var(--bg-sunken); }
+.gr-obj-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gr-obj-from { margin: 0; }
+.gr-obj.gr-flash { outline: 2px solid var(--accent, #3a7bd5); outline-offset: 2px; border-radius: 4px; }
+.uo-geo { font-size: 11px; color: var(--warn-ink, #b06d00); margin: 0 2px 0 1px; flex: 0 0 auto; }
 .scn-vis { white-space: nowrap; }
 /* MICRO-RITOCCHI-CHIARI p.2b · the Warnings table: rows picked by hand, verbs over them */
 .tv-issues .tv-pick { width: 22px; text-align: center; padding-left: 2px; padding-right: 2px; }

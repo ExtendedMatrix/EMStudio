@@ -67,6 +67,8 @@ export interface OutlinerOpts {
    *  3D's (a unit is its proxy, a document its RMDoc, a find its RMSF, a survey
    *  its RM / container / tileset), and «by epoch» puts the epoch ABOVE them */
   space?: boolean;
+  /** MICRO-PL00 · only the objects with a georeference of their own (and the rows above them) */
+  geoOwn?: boolean;
   query: string;
 }
 
@@ -229,6 +231,8 @@ export interface URow {
   /** MICRO-TESTATE-COERENTI p.11 · a member living by its own choice: the
    *  container it can follow again («Segui il container») */
   followGroup?: string;
+  /** MICRO-PL00 · its own georeference, in words (the row's discreet mark) */
+  geo?: string;
 }
 
 interface TNode {
@@ -271,6 +275,9 @@ export interface BuildIn {
   texts: Texts;
   /** keys turned from their default state (open ↔ closed) */
   toggled: ReadonlySet<string>;
+  /** MICRO-PL00 · a node with a georeference of its own (or local, not
+   *  georeferenced): the words of its mark (its system), else null */
+  geoMark?: (id: string) => string | null;
 }
 
 /** The tree of one graph's dimensions. */
@@ -773,6 +780,8 @@ export function flattenOutliner(b: BuildIn): URow[] {
   const q = b.opts.query.trim().toLowerCase();
   const filter = b.opts.sync3d && b.opts.absent === "filter";
   const grey = b.opts.sync3d && b.opts.absent === "grey";
+  const geoOnly = !!b.opts.geoOwn && !!b.geoMark;
+  const geoOf = (t: TNode): string | null => (b.geoMark && t.row.id && (t.row.kind === "node" || t.row.kind === "sub" || t.row.kind === "gis") ? b.geoMark(t.row.id) : null);
   const out: URow[] = [];
   const isOpen = (t: TNode) => (t.def ?? false) !== b.toggled.has(t.row.key);
   const kidsOf = (t: TNode): TNode[] => {
@@ -787,13 +796,13 @@ export function flattenOutliner(b: BuildIn): URow[] {
     if (hit !== undefined) return hit;
     let v: boolean;
     const leafish = t.row.kind === "node" || t.row.kind === "sub" || t.row.kind === "gis" || t.row.kind === "aux" || t.row.kind === "version";
-    const own = (!q || (t.match ?? t.row.label.toLowerCase()).includes(q)) && (!filter || presentOf(t));
+    const own = (!q || (t.match ?? t.row.label.toLowerCase()).includes(q)) && (!filter || presentOf(t)) && (!geoOnly || !!geoOf(t));
     if (leafish) v = own || (t.kids ?? []).some(survives);
     else {
       // a structural row survives when something under it does; a source's
       // and a graph's rows always stay (the place stays, even empty)
       v = t.row.kind === "source" || t.row.kind === "graph" || kidsOf(t).some(survives)
-        || (t.row.kind === "group" && !!t.row.id && own && !!q);
+        || (t.row.kind === "group" && !!t.row.id && own && (!!q || geoOnly));
     }
     keep.set(t, v);
     return v;
@@ -815,12 +824,14 @@ export function flattenOutliner(b: BuildIn): URow[] {
     return { all: all.size + anon, present: present.size + anonPresent };
   };
   const walk = (t: TNode, depth: number): void => {
-    if ((q || filter) && !survives(t)) return;
-    const searching = !!q && t.row.kind !== "source" && t.row.kind !== "graph";
+    if ((q || filter || geoOnly) && !survives(t)) return;
+    const searching = (!!q || geoOnly) && t.row.kind !== "source" && t.row.kind !== "graph";
     const hasKids = !!(t.kids?.length || t.lazy);
-    const open = hasKids && (searching ? true : isOpen(t) || (!!q && t.row.kind === "graph" && !!t.lazy));
+    const open = hasKids && (searching ? true : isOpen(t) || ((!!q || geoOnly) && t.row.kind === "graph" && !!t.lazy));
     const row: URow = { ...t.row, depth: depth + ((t as TNode & { indent?: number }).indent ?? 0), parent: hasKids, open };
     if (grey && (t.row.kind === "node" || t.row.kind === "sub") && !presentOf(t)) row.absent = true;
+    const gm = geoOf(t);
+    if (gm) row.geo = gm;
     if (t.row.kind === "dim" || (t.row.kind === "group" && !t.row.id)) {
       const c = counts(t);
       row.count = b.opts.sync3d ? `${c.present} / ${c.all}` : String(c.all);
