@@ -220,7 +220,7 @@ import {
   watchSystemTheme,
   type ThemeMode,
 } from "./theme";
-import { buildNodeList, rowMark, type NodeListCallbacks } from "./nodelist";
+import { buildNodeList, outlinerMark, type NodeListCallbacks } from "./nodelist";
 // MICRO-OUTLINER-UNICO · the one Outliner (sources → graphs → every dimension)
 import { emptyFacts, type Dim, type OutlinerOpts, type OutlinerSourceIn, type ThreeFacts, type URow } from "./outliner-tree";
 import { buildOutline } from "./outline";
@@ -14246,7 +14246,8 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
         return el;
       }
       const n = r.id ? (r.slot === emtree.activeId ? store?.node(r.id) : emtree.get(r.slot ?? "")?.store.node(r.id)) : null;
-      return rowMark({ node_type: n?.node_type ?? r.glyph ?? "", data: n?.data ?? {} } as EmNode);
+      // MICRO-PL001 · the EM glyph, else the old scene Outliner's icon (never the bare dot)
+      return outlinerMark({ node_type: n?.node_type ?? r.glyph ?? "", data: n?.data ?? {} } as EmNode, r.icon);
     },
     word: (k) => t(k === "eye" ? "uo.eye" : k === "menu" ? "uo.menu" : k === "active" ? "src.badgeActive"
       : k === "activate" ? "src.badgeActivate" : "uo.absent"),

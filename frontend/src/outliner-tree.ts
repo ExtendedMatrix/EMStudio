@@ -189,6 +189,9 @@ export interface URow {
   glyph?: string;
   /** a text glyph, when no node type says it */
   glyphText?: string;
+  /** MICRO-PL001 · the EM glyph the row is drawn with when it is not its node
+   *  type's (a tileset, the «Proxy» folder, the graph); `glyph` stays the type */
+  icon?: string;
   /** the node's description, shown small after its name */
   desc?: string;
   /** a count after the label («12», «7 / 12» when synced) */
@@ -374,7 +377,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     const C = texts.container;
     const gk = `${pre}/grp/${c.node.id}`;
     const kids: TNode[] = c.alts.map((a) => ({
-      row: { key: k(`${gk}/alt/${a.id}`), kind: "sub" as const, label: nameOf(a), id: a.id, slot: g.slot, glyphText: "▦", alt: true,
+      row: { key: k(`${gk}/alt/${a.id}`), kind: "sub" as const, label: nameOf(a), id: a.id, slot: g.slot, icon: "tileset", alt: true,
         ...(C ? { title: C.alternative } : {}),
         ...(space && facts.rmEpochs.has(c.node.id) ? { eye: `rm:${c.node.id}`, skey: `rm:${c.node.id}` } : {}) },
       present: true, match: nameOf(a).toLowerCase() }));
@@ -402,7 +405,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     return {
       row: { key: k(gk), kind: "node", label: nameOf(c.node), id: c.node.id, slot: g.slot, glyph: String(c.node.node_type), epochAt: at,
         ...(c.node.description ? { desc: String(c.node.description) } : {}),
-        ...(own ? { eye: `rm:${c.node.id}`, skey: `rm:${c.node.id}`, glyphText: facts.tilesets.has(c.node.id) ? "▦" : undefined } : {}),
+        ...(own ? { eye: `rm:${c.node.id}`, skey: `rm:${c.node.id}`, ...(facts.tilesets.has(c.node.id) ? { icon: "tileset" } : {}) } : {}),
         ...(c.bad.length && C ? { warn: C.outOfStep(c.bad.length, epName([...new Set(c.bad.flatMap((x) => epochsOfNode(x.id)))]), epName(c.ref)) } : {}) },
       kids, def: false, present: true, match: `${nameOf(c.node)} ${String(c.node.description ?? "")}`.toLowerCase(),
     };
@@ -539,7 +542,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
 
   const modelLeaf = (n: EmNode, key: string): TNode => leaf(n, key, true, {
     ...(n.node_type !== "RepresentationModelNodeGroup" ? { eye: `rm:${n.id}` } : {}),
-    ...(facts.tilesets.has(n.id) ? { glyphText: "▦", title: "tileset" } : {}),
+    ...(facts.tilesets.has(n.id) ? { icon: "tileset", title: "tileset" } : {}),
   });
   // MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 (E.D., 13 Nov 2026: «il container è un
   // ramo») · by epoch: epoch → container → its members (and its alternative);
@@ -575,7 +578,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
       }
     }
     const epochOf = (n: EmNode): string[] => lives.get(n.id) ?? [];
-    return grouped("proxies", units, (n) => leaf(n, `proxies/${n.id}`, true, { eye: `proxy:${n.id}`, glyphText: "◆" }), epochOf);
+    return grouped("proxies", units, (n) => leaf(n, `proxies/${n.id}`, true, { eye: `proxy:${n.id}` }), epochOf);
   };
 
   /** MICRO-D-GIS-DOCUMENTI · the GIS rows: a sheet under its DOCUMENT (a
@@ -626,7 +629,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     const pxLeaf = (u: EmNode, at: string): TNode => {
       const from = survFrom.get(at)?.get(u.id);
       const fromName = from !== undefined ? (from ? nameOf(byId.get(from) ?? ({ id: from } as EmNode)) : "—") : null;
-      return leaf(u, `sp/${at}/px/${u.id}`, true, { eye: `proxy:${u.id}`, glyphText: "◆", skey: `proxy:${u.id}`,
+      return leaf(u, `sp/${at}/px/${u.id}`, true, { eye: `proxy:${u.id}`, skey: `proxy:${u.id}`,
         ...(fromName != null && W.survives ? { note: W.survivesMark ?? "⟲", noteTitle: W.survives(fromName) } : {}) });
     };
     // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · a model's versions under it (a click on one draws it)
@@ -636,9 +639,9 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
         glyphText: v.drawn ? "●" : v.chosen ? "○" : "·", version: { rm: n.id, ...v } }, present: true, match: v.name.toLowerCase() })) : [];
     };
     const rmKeyed = (n: EmNode, key: string): TNode => leaf(n, key, true, { eye: `rm:${n.id}`, skey: `rm:${n.id}`,
-      ...(facts.tilesets.has(n.id) ? { glyphText: "▦", title: "tileset" } : {}) }, versionRows(n, key));
-    const typeGroup = (at: string, key: string, label: string, kids: TNode[], glyph?: string): TNode[] => kids.length
-      ? [{ row: { key: k(`sp/${at}/${key}`), kind: "group", label, ...(glyph ? { glyph } : {}) }, kids, def: true }] : [];
+      ...(facts.tilesets.has(n.id) ? { icon: "tileset", title: "tileset" } : {}) }, versionRows(n, key));
+    const typeGroup = (at: string, key: string, label: string, kids: TNode[], glyph?: string, icon?: string): TNode[] => kids.length
+      ? [{ row: { key: k(`sp/${at}/${key}`), kind: "group", label, ...(glyph ? { glyph } : {}), ...(icon ? { icon } : {}) }, kids, def: true }] : [];
     // MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 · the containers as branches (the same
     // reading as the graph's «Models» by epoch), the loose models after them
     const modelsIn = (at: string, inEp: (id: string) => boolean): TNode[] =>
@@ -692,7 +695,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
       return out2;
     };
     const block = (at: string, units: EmNode[], inEp: (id: string) => boolean, gis: boolean): TNode[] => [
-      ...typeGroup(at, "px", W.proxies, units.filter((u) => facts.proxies.has(u.id)).sort(byName).map((u) => pxLeaf(u, at))),
+      ...typeGroup(at, "px", W.proxies, units.filter((u) => facts.proxies.has(u.id)).sort(byName).map((u) => pxLeaf(u, at)), undefined, "proxy"),
       ...typeGroup(at, "models", W.models, modelsIn(at, inEp), "representation_model"),
       ...typeGroup(at, "rmdoc", W.rmdoc, subOf(at, rmdocMap, docs, inEp, "representation_model_doc"), "representation_model_doc"),
       ...typeGroup(at, "rmsf", W.rmsf, subOf(at, facts.rmsf, finds, inEp, "representation_model_sf"), "representation_model_sf"),
@@ -758,7 +761,7 @@ function sourceNodes(b: BuildIn): TNode[] {
       ...(s.dirty ? { count: "●" } : s.readOnly ? { count: "🔒" } : {}) },
     def: true,
     kids: s.graphs.map((g) => ({
-      row: { key: `g:${g.slot}`, kind: "graph" as const, label: g.name, slot: g.slot, glyphText: "◆", active: g.active,
+      row: { key: `g:${g.slot}`, kind: "graph" as const, label: g.name, slot: g.slot, icon: "graph", active: g.active,
         ...(g.nodes != null ? { count: String(g.nodes) } : {}) },
       lazy: () => graphKids(g, b), def: g.active,
     })),

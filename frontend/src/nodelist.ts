@@ -8,15 +8,16 @@ import type { EmDocument, EmNode } from "./types";
 import { liveNodes } from "./crdt";
 import { buildOutline, epochSpan, type OutlineUnit } from "./outline";
 import { t } from "./i18n";
-import { glyphFor, glyphSvg } from "./glyphs";
+import { glyphByKey, glyphFor, glyphSvg } from "./glyphs";
+import { typeIconElement } from "./type-icons";
 import { activeTheme, canvasTheme } from "./theme";
 import { listStep } from "./list-keys";
 
 /** SHIFT-A fase 6b · a row's mark: the node's GLYPH, inline, when the datamodel
  *  draws it from paths (extractor, combiner, the ornaments, the DTC kinds) —
  *  the same paths as the canvas — else the coloured dot of its style. */
-export function rowMark(n: Pick<EmNode, "node_type" | "data">): HTMLElement {
-  const g = glyphFor(n.node_type, n.data as Record<string, unknown> | undefined);
+export function rowMark(n: Pick<EmNode, "node_type" | "data">, glyph?: ReturnType<typeof glyphFor>): HTMLElement {
+  const g = glyph ?? glyphFor(n.node_type, n.data as Record<string, unknown> | undefined);
   const el = document.createElement("span");
   if (g) {
     const th = canvasTheme();
@@ -29,6 +30,30 @@ export function rowMark(n: Pick<EmNode, "node_type" | "data">): HTMLElement {
   el.className = "nl-dot";
   el.style.background = st.fill;
   el.style.borderColor = st.border;
+  return el;
+}
+
+/** MICRO-PL001 · an Outliner row's mark: the EM glyph of the Matrix when the
+ *  datamodel draws the type (or `icon`, a data glyph: tileset, proxy, graph)
+ *  from paths, else the picture the old scene Outliner gave it — the type's
+ *  official 2D icon (US, USV/s, SF, the epoch, the property…), a group's box —
+ *  never the bare dot. A row without a type: an empty place, same width. */
+export function outlinerMark(n: Pick<EmNode, "node_type" | "data">, icon?: string): HTMLElement {
+  const type = String(n.node_type ?? "");
+  const g = icon ? glyphByKey(icon) : glyphFor(type, n.data as Record<string, unknown> | undefined) ?? (type ? glyphByKey(type) : null);
+  if (g) return rowMark(n, g);
+  const el = document.createElement("span");
+  el.className = "nl-dot nl-glyph uo-icon";
+  if (!type) return el;
+  const pic = typeIconElement(type);
+  // the epoch's official icon is drawn WHITE (a clock for a dark lane): here it
+  // is the same drawing in the theme's ink, legible on a light Outliner too
+  if (type === "EpochNode" && pic instanceof HTMLImageElement) {
+    const m = document.createElement("span");
+    m.className = "uo-icon-ink";
+    m.style.setProperty("--icon", `url("${pic.src}")`);
+    el.appendChild(m);
+  } else el.appendChild(pic);
   return el;
 }
 

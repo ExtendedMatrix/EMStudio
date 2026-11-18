@@ -176,6 +176,12 @@ if (path) {
   ok(L.filter((x) => x.trim() === "Survey").length === 1 && L.indexOf("        Survey") > L.findIndex((x) => x.startsWith("    No epoch")), "a container that declares no epoch is under «no epoch», nowhere else");
   eq(rows.find((r) => r.label === "US1" && r.skey)?.skey, "proxy:US1", "a proxy row carries its Space key");
   eq(rows.find((r) => r.label === "Mesh 2")?.skey, "rm:RM2", "a model row too");
+  // MICRO-PL001 · the icons of the old scene Outliner: a proxy is drawn as its UNIT'S
+  // TYPE (no generic ◆), the «Proxy» folder with the proxy glyph, the graph with its glyph
+  const px = rows.find((r) => r.label === "US1" && r.skey);
+  ok(px.glyph === "US" && !px.glyphText && !px.icon, "a proxy row: its unit's type, no generic ◆");
+  eq(rows.find((r) => r.kind === "group" && r.label.startsWith("Proxy"))?.icon, "proxy", "the «Proxy» folder: the proxy glyph");
+  ok(rows.find((r) => r.kind === "graph")?.icon === "graph" && !rows.find((r) => r.kind === "graph")?.glyphText, "the graph row: the graph glyph");
   ok(L.some((x) => x.startsWith("    No epoch")) && L.includes("        Catasto"), "the GIS layers under «no epoch»");
   ok(!rows.some((r) => r.kind === "dim"), "no graph dimension in the Space's tree by epoch");
   ok(O.flattenOutliner({ sources: src2, opts: { ...O.DEFAULT_OPTS, space: true, hierarchy: "type" }, texts: t2, toggled: new Set() }).some((r) => r.kind === "dim"),
@@ -226,6 +232,11 @@ if (path) {
   ok(rows.find((r) => r.label === "RMSF prato")?.noteTitle === "segue" && !rows.find((r) => r.label === "RMSF prato")?.ghost, "a member without an epoch follows its container (full there)");
   ok(L.includes("        Loose"), "a loose model under its epoch");
   ok(L.includes("        Survey_2015_egm2008"), "the 2015 tileset (not a member) stays under 2015");
+  {
+    const ts = rows.find((r) => r.label === "Survey_2015_egm2008");
+    ok(ts.icon === "tileset" && ts.glyph === "representation_model" && !ts.glyphText, "MICRO-PL001 · a tileset: the tileset glyph, its type kept (no ▦)");
+    eq(rows[sv + 1].icon, "tileset", "…and a container's tileset alternative");
+  }
   eq(full[0].epochAt, "XX", "a row says the epoch it is listed under (the drag moves from it)");
   ok(!rows.some((r) => r.warn), "nothing out of step: a member's own epoch is a choice");
   // the container DECLARES 2015: it lies there; the members of 2015 follow it in full, those of XX sec are attenuated
