@@ -125,7 +125,9 @@ export interface OverlayDoc {
   file_types: Record<string, unknown>;
   landmark_sets: Record<string, unknown>;
   forms: Record<string, { id: string; source?: string; compiled?: string; digest?: string; origin?: string; profile?: string;
-    label?: Record<string, string> | string; compiled_doc?: unknown }>;
+    label?: Record<string, string> | string; compiled_doc?: unknown;
+    /** MICRO-PL11 (bridge 80): the compiled definition verified (file digest, content digest, id, version) */
+    verified?: boolean; compiled_problems?: ExtProblem[]; vocabularies?: unknown[] }>;
   color_schemes: Record<string, { id?: string; property?: string; path?: string; file?: string; origin?: string; profile?: string;
     label?: Record<string, string> | string; doc?: unknown }>;
   visual_rules: Record<string, unknown>;
@@ -256,17 +258,42 @@ export function schemesOf(ov: OverlayDoc | null, lang: string): PackageScheme[] 
   return out;
 }
 
-/** a package's sheets: a compiled definition in stratigraph-templates' form
- *  (`header.id`, `header.version`) is added to the vendored ones; another form
- *  is said, not guessed (the package compiler is W8's) */
-export interface PackageForm { id: string; name: string; profile: string; def: { header: { id: string; version?: string } } | null }
+/** a package's sheets: a compiled definition the bridge VERIFIED (MICRO-PL11:
+ *  the file is the one the manifest names, its content what the compiler
+ *  produced, its id and version the manifest's) is added to the vendored ones;
+ *  one that is not verified is not offered, and the window says why — never
+ *  guessed, never taken on trust (a bridge before 80 does not verify: not offered) */
+export interface PackageForm {
+  id: string; name: string; profile: string;
+  def: { header: { id: string; version?: string; digest?: string } } | null;
+  problems: ExtProblem[];
+}
 export function formsOf(ov: OverlayDoc | null, lang: string): PackageForm[] {
   if (!ov) return [];
   return Object.entries(ov.forms ?? {}).map(([id, f]) => {
     const d = f.compiled_doc as { header?: { id?: unknown; version?: unknown } } | undefined;
-    const ok = !!d && typeof d === "object" && !!d.header && typeof d.header.id === "string";
-    return { id, name: labelIn(f.label, lang) || id, profile: f.profile ?? "", def: ok ? d as { header: { id: string; version?: string } } : null };
+    const shaped = !!d && typeof d === "object" && !!d.header && typeof d.header.id === "string";
+    const ok = shaped && f.verified === true;
+    const problems = f.compiled_problems?.length ? f.compiled_problems
+      : ok ? [] : [{ code: "form_unverified", level: "error", where: `forms ${id}`, en: "", it: "" }];  // said by the window (ext.formUnverified)
+    const title = (d as { header?: { standard?: { title?: Record<string, string> } } } | undefined)?.header?.standard?.title;
+    return { id, name: labelIn(f.label, lang) || (ok ? labelIn(title, lang) : "") || id, profile: f.profile ?? "",
+             def: ok ? d as { header: { id: string; version?: string; digest?: string } } : null, problems };
   });
+}
+
+/** the vocabularies of the verified sheets (their package's own schemes), for
+ *  `sheet.setRuntimeVocabularies`: one file per scheme */
+export function formVocabulariesOf(ov: OverlayDoc | null): Array<{ scheme: string; concepts: unknown[] }> {
+  const out = new Map<string, { scheme: string; concepts: unknown[] }>();
+  for (const f of Object.values(ov?.forms ?? {})) {
+    if (f.verified !== true) continue;
+    for (const v of (f.vocabularies ?? []) as Array<{ scheme?: unknown; concepts?: unknown }>) {
+      if (v && typeof v.scheme === "string" && Array.isArray(v.concepts) && !out.has(v.scheme))
+        out.set(v.scheme, v as { scheme: string; concepts: unknown[] });
+    }
+  }
+  return [...out.values()];
 }
 
 // ── header.profiles ─────────────────────────────────────────────────────────

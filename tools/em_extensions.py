@@ -32,6 +32,21 @@ POST /profiles/overlay {declared: header.profiles, lang, installed?: bool}
      true) also the newest version of every other package installed here — a
      package installed is usable in a new document, and the save declares it
      (``profiles.declare`` picks the newest installed by prefix the same way)
+
+MICRO-PL11 (W8) · the SHEETS of a package are verified, never taken on trust:
+a form's compiled definition goes to the page (``compiled_doc``, ``verified``)
+only when stratigraph-templates' ``packages.verify_compiled`` finds nothing —
+the file's digest is the manifest's ``forms[].digest``, it is a compiled
+definition, its ``header.digest`` is its content's, its id and version are the
+ones the manifest and the file's name say; otherwise ``compiled_problems``
+(EN + IT) and nothing to draw. With it, ``vocabularies``: the package's own
+schemes the definition names (``<prefix>:<slug>``), their concepts read from
+the vocabulary manager of this machine. The PREVIEW and the INSTALL run the
+same check on the archive: a compiled form edited after compiling (or with
+another id or version) makes the data not installable and the install
+refused; a placeholder that is not a compiled definition is a warning (the
+sheet is not offered, the rest of the data goes in). The file's digest is
+s3Dgraphy's validator's own error, not repeated here.
 """
 from __future__ import annotations
 
@@ -178,15 +193,156 @@ def _overlay(body: Dict[str, Any]) -> Dict[str, Any]:
         out["strings_en"] = overlay.strings("en")
     for prof in out["profiles"]:
         prof["declared"] = prof["name"] in declared_names
-    # the files the page cannot read by itself: a form's compiled definition,
-    # a colour scheme's .emc — inside the package's own folder only
-    for key, field, doc_key in (("forms", "compiled_path", "compiled_doc"), ("color_schemes", "file", "doc")):
-        for entry in (out.get(key) or {}).values():
-            doc = _package_json(entry.get(field), [p.root for p in active])
-            if doc is not None:
-                entry[doc_key] = doc
+    # the files the page cannot read by itself: a colour scheme's .emc, a
+    # form's compiled definition — inside the package's own folder only; a
+    # form's only when verified (MICRO-PL11), with its package's vocabularies
+    roots = [p.root for p in active]
+    for entry in (out.get("color_schemes") or {}).values():
+        doc = _package_json(entry.get("file"), roots)
+        if doc is not None:
+            entry["doc"] = doc
+    for entry in (out.get("forms") or {}).values():
+        path = entry.get("compiled_path")
+        doc, said = _verify_form(entry, _read_bytes(path, roots), Path(str(path or "")).name)
+        entry["verified"] = not said
+        if said:
+            entry["compiled_problems"] = said
+        else:
+            entry["compiled_doc"] = doc
+            entry["vocabularies"] = _form_vocabularies(doc)
     return {"ok": True, "overlay": _plain(out), "missing": _plain(missing),
             "problems": [p.as_dict() for p in problems]}
+
+
+def _st_packages():
+    """stratigraph-templates' ``packages`` (the verifier of a compiled form):
+    installed, ``STRATIGRAPH_TEMPLATES_SRC``, or the copy vendored beside this
+    file (``tools/vendor``, the same as em_sheet's)."""
+    import sys
+    try:
+        from stratigraph_templates import packages  # noqa: F401
+    except ImportError:
+        for cand in (os.environ.get("STRATIGRAPH_TEMPLATES_SRC"), str(Path(__file__).resolve().parent / "vendor")):
+            if cand and (Path(cand) / "stratigraph_templates").is_dir() and cand not in sys.path:
+                sys.path.insert(0, cand)
+                break
+        from stratigraph_templates import packages  # noqa: F401
+    if not hasattr(packages, "verify_compiled"):
+        raise ImportError("this stratigraph-templates has no packages.verify_compiled (older than MICRO-PL11)")
+    return packages
+
+
+#: verify_compiled's codes that refuse an archive's data; ``not_compiled`` is a
+#: warning (the sheet is not offered), ``file_digest`` s3Dgraphy's own error
+_FORM_BLOCKS = ("content_digest", "id", "version", "format_version")
+
+
+def _form_problem(code: str, level: str, form_id: str, en: str, it: str) -> Dict[str, Any]:
+    return {"code": f"form_{code}", "level": level, "where": f"forms {form_id}",
+            "en": f"forms {form_id}: {en}", "it": f"forms {form_id}: {it}"}
+
+
+def _read_bytes(path: Any, roots: List[Any]) -> Any:
+    """A file of an installed package (≤ 4 MB), only under one of its roots."""
+    if not path:
+        return None
+    try:
+        f = Path(str(path)).resolve()
+        if not any(r is not None and Path(str(r)).resolve() in f.parents for r in roots):
+            return None
+        if not f.is_file() or f.stat().st_size > 4 * 1024 * 1024:
+            return None
+        return f.read_bytes()
+    except OSError:
+        return None
+
+
+def _verify_form(entry: Dict[str, Any], raw: Any, file_name: str) -> Tuple[Any, List[Dict[str, Any]]]:
+    """``(doc, problems)`` of one form's compiled file; problems as the page
+    shows them (``{code, level, where, en, it}``)."""
+    import json
+    fid = str(entry.get("id") or "?")
+    if raw is None:
+        return None, [_form_problem("missing", "error", fid, "the compiled file cannot be read",
+                                    "il file compilato non si legge")]
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        doc = None
+    try:
+        S = _st_packages()
+    except ImportError as exc:
+        return None, [_form_problem("no_verifier", "error", fid, f"not verified: {exc}",
+                                    f"non verificata: {exc}")]
+    found = S.verify_compiled(doc, {"id": fid, "digest": entry.get("digest")}, raw, file_name)
+    return doc, [_form_problem(x["code"], "error", fid, x["en"], x["it"]) for x in found]
+
+
+def _form_vocabularies(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The package's own schemes a verified compiled form names, in the shape
+    the page's vendored vocabularies have (``vocabolari/<scheme>.json``), with
+    their concepts from the vocabulary manager of this machine (the copy its
+    owner put there, D-17). A central scheme (no prefix) is the page's own."""
+    try:
+        from s3dgraphy.authorities import packages as V
+    except ImportError:
+        return []
+    head = doc.get("header") or {}
+    langs = [str(x) for x in head.get("languages") or []]
+    out = []
+    for v in head.get("vocabularies") or []:
+        sid, uri = str(v.get("id") or ""), v.get("uri")
+        if ":" not in sid or not uri:
+            continue
+        hits = V.find_installed(str(uri), v.get("version")) or V.find_installed(str(uri))
+        idx = V.vocab_index(str(hits[0][1].get("id")), hits[0][1].get("version")) if hits else None
+        concepts = []
+        for c_uri, c in sorted(((idx or {}).get("concepts") or {}).items()):
+            if c_uri == uri:
+                continue
+            pref = c.get("pref") or {}
+            concepts.append({"concept": c_uri, "labels": {k: pref[k] for k in sorted(pref)
+                                                           if not langs or k in langs}})
+        out.append({"format": 1, "scheme": sid, "authority": v.get("authority"), "status": v.get("status"),
+                    "uri": uri, "license": v.get("license"), "languages": langs, "concepts": concepts,
+                    "installed": bool(hits),
+                    **({"unverified_languages": v["unverified_languages"]} if v.get("unverified_languages") else {})})
+    return out
+
+
+def _archive_form_checks(ref: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """``(errors, warnings)`` of the compiled forms an ARCHIVE carries, before
+    anything is written (preview and install)."""
+    import json
+    P = _P()
+    try:
+        pkg = P.open_package(ref)
+    except Exception:  # noqa: BLE001 — the library's preview/install says why
+        return [], []
+    errors, warnings = [], []
+    for f in ((pkg.profile or {}).get("forms") or []):
+        if not isinstance(f, dict) or not f.get("compiled"):
+            continue
+        rel = pkg.data_file(str(f["compiled"]))
+        if not pkg.source.exists(rel):
+            continue                       # missing_file: the library's
+        raw = pkg.source.read(rel)
+        try:
+            doc = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            doc = None
+        fid = str(f.get("id") or "?")
+        try:
+            found = _st_packages().verify_compiled(doc, {"id": fid}, None, Path(str(f["compiled"])).name)
+        except ImportError as exc:
+            warnings.append(_form_problem("no_verifier", "warning", fid, f"not verified: {exc}",
+                                          f"non verificata: {exc}"))
+            continue
+        for x in found:
+            block = x["code"] in _FORM_BLOCKS
+            p = _form_problem(x["code"], "error" if block else "warning", fid, x["en"], x["it"])
+            (errors if block else warnings).append(p)
+    return errors, warnings
 
 
 def _package_json(path: Any, roots: List[Any]) -> Any:
@@ -216,13 +372,32 @@ def post(route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
             if route == "/extensions/preview":
                 if src.ref is None:
                     return 400, {"ok": False, "error": "preview takes {path} or {zip_b64}"}
-                return 200, {"ok": True, "preview": _plain(E.preview(src.ref))}
+                pv = _plain(E.preview(src.ref))
+                errors, warnings = _archive_form_checks(src.ref)
+                if errors and isinstance(pv.get("data"), dict):
+                    pv["data"]["errors"] = list(pv["data"].get("errors") or []) + errors
+                    pv["data"]["installable"] = False
+                if warnings:
+                    pv["warnings"] = list(pv.get("warnings") or []) + warnings
+                pv["forms_checked"] = True
+                return 200, {"ok": True, "preview": pv}
             if route == "/extensions/install":
                 if src.ref is None:
                     return 400, {"ok": False, "error": "install takes {path} or {zip_b64}"}
                 parts = str(body.get("parts") or "all")
                 if parts not in ("all", "data"):
                     return 400, {"ok": False, "error": "parts: all | data"}
+                errors, _warnings = _archive_form_checks(src.ref)
+                if errors:
+                    src.close()
+                    if src.tmp is None and body.get("zip_b64"):
+                        try:
+                            os.remove(src.ref)  # the archive kept for later: not installed, not kept
+                        except OSError:
+                            pass
+                    return 422, {"ok": False, "problems": errors,
+                                 "error": "a compiled sheet of the package is not what it was compiled to: "
+                                          "nothing installed"}
                 return 200, {"ok": True, "installed": _plain(E.install(src.ref, parts=parts,
                                                                       trust=bool(body.get("trust"))))}
             ref = src.ref if src.ref is not None else str(body.get("id") or "")

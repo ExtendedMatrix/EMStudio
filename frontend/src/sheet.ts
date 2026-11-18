@@ -121,6 +121,8 @@ export interface CompiledDef {
     languages: string[];
     digest?: string;
     vocabularies?: Array<{ id: string; status?: string; provisional?: string; provisional_for?: string }>;
+    /** MICRO-PL11 (W8): the community packages a package's sheet was compiled with */
+    packages?: Array<{ name: string; iri?: string; prefix?: string; version?: string }>;
   };
   visual: {
     identity: { human_key: string[]; pattern?: string; unit_field?: string };
@@ -136,7 +138,7 @@ export interface CompiledDef {
     unit?: { record_status?: { em_json?: string; scheme?: string; values?: string[] } };
   };
 }
-interface VocabFile {
+export interface VocabFile {
   scheme: string;
   status?: string;
   provisional?: string;
@@ -158,6 +160,25 @@ export function vendoredFrom(): { commit?: string } {
 const RUNTIME_DEFS: CompiledDef[] = [];
 export function setRuntimeDefinitions(defs: CompiledDef[]): void {
   RUNTIME_DEFS.splice(0, RUNTIME_DEFS.length, ...defs.filter((d) => !DEFS.some((v) => v.header.id === d.header.id)));
+}
+
+/** MICRO-PL11 (W8) · the vocabularies of the packages' sheets (their own
+ *  schemes, `<prefix>:<slug>`), in the vendored files' shape, read by the
+ *  bridge from this machine's vocabulary manager: after the vendored ones,
+ *  never in place of one. */
+const RUNTIME_VOCABS = new Map<string, VocabFile>();
+export function setRuntimeVocabularies(files: VocabFile[]): void {
+  RUNTIME_VOCABS.clear();
+  for (const f of files) if (f && f.scheme && !VOCABS.has(f.scheme)) RUNTIME_VOCABS.set(f.scheme, f);
+}
+function vocabOf(scheme: string | null | undefined): VocabFile | undefined {
+  return scheme ? (VOCABS.get(scheme) ?? RUNTIME_VOCABS.get(scheme)) : undefined;
+}
+
+/** The community package a sheet comes from (its header's `packages`), or null
+ *  for a sheet of the core. */
+export function packageOf(def: CompiledDef): { name: string; version?: string } | null {
+  return def.header.packages?.[0] ?? null;
 }
 
 /** Every vendored definition, the one per id this copy holds (its latest), then the packages'. */
@@ -276,11 +297,11 @@ export function conceptsFor(def: CompiledDef, fid: string, lang: string):
   const voc = f?.vocabulary ?? f?.concept_vocabulary;
   const scheme = voc?.scheme ?? null;
   if (!scheme) return { scheme: null, answeredBy: null, concepts: [] };
-  let v = VOCABS.get(scheme);
+  let v = vocabOf(scheme);
   let answeredBy: string | null = scheme;
   if ((!v || !v.concepts.length) && (voc?.provisional || v?.provisional)) {
     answeredBy = voc?.provisional ?? v?.provisional ?? null;
-    v = answeredBy ? VOCABS.get(answeredBy) : undefined;
+    v = vocabOf(answeredBy);
   }
   if (!v || !v.concepts.length) return { scheme, answeredBy: null, concepts: [] };
   return { scheme, answeredBy, concepts: v.concepts.map((c) => ({ concept: c.concept, label: c.labels[lang] ?? Object.values(c.labels)[0] ?? c.concept })) };
@@ -295,7 +316,7 @@ export function conceptLabel(def: CompiledDef, fid: string, concept: string, lan
 /** A key of a module the definition names (em-record-status, em-place-level…)
  *  said in `lang`: the concept whose IRI ends with the key. */
 export function schemeKeyLabel(scheme: string, key: string, lang: string): string {
-  const v = VOCABS.get(scheme);
+  const v = vocabOf(scheme);
   const c = v?.concepts.find((x) => x.concept.endsWith(`/${key}`));
   return c ? (c.labels[lang] ?? Object.values(c.labels)[0] ?? key) : key;
 }

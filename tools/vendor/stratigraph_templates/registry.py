@@ -133,6 +133,27 @@ class Registry:
     taken_on: str = ""
     #: Set by `registry()`: whether the working tree was compared, and the answer.
     live_check: str = ""
+    #: MICRO-PL11 (W8) · the community packages laid over the core for this run
+    #: (`with_packages`): `{name, iri, prefix, version}` each. Never in the
+    #: snapshot, never in `content()`: the snapshot is the core's.
+    packages: List[Dict[str, str]] = dc_field(default_factory=list)
+    #: quale id → the package that declares it (`name version`)
+    package_qualia: Dict[str, str] = dc_field(default_factory=dict)
+
+    def with_packages(self, qualia: Dict[str, str], packages: List[Dict[str, str]]) -> "Registry":
+        """A COPY of this registry with the packages' qualia beside the core's
+        (SPEC-pacchetto §8: «snapshot del nucleo + sovrapposizione»). The core
+        is not redefined: a package quale is prefixed, a core one is not."""
+        import copy
+
+        out = copy.copy(self)
+        out.qualia = set(self.qualia) | set(qualia)
+        out.package_qualia = {**self.package_qualia, **qualia}
+        out.packages = [*self.packages, *packages]
+        return out
+
+    def packages_line(self) -> str:
+        return ", ".join(f"{p['name']} {p['version']}" for p in self.packages)
 
     # -- provenance line, printed by every command that validates -------------
     def versions_line(self) -> str:
@@ -148,6 +169,9 @@ class Registry:
         )
         if self.live_check:
             line += f"\n  working tree: {self.live_check}"
+        if self.packages:
+            line += (f"\n  + community packages: {self.packages_line()} "
+                     f"({len(self.package_qualia)} qualia of theirs)")
         return line
 
     # -- the em.json spelling of a node type named in a definition -------------
@@ -245,6 +269,11 @@ class Registry:
             "taken_from": {k: self.taken_from.get(k) for k in ("git_commit", "git_dirty")},
             "snapshot": "registry/s3dgraphy-snapshot.json",
         }
+
+    def packages_header(self) -> List[Dict[str, str]]:
+        """What a compiled definition says of the packages it was compiled
+        with (`header.packages`); [] for a sheet of the core."""
+        return [dict(p) for p in self.packages]
 
 
 # ── reading s3Dgraphy ────────────────────────────────────────────────────────

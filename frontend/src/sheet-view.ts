@@ -342,7 +342,11 @@ export function renderSheet(body: HTMLElement, inp: SheetViewInput | null, cb: S
     unread.appendChild(line);
   }
   pages.appendChild(unread);
-  const foot = el("div", "sk-foot", cb.t("sheet.foot", { id: inp.def.header.id, v: inp.def.header.version }));
+  // MICRO-PL11: a community package's sheet is not vendored — it came with its package, verified
+  const pkg = inp.def.header.packages?.[0];
+  const foot = el("div", "sk-foot", pkg
+    ? cb.t("sheet.footPackage", { id: inp.def.header.id, v: inp.def.header.version, p: `${pkg.name} ${pkg.version ?? ""}`.trim() })
+    : cb.t("sheet.foot", { id: inp.def.header.id, v: inp.def.header.version }));
   pages.appendChild(foot);
   body.appendChild(pages);
   pages.scrollTop = scroll;

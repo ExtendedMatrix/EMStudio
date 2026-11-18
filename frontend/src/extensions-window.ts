@@ -196,8 +196,12 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
       }
       const added = host.formsAdded?.() ?? new Set<string>();
       for (const f of formsOf(state.overlay, lang).filter((x) => x.profile === iri)) {
-        const line = el("div", "cw-hint ext-form", t(f.def ? (added.has(f.def.header.id) ? "ext.formAdded" : "ext.formReady") : "ext.formNotCompiled", { s: f.name }));
-        line.dataset.extForm = f.def ? "added" : "not-compiled";
+        const line = f.def
+          ? el("div", "cw-hint ext-form", t(added.has(f.def.header.id) ? "ext.formAdded" : "ext.formReady", { s: f.name })
+              + " · " + t("ext.formVerified", { d: String(f.def.header.digest ?? "").slice(7, 19) }))
+          : el("div", "cw-warn ext-form", t("ext.formRefused", { s: f.name, why: f.problems.map((p) =>
+              p.code === "form_unverified" ? t("ext.formUnverified") : problemText(p, lang)).join(" · ") }));
+        line.dataset.extForm = f.def ? "added" : (f.problems[0]?.code ?? "refused");
         d.appendChild(line);
       }
       row.appendChild(d);

@@ -106,7 +106,9 @@ def canonical(doc: Any) -> str:
 #: definition against a later datamodel that changes nothing in its recipe
 #: keeps its digest — and a datamodel change that DOES change the recipe
 #: changes it, because the recipe is inside.
-_OUTSIDE_DIGEST = ("digest", "datamodel", "compiled_by")
+#: `packages` (MICRO-PL11): the community packages a package's sheet was
+#: compiled with — what it was checked against, like `datamodel`.
+_OUTSIDE_DIGEST = ("digest", "datamodel", "packages", "compiled_by")
 
 
 def digest_of(doc: Dict[str, Any]) -> str:
@@ -874,6 +876,8 @@ def compile_template(t: Template, reg: Registry, vocab: Vocabularies) -> Dict[st
         "datamodel": reg.header(),
         "compiled_by": {"name": "stratigraph-templates", "version": __version__},
     }
+    if reg.packages:
+        header["packages"] = reg.packages_header()
     visual = _visual(t)
     _mark_provisional(visual, recipe, vocab)
     doc = {"format": FORMAT, "format_version": FORMAT_VERSION, "header": header,

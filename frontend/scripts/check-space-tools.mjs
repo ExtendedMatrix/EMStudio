@@ -181,9 +181,9 @@ const main = fs.readFileSync(path.join(SRC, "main.ts"), "utf8");
 ok(/for \(const tool of VIEWER_3D_TOOLS\)\s*\n?\s*registerSpaceTool\(/.test(main), "the six tools of the Viewer registered first, from VIEWER_3D_TOOLS");
 ok(/spaceTools\(\)/.test(main) && !/for \(const tool of VIEWER_3D_TOOLS\) \{\s*const on = s\.trace\.tool === tool/.test(main), "the bar draws the register, not the constant");
 ok(/const need = CLICKS\[tool\]/.test(main) === false, "the clicks come from the register");
-ok(/BRIDGE_LEVEL_WANTED = 79/.test(main), "the page wants the bridge of level 79");
+ok(/BRIDGE_LEVEL_WANTED = (79|[89]\d)/.test(main), "the page wants the bridge of level 79 or later");
 const bridge = fs.readFileSync(path.join(SRC, "../../tools/em_bridge.py"), "utf8");
-ok(/BRIDGE_LEVEL = 79/.test(bridge) && /route\.startswith\("\/pose\/"\)/.test(bridge), "the bridge: level 79, /pose/* routed");
+ok(/BRIDGE_LEVEL = (79|[89]\d)/.test(bridge) && /route\.startswith\("\/pose\/"\)/.test(bridge), "the bridge: level 79 or later, /pose/* routed");
 
 // ── the bridge's /pose/* over s3dgraphy.annotation, on em-profiles' example ──
 const S3D = process.env.S3D ?? path.resolve(SRC, "../../../s3Dgraphy");

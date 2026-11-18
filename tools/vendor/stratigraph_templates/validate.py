@@ -203,6 +203,29 @@ def _check_labels(t: Template, problems: List[Problem]) -> None:
         walk(side.rows, f"sheet[{side.id}]")
 
 
+_PREFIXED = re.compile(r"^([a-z][a-z0-9]{1,15}):")
+
+
+def _unknown_quale(reg: Registry, quale: str, near: Optional[List[str]] = None) -> str:
+    """Why a quale is not known — said for a package's (`<prefix>:…`) too: the
+    packages compiled with, or that none carries that prefix (MICRO-PL11)."""
+    tail = f". Near: {near}" if near is not None else ""
+    m = _PREFIXED.match(str(quale))
+    if not m:
+        return (f"graph qualia '{quale}' is not declared by s3Dgraphy "
+                f"(qualia types {reg.qualia_version}){tail}")
+    prefix = m.group(1)
+    mine = [p for p in reg.packages if p.get("prefix") == prefix]
+    if mine:
+        return (f"graph qualia '{quale}' is not declared by the package {mine[0]['name']} "
+                f"{mine[0]['version']} (prefix '{prefix}'){tail}")
+    if reg.packages:
+        return (f"graph qualia '{quale}' has the prefix '{prefix}' of no package compiled with "
+                f"({reg.packages_line()}): add its folder with --with{tail}")
+    return (f"graph qualia '{quale}' is a community package's (prefix '{prefix}'): a package's "
+            f"sheet is compiled with its package — `stratigraph-templates package-build <folder>`{tail}")
+
+
 def _check_graph(t: Template, reg: Registry, problems: List[Problem], draft: bool = False) -> None:
     for f in t.fields:
         g = f.graph
@@ -308,13 +331,7 @@ def _check_graph(t: Template, reg: Registry, problems: List[Problem], draft: boo
             )
         if g.qualia and g.qualia not in reg.qualia:
             near = sorted(q for q in reg.qualia if str(g.qualia)[:4].lower() in q.lower())[:6]
-            problems.append(
-                Problem(
-                    where,
-                    f"graph qualia '{g.qualia}' is not declared by s3Dgraphy "
-                    f"(qualia types {reg.qualia_version}). Near: {near}",
-                )
-            )
+            problems.append(Problem(where, _unknown_quale(reg, g.qualia, near)))
 
         # SPEC §2.4 — what tells this box's node from its siblings'
         if g.accepts:
@@ -323,9 +340,7 @@ def _check_graph(t: Template, reg: Registry, problems: List[Problem], draft: boo
                                                f"its rows may declare), not a {f.type}"))
             for q in g.accepts:
                 if q not in reg.qualia:
-                    problems.append(Problem(where, f"graph.accepts names qualia '{q}', which "
-                                                   f"s3Dgraphy does not declare (qualia types "
-                                                   f"{reg.qualia_version})"))
+                    problems.append(Problem(where, f"graph.accepts names {_unknown_quale(reg, q)}"))
         if g.where and g.verdict != "node":
             problems.append(Problem(where, "graph.where says what the NODE of a 'node' verdict "
                                            "carries; this verdict has no node"))

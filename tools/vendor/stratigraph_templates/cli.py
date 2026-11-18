@@ -16,6 +16,7 @@ from .render import RenderError, VocabTrace, sheet_html, write_pdf
 from .validate import ValidationError, blocked_fields, draft_undecided, validate_template
 from .vocab import Vocabularies, VocabularyError
 from .xsd_extract import extract_xsd
+from .packages import PackageError
 from . import idai_extract
 
 
@@ -239,6 +240,37 @@ def cmd_registry_snapshot(args) -> int:
     return 0
 
 
+def cmd_package_build(args) -> int:
+    """MICRO-PL11 (W8) · the sheets of a community package, compiled against the
+    core snapshot + the package's overlay, written where its manifest says."""
+    from .packages import build_package
+
+    reg = _registry(args)
+    vocab = _vocab()
+    pkg, results, oreg = build_package(args.package, reg, vocab, with_packages=args.with_packages or [],
+                                 write=not args.check)
+    print(oreg.provenance())
+    for note in pkg.notes:
+        print(f"  · {note}")
+    if not results:
+        print(f"{pkg.label()}: no forms[] — nothing to compile")
+    bad = 0
+    for r in results:
+        if r.error:
+            bad += 1
+            print(f"✗ {r.id} does not compile", file=sys.stderr)
+            for line in r.error.splitlines()[1:] or [r.error]:
+                print(f"  {line}", file=sys.stderr)
+            continue
+        print(f"✓ {r.id} → {r.path} ({r.what})")
+        print(f"    definition {r.digest}")
+        print(f"    file       {r.file_digest}")
+        if not r.stamped:
+            print(f"    the manifest's forms[].digest says {r.manifest_digest or '(nothing)'}"
+                  f"{' (--check: not stamped)' if args.check else ''}")
+    return 1 if bad else 0
+
+
 def cmd_vocab(args) -> int:
     vocab = _vocab()
     if args.concept is None:
@@ -320,6 +352,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = sub.add_parser("registry-snapshot", help="record what s3Dgraphy declares today")
     p.set_defaults(func=cmd_registry_snapshot)
 
+    p = sub.add_parser("package-build",
+                       help="compile a community package's forms (core snapshot + the package's overlay)")
+    p.add_argument("package", help="the package's folder (em-extension.toml or profile.json)")
+    p.add_argument("--with", dest="with_packages", action="append", metavar="FOLDER",
+                   help="a package this one requires, laid over the core too (repeatable)")
+    p.add_argument("--check", action="store_true", help="compile and say, write nothing")
+    p.set_defaults(func=cmd_package_build)
+
     p = sub.add_parser("vocab", help="list schemes, or resolve a concept label")
     p.add_argument("--scheme")
     p.add_argument("--concept")
@@ -331,7 +371,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return args.func(args)
     except (ValidationError, RenderError, VocabularyError, MissingLabel, RegistryUnavailable,
             RegistryDivergence, CompileError, FileNotFoundError,
-            idai_extract.IdaiFieldError) as exc:
+            idai_extract.IdaiFieldError, PackageError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

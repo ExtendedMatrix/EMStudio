@@ -91,8 +91,11 @@ VENDOR="$EMSTUDIO/tools/vendor"
 SHEET_ARGS=(--paths "$VENDOR" --hidden-import stratigraph_templates
             --hidden-import stratigraph_templates.loader --hidden-import stratigraph_templates.model
             --hidden-import stratigraph_templates.render --hidden-import yaml
+            --hidden-import stratigraph_templates.packages --hidden-import stratigraph_templates.compile
+            --hidden-import stratigraph_templates.vocab --hidden-import stratigraph_templates.registry
+            --hidden-import stratigraph_templates.validate
             --exclude-module weasyprint)
-echo "  · bundling 'stratigraph_templates' @ $("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["stratigraph_templates"]["commit"])' "$VENDOR/VENDORED.json") (Stampa A4 of a sheet; no WeasyPrint)"
+echo "  · bundling 'stratigraph_templates' @ $("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["stratigraph_templates"]["commit"])' "$VENDOR/VENDORED.json") (Stampa A4 of a sheet, the verifier of a package's sheets; no WeasyPrint)"
 
 
 # Bundle the S3 SDK (boto3) only if it is installed in the build venv, so the
