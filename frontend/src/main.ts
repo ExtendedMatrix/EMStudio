@@ -625,12 +625,14 @@ import {
   clearEmDataFilters,
 } from "./emdata";
 import { addQualiaClaim, addRow, deleteRow } from "./em-data";
+import * as SP from "./sheet-print";
 import {
   definitions as sheetDefinitions, isSheetUnit, planEdit as planSheetEdit, planRefAdd as planSheetRefAdd,
   planRefRemove as planSheetRefRemove, readUnit as readSheetUnit, recordOf as sheetRecordOf, resolveDefinition,
   sheetLanguage, studySheetChoice, STUDY_SHEET_KEY, fillCounts as sheetFillCounts, labelIn as sheetLabelIn,
   applyPlan as applySheetActs, type Plan as SheetPlan, type CompiledDef,
   planStatus as planSheetStatus, planConcept as planSheetConcept, schemeKeyLabel as sheetSchemeKeyLabel,
+  sheetLayout, visualField as sheetVisualField,
 } from "./sheet";
 import { renderSheet } from "./sheet-view";
 import { isVolatile, VOLATILE_KEY } from "./volatile";
@@ -18046,7 +18048,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 75;   // 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 76;   // 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -23934,6 +23936,8 @@ function openGeorefCard(slotId?: string | null): void {
   paintGeorefCard();
 }
 document.getElementById("btn-georef")?.addEventListener("click", () => openGeorefCard());
+// MICRO-PL002 · File ▸ Stampa schede…: the print window, on the selection or all
+document.getElementById("btn-print-sheets")?.addEventListener("click", () => openSheetPrintWindow("menu"));
 
 // ── MICRO-PL00-GEOREF-NELL-INSPECTOR (E.D., 18 Nov 2026) · the georeference ON THE OBJECT ──
 // Every object with a place in the Space shows, in its Inspector, the
@@ -37545,7 +37549,7 @@ function renderSheetInto(body: HTMLElement, _win: Win): void {
     onRefRemove: (fid: string, edge: EmEdge) => sheetRefRemove(fid, edge),
     onPick: (id: string) => select(id),
     onChoose: (id: string) => chooseSheetDefinition(id),
-    onPrint: () => { void printSheet(); },
+    onPrint: () => openSheetPrintWindow("current"),
     onStatus: (key: string) => sheetStatus(key),
     onConcept: (fid: string, value: string) => sheetConcept(fid, value),
   };
@@ -37697,31 +37701,360 @@ function followNeighbourhood(nodeId: string, from: PickFrom | null): void {
   }
 }
 
-/** The A4 recto/verso: the record read off the graph, printed by
- *  stratigraph-templates' own renderer (`render.sheet_html(mode="print")`)
- *  through the bridge — the Python is the print, as in StratiField; the page
- *  shows it, the system prints it, WeasyPrint (when the bridge has it) saves
- *  the PDF. */
-async function printSheet(): Promise<void> {
-  const now = sheetReadingNow();
-  if (!now || !store) return;
-  const unit = store.node(now.unitId);
-  const record = sheetRecordOf(now.def, now.reading);
-  let answer: { html?: string; pdf_b64?: string; pages?: number; pdf?: boolean; why?: string; error?: string };
-  try {
-    const res = await fetch(`${await bridgeUrl()}/sheet/render`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ definition: now.def, record, lang: now.lang, pdf: true }),
-    });
-    answer = await res.json();
-    if (!res.ok) throw new Error(answer.error ?? `HTTP ${res.status}`);
-  } catch (e) {
-    toast(t("sheet.printNoBridge", { why: String((e as Error).message ?? e) }));
-    return;
-  }
-  openSheetPrint(String(unit?.name ?? now.unitId), now.def, answer);
+// ─────────────────────────────────────────── MICRO-PL002 · «Stampa schede»
+//
+// E.D. (18 Nov 2026): «Print A4…» printed ONE sheet and nothing said how to
+// print more. Now «Print A4…» (the Scheda window) and File ▸ «Stampa schede…»
+// open this window: WHAT to print (criteria that combine — `sheet-print.ts`),
+// the count before printing, the order, recto+verso or recto, one PDF or one
+// per sheet; then the records go to the bridge a batch at a time (progress,
+// Interrompi), and stratigraph-templates' renderer draws every A4 — the same
+// print as before, as many times as asked.
+
+type SheetPrintScope = "current" | "selection" | "all";
+/** what stays from one opening to the next (this session): how, not which */
+let skpLast: Pick<SP.PrintCriteria, "order" | "sides" | "output"> = { order: "number", sides: "both", output: "one" };
+/** the run in progress (render or read), stopped by «Interrompi» */
+let skpRun: { cancelled: boolean } | null = null;
+/** records per request to the bridge: the bar moves, «Interrompi» answers */
+const SKP_BATCH = 20;
+
+function skpEl<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
 }
 
+function skpUnits(): SP.PrintUnit[] {
+  if (!store) return [];
+  const st = store;
+  const at = (id: string) => {
+    const r = matrixViewLayout?.positions?.[id] ?? st.doc.layout?.positions?.[id];
+    return r ? { x: r.x, y: r.y } : null;
+  };
+  return SP.printUnits(st.liveNodes(), st.liveEdges(), (n) => isSheetUnit(n), at);
+}
+
+/** The window. `from`: «Print A4…» opens it on the sheet shown («current»),
+ *  File ▸ Stampa schede… on the selection when there is one, else all. */
+function openSheetPrintWindow(from: SheetPrintScope | "menu"): void {
+  if (!store) { toast(t("sheet.noDocument")); return; }
+  const found = sheetDef().def;
+  if (!found) { toast(t("skp.noDefinition")); return; }
+  const def: CompiledDef = found;
+  const st = store;
+  const lang = sheetLanguage(def, getLocale());
+  const g = { nodes: st.liveNodes(), edges: st.liveEdges() };
+  const units = skpUnits();
+  const current = currentSheetUnit();
+  const selection = new Set([...selectedIds].filter((id) => isSheetUnit(st.node(id))));
+  let scope: SheetPrintScope = from === "current" && current ? "current"
+    : from !== "all" && selection.size ? "selection" : "all";
+  const c: SP.PrintCriteria = { ...SP.freshCriteria(), ...skpLast };
+  const sidesPerSheet = sheetLayout(def, lang).length;
+  const required = (fid: string) => !!sheetVisualField(def, fid)?.required;
+  const rs = def.recipe.unit?.record_status;
+  const nameOf = (id: string) => String(st.node(id)?.name || id);
+  const std = `${def.header.standard.authority} ${def.header.standard.code} ${def.header.standard.version}`;
+  const graphName = (() => { const sl = emtree.active(); return sl ? slotName(sl) : ""; })();
+  let pdfWhy: string | null | undefined;   // undefined = not asked yet; null = the bridge makes PDFs
+
+  document.getElementById("skp")?.remove();
+  const ov = skpEl("div", "sk-print-ov");
+  ov.id = "skp";
+  const box = skpEl("div", "skp-box");
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", t("skp.title"));
+  const head = skpEl("div", "skp-head");
+  head.append(skpEl("b", "", t("skp.title")), skpEl("span", "skp-def", `${std} · ${def.header.version}`));
+  const body = skpEl("div", "skp-body");
+  const foot = skpEl("div", "skp-foot");
+  box.append(head, body, foot);
+  ov.appendChild(box);
+
+  // ── what: the scope
+  const scopeBox = skpEl("fieldset", "skp-group skp-scope");
+  scopeBox.appendChild(skpEl("legend", "", t("skp.what")));
+  const scopes: Array<[SheetPrintScope, string, boolean]> = [
+    ["current", current ? t("skp.scopeCurrent", { name: nameOf(current) }) : t("skp.scopeCurrentNone"), !!current],
+    ["selection", t("skp.scopeSelection", { n: selection.size }), selection.size > 0],
+    ["all", t("skp.scopeAll", { n: units.length }), true],
+  ];
+  for (const [key, label, on] of scopes) {
+    const l = skpEl("label", "skp-opt");
+    const r = document.createElement("input");
+    r.type = "radio"; r.name = "skp-scope"; r.value = key; r.checked = key === scope; r.disabled = !on;
+    r.dataset.skpScope = key;
+    r.addEventListener("change", () => { if (r.checked) { scope = key; refresh(); } });
+    l.append(r, document.createTextNode(` ${label}`));
+    scopeBox.appendChild(l);
+  }
+  body.appendChild(scopeBox);
+
+  // ── the filters: lists of choices with their counts (in the whole graph)
+  const lists = skpEl("div", "skp-lists");
+  body.appendChild(lists);
+  const tally = (keys: (u: SP.PrintUnit) => string[]) => {
+    const m = new Map<string, number>();
+    for (const u of units) for (const k of keys(u)) m.set(k, (m.get(k) ?? 0) + 1);
+    return m;
+  };
+  const checkList = (key: string, legend: string, items: Array<{ id: string; label: string; title?: string; n?: number }>,
+                     chosen: string[], hint?: string): void => {
+    const fs = skpEl("fieldset", "skp-group");
+    fs.dataset.skpList = key;
+    fs.appendChild(skpEl("legend", "", legend));
+    if (!items.length) fs.appendChild(skpEl("div", "skp-none", hint ?? t("skp.noneInGraph")));
+    const scroll = skpEl("div", "skp-scroll");
+    for (const it of items) {
+      const l = skpEl("label", "skp-opt");
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.value = it.id; cb.dataset.skpVal = it.id;
+      cb.addEventListener("change", () => {
+        const i = chosen.indexOf(it.id);
+        if (cb.checked && i < 0) chosen.push(it.id);
+        if (!cb.checked && i >= 0) chosen.splice(i, 1);
+        refresh();
+      });
+      const txt = skpEl("span", "skp-lbl", it.label);
+      l.title = it.title ?? it.label;
+      l.append(cb, txt);
+      if (it.n !== undefined) l.appendChild(skpEl("span", "skp-n", String(it.n)));
+      scroll.appendChild(l);
+    }
+    if (items.length) fs.appendChild(scroll);
+    lists.appendChild(fs);
+  };
+  const types = tally((u) => [u.type]);
+  checkList("types", t("skp.types"), [...types].sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([id, n]) => ({ id, label: id, n })), c.types);
+  const epochs = tally((u) => u.epochs);
+  const startOf = (id: string) => {
+    const v = (st.node(id)?.data as Record<string, unknown> | undefined)?.start_time;
+    const n = typeof v === "number" ? v : Number(/-?\d+/.exec(String(v ?? ""))?.[0] ?? NaN);
+    return Number.isFinite(n) ? n : Infinity;
+  };
+  checkList("epochs", t("skp.epochs"), [...epochs].sort((a, b) => startOf(a[0]) - startOf(b[0]) || nameOf(a[0]).localeCompare(nameOf(b[0])))
+    .map(([id, n]) => ({ id, label: nameOf(id), n })), c.epochs);
+  const groups = tally((u) => u.groups);
+  checkList("groups", t("skp.groups"), [...groups].sort((a, b) => nameOf(a[0]).localeCompare(nameOf(b[0]), undefined, { numeric: true }))
+    .map(([id, n]) => ({ id, label: nameOf(id), title: `${nameOf(id)} · ${String(st.node(id)?.node_type ?? "")}`, n })), c.groups);
+  checkList("states", t("skp.states"), (["full", "gaps", "todo"] as SP.SheetState[])
+    .map((k) => ({ id: k, label: t(`skp.state.${k}`) })), c.states as string[]);
+  if (rs?.values?.length)
+    checkList("statuses", t("skp.statuses"), [...rs.values.map((k) => ({ id: k, label: sheetSchemeKeyLabel(String(rs.scheme ?? ""), k, lang) })),
+      { id: "", label: t("skp.statusNone") }], c.statuses);
+
+  // ── numbers, words
+  const inputs = skpEl("div", "skp-inputs");
+  const field = (key: "numbers" | "text", label: string, ph: string) => {
+    const l = skpEl("label", "skp-field");
+    l.appendChild(skpEl("span", "", label));
+    const i = document.createElement("input");
+    i.type = "text"; i.placeholder = ph; i.spellcheck = false; i.dataset.skpInput = key;
+    i.addEventListener("input", () => { c[key] = i.value; refresh(); });
+    l.appendChild(i);
+    inputs.appendChild(l);
+  };
+  field("numbers", t("skp.numbers"), t("skp.numbersHint"));
+  field("text", t("skp.text"), t("skp.textHint"));
+  body.appendChild(inputs);
+
+  // ── how: order, sides, output
+  const how = skpEl("div", "skp-how");
+  const select = <K extends "order" | "sides" | "output">(key: K, label: string, opts: Array<[SP.PrintCriteria[K], string]>) => {
+    const l = skpEl("label", "skp-field");
+    l.appendChild(skpEl("span", "", label));
+    const s = document.createElement("select");
+    s.dataset.skpSelect = key;
+    for (const [v, txt] of opts) { const o = document.createElement("option"); o.value = String(v); o.textContent = txt; s.appendChild(o); }
+    s.value = String(c[key]);
+    s.addEventListener("change", () => { c[key] = s.value as SP.PrintCriteria[K]; skpLast = { ...skpLast, [key]: s.value }; refresh(); });
+    l.appendChild(s);
+    how.appendChild(l);
+    return s;
+  };
+  select("order", t("skp.order"), [["number", t("skp.orderNumber")], ["epoch", t("skp.orderEpoch")], ["matrix", t("skp.orderMatrix")]]);
+  select("sides", t("skp.sides"), [["both", t("skp.sidesBoth")], ["recto", t("skp.sidesRecto")]]);
+  const outSel = select("output", t("skp.output"), [["one", t("skp.outputOne")], ["each", t("skp.outputEach")]]);
+  body.appendChild(how);
+
+  // ── the count, the file, the progress, the buttons
+  const count = skpEl("div", "skp-count");
+  count.dataset.skpCount = "";
+  const file = skpEl("div", "skp-file");
+  const note = skpEl("div", "skp-note");
+  const prog = skpEl("div", "skp-progress");
+  prog.hidden = true;
+  const bar = document.createElement("progress");
+  const progTxt = skpEl("span", "");
+  prog.append(bar, progTxt);
+  const btns = skpEl("div", "skp-btns");
+  const go = skpEl("button", "primary", t("skp.print"));
+  go.dataset.skpAct = "print";
+  const stop = skpEl("button", "", t("skp.stop"));
+  stop.dataset.skpAct = "stop";
+  stop.hidden = true;
+  const close = skpEl("button", "", t("sheet.close"));
+  close.dataset.skpAct = "close";
+  btns.append(stop, close, go);
+  foot.append(count, file, note, prog, btns);
+
+  const progress = (txt: string, i: number, n: number) => {
+    prog.hidden = false; bar.max = Math.max(1, n); bar.value = i;
+    progTxt.textContent = txt;
+  };
+  const endProgress = () => { prog.hidden = true; stop.hidden = true; skpRun = null; };
+  const busy = () => !!skpRun;
+
+  /** read the sheets the state/status filter needs, a few at a time */
+  const readStates = async (list: SP.PrintUnit[]): Promise<boolean> => {
+    const todo = list.filter((u) => u.state === undefined);
+    if (!todo.length) return true;
+    const run = (skpRun = { cancelled: false });
+    stop.hidden = false;
+    for (let i = 0; i < todo.length; i++) {
+      const u = todo[i];
+      const r = readSheetUnit(def, g, u.id, lang);
+      u.state = SP.sheetStateOf(r.fields.values(), required);
+      u.status = r.status ? r.status.key : null;
+      if (i % 25 === 24) {
+        progress(t("skp.reading", { i: i + 1, n: todo.length }), i + 1, todo.length);
+        await new Promise((res) => setTimeout(res, 0));
+        if (run.cancelled) { endProgress(); return false; }
+      }
+    }
+    endProgress();
+    return true;
+  };
+
+  const baseSet = (): ReadonlySet<string> =>
+    scope === "current" ? new Set(current ? [current] : []) : scope === "selection" ? selection : new Set();
+  const chosen = (): SP.PrintUnit[] =>
+    SP.selectUnits(units, { ...c, scope: scope === "all" ? "all" : "selection" }, baseSet());
+  let reading = false;
+  function refresh(): void {
+    if (SP.needsReading(c) && !reading) {
+      const pool = SP.selectUnits(units, { ...c, states: [], statuses: [], scope: scope === "all" ? "all" : "selection" }, baseSet());
+      if (pool.some((u) => u.state === undefined)) {
+        reading = true;
+        count.textContent = t("skp.readingSay");
+        void readStates(pool).then(() => { reading = false; refresh(); });
+        return;
+      }
+    }
+    if (reading) return;
+    const list = chosen();
+    const pages = SP.pageCount(list.length, c.sides, sidesPerSheet);
+    count.textContent = list.length ? `${tn("skp.countSheets", list.length)}, ${tn("skp.countPages", pages)}` : t("skp.countNone");
+    count.dataset.skpN = String(list.length);
+    count.dataset.skpPages = String(pages);
+    const now = new Date();
+    file.textContent = c.output === "one"
+      ? t("skp.fileOne", { name: SP.printFileName(std, graphName, now) })
+      : t("skp.fileEach", { name: SP.printFileName(std, graphName, now, list[0]?.name ?? "US1") });
+    note.textContent = c.output === "each" && pdfWhy ? t("skp.eachNeedsPdf", { why: pdfWhy }) : "";
+    go.disabled = !list.length || busy() || (c.output === "each" && !!pdfWhy);
+  }
+
+  /** does this bridge make PDFs (WeasyPrint)? asked once, with nothing to draw */
+  const askPdf = async () => {
+    try {
+      const res = await fetch(`${await bridgeUrl()}/sheet/render`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ definition: def, records: [], lang, pdf: true }),
+      });
+      const a = await res.json() as { why?: string; error?: string; htmls?: unknown };
+      pdfWhy = res.ok && Array.isArray(a.htmls) ? (a.why ?? null) : (a.error ?? `HTTP ${res.status}`);
+    } catch (e) { pdfWhy = String((e as Error).message ?? e); }
+    // the desktop's sidecar has no WeasyPrint on purpose (MICRO-I): said so
+    if (pdfWhy && isTauri()) pdfWhy = t("skp.desktopNoPdf");
+    box.dataset.skpPdf = pdfWhy ? "no" : "yes";
+    if (pdfWhy && c.output === "each") outSel.title = pdfWhy;
+    refresh();
+  };
+
+  const finish = () => { if (skpRun) skpRun.cancelled = true; ov.remove(); };
+  close.addEventListener("click", finish);
+  stop.addEventListener("click", () => { if (skpRun) skpRun.cancelled = true; });
+  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); if (skpRun) skpRun.cancelled = true; else finish(); } });
+  go.addEventListener("click", () => { void runPrint(); });
+
+  async function runPrint(): Promise<void> {
+    const list = chosen();
+    if (!list.length || busy()) return;
+    const run = (skpRun = { cancelled: false });
+    stop.hidden = false; go.disabled = true;
+    const now = new Date();
+    const htmls: string[] = [], pdfs: Array<{ name: string; b64: string }> = [];
+    try {
+      const parts = SP.batches(list, SKP_BATCH);
+      let done = 0;
+      progress(t("skp.rendering", { i: 0, n: list.length }), 0, list.length);
+      for (const part of parts) {
+        const records = part.map((u) => sheetRecordOf(def, readSheetUnit(def, g, u.id, lang)));
+        const res = await fetch(`${await bridgeUrl()}/sheet/render`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ definition: def, records, lang, pdf: c.output === "each" }),
+        });
+        const a = await res.json() as { htmls?: string[]; pdfs?: string[]; error?: string; why?: string };
+        if (!res.ok || !Array.isArray(a.htmls)) throw new Error(a.error ?? `HTTP ${res.status}`);
+        if (c.output === "each" && !a.pdfs) throw new Error(a.why ?? t("skp.desktopNoPdf"));
+        htmls.push(...a.htmls);
+        if (a.pdfs) a.pdfs.forEach((b64, i) => pdfs.push({ name: SP.printFileName(std, graphName, now, part[i].name), b64 }));
+        done += part.length;
+        progress(t("skp.rendering", { i: done, n: list.length }), done, list.length);
+        if (run.cancelled) { toast(t("skp.stopped", { i: done, n: list.length })); return; }
+      }
+    } catch (e) {
+      toast(t("sheet.printNoBridge", { why: String((e as Error).message ?? e) }));
+      return;
+    } finally {
+      endProgress();
+      refresh();
+    }
+    if (c.output === "one") {
+      const name = SP.printFileName(std, graphName, now).replace(/\.pdf$/, "");
+      const html = SP.joinSheets(htmls, c.sides, name);
+      logInfo(t("skp.logged", { n: list.length, pages: SP.pageCount(list.length, c.sides, sidesPerSheet), name }));
+      ov.remove();
+      openSheetPrint(list.length === 1 ? list[0].name : t("skp.previewMany", { n: list.length }), def,
+                     { html, pages: SP.pageCount(list.length, c.sides, sidesPerSheet) });
+      return;
+    }
+    await saveSheetPdfs(pdfs);
+  }
+
+  ov.tabIndex = -1;
+  document.body.appendChild(ov);
+  refresh();
+  ov.focus();
+  void askPdf();
+}
+
+/** «Un PDF per scheda»: the desktop asks a folder once and writes them there;
+ *  the web downloads them one by one. */
+async function saveSheetPdfs(pdfs: Array<{ name: string; b64: string }>): Promise<void> {
+  if (!pdfs.length) return;
+  const bytesOf = (b64: string) => Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+  if (isTauri()) {
+    const dir = await pickFolder();
+    if (!dir) return;
+    const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+    for (const p of pdfs) await writeBinaryFile(`${dir.replace(/[\\/]+$/, "")}${sep}${p.name}`, bytesOf(p.b64));
+    toast(t("skp.savedEach", { n: pdfs.length, dir }));
+  } else {
+    for (const p of pdfs) downloadBlob(new Blob([bytesOf(p.b64)], { type: "application/pdf" }), p.name, "application/pdf");
+    toast(t("skp.downloadedEach", { n: pdfs.length }));
+  }
+}
+
+/** The A4s, shown and printed: stratigraph-templates' renderer through the
+ *  bridge — the Python is the print, as in StratiField; the page shows it, the
+ *  system prints it (its «Save as PDF» is the PDF: the file takes the page's
+ *  title, «template · graph · date»), WeasyPrint (when the bridge has it)
+ *  saves the PDF of one sheet. */
 function openSheetPrint(name: string, def: CompiledDef,
                         answer: { html?: string; pdf_b64?: string; pages?: number; why?: string }): void {
   document.getElementById("sk-print")?.remove();
@@ -37740,7 +38073,10 @@ function openSheetPrint(name: string, def: CompiledDef,
   // MICRO-I-STAMPA-NEL-DESKTOP · the desktop's sidecar has no WeasyPrint, on
   // purpose: there the PDF is the print dialog's, and the line says how
   info.textContent = answer.pdf_b64 ? t("sheet.printPages", { n: String(answer.pages ?? "?") })
-    : isTauri() ? t("sheet.printPdfDesktop") : t("sheet.printNoPdf", { why: answer.why ?? "" });
+    : isTauri() ? t("sheet.printPdfDesktop")
+    : answer.why ? t("sheet.printNoPdf", { why: answer.why })
+    // MICRO-PL002 · a batch: its pages, and how the PDF is made
+    : t("skp.previewInfo", { n: String(answer.pages ?? "?") });
   bar.appendChild(info);
   const frame = document.createElement("iframe");
   frame.className = "sk-print-frame";

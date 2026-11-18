@@ -91,7 +91,9 @@ const FILE_ORDER = ["new", "newProject", "openProject", "reorderProject", "close
   // MICRO-E p.1 · «Porta dentro…», the one door, before Import
   "door", "georef",
   "import▸", "import/importGraphml", "import/importMapping",
-  "export▸", "export/exportSvg", "export/exportTtl", "integrate", "relocate", "collect", "cleanFile", "—",
+  "export▸", "export/exportSvg", "export/exportTtl",
+  // MICRO-PL002 · «Stampa schede…», after Export
+  "printSheets", "integrate", "relocate", "collect", "cleanFile", "—",
   "createRoom", "bringIntoRoom", "consolidate", "composeFromGraph"];
 
 for (const platform of ["web", "mac", "win", "linux"]) {

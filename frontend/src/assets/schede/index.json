@@ -2,7 +2,7 @@
  "format": "emstudio/schede-vendored",
  "format_version": "1",
  "from": {
-  "commit": "d1b81ba",
+  "commit": "a1893f3",
   "repository": "stratigraph-templates"
  },
  "schede": {
@@ -31,7 +31,7 @@
   }
  },
  "vocabularies_from": {
-  "commit": "7dbb59d",
+  "commit": "83ee923",
   "repository": "ExtendedMatrix/vocabularies"
  }
 }

@@ -12233,6 +12233,32 @@ button.uo-col { cursor: pointer; }
 .sk-print-bar { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
 .sk-print-bar .sk-print-info { flex: 1; color: var(--text-muted); font-size: 12px; }
 .sk-print-frame { flex: 1; border: 0; background: #888; }
+/* MICRO-PL002 · «Stampa schede»: what to print, how many, how */
+.skp-box { width: min(920px, 94vw); max-height: 92vh; background: var(--bg-elevated); border-radius: var(--radius-lg); display: flex; flex-direction: column; overflow: hidden; color: var(--text); font-size: 12px; }
+.skp-head { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.skp-head .skp-def { color: var(--text-muted); }
+.skp-body { flex: 1; overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.skp-group { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; margin: 0; min-width: 0; }
+.skp-group legend { padding: 0 4px; color: var(--text-muted); }
+.skp-scope { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.skp-lists { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.skp-scroll { max-height: 150px; overflow: auto; display: flex; flex-direction: column; }
+.skp-opt { display: flex; align-items: center; gap: 4px; padding: 1px 0; white-space: nowrap; min-width: 0; }
+.skp-opt .skp-lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.skp-opt .skp-n { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; padding-left: 6px; }
+.skp-none { color: var(--text-muted); font-style: italic; }
+.skp-inputs, .skp-how { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.skp-field { display: flex; flex-direction: column; gap: 2px; min-width: 200px; flex: 1; }
+.skp-field span { color: var(--text-muted); }
+.skp-foot { border-top: 1px solid var(--border); padding: 8px 12px; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: center; }
+.skp-count { font-weight: 600; font-size: 13px; }
+.skp-file, .skp-note { color: var(--text-muted); grid-column: 1; overflow-wrap: anywhere; }
+.skp-note:empty { display: none; }
+.skp-progress { grid-column: 1; display: flex; gap: 8px; align-items: center; }
+.skp-progress[hidden] { display: none; }
+.skp-progress progress { flex: 1; }
+.skp-btns { grid-column: 2; grid-row: 1 / span 4; display: flex; gap: 6px; }
+.skp-btns [hidden] { display: none; }
 /* MICRO-Q p.0 · «Applica a tutti i grafi del file…»: the summary */
 .gr-apply-all { margin-top: 6px; }
 .gr-apply-table { border-collapse: collapse; font-size: 12px; margin: 4px 0 8px; }

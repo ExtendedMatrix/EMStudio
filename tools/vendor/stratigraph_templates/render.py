@@ -14,6 +14,7 @@ template, which is how a second standard can arrive without a line of code.
 from __future__ import annotations
 
 import html
+import re
 from dataclasses import dataclass, field as dc_field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,6 +26,11 @@ ROTATED_STRIP_MM = 6.5
 #: font size of a block label, in points — the validator needs it to tell whether
 #: a rotated label fits the height of its block
 STRIP_FONT_PT = 5.2
+
+#: page geometry, millimetres (portrait): the formats a sheet may declare
+PAGE_MM = {"A4": (210.0, 297.0), "A3": (297.0, 420.0)}
+#: how far inside the printable box the sheet stops, millimetres (see _PRINT_CSS)
+PRINT_SLACK_MM = 1.5
 
 PROVENANCE_MARK = {
     "asserted": "",
@@ -302,8 +308,24 @@ def human_key(t: Template, record: Optional[Record], lang: str) -> str:
         out = pattern
         for fid in t.identity.human_key:
             out = out.replace("{" + fid + "}", str(record.values.get(fid, "") or ""))
-        return out.strip()
+        return _tidy_key(out)
     return " ".join(str(record.values.get(f, "") or "") for f in t.identity.human_key).strip()
+
+
+#: what a pattern puts between its pieces: a dash, a middle dot, a comma… (never
+#: the hyphen, which belongs to the values: «RSF-008»)
+_KEY_SEP = r"[—–·,;:/|]"
+
+
+def _tidy_key(text: str) -> str:
+    """A pattern whose fields are missing keeps no trace of them: «US 8 — ()»
+    is «US 8». Brackets left empty go, then a separator left with nothing on
+    one side, then the spaces doubled by what went."""
+    out = re.sub(r"\(\s*\)|\[\s*\]", "", text)
+    out = re.sub(r"\s+", " ", out).strip()
+    out = re.sub(rf"({_KEY_SEP})(?:\s*{_KEY_SEP})+", r"\1", out)
+    out = re.sub(rf"^(?:{_KEY_SEP}\s*)+|(?:\s*{_KEY_SEP})+$", "", out)
+    return out.strip()
 
 
 # --------------------------------------------------------------------------- CSS
@@ -356,10 +378,19 @@ body { margin: 0; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; c
 .strip.rot .txt { transform: translate(-50%, -50%) rotate(-90deg); }
 """.replace("STRIP", str(ROTATED_STRIP_MM))
 
+# The sheet stops a little INSIDE the page's printable box (PRINT_SLACK_MM of
+# padding on the right), measured in the desktop's print path (MICRO-PL002: a
+# WKWebView, NSPrintOperation, A4): WebKit clips the page at 197.5 mm, not 198 —
+# the paper is 595 × 842 whole points — and the sheet's right rule, drawn at
+# 197.9 mm, and the end of the running head fell off the paper. Not a width in
+# mm: a sheet narrower than its page box is ZOOMED by WebKit's print (×1.067
+# measured, 170 mm printed as 181) and falls off again; at 100% it is printed
+# 1:1. WeasyPrint draws the same thing, 1.5 mm narrower than before.
 _PRINT_CSS = """
-@page { size: A4; margin: MARGIN; }
-.sheet { page-break-after: always; }
-.sheet:last-of-type { page-break-after: auto; }
+@page { size: PAGE; margin: MARGIN; }
+html, body { background: #fff; }
+.sheet { padding-right: SLACKmm; page-break-after: always; break-after: page; }
+.sheet:last-of-type { page-break-after: auto; break-after: auto; }
 """
 
 _FORM_CSS = """
@@ -434,6 +465,15 @@ def _margin_css(t: Template) -> str:
     )
 
 
+def _print_css(t: Template) -> str:
+    """The @page of the sheet's own format and the slack inside it."""
+    page = (t.sheet.page if t.sheet is not None else None) or "A4"
+    if page not in PAGE_MM:
+        raise RenderError(f"unknown page format '{page}'; known: {sorted(PAGE_MM)}")
+    return (_PRINT_CSS.replace("PAGE", page).replace("MARGIN", _margin_css(t))
+            .replace("SLACK", f"{PRINT_SLACK_MM:g}"))
+
+
 # --------------------------------------------------------------------------- entry
 def sheet_html(
     t: Template,
@@ -472,7 +512,7 @@ def sheet_html(
         )
 
     css = _BASE_CSS + (
-        _PRINT_CSS.replace("MARGIN", _margin_css(t)) if mode == "print" else _FORM_CSS
+        _print_css(t) if mode == "print" else _FORM_CSS
     )
     title = f"{t.standard.authority} {t.standard.code} {t.standard.version} — {human_key(t, record, lang) or t.id}"
 

@@ -43,31 +43,47 @@ def _templates():
 
 
 def render_sheet(body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    """One sheet (`record`) or a batch (`records`, MICRO-PL002: the print window
+    sends a few dozen at a time so it can say how far it is and stop between
+    two). A batch answers `htmls` (one page per record, in order) and, with
+    `pdf` and WeasyPrint here, `pdfs` (base64, one per record)."""
     try:
         loader, model, render = _templates()
     except ImportError as exc:
         return 501, {"ok": False, "error": f"stratigraph-templates is not reachable from this bridge: {exc}"}
     definition = body.get("definition")
-    rec = body.get("record") or {}
     lang = body.get("lang") or None
+    batch = isinstance(body.get("records"), list)
+    recs = body.get("records") if batch else [body.get("record") or {}]
     try:
         t = loader.template_from_compiled(definition)
-        record = model.Record(template=str(rec.get("template") or t.id),
-                              template_version=str(rec.get("template_version") or t.version),
-                              values=dict(rec.get("values") or {}))
-        html = render.sheet_html(t, record, lang=lang, mode="print")
+        htmls = []
+        for rec in recs:
+            rec = rec or {}
+            record = model.Record(template=str(rec.get("template") or t.id),
+                                  template_version=str(rec.get("template_version") or t.version),
+                                  values=dict(rec.get("values") or {}))
+            htmls.append(render.sheet_html(t, record, lang=lang, mode="print"))
     except Exception as exc:
         return 422, {"ok": False, "error": str(exc)}
-    out: Dict[str, Any] = {"ok": True, "html": html, "template": t.id, "version": t.version, "pdf": False}
+    sides = len(t.sheet.sides) if t.sheet is not None else 1
+    out: Dict[str, Any] = {"ok": True, "template": t.id, "version": t.version, "pdf": False, "sides": sides}
+    if batch:
+        out["htmls"] = htmls
+    else:
+        out["html"] = htmls[0]
     if body.get("pdf"):
         try:
             from weasyprint import HTML
         except Exception as exc:
             out["why"] = f"WeasyPrint is not installed here ({type(exc).__name__})"
         else:
-            doc = HTML(string=html).render()
+            docs = [HTML(string=h).render() for h in htmls]
             out["pdf"] = True
-            out["pages"] = len(doc.pages)
-            out["sides"] = len(t.sides)
-            out["pdf_b64"] = base64.b64encode(doc.write_pdf()).decode("ascii")
+            if batch:
+                out["pdfs"] = [base64.b64encode(d.write_pdf()).decode("ascii") for d in docs]
+                out["pages"] = [len(d.pages) for d in docs]
+            else:
+                out["pages"] = len(docs[0].pages)
+                out["pdf_b64"] = base64.b64encode(docs[0].write_pdf()).decode("ascii")
     return 200, out

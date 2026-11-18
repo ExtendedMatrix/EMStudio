@@ -138,6 +138,8 @@ export const MENUS: MenuDef[] = [
         cmd("exportSvg", "menu.svgItem", "btn-svg", { title: "menu.svgTitle" }),
         cmd("exportTtl", "menu.ttlItem", "btn-ttl", { title: "menu.ttlTitle" }),
       ] },
+      // MICRO-PL002 · the sheets printed: which ones (criteria), how many, in which order
+      cmd("printSheets", "skp.menu", "btn-print-sheets", { title: "skp.menuTitle" }),
       cmd("integrate", "container.addToProject", "btn-add-project", { title: "container.addToProjectTitle" }),
       // MICRO-PERCORSI-WINDOWS p.3 · Blender's «Find Missing Files», for a study
       cmd("relocate", "fs.relocate", "btn-relocate-files", { title: "fs.relocateTitle" }),

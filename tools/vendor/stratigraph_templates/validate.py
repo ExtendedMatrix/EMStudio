@@ -17,14 +17,12 @@ from typing import Dict, List, Optional, Set
 
 from .model import EDGE_DIRECTIONS, FIELD_TYPES, GRAPH_VERDICTS, SEMVER_PATTERN, Template
 from .registry import Registry, registry
-from .render import STRIP_FONT_PT
+from .render import PAGE_MM, STRIP_FONT_PT
 
 UID_POLICIES = ("minted_by_creator",)
 DRAFT_VERDICT = "undecided"
 SIDE_IDS = ("recto", "verso")
 
-#: page geometry, millimetres — the A4 recto/verso invariant, checked not assumed
-PAGE_MM = {"A4": (210.0, 297.0)}
 #: room the running head takes at the top of every side
 HEAD_ALLOWANCE_MM = 9.0
 
