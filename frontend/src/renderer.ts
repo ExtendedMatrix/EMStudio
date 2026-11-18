@@ -1037,6 +1037,9 @@ export function render(
       ctx.strokeRect(n.x - m, n.y - m, n.w + 2 * m, n.h + 2 * m);
       ctx.restore();
     }
+    // MICRO-V · «senza epoca»: no epoch of its own, drawn in the lane of the
+    // nodes its edges come from — a dotted frame, finer than «fuori dal gruppo»
+    if (n.noEpoch && !scene.groupsById?.has(n.id)) strokeNoEpoch(ctx, n, vp.scale);
     const st = nodeStyle(n.node.node_type);
     // Monochrome (B/W) mode: EVERY node draws with a black BORDER only — fills,
     // text and container header tints are left untouched (nodes are told apart by
@@ -1061,6 +1064,7 @@ export function render(
         drawLabels,
         glyphFor(n.node.node_type, n.node.data as Record<string, unknown> | undefined),
       );
+      if (group.noEpoch || n.noEpoch) strokeNoEpoch(ctx, group, vp.scale);
       // MICRO-Q p.1 · a fixed group out of its epoch's band: a warning outline
       if (group.outOfLane) {
         ctx.save();
@@ -2415,4 +2419,18 @@ export function render(
       bandLabelHits.push({ id: sb.phaseId, x: chipX, y: ty - 1, w: chipW, h: chipH });
     }
   }
+}
+
+/** MICRO-V · the «senza epoca» mark: a dotted frame in the muted ink, 5 px
+ *  out (screen), around a node or a group the layout put in the lane of its
+ *  sources because it has no epoch of its own */
+function strokeNoEpoch(ctx: CanvasRenderingContext2D, r: { x: number; y: number; w: number; h: number }, scale: number): void {
+  ctx.save();
+  ctx.setLineDash([1.5 / scale, 3 / scale]);
+  ctx.lineCap = "round";
+  ctx.lineWidth = 1.6 / scale;
+  ctx.strokeStyle = canvasTheme().labelMuted;
+  const m = 5 / scale;
+  ctx.strokeRect(r.x - m, r.y - m, r.w + 2 * m, r.h + 2 * m);
+  ctx.restore();
 }

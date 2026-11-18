@@ -92,6 +92,13 @@ pub struct Layout {
     /// (survives content growth; reusable across renderers, e.g. Heriverse).
     #[serde(default)]
     pub anchors: Vec<Anchor>,
+    /// MICRO-V (E.D., 18 Nov 2026: «i Group seguono i nodi dentro») · the nodes
+    /// with no epoch of their own that the layout put in the lane of their
+    /// sources (`Inquiry::g_lane_from_sources`): what the Matrix marks «senza
+    /// epoca». An OUTPUT of the layout, not intent: never written when empty,
+    /// and the page keeps it out of the document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lane_from_sources: Vec<String>,
 }
 
 /// A rule pin: `node` is placed at `corner` of container `to` (+ dx,dy).

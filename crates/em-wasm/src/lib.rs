@@ -8,8 +8,9 @@
 //!   em_free(ptr, len)                     release a buffer from em_alloc
 //!   em_free_result(out_ptr)               release a result buffer
 //!
-//! Input: `{ graph, layout? }` — when `layout` is present its positions are
-//! used as a From-Sketch soft constraint (manual arrangements survive).
+//! Input: `{ graph, layout?, sizes_only?, reduce_crossings? }` — when `layout`
+//! is present its positions are used as a From-Sketch soft constraint (manual
+//! arrangements survive); `reduce_crossings` adds the crossing reduction (D).
 //! Output: `{ "ok": Layout }` or `{ "err": "message" }`.
 
 use em_core::{layout, model::Graph, model::Layout};
@@ -25,6 +26,11 @@ struct LayoutRequest {
     /// it correctly without the user pressing Layout.
     #[serde(default)]
     sizes_only: bool,
+    /// MICRO-V · «Disponi riducendo gli incroci»: the crossing reduction of the
+    /// inquiry (D, median sweeps + transpositions) for THIS run only — asked
+    /// for by the person, never at the opening nor in every «Disponi»
+    #[serde(default)]
+    reduce_crossings: bool,
 }
 
 #[no_mangle]
@@ -76,6 +82,7 @@ pub unsafe extern "C" fn em_layout(ptr: *const u8, len: usize) -> *mut u8 {
                 let mut opts = layout::LayoutOptions::default();
                 let sketch = req.layout.as_ref();
                 opts.use_sketch = sketch.is_some();
+                opts.inquiry.d_median_transpose = req.reduce_crossings;
                 let computed = match (req.sizes_only, sketch) {
                     // sizes only: the same engine owns the size, so there is no
                     // second implementation to diverge from

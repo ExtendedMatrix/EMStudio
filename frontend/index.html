@@ -628,6 +628,17 @@
               </select>
             </label>
           </section>
+          <!-- MICRO-V · the Matrix's layout: a drop is an order suggestion -->
+          <section data-settings-tab="general" class="settings-sect" data-sect="matrix-layout">
+            <h4 data-i18n="settings.matrixLayout">Matrix · layout</h4>
+            <label class="settings-check">
+              <input id="set-drop-as-order" type="checkbox" />
+              <span data-i18n="settings.dropAsOrder">«Layout» respects where I drop the nodes</span>
+            </label>
+            <p class="settings-hint" data-i18n="settings.dropAsOrderHint">
+              A node dropped by hand keeps its place beside the nearest node at the next «Layout». Off: the drop moves it by the same amount in the stored layout too, as before.
+            </p>
+          </section>
           <section data-settings-tab="general" class="settings-sect">
             <h4 data-i18n="settings.interaction">Interaction</h4>
             <label class="settings-check">

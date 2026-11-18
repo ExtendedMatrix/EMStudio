@@ -40,11 +40,15 @@ async function ensure(): Promise<EmCoreExports> {
 export async function computeLayout(
   graph: EmGraph,
   sketch?: EmLayout,
-  opts?: { sizesOnly?: boolean },
+  opts?: { sizesOnly?: boolean; reduceCrossings?: boolean },
 ): Promise<EmLayout> {
   const core = await ensure();
   const input = new TextEncoder().encode(
-    JSON.stringify({ graph, layout: sketch, sizes_only: !!opts?.sizesOnly }),
+    JSON.stringify({
+      graph, layout: sketch, sizes_only: !!opts?.sizesOnly,
+      // MICRO-V · «Disponi riducendo gli incroci»: D for this run only
+      ...(opts?.reduceCrossings ? { reduce_crossings: true } : {}),
+    }),
   );
   const ptr = core.em_alloc(input.length);
   new Uint8Array(core.memory.buffer, ptr, input.length).set(input);
@@ -57,7 +61,21 @@ export async function computeLayout(
     new Uint8Array(core.memory.buffer, out + 4, len),
   );
   core.em_free_result(out);
-  const result = JSON.parse(json) as { ok?: EmLayout; err?: string };
+  const result = JSON.parse(json) as { ok?: EmLayout & { lane_from_sources?: string[] }; err?: string };
   if (result.err || !result.ok) throw new Error(result.err ?? "layout failed");
+  // MICRO-V · the nodes with no epoch that em-core put in the lane of their
+  // sources: an OUTPUT, kept beside the layout and out of it (the archival
+  // layout is the document's, and this is not intent)
+  const bySources = result.ok.lane_from_sources;
+  delete result.ok.lane_from_sources;
+  if (bySources?.length) laneFromSourcesOf.set(result.ok, new Set(bySources));
   return result.ok;
 }
+
+const laneFromSourcesOf = new WeakMap<object, Set<string>>();
+/** MICRO-V · the nodes of `layout` placed in a lane by their sources (G): the
+ *  Matrix marks them «senza epoca». Empty for a layout em-core did not give. */
+export function laneFromSources(layout: EmLayout | null | undefined): ReadonlySet<string> {
+  return (layout && laneFromSourcesOf.get(layout)) || EMPTY;
+}
+const EMPTY: ReadonlySet<string> = new Set();

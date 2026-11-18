@@ -80,6 +80,12 @@ export interface InteractionSettings {
    *  licence/embargo) instead of «‹name› [resource]». OFF by default: E.D.
    *  wants to try it before keeping it (§5 of «L'Archivio ripensato»). */
   dtcHoverCard: boolean;
+  /** MICRO-V (E.D., 18 Nov 2026: «Disponi rispetta dove lascio i nodi») · a
+   *  node dropped in the Matrix is an ORDER SUGGESTION: its place is written
+   *  into the archival layout relative to the nearest node in the view (F(2)
+   *  of MICRO-R), so the next «Disponi» keeps it beside that node. Off = the
+   *  drop's delta written as it is (the behaviour before). On by default. */
+  dropAsOrder: boolean;
 }
 
 /**
@@ -234,7 +240,8 @@ const DEFAULTS: Settings = {
           accept: "everything", hubUrl: "", hubRoom: "", nodes: [] },
   developer: { showNodeIds: false },
   interaction: { edgeTooltips: true, strictDocumentNames: true,
-                 lotGapMinutes: 30, lotMinPhotos: 5, zoomToSelection: true, dtcHoverCard: false },
+                 lotGapMinutes: 30, lotMinPhotos: 5, zoomToSelection: true, dtcHoverCard: false,
+                 dropAsOrder: true },
   ai: { provider: "claude", model: "" },
   // No default host on purpose: a wrong one would look like a broken viewer.
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.

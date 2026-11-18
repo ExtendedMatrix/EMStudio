@@ -27,11 +27,21 @@
 //! those amounts only. The rest of p.2 (the pieces packed bottom-left up to the
 //! drawing's width, a group's over-wide row folded From-Sketch too) leaves this
 //! fixture identical: it has one piece per lane and no over-wide group row.
+//!
+//! Re-blessed 18 Nov 2026 (MICRO-V, the strategies of MICRO-R switched on):
+//! G (a node with no epoch in the lane of its sources) moves the fixture's two
+//! resource links `…_link` out of the trailing lane into the third lane's outer
+//! band (x 2646/2796 → 150/0, y 1802 → 1832), so that lane grows 1658 → 1752
+//! and the canvas 1850 → 1944; `geo_TempluMare`, still lane-less, follows the
+//! trailing lane down by the same 94. C acts From-Sketch only: nothing here.
+//! D is asked for («Disponi riducendo gli incroci»): its own snapshot,
+//! `templu_mare_matrix_reduce.txt`, the fixture laid out From-Sketch on its
+//! default layout with D on.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use em_core::layout::{compute, LayoutOptions};
+use em_core::layout::{compute, compute_with_sketch, LayoutOptions};
 use em_core::Graph;
 
 fn fixture_path() -> PathBuf {
@@ -40,9 +50,9 @@ fn fixture_path() -> PathBuf {
         .join("../../frontend/testdata/TempluMare.em.json")
 }
 
-fn snapshot_path() -> PathBuf {
+fn snapshot_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/snapshots/templu_mare_matrix.txt")
+        .join(format!("tests/snapshots/{name}.txt"))
 }
 
 fn load_graph() -> Graph {
@@ -66,7 +76,20 @@ fn load_graph() -> Graph {
 /// does not fail the build. `positions` is a `BTreeMap`, so the order is the
 /// map's own and needs no extra sorting.
 fn render(graph: &Graph) -> String {
-    let layout = compute(graph, &LayoutOptions::default());
+    render_layout(&compute(graph, &LayoutOptions::default()))
+}
+
+/// MICRO-V · «Disponi riducendo gli incroci»: From-Sketch on the default
+/// layout, with the crossing reduction (D) on — what the page asks for
+fn render_reduce(graph: &Graph) -> String {
+    let base = compute(graph, &LayoutOptions::default());
+    let mut opts = LayoutOptions::default();
+    opts.use_sketch = true;
+    opts.inquiry.d_median_transpose = true;
+    render_layout(&compute_with_sketch(graph, &opts, Some(&base)))
+}
+
+fn render_layout(layout: &em_core::Layout) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
@@ -102,17 +125,31 @@ fn layout_is_deterministic() {
         render(&graph),
         "layout::compute is not deterministic — the snapshot cannot pin it"
     );
+    // MICRO-V · five runs with D on, identical to the byte
+    let first = render_reduce(&graph);
+    for _ in 0..4 {
+        assert_eq!(render_reduce(&graph), first, "D is not deterministic");
+    }
 }
 
 #[test]
 fn templu_mare_layout_matches_snapshot() {
     let graph = load_graph();
-    let actual = render(&graph);
-    let path = snapshot_path();
+    check_snapshot(&render(&graph), "templu_mare_matrix");
+}
+
+#[test]
+fn templu_mare_reduce_crossings_matches_snapshot() {
+    let graph = load_graph();
+    check_snapshot(&render_reduce(&graph), "templu_mare_matrix_reduce");
+}
+
+fn check_snapshot(actual: &str, name: &str) {
+    let path = snapshot_path(name);
 
     if std::env::var_os("UPDATE_LAYOUT_SNAPSHOT").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, &actual).unwrap();
+        std::fs::write(&path, actual).unwrap();
         eprintln!("re-blessed {}", path.display());
         return;
     }

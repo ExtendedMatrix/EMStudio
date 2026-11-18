@@ -692,7 +692,7 @@ import {
   type WorkspaceId,
   type WindowType,
 } from "./workspace";
-import type { CentralMode, EmDocument, EmEdge, EmNode, LayoutRect, ViewKind } from "./types";
+import type { CentralMode, EmDocument, EmEdge, EmLayout, EmNode, LayoutRect, ViewKind } from "./types";
 import {
   BridgeDownError,
   FsListError,
@@ -2976,6 +2976,18 @@ window.__EM_SCENE__ = () => {
   compactAll: () => runCompact(),
   /** MICRO-Q p.1 · «Riordina tutto» (the canvas menu's), and the Graph's hand positions */
   reflowAll: () => layoutAll(false),
+  // MICRO-V · «Disponi riducendo gli incroci»; the «senza epoca» nodes of the
+  // view; the anchor the last drop was written against (F(2)); the scene's marks
+  reflowReduce: () => layoutAll(false, true),
+  noEpochNodes: () => [...matrixNoEpoch],
+  noEpochMarked: () => (scenes.matrix?.nodes ?? []).filter((n) => n.noEpoch).map((n) => n.id),
+  dropAnchor: () => lastDropAnchor,
+  /** the box or lane lit while a node is dragged (null: the drop is a place) */
+  litDropTarget: () => (dropTarget ? (dropTarget.kind === "group" ? { kind: "group", id: dropTarget.group.id } : { kind: "lane", epoch: dropTarget.epochId }) : null),
+  /** the membership edges of a node as the graph has them (type → target) */
+  memberships: (id: string) => (store?.doc.graph.edges ?? [])
+    .filter((e) => e.source === id && MEMBERSHIP_EDGES.has(e.edge_type ?? ""))
+    .map((e) => ({ edge: e.edge_type, target: e.target })),
   graphOverride: (id: string) => graphOverrides.get(id) ?? null,
   /** MICRO-Q p.2 · the view layout's input and output (JSON), for the metrics */
   viewLayoutIO: () => JSON.stringify({ input: lastViewInput, output: matrixViewLayout }),
@@ -7446,6 +7458,7 @@ function buildScenesNow(): void {
     // horizons — but what the hand placed stays where the hand left it
     if (sc && EXPERIMENTAL) makeRoom(sc, 24, (id) => handPlaced.has(id));
     markPinnedGroups(sc);
+    markNoEpoch(sc);
     return sc;
   };
   const sharedCont = overlayShown(overlaysOf("matrix"), "continuity");
@@ -7570,14 +7583,8 @@ function buildScenesNow(): void {
 // Recompute the Matrix VIEW layout (em-core on the visible subgraph) so the
 // Matrix recompacts under a filter; clears it when nothing is hidden. Async
 // (WASM); rebuilds + redraws when done. Matrix-only.
-// True when the Matrix filter is TIGHTER than its per-view default (the user
-// actively hid a ring that's on by default) — only then do we recompact, so
-// the default Matrix keeps the archival em-core layout and pays no WASM cost.
-function matrixTighterThanDefault(): boolean {
-  const def = defaultVisibleLeaves("matrix");
-  const cur = circleState.matrix;
-  return [...def].some((k) => !cur.has(k));
-}
+// (MICRO-V p.3 · `matrixTighterThanDefault`, the filter tighter than its
+// default, is gone: it made «Disponi» lay out the view only, see `layoutAll`)
 /**
  * MICRO-PULIZIA p.5 · THE MATRIX IS LAID OUT ON WHAT IT DRAWS — always, not only
  * when a filter is tighter than the default.
@@ -7651,43 +7658,52 @@ function matrixViewMaybeStale(): void {
   matrixViewQueued = true;
   queueMicrotask(() => { matrixViewQueued = false; void refreshMatrixViewLayout(); });
 }
+/**
+ * The view layout's input: the graph the Matrix draws (see the comments) —
+ * shared by the view's own layout and «Disponi riducendo gli incroci»
+ * (MICRO-V), which reduces the crossings on what is SEEN.
+ */
+function matrixViewInput(doc: EmDocument): { v: ReturnType<typeof filteredView>; drawn: Set<string> | null; subGraph: EmDocument["graph"] } {
+  const v = filteredView({ placesUndrawn: true });
+  // MICRO-PULIZIA p.5 · the engine needs what places a unit in TIME even
+  // where the Matrix does not draw it: the epochs (lanes, not boxes) and the
+  // edges among the drawn nodes whatever their ring — `has_first_epoch` is
+  // in «other edges», hidden by default, and without it every unit fell in
+  // one lane (measured on GT16: XX sec 14 of 23, Post antiquity empty)
+  // …and ONLY what it draws as a box: a closed paradata group is a «PD»
+  // tablet on its unit, an epoch's is the lane's tag — boxes em-core would
+  // otherwise make room for (GT16: 123 of the 348 nodes it placed). The
+  // drawn set does not depend on positions, so the scene just built says it.
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · …and not the continuity nodes: the
+  // view draws each one above its unit (views/matrix.ts), so the engine must
+  // not keep a place for it (it left a 244-wide hole in a TempluMare lane)
+  const drawn = scenes.matrix
+    ? new Set(scenes.matrix.nodes.filter((n) => !n.collapsed && !isContinuityType(n.node.node_type)).map((n) => n.id)) : null;
+  const nodes = drawn ? v.nodes.filter((n) => drawn.has(n.id)) : v.nodes;
+  const ids = new Set(nodes.map((n) => n.id));
+  const epochs = doc.graph.nodes.filter((n) => !ids.has(n.id) && classOf(n.node_type) === "EpochNode");
+  for (const n of epochs) ids.add(n.id);
+  const both = (e: EmEdge): boolean => ids.has(e.source) && ids.has(e.target);
+  const kept = v.edges.filter(both);
+  const seen = new Set(kept.map((e) => `${e.source}|${e.target}|${e.edge_type}`));
+  const extra = doc.graph.edges.filter((e) => both(e)
+    && !seen.has(`${e.source}|${e.target}|${e.edge_type}`)
+    && !isRemoved(e as unknown as Record<string, unknown>));
+  const subGraph = {
+    ...doc.graph,
+    nodes: [...nodes, ...epochs],
+    edges: [...kept, ...extra],
+  } as EmDocument["graph"];
+  return { v, drawn, subGraph };
+}
 async function refreshMatrixViewLayout(): Promise<void> {
   if (!store) return;
   const sig = matrixViewSigNow();
   matrixViewSig = sig;
-  const v = filteredView({ placesUndrawn: true });
   const doc = store.doc;
   try {
-    const { computeLayout } = await import("./emcore");
-    // MICRO-PULIZIA p.5 · the engine needs what places a unit in TIME even
-    // where the Matrix does not draw it: the epochs (lanes, not boxes) and the
-    // edges among the drawn nodes whatever their ring — `has_first_epoch` is
-    // in «other edges», hidden by default, and without it every unit fell in
-    // one lane (measured on GT16: XX sec 14 of 23, Post antiquity empty)
-    // …and ONLY what it draws as a box: a closed paradata group is a «PD»
-    // tablet on its unit, an epoch's is the lane's tag — boxes em-core would
-    // otherwise make room for (GT16: 123 of the 348 nodes it placed). The
-    // drawn set does not depend on positions, so the scene just built says it.
-    // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · …and not the continuity nodes: the
-    // view draws each one above its unit (views/matrix.ts), so the engine must
-    // not keep a place for it (it left a 244-wide hole in a TempluMare lane)
-    const drawn = scenes.matrix
-      ? new Set(scenes.matrix.nodes.filter((n) => !n.collapsed && !isContinuityType(n.node.node_type)).map((n) => n.id)) : null;
-    const nodes = drawn ? v.nodes.filter((n) => drawn.has(n.id)) : v.nodes;
-    const ids = new Set(nodes.map((n) => n.id));
-    const epochs = doc.graph.nodes.filter((n) => !ids.has(n.id) && classOf(n.node_type) === "EpochNode");
-    for (const n of epochs) ids.add(n.id);
-    const both = (e: EmEdge): boolean => ids.has(e.source) && ids.has(e.target);
-    const kept = v.edges.filter(both);
-    const seen = new Set(kept.map((e) => `${e.source}|${e.target}|${e.edge_type}`));
-    const extra = doc.graph.edges.filter((e) => both(e)
-      && !seen.has(`${e.source}|${e.target}|${e.edge_type}`)
-      && !isRemoved(e as unknown as Record<string, unknown>));
-    const subGraph = {
-      ...doc.graph,
-      nodes: [...nodes, ...epochs],
-      edges: [...kept, ...extra],
-    } as EmDocument["graph"];
+    const { computeLayout, laneFromSources } = await import("./emcore");
+    const { v, drawn, subGraph } = matrixViewInput(doc);
     // MICRO-Q p.2 · what em-core is given, for a probe that measures the layout
     lastViewInput = { graph: subGraph, layout: doc.layout ?? null };
     // seed with the archival layout (From-Sketch) so kept nodes barely move
@@ -7710,8 +7726,10 @@ async function refreshMatrixViewLayout(): Promise<void> {
       }
     }
     matrixViewLayout = out;
+    matrixNoEpoch = laneFromSources(out);
   } catch {
     matrixViewLayout = null; // fall back to archival on failure
+    matrixNoEpoch = new Set();
   }
   // MICRO-STANZA-POSIZIONI · the view of the door's layout is here: the room's
   // positions arrive on it (they rebuild the scene themselves)
@@ -14721,12 +14739,21 @@ function dropOptionsFor(primary: string): Omit<DropOptions, "alt"> {
   return { forbidden, own, accepts };
 }
 
-function liveDropTarget(wx: number, wy: number, alt: boolean): DropTarget | null {
+function liveDropTarget(wx: number, wy: number, alt: boolean, shift = false): DropTarget | null {
   const s = scene();
   if (!s || !dragDropOpts) return null;
-  const t = dropTargetAt(s, wx, wy, { ...dragDropOpts, alt });
+  // MICRO-V p.2 (E.D., 18 Nov 2026) · a box is joined ONLY with Shift held at
+  // the release: without it the drop over a VSF/US/activity is a place, and
+  // nothing in the graph changes (USV158 dropped under USV145, inside VSF142's
+  // box, stays `is_in_activity VAct.04`). The lane under the point is the target
+  const t = dropTargetAt(s, wx, wy, { ...dragDropOpts, alt: alt || !shift });
   // MICRO-Q p.1 · a group's drag never takes a lane: it is a move (no lane lit)
   return t?.kind === "lane" && dragIsGroupMove ? null : t;
+}
+/** MICRO-V p.2 · what a drop target is compared against: a group with the
+ *  group under the press, a lane with the lane under the press */
+function dropChanges(t: DropTarget | null): boolean {
+  return !!t && !sameTarget(t, t.kind === "group" ? dragStartTarget : dragStartLane);
 }
 
 /** Membership moves of a drop into a group (D2 inverse); returns how many. */
@@ -14797,6 +14824,7 @@ function settleDropped(
 ): void {
   const st = store!;
   const groupIds = [primary, ...members];
+  droppingNow = new Set(dropped.keys());
   // MICRO-LAB bande-3 · what the hand drops, «making room» never moves again
   if (EXPERIMENTAL) st.markHandPlaced(groupMove ? [primary] : [...dropped.keys()]);
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · in a soloing the drop IS the place, in
@@ -14912,6 +14940,15 @@ function groupDescendants(groupId: string): string[] {
       if (m !== groupId && !acc.includes(m)) { acc.push(m); stack.push(m); }
   }
   return acc;
+}
+
+/** MICRO-V · the nodes em-core put in the lane of their sources because they
+ *  have no epoch of their own (G): marked «senza epoca» in the Matrix */
+let matrixNoEpoch: ReadonlySet<string> = new Set();
+function markNoEpoch(sc: Scene | null): void {
+  if (!sc || !matrixNoEpoch.size) return;
+  for (const n of sc.nodes) if (matrixNoEpoch.has(n.instanceOf ?? n.id)) n.noEpoch = true;
+  for (const g of sc.groups ?? []) if (matrixNoEpoch.has(g.id)) g.noEpoch = true;
 }
 
 /** MICRO-Q p.1 · the groups of the scene fixed by the hand, and the warning of
@@ -15468,12 +15505,12 @@ function freePlaceInBand(s: Scene, id: string, sn: { x: number; y: number; w: nu
 
 /** The release of a node drag: reassign (if the target changed) and place, as
  *  ONE undoable step, then say what happened with an «Annulla» at hand. */
-function commitNodeDrag(wx: number, wy: number, alt: boolean): void {
+function commitNodeDrag(wx: number, wy: number, alt: boolean, shift = false): void {
   const st = store;
   const s = scene();
   if (!st || !s || !dragMoving || !dragNodeId) return;
-  const drop = liveDropTarget(wx, wy, alt);
-  const reassign = drop && !sameTarget(drop, dragStartTarget) ? drop : null;
+  const drop = liveDropTarget(wx, wy, alt, shift);
+  const reassign = dropChanges(drop) ? drop : null;
   const dropped = new Map<string, { x: number; y: number }>();
   for (const id of dragMoving.nodes.keys()) {
     const n = s.byId.get(id);
@@ -15489,10 +15526,40 @@ function commitNodeDrag(wx: number, wy: number, alt: boolean): void {
   slideSuppressed++;
   try {
     st.batch(() => {
+      // MICRO-V p.2 · Shift held at the release: the membership changes (a box
+      // joined, or the own box left), said with what it was, in this ONE step
+      const mm0 = shift && !inContext() ? buildMembership(st.doc) : null;
+      const memberWord = (id: string, parent: string | null | undefined): string => {
+        if (!parent) return t("drop.noGroup");
+        const et = st.doc.graph.edges.find((e) => e.source === id && e.target === parent && MEMBERSHIP_EDGES.has(e.edge_type ?? ""))?.edge_type;
+        return `${et ?? "∈"} ${String(st.node(parent)?.name ?? parent)}`;
+      };
       if (reassign?.kind === "group") {
+        const was = mm0 && ids.length === 1 ? memberWord(ids[0], mm0.primaryOf.get(ids[0])) : null;
         const n = dropIntoGroup(ids, reassign.group.id);
-        if (n) message = `${names(ids)} → ${reassign.group.title}`;
-      } else if (reassign?.kind === "lane" && !dragIsGroupMove) {
+        if (n) {
+          const now = ids.length === 1 ? memberWord(ids[0], reassign.group.id) : reassign.group.title;
+          message = was ? t("drop.memberChanged", { names: names(ids), was, now }) : `${names(ids)} → ${reassign.group.title}`;
+        }
+      } else if (mm0 && !dragIsGroupMove) {
+        // Shift and no box to join: out of its own box, when dropped outside it
+        // (D2, «trascina con Shift per staccare», now decided at the release)
+        const out: string[] = [];
+        let from = "";
+        for (const id of ids) {
+          const c = mm0.primaryOf.get(id);
+          const box = c ? s.groupsById?.get(c) : undefined;
+          if (!c || !box || box.folded) continue;
+          const at = s.byId.get(id);
+          const cx = at ? at.x + at.w / 2 : wx, cy = at ? at.y + at.h / 2 : wy;
+          if (cx >= box.x && cx <= box.x + box.w && cy >= box.y && cy <= box.y + box.h) continue;
+          if (!from) from = memberWord(id, c);
+          st.removeFromGroup(id, c, at ? { x: at.x, y: at.y, w: at.w, h: at.h } : undefined);
+          out.push(id);
+        }
+        if (out.length) message = t("drop.memberChanged", { names: names(out), was: from, now: t("drop.noGroup") });
+      }
+      if (reassign?.kind === "lane" && !dragIsGroupMove) {
         // MICRO-Q p.1 · a GROUP dragged into another band is MOVED, not
         // re-dated: it stays fixed there and its border says it left its
         // epoch's band (E.D.: «lo spostamento è permesso»); its epoch changes
@@ -15524,6 +15591,8 @@ function endNodeDrag(): void {
   dragMoving = null;
   dragDropOpts = null;
   dragStartTarget = null;
+  dragStartLane = null;
+  dragLastWorld = null;
   dropTarget = null;
   // MICRO-STANZA-POSIZIONI · the room's frames held during the drag
   if (heldLayout.length) releaseHeldLayout();
@@ -16962,8 +17031,12 @@ function openAddMenu(
     });
   // SHIFT-A fase 3 · the right-click on empty space ends with the Layout of
   // today, under its new name
-  if (opts.reflowAll)
+  if (opts.reflowAll) {
     extra.push({ key: "reflow-all", label: t("ctx.reflowAll"), run: () => void layoutAll(false) });
+    // MICRO-V · beside it, the crossing reduction asked for (Matrix only)
+    if (view === "matrix")
+      extra.push({ key: "reflow-reduce", label: t("menu.relayoutReduce"), run: () => void layoutAll(false, true) });
+  }
   const linkedAll = [...chain, ...ornaments].map(linkEntry);
   if (opts.linkedOnly) {
     showAddMenu({
@@ -20862,6 +20935,7 @@ function openSettings(section?: string): void {
   { const el = document.getElementById("set-experimental") as HTMLInputElement | null; if (el) el.checked = experimentalStored(); }
   setEdgeTips.checked = s.interaction.edgeTooltips;
   { const el = document.getElementById("set-dtc-hover-card") as HTMLInputElement | null; if (el) el.checked = !!s.interaction.dtcHoverCard; }
+  { const el = document.getElementById("set-drop-as-order") as HTMLInputElement | null; if (el) el.checked = s.interaction.dropAsOrder !== false; }
   setStrictDocNames.checked = s.interaction.strictDocumentNames;
   (document.getElementById("set-lot-gap") as HTMLInputElement).value = String(s.interaction.lotGapMinutes);
   (document.getElementById("set-lot-min") as HTMLInputElement).value = String(s.interaction.lotMinPhotos);
@@ -21270,6 +21344,7 @@ settingsModal.addEventListener("click", (e) => {
     interaction: {
       edgeTooltips: setEdgeTips.checked,
       dtcHoverCard: !!(document.getElementById("set-dtc-hover-card") as HTMLInputElement | null)?.checked,
+      dropAsOrder: (document.getElementById("set-drop-as-order") as HTMLInputElement | null)?.checked ?? true,
       strictDocumentNames: setStrictDocNames.checked,
       lotGapMinutes: Number((document.getElementById("set-lot-gap") as HTMLInputElement)?.value) || 30,
       lotMinPhotos: Number((document.getElementById("set-lot-min") as HTMLInputElement)?.value) || 5,
@@ -59749,6 +59824,20 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   // bar, «Uniform spellings…» is in Tools; in the Matrix (and the DTC, the
   // Graphs paradata) the menu is empty and is not drawn.
   graph: [
+    // MICRO-V (E.D., 18 Nov 2026) · the Matrix's «⋯»: «Disponi» and, beside it,
+    // «Disponi riducendo gli incroci» — the crossing reduction (D) on request,
+    // never at the opening nor in every «Disponi»
+    {
+      label: "menu.matrixLayout",
+      items: (win) => {
+        if (winMode(win) !== "matrix" || hzWin(win.id)) return [];
+        const why = (): string | null => (store ? null : t("menu.noGraph"));
+        return [
+          { label: "toolbar.layout", disabledReason: why, run: () => focusThen(win, () => void layoutAll(false)) },
+          { label: "menu.relayoutReduce", disabledReason: why, run: () => focusThen(win, () => void layoutAll(false, true)) },
+        ];
+      },
+    },
     {
       label: "Layout",
       items: (win) => {
@@ -60326,10 +60415,12 @@ async function runLayout(fresh: boolean, target: DocumentStore | null = store,
                           *  one: not a step of anybody's history */
                          initial = false,
                          /** MICRO-Q p.1 · «Riordina tutto»: the groups the hand fixed are freed */
-                         releaseGroups = false): Promise<void> {
+                         releaseGroups = false,
+                         /** MICRO-V · «Disponi riducendo gli incroci» (D, this run only) */
+                         reduceCrossings = false): Promise<ReducedCrossings | null> {
   // F4 · the store asked for, held across the awaits (see `reassertSizes`)
   const st = target;
-  if (!st) return;
+  if (!st) return null;
   // TOCCARE · a layout is the explicit «Riordina» (and what structural edits
   // ask for): the remembered re-stack is recomputed from the new positions
   if (st === store) reflowMatrix();
@@ -60348,13 +60439,100 @@ async function runLayout(fresh: boolean, target: DocumentStore | null = store,
   const layout = await perfTimeAsync("runLayout", () =>
     computeLayout(st.doc.graph, sketch),
   );
-  st.setLayout(layout, {
+  // MICRO-V · «Disponi riducendo gli incroci»: the crossings are reduced on
+  // what is SEEN — the view's graph laid out on this new archive with D — and
+  // the x of every node drawn there is written into the archive, so the view
+  // the opening computes from it (C and G, no D) finds that order again. KEPT
+  // ONLY WHEN THAT VIEW CROSSES LESS than the plain «Disponi»'s (as D keeps an
+  // order only when it crosses less). Measured in the page: D on the archive
+  // itself (the whole graph, the outer ring too) made the Basilica's view WORSE,
+  // 14 454 → 16 382; this way the v10 goes 146 → 86 and the Basilica, where the
+  // order does not carry over, keeps the plain «Disponi» (and says so).
+  let note: ReducedCrossings | null = null;
+  let chosen = layout;
+  if (reduceCrossings && st === store && view === "matrix" && !inContext()) {
+    const { subGraph } = matrixViewInput(st.doc);
+    const reduced = await perfTimeAsync("runLayout", () => computeLayout(subGraph, layout, { reduceCrossings: true }));
+    const moved = withViewX(st, layout, reduced);
+    const plain = await perfTimeAsync("runLayout", () => computeLayout(subGraph, layout));
+    const after = await perfTimeAsync("runLayout", () => computeLayout(subGraph, moved));
+    const from = viewCrossings(subGraph, plain.positions ?? {});
+    const to = viewCrossings(subGraph, after.positions ?? {});
+    note = { from, to: Math.min(from, to), kept: to < from };
+    if (to < from) chosen = moved;
+  }
+  st.setLayout(chosen, {
     ...(all ? { rearrange: (g: string) => st.node(g)?.node_type === "ParadataNodeGroup" } : {}),
     initial,
   });
   // MICRO-STANZA-POSIZIONI · the door's layout is nobody's move: every screen
   // in the room computes the same one, and none of them sends it
   if (initial) layoutSeenNow(st);
+  return note;
+}
+/** MICRO-V · what «Disponi riducendo gli incroci» did: the crossings of the view
+ *  the plain «Disponi» would give, and of the one kept */
+interface ReducedCrossings { from: number; to: number; kept: boolean }
+
+/**
+ * MICRO-V · the archival layout with the x of every node a view layout places
+ * (its y, size and everything else kept): the next view layout reads its order
+ * from there (From-Sketch: a leaf's key is its archival x, a group's its left
+ * edge). A pinned node, and what a pinned group carries, keep their Rects.
+ */
+function withViewX(st: DocumentStore, arch: EmLayout, seen: EmLayout): EmLayout {
+  const ap = arch.positions ?? {}, vp = seen.positions ?? {};
+  const keep = new Set<string>();
+  for (const id of arch.pinned ?? []) { keep.add(id); for (const m of groupDescendants(id)) keep.add(m); }
+  const positions = { ...ap };
+  for (const [id, r] of Object.entries(vp)) {
+    if (!ap[id] || keep.has(id) || classOf(st.node(id)?.node_type) === "EpochNode") continue;
+    positions[id] = { ...ap[id], x: r.x };
+  }
+  return { ...arch, positions };
+}
+/**
+ * MICRO-V · the crossings of a Matrix view as `layout_metrics` counts them
+ * (crates/em-core/examples): the drawn relations as straight segments, from
+ * the source's bottom to the target's top (side to side for the symmetric
+ * ones), membership and epoch edges left out, and an edge between a group and
+ * what it contains; two segments sharing a node do not cross.
+ */
+function viewCrossings(graph: EmDocument["graph"], pos: Record<string, LayoutRect>): number {
+  const MEMBER = new Set(["is_in_activity", "is_in_paradata_nodegroup", "is_in_location", "is_in_timebranch", "is_part_of"]);
+  const SYM = new Set(["has_same_time", "is_physically_equal_to", "equals", "bonded_to", "is_bonded_to", "contrasts_with"]);
+  const epoch = new Set(graph.nodes.filter((n) => classOf(n.node_type) === "EpochNode").map((n) => n.id));
+  const parent = new Map<string, string>();
+  for (const e of graph.edges)
+    if (MEMBER.has(e.edge_type ?? "") && !epoch.has(e.target) && !parent.has(e.source)) parent.set(e.source, e.target);
+  const anc = (a: string, b: string): boolean => {
+    for (let c = parent.get(b), k = 0; c && k < 64; c = parent.get(c), k++) if (c === a) return true;
+    return false;
+  };
+  const segs: { s: string; t: string; x0: number; y0: number; x1: number; y1: number }[] = [];
+  for (const e of graph.edges) {
+    const et = e.edge_type ?? "";
+    if (MEMBER.has(et) || epoch.has(e.source) || epoch.has(e.target) || e.source === e.target) continue;
+    const a = pos[e.source], c = pos[e.target];
+    if (!a || !c || anc(e.source, e.target) || anc(e.target, e.source)) continue;
+    segs.push(SYM.has(et)
+      ? { s: e.source, t: e.target, x0: a.x + a.w / 2, y0: a.y + a.h / 2, x1: c.x + c.w / 2, y1: c.y + c.h / 2 }
+      : { s: e.source, t: e.target, x0: a.x + a.w / 2, y0: a.y + a.h, x1: c.x + c.w / 2, y1: c.y });
+  }
+  const o = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number): number => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  let n = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const p = segs[i];
+    const pxl = Math.min(p.x0, p.x1), pxh = Math.max(p.x0, p.x1), pyl = Math.min(p.y0, p.y1), pyh = Math.max(p.y0, p.y1);
+    for (let j = i + 1; j < segs.length; j++) {
+      const q = segs[j];
+      if (q.s === p.s || q.s === p.t || q.t === p.s || q.t === p.t) continue;
+      if (Math.max(q.x0, q.x1) < pxl || Math.min(q.x0, q.x1) > pxh || Math.max(q.y0, q.y1) < pyl || Math.min(q.y0, q.y1) > pyh) continue;
+      if (o(q.x0, q.y0, q.x1, q.y1, p.x0, p.y0) * o(q.x0, q.y0, q.x1, q.y1, p.x1, p.y1) < 0
+        && o(p.x0, p.y0, p.x1, p.y1, q.x0, q.y0) * o(p.x0, p.y0, p.x1, p.y1, q.x1, q.y1) < 0) n++;
+    }
+  }
+  return n;
 }
 
 /**
@@ -60362,7 +60540,9 @@ async function runLayout(fresh: boolean, target: DocumentStore | null = store,
  * function for the toolbar button and the canvas menu, so the two cannot
  * drift. `fresh` (Alt) drops the manual arrangement.
  */
-async function layoutAll(fresh: boolean): Promise<void> {
+async function layoutAll(fresh: boolean,
+                         /** MICRO-V · «Disponi riducendo gli incroci» */
+                         reduce = false): Promise<void> {
   if (!store) return;
   btnLayout.disabled = true;
   try {
@@ -60383,16 +60563,22 @@ async function layoutAll(fresh: boolean): Promise<void> {
       buildScenes();
       draw();
       toast(t("tst.graphLayout", { name: view === "graph" ? graphAlgorithm : view }));
-    } else if (matrixTighterThanDefault()) {
-      // Matrix filtered beyond its default → recompute the VIEW layout on the
-      // visible subgraph (recompact), leaving the archival layout untouched.
-      await refreshMatrixViewLayout();
-      toast(t("tst.layoutFiltered"));
     } else {
+      // MICRO-V p.3 (E.D., 18 Nov 2026: «la persona deve poter fidarsi che ciò
+      // che vede dopo “Disponi” è ciò che ritrova dopo un gesto o una
+      // riapertura») · an EXPLICIT «Disponi» lays out the ARCHIVE, whatever the
+      // filter: one undo step, and the view is laid out again on it (its
+      // revision changed) — the same computation an opening does, so the
+      // reopened file shows what «Disponi» showed. It used to recompute only
+      // the view when the filter was tighter than the default
+      // (`matrixTighterThanDefault`): the archive kept the old order, which the
+      // hand's next gesture and every reopening read again (USV158 on the v10).
+      // The OPENING still writes nothing: it lays out the view only.
       // MICRO-Q p.1 · «Riordina tutto» frees the groups the hand fixed
       const freed = pinnedGroups();
-      await runLayout(fresh, store, true, false, true); // store.setLayout → onChange → buildScenes + draw
-      toast(fresh ? t("tst.layoutFresh") : t("tst.layoutSketch"));
+      const note = await runLayout(fresh, store, true, false, true, reduce); // store.setLayout → onChange → buildScenes + draw
+      toast(note ? t(note.kept ? "tst.layoutReduce" : "tst.layoutReduceNone", { from: String(note.from), to: String(note.to) })
+        : fresh ? t("tst.layoutFresh") : t("tst.layoutSketch"));
       if (freed.length) logInfo(t("grp.reflowedAll", { n: String(freed.length) }), freed);
     }
   } catch (e) {
@@ -60961,7 +61147,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       // (is_part_of US/USD/VSF) containers.
       dragDetachPending = false;
       dragDetachSet = [];
-      if (e.shiftKey && !inContext() && store) {
+      // MICRO-V p.2 · the membership is decided at the RELEASE (Shift held
+      // then): the old detach at the first move of a Shift-press is off
+      if (DETACH_AT_PRESS && e.shiftKey && !inContext() && store) {
         const mm = buildMembership(store.doc);
         // shift+drag detaches the WHOLE selection when dragging a selected node
         const multi = selectedIds.has(hit.id) && selectedIds.size > 1;
@@ -61004,6 +61192,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       dragDropOpts = view === "matrix" && !inContext() ? dropOptionsFor(hit.id) : null;
       dragStartTarget = dragDropOpts
         ? dropTargetAt(s, w.x, w.y, { ...dragDropOpts, alt: false })
+        : null;
+      dragStartLane = dragDropOpts
+        ? dropTargetAt(s, w.x, w.y, { ...dragDropOpts, alt: true })
         : null;
     } else if (hit && canvasOverrides() && !inContext()) {
       // Graph / DTC view: drag a node to place it (persisted as an override in
@@ -61229,8 +61420,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       }
       // the target under the pointer, drawn only when the drop would CHANGE
       // something (another lane / band, or a group to join)
-      const t = liveDropTarget(w.x, w.y, e.altKey);
-      dropTarget = t && !sameTarget(t, dragStartTarget) ? t : null;
+      const t = liveDropTarget(w.x, w.y, e.altKey, e.shiftKey);
+      dropTarget = dropChanges(t) ? t : null;
+      dragLastWorld = { x: w.x, y: w.y };
       invalidateRoutes(s);
       requestDraw();
       return;
@@ -61363,6 +61555,14 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
           w.textContent = t("grp.outOfLane", { epoch: sg.outOfLane });
           tooltip.appendChild(w);
         }
+      }
+      // MICRO-V · no epoch of its own: where it is drawn, and why
+      if (hit.noEpoch || sg?.noEpoch) {
+        const w = document.createElement("div");
+        w.className = "tt-noepoch";
+        w.dataset.noEpoch = "1";
+        w.textContent = t("mx.noEpochTip");
+        tooltip.appendChild(w);
       }
       placeTooltip(e);
       tooltip.classList.remove("hidden");
@@ -61646,7 +61846,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       // (MICRO-STANZA-POSIZIONI · and these places are newer than any frame
       // the room sent meanwhile)
       heldSkip = new Set([...dragMoving.nodes.keys(), ...dragMoving.groups.keys()]);
-      commitNodeDrag(w.x, w.y, e.altKey);
+      commitNodeDrag(w.x, w.y, e.altKey, e.shiftKey);
     }
     endNodeDrag();
     dragNodeId = null;
@@ -61855,7 +62055,19 @@ let dragMoving: {
 } | null = null;
 let dragDropOpts: Omit<DropOptions, "alt"> | null = null;
 let dragStartTarget: DropTarget | null = null;
+/** MICRO-V p.2 · the lane under the press (a drop without Shift compares with it) */
+let dragStartLane: DropTarget | null = null;
+/** MICRO-V p.2 · the last point of a node drag: Shift pressed or let go
+ *  without moving lights the box (or puts it out) at once */
+let dragLastWorld: { x: number; y: number } | null = null;
 let dropTarget: DropTarget | null = null;
+for (const type of ["keydown", "keyup"] as const)
+  window.addEventListener(type, (e) => {
+    if (e.key !== "Shift" || dragMode !== "node" || !dragMoving || !dragLastWorld) return;
+    const t = liveDropTarget(dragLastWorld.x, dragLastWorld.y, e.altKey, type === "keydown");
+    dropTarget = dropChanges(t) ? t : null;
+    requestDraw();
+  });
 let graphDragBefore: Map<string, { x: number; y: number }> | null = null;
 /** MICRO-Q p.1 · the members a group's disc carries in the Graph (at the press) */
 let graphDragMembers: string[] | null = null;
@@ -61865,6 +62077,8 @@ let dragMemberIds: string[] | null = null;
 // move (move each selected node, respecting its container)
 let dragIsGroupMove = false;
 let dragDetachPending = false; // Shift+drag a member → pull it out of its group
+/** MICRO-V p.2 · off: Shift at the release decides (`commitNodeDrag`) */
+const DETACH_AT_PRESS = false;
 // nodes to pull out of their groups on shift+drag (whole selection if multi)
 let dragDetachSet: { id: string; container: string }[] = [];
 let spaceHeld = false; // Space → pan-always gesture (see pointerdown)
@@ -62013,13 +62227,55 @@ function moveOneByDelta(
     // re-stack / sub-band shift on every frame — that shift is NOT in
     // layout.positions, so it compounds and the node runs away (worst on
     // free nodes like extractor/combiner in a lower, shifted lane).
-    store.moveNodesBy([id], ddx, ddy, checkpoint);
     // MICRO-AUTORI-LAYOUT p.2 · a filtered Matrix draws the VIEW layout: the
     // same move there, or the node went back to it until the filter changed
     const vr = matrixViewLayout?.positions?.[id];
-    if (vr && view === "matrix") matrixViewLayout!.positions![id] = { ...vr, x: vr.x + ddx, y: vr.y + ddy };
+    const nv = vr && view === "matrix" ? { ...vr, x: vr.x + ddx, y: vr.y + ddy } : null;
+    if (nv) matrixViewLayout!.positions![id] = nv;
+    // MICRO-V · F(2): the drop is an ORDER SUGGESTION — in the archive the node
+    // goes where it now is in the view RELATIVE TO THE NEAREST NODE there (the
+    // two layouts' rows and lanes differ: the same delta put USV158, dropped
+    // under USV145 in the view, right of VSF142 in the archive, and «Disponi»
+    // took it back there). Off in the Preferences: the delta, as before.
+    const at = nv && getSettings().interaction.dropAsOrder !== false ? archiveSpotNear(id, nv) : null;
+    const ar = store.doc.layout?.positions?.[id];
+    if (at && ar) store.moveNodesBy([id], at.x - ar.x, at.y - ar.y, checkpoint);
+    else store.moveNodesBy([id], ddx, ddy, checkpoint);
   }
 }
+
+/** MICRO-V · the nodes a drop is moving (excluded as anchors of each other) */
+let droppingNow: ReadonlySet<string> = new Set();
+/**
+ * MICRO-V · F(2) of MICRO-R: where a node dropped at `at` (view layout
+ * coordinates) goes in the ARCHIVAL layout — beside the nearest node of the
+ * view's lane that both layouts place, at the same offset from it:
+ * x_arch = x_view − x_view(near) + x_arch(near), and so y. Groups, epochs and
+ * the nodes moving with it are not anchors. Null: no anchor (then the delta).
+ */
+function archiveSpotNear(id: string, at: { x: number; y: number; w: number; h: number }): { x: number; y: number } | null {
+  const vp = matrixViewLayout?.positions;
+  const ap = store?.doc.layout?.positions;
+  if (!vp || !ap || !store) return null;
+  const lanes = matrixViewLayout?.swimlanes ?? [];
+  const cy = at.y + at.h / 2, cx = at.x + at.w / 2;
+  const lane = lanes.find((l) => cy >= l.y && cy < l.y + l.height);
+  let best: { d: number; near: string } | null = null;
+  for (const [nid, r] of Object.entries(vp)) {
+    if (nid === id || droppingNow.has(nid) || !ap[nid]) continue;
+    const ny = r.y + r.h / 2;
+    if (lane && (ny < lane.y || ny >= lane.y + lane.height)) continue;
+    if (isGroupLike(nid) || classOf(store.node(nid)?.node_type) === "EpochNode") continue;
+    const d = Math.hypot(r.x + r.w / 2 - cx, ny - cy);
+    if (!best || d < best.d || (d === best.d && nid < best.near)) best = { d, near: nid };
+  }
+  if (!best) return null;
+  const v = vp[best.near], a = ap[best.near];
+  lastDropAnchor = { id, near: best.near, d: best.d };
+  return { x: at.x - v.x + a.x, y: at.y - v.y + a.y };
+}
+/** MICRO-V · the last anchor a drop was written against (a probe reads it) */
+let lastDropAnchor: { id: string; near: string; d: number } | null = null;
 
 
 

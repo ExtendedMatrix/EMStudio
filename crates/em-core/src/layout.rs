@@ -65,7 +65,8 @@ pub struct LayoutOptions {
     pub group_pad: f64,
     /// the room a group's title bar takes above its first row
     pub group_header: f64,
-    /// MICRO-R · the strategies of the layout inquiry, every one OFF by default
+    /// MICRO-R · the strategies of the layout inquiry; MICRO-V · C and G on by
+    /// default (`Inquiry::app`), D on request
     pub inquiry: Inquiry,
 }
 
@@ -97,6 +98,14 @@ pub struct Inquiry {
 }
 
 impl Inquiry {
+    /// MICRO-V (E.D., 18 Nov 2026) · what the app lays out with: C (a leaf on
+    /// its neighbours' side of a group) and G (a node with no epoch in the lane
+    /// of its sources). D is asked for («Disponi riducendo gli incroci»,
+    /// `LayoutRequest.reduce_crossings`); A, B and F(3) stay off.
+    pub fn app() -> Self {
+        Inquiry { c_group_side: true, g_lane_from_sources: true, ..Inquiry::default() }
+    }
+
     /// «A,B,C,D» (any subset, any case) → the switches
     pub fn parse(s: &str) -> Self {
         let has = |c: char| s.split(|x: char| x == ',' || x == '+' || x.is_whitespace()).any(|t| t.eq_ignore_ascii_case(&c.to_string()));
@@ -138,7 +147,9 @@ impl Default for LayoutOptions {
             // group, nested ones included
             group_pad: 12.0,
             group_header: 26.0,
-            inquiry: Inquiry::default(),
+            // MICRO-V · C and G on (`Inquiry::app`); `Inquiry::default()` is
+            // every strategy off, the engine before MICRO-R
+            inquiry: Inquiry::app(),
         }
     }
 }
@@ -514,6 +525,9 @@ pub fn compute_with_sketch(
         }
     }
     // MICRO-R · G: the oldest lane among the sources of a lane-less node
+    // MICRO-V · on by default (E.D.: «i Group seguono i nodi dentro»); the
+    // nodes it placed are said in the output (`lane_from_sources`)
+    let mut by_sources = vec![false; n];
     if opts.inquiry.g_lane_from_sources {
         let skip = |t: &str| {
             membership_edge(t) || t == "has_first_epoch" || CHAIN_EDGES.contains(&t)
@@ -544,6 +558,7 @@ pub fn compute_with_sketch(
                 if let Some(l) = src_max[i] {
                     if tgt_min[i].map_or(true, |m| m >= l) {
                         lane[i] = Some(l);
+                        by_sources[i] = true;
                         changed = true;
                     }
                 }
@@ -1120,6 +1135,12 @@ pub fn compute_with_sketch(
         edge_routes: sketch.map(|s| s.edge_routes.clone()).unwrap_or_default(),
         pinned: sketch.map(|s| s.pinned.clone()).unwrap_or_default(),
         anchors: sketch.map(|s| s.anchors.clone()).unwrap_or_default(),
+        lane_from_sources: by_sources
+            .iter()
+            .enumerate()
+            .filter(|&(i, &b)| b && !hidden[i] && !spatial[i])
+            .map(|(i, _)| graph.nodes[i].id.clone())
+            .collect(),
     }
 }
 
@@ -1531,11 +1552,14 @@ mod tests {
             ],
             data: std::collections::BTreeMap::new(),
         };
-        assert_eq!(Inquiry::default(), Inquiry::parse(""), "every strategy off by default");
-        assert_eq!(LayoutOptions::default().inquiry, Inquiry::default());
+        assert_eq!(Inquiry::default(), Inquiry::parse(""), "the zero value: every strategy off");
+        // MICRO-V · the app's: C and G on, D on request, A and B off
+        assert_eq!(LayoutOptions::default().inquiry, Inquiry::parse("C,G"));
+        assert_eq!(Inquiry::app(), Inquiry::parse("C,G"));
         let p = Inquiry::parse("b, C+d");
         assert!(!p.a_median_x && p.b_beside_neighbour && p.c_group_side && p.d_median_transpose && !p.g_lane_from_sources);
         let mut opts = LayoutOptions::default();
+        opts.inquiry = Inquiry::default();
         let base = compute(&g, &opts);
         let mut sketch = base.clone();
         let v = base.positions["V"].clone();
@@ -1551,6 +1575,51 @@ mod tests {
             let again = compute_with_sketch(&g, &opts, Some(&sketch));
             assert_eq!(serde_json::to_string(&on).unwrap(), serde_json::to_string(&again).unwrap(), "{s}: deterministic");
         }
+    }
+
+    #[test]
+    fn a_node_without_epoch_takes_the_lane_of_its_sources_and_is_said() {
+        // MICRO-V · G on by default (the Basilica's «Group» nodes, reached by
+        // `generic_connection` from SF of the newest lane): the lane-less node
+        // goes to its sources' lane, not the trailing one, and the output names
+        // it (`lane_from_sources`, the Matrix's «senza epoca» mark)
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![
+                epoch("NEW", 200.0),
+                epoch("OLD", 100.0),
+                node("A", "SF"),
+                node("B", "SF"),
+                node("X", "US"),
+                node("G", "Group"),
+            ],
+            edges: vec![
+                edge("e1", "has_first_epoch", "A", "NEW"),
+                edge("e2", "has_first_epoch", "B", "NEW"),
+                edge("e3", "has_first_epoch", "X", "OLD"),
+                edge("c1", "generic_connection", "A", "G"),
+                edge("c2", "generic_connection", "B", "G"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        let mut opts = LayoutOptions::default();
+        let on = compute(&g, &opts);
+        let lane_of = |l: &Layout, id: &str| {
+            let r = &l.positions[id];
+            let cy = r.y + r.h / 2.0;
+            l.swimlanes.iter().find(|s| cy >= s.y && cy < s.y + s.height).map(|s| s.epoch_id.clone())
+        };
+        assert_eq!(lane_of(&on, "G").as_deref(), Some("NEW"), "G in its sources' lane");
+        assert_eq!(on.lane_from_sources, vec!["G".to_string()]);
+        let json = serde_json::to_string(&on).unwrap();
+        assert!(json.contains("lane_from_sources"));
+        opts.inquiry = Inquiry::default();
+        let off = compute(&g, &opts);
+        assert_ne!(lane_of(&off, "G").as_deref(), Some("NEW"), "off: the trailing lane");
+        assert!(off.lane_from_sources.is_empty());
+        assert!(!serde_json::to_string(&off).unwrap().contains("lane_from_sources"), "not written when empty");
     }
 
     #[test]

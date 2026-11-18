@@ -43,6 +43,10 @@ export interface SceneNode {
    *  paradata group by the view's implicit group: «fuori dal gruppo», a light
    *  dashed frame (`implicit-pd.ts`) */
   outside?: boolean;
+  /** MICRO-V · no epoch of its own: em-core put it in the lane of the nodes its
+   *  edges come from (G, `lane_from_sources`). Matrix only: a dotted frame,
+   *  and the tooltip says it */
+  noEpoch?: boolean;
   /** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · a continuity node (BR) drawn as its
    *  unit's: the unit, and whether it ends a real unit or extends a virtual
    *  one (continuity.ts). Placed by the view above the unit; not dragged. */
@@ -160,6 +164,8 @@ export interface SceneGroup {
   pinned?: boolean;
   /** MICRO-Q p.1 · a fixed group out of its epoch's band (Matrix): the band's label */
   outOfLane?: string | null;
+  /** MICRO-V · a group with no epoch of its own, in the lane of its sources */
+  noEpoch?: boolean;
 }
 
 export interface Scene {

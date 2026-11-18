@@ -44,14 +44,16 @@ export async function bench(name) {
   const browser = process.env.ENGINE === "webkit" ? await pw.webkit.launch()
     : await pw.chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
   const doc = JSON.parse(readFileSync(V9, "utf8"));
-  const open = async ({ width = 1552, height = 914, ws = null } = {}) => {
-    const page = await (await browser.newContext({ viewport: { width, height } })).newPage();
+  // MICRO-V · `seed`: localStorage entries the page starts with (a person's
+  // preferences); `with`: another document instead of the v9 copy
+  const open = async ({ width = 1552, height = 914, ws = null, seed = null, with: other = null } = {}) => {
+    const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })).newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
-    await page.addInitScript(() => { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "it"); sessionStorage.setItem("probe", "1"); } });
+    await page.addInitScript((seed) => { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "it"); for (const [k, v] of Object.entries(seed ?? {})) localStorage.setItem(k, v); sessionStorage.setItem("probe", "1"); } }, seed);
     await page.goto(`http://localhost:${PORT}/em/studio/${process.env.BRIDGE ? `?bridge=${encodeURIComponent(process.env.BRIDGE)}` : ""}`);
     await page.waitForFunction(() => !!window.__EM_DRAG__?.openAt, null, { timeout: 90000 });
-    await page.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [doc, V9]);
+    await page.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [other ?? doc, V9]);
     await page.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 90000 });
     if (ws) { await page.evaluate((w) => document.querySelector(`#workspace-bar .ws-tab[data-ws="${w}"]`)?.click(), ws); await page.waitForTimeout(2500); }
     return { page, errors };

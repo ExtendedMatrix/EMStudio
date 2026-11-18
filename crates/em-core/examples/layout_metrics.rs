@@ -19,7 +19,8 @@
 //! «exiled» nodes (the nearest neighbour farther than EXILE_K = 3 times the
 //! median of that distance), and the time. PROBE=USV158,… prints where those
 //! nodes went and what their edges cross. The strategies of the inquiry are
-//! switched on with STRAT=A,B,C,D (see `LayoutOptions::inquiry`).
+//! switched on with STRAT=A,B,C,D,G (see `LayoutOptions::inquiry`); MICRO-V:
+//! unset = the app's default (C,G), STRAT= (empty) = all off, the engine before.
 use em_core::layout::{compute_with_sketch, upward_edges, LayoutOptions};
 use em_core::{Graph, Layout};
 use std::collections::{BTreeMap, HashMap, HashSet};

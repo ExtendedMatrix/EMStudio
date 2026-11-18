@@ -1105,7 +1105,11 @@ fn layout_component(
             let order: Vec<usize> = if down { (1..n_ranks).collect() } else { (0..n_ranks.saturating_sub(1)).rev().collect() };
             for r in order {
                 // the barycenter of every order node of this rank
-                let mut bary: HashMap<usize, f64> = HashMap::new();
+                // MICRO-V · ordered maps: the group keys below SUM these values,
+                // and a HashMap's iteration order (seeded per process) could
+                // change the last bit of a float sum — the order, and so the
+                // layout, must be the same on every run and every machine
+                let mut bary: BTreeMap<usize, f64> = BTreeMap::new();
                 for (o, od) in ords.iter().enumerate() {
                     if od.rank != r {
                         continue;
@@ -1125,7 +1129,7 @@ fn layout_component(
                     bary.insert(o, v);
                 }
                 // a group's key at this rank: the mean of its order nodes here
-                let mut gsum: HashMap<usize, (f64, usize)> = HashMap::new();
+                let mut gsum: BTreeMap<usize, (f64, usize)> = BTreeMap::new();
                 for (&o, &v) in bary.iter() {
                     let mut c = ords[o].container;
                     while c != ROOT {
