@@ -33,7 +33,7 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "rights").items.map((i) => i.key),
     ["author", "author_ai", "license", "embargo", "inherited"], "authorship and rights: the four ornaments and the inherited");
   eq(new Set(O.OVERLAY_KEYS).size, O.OVERLAY_KEYS.length, "every overlay once");
-  eq(O.OVERLAY_KEYS.length, 50, "fifty overlays (MICRO-TESTATE-COERENTI: + RMSF and the 3D extractors, categories of «Visibilità ▾»); forty-eight: twenty-four of the graph, twenty-four of the Space (MICRO-OUTLINER-UNICO: the RMDocs, a layer of their own; (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics; MICRO-GLIFI-OVERLAY-CONTINUITA p.3: the continuity, in Time; MICRO-SERVSF-FINE-ISTANZE p.3: the instances, in Objects; MICRO-MATRIX-FASI p.3: a document's RMDoc and an epoch's RM, in 3D)");
+  eq(O.OVERLAY_KEYS.length, 51, "fifty-one overlays (MICRO-PL06 p.0: the proxies' edges, in Geometry); fifty (MICRO-TESTATE-COERENTI: + RMSF and the 3D extractors, categories of «Visibilità ▾»); forty-eight: twenty-four of the graph, twenty-four of the Space (MICRO-OUTLINER-UNICO: the RMDocs, a layer of their own; (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics; MICRO-GLIFI-OVERLAY-CONTINUITA p.3: the continuity, in Time; MICRO-SERVSF-FINE-ISTANZE p.3: the instances, in Objects; MICRO-MATRIX-FASI p.3: a document's RMDoc and an epoch's RM, in 3D)");
   eq(O.OVERLAY_GROUPS.filter((g) => g.door).map((g) => g.key), ["s3_categories"], "one group has another door: the 3D's categories («Visibilità ▾»)");
   eq(O.VISIBILITY_KEYS, ["s3_rm", "s3_tiles", "s3_rmdoc", "s3_rmsf", "s3_proxies", "s3_sketches", "s3_x3d"], "the categories of «Visibilità ▾», in its order");
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "time").items.map((i) => i.key), ["lane_pd_tag", "date_invite", "continuity"], "Time: the epoch's tag, the invitation, the continuity");
@@ -55,9 +55,14 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
     "s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch",
     "s3_rm", "s3_tiles", "s3_rmdoc", "s3_rmsf", "s3_proxies", "s3_sketches", "s3_x3d",
     "s3_proxy_wire", "s3_instances", "s3_sel_outline", "s3_gizmo",
-    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its twenty-six, in their groups (the categories first, switched in «Visibilità ▾»), and only them");
-  eq(O.OVERLAY_VALUES.map((v) => [v.key, v.def]), [["s3_opacity_proxy", 0.42], ["s3_opacity_wire", 0.9], ["s3_opacity_rm", 1]],
-     "Geometry: three sliders, at the opacities the scene used (the models' since MICRO-RIFINITURE p.6: 1, as they came)");
+    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch", "s3_proxy_edges"], "the Space: its twenty-seven, in their groups (the categories first, switched in «Visibilità ▾»), and only them (MICRO-PL06 p.0: the proxies' edges, in Geometry)");
+  eq(O.OVERLAY_VALUES.map((v) => [v.key, v.def]), [["s3_opacity_proxy", 0.42], ["s3_opacity_wire", 0.9], ["s3_opacity_rm", 1], ["s3_edge_angle", 30]],
+     "Geometry: four sliders, at the opacities the scene used (the models' since MICRO-RIFINITURE p.6: 1, as they came) and the edge angle (MICRO-PL06 p.0)");
+  // MICRO-PL06 p.0 · the edge angle's default is the rules' (em_visual_rules threed_style.defaults.edges)
+  const rulesAngle = JSON.parse(readFileSync(`${SRC}assets/em_visual_rules.json`, "utf8")).threed_style.defaults.edges.feature_angle_deg;
+  eq([rulesAngle, O.OVERLAY_VALUES.find((v) => v.key === "s3_edge_angle")], [30, { key: "s3_edge_angle", min: 1, max: 90, step: 1, def: 30, unit: "°" }],
+     "the edge angle: 1–90°, its default the rules' 30°");
+  eq(O.defaultOverlays("space").off.includes("s3_proxy_edges"), false, "the proxies' edges: on by default");
   // every label in en, it, de
   const i18n = readFileSync(`${SRC}i18n.ts`, "utf8");
   for (const k of [...O.OVERLAY_KEYS.map((x) => `ov.item.${x}`), ...O.OVERLAY_GROUPS.map((g) => `ov.group.${g.key}`),
@@ -198,6 +203,16 @@ ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without over
   eq(O.overlayValue(O.loadOverlays(null, "space"), "s3_opacity_proxy"), 0.7, "reload: the opacity remembered");
   eq(O.withValue(moved, "s3_opacity_proxy", 0.42), O.defaultOverlays("space"), "back at its default: no value kept");
   ok(!O.overlaysHideSomething(moved, "space"), "an opacity moved hides nothing");
+  // MICRO-PL06 p.0 · the edge angle: untouched = the rules' angle for every
+  // type (null), moved = the view's, back at 30 = untouched again
+  eq(O.edgeAngleOverride(O.defaultOverlays("space")), null, "the edge angle untouched: each type keeps the rules'");
+  const sharp = O.withValue(O.defaultOverlays("space"), "s3_edge_angle", 60);
+  eq(O.edgeAngleOverride(sharp), 60, "moved to 60°: the view's");
+  eq(O.edgeAngleOverride(O.withValue(sharp, "s3_edge_angle", 500)), 90, "never past 90°");
+  eq(O.edgeAngleOverride(O.withValue(sharp, "s3_edge_angle", 0)), 1, "never under 1°");
+  eq(O.withValue(sharp, "s3_edge_angle", 30), O.defaultOverlays("space"), "back at 30°: untouched, no value kept");
+  const bare = O.withOverlay(O.defaultOverlays("space"), "s3_proxy_edges", false);
+  ok(!O.overlayShown(bare, "s3_proxy_edges") && O.overlaysHideSomething(bare, "space"), "the proxies' edges off: hidden, and the menu says something is");
   mem.clear();
 }
 

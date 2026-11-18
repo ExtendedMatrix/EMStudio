@@ -76,8 +76,10 @@ try {
 } catch { console.log("  (s3Dgraphy 850c7d1 not reachable: the before/after table is skipped)"); }
 const table = [];
 if (before) {
-  // 1.6.46 (MICRO-A-PROPRIO-EREDITATO) changed one `_comment` only
-  ok(before.version === "1.6.44" && ["1.6.45", "1.6.46"].includes(rules.version), `1.6.44 → ${rules.version}`);
+  // 1.6.46 (MICRO-A-PROPRIO-EREDITATO) changed one `_comment` only, 1.6.47
+  // (MICRO-D-GIS-DOCUMENTI) the containers' block only; 1.6.48 (MICRO-PL06
+  // part 0, E.D. 18 Nov 2026) the default edge angle 1° → 30°
+  ok(before.version === "1.6.44" && ["1.6.45", "1.6.46", "1.6.47", "1.6.48"].includes(rules.version), `1.6.44 → ${rules.version}`);
   // the 1.6.44 reading, as palette.ts read it then (edges show false = the contour)
   const was = (k) => {
     const st = before.node_styles[k]?.style; const m = st?.material?.rgba_color; if (!m) return null;
@@ -108,8 +110,10 @@ if (before) {
       } else if (k === "USNt") {
         eq(edgesNow, w.edges, "USNt: its edges unchanged");
       } else {
-        // the contour the scene drew becomes the type's edges, the same lines
-        eq([w.edges.style, w.edges.angle, edgesNow.style, edgesNow.angle], ["contour", 1, "solid", 1], `${k}: contour → solid at 1°`);
+        // the contour the scene drew becomes the type's edges, in the same
+        // colour; at 30° since 1.6.48 (at 1° a proxy modelled on the survey
+        // drew nearly every triangle: MICRO-PL06 part 0)
+        eq([w.edges.style, w.edges.angle, edgesNow.style, edgesNow.angle], ["contour", 1, "solid", 30], `${k}: contour → solid at 30°`);
         ok(close(edgesNow.rgb, w.edges.rgb), `${k}: the edges in the contour's colour ${edgesNow.rgb} ≈ ${w.edges.rgb}`);
       }
     }

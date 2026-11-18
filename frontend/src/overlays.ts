@@ -58,6 +58,8 @@ export type OverlayKey =
   | "s3_navgizmo"
   | "s3_proxies"
   | "s3_proxy_wire"
+  /** MICRO-PL06 p.0 · the proxies' edges (on by default): off = only the faces' colour */
+  | "s3_proxy_edges"
   | "s3_rm"
   | "s3_tiles"
   /** MICRO-OUTLINER-UNICO · the RMDocs, a layer of their own */
@@ -90,8 +92,12 @@ export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "three
 
 /** MICRO-GIZMO-ASSI · a value of a view's overlays, not a switch: a slider of
  *  the «Geometry» group (Blender's Overlays ▸ Geometry) */
-export type OverlayValueKey = "s3_opacity_proxy" | "s3_opacity_wire" | "s3_opacity_rm";
-export interface OverlayValueItem { key: OverlayValueKey; min: number; max: number; step: number; def: number }
+export type OverlayValueKey = "s3_opacity_proxy" | "s3_opacity_wire" | "s3_opacity_rm" | "s3_edge_angle";
+export interface OverlayValueItem {
+  key: OverlayValueKey; min: number; max: number; step: number; def: number;
+  /** how the menu writes the value: a percentage (the opacities, the default) or degrees */
+  unit?: "%" | "°";
+}
 
 export interface OverlayItem {
   key: OverlayKey;
@@ -206,11 +212,18 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
   ] },
   // MICRO-GIZMO-ASSI · the opacity of the proxies, filled and in wireframe (the
   // values the scene used: 0.42 and 0.9)
-  { key: "s3_geometry", items: [], values: [
+  // MICRO-PL06 p.0 (E.D. 18 Nov 2026) · «Proxies' edges» off = the faces'
+  // colour alone; «Edge angle» overrides em_visual_rules' feature_angle_deg
+  // for this view (untouched: each type's own angle, the rules' 30°, USN 20°)
+  { key: "s3_geometry", items: [
+    { key: "s3_proxy_edges", text: "▭" },
+  ], values: [
     { key: "s3_opacity_proxy", min: 0.05, max: 1, step: 0.01, def: 0.42 },
     { key: "s3_opacity_wire", min: 0.05, max: 1, step: 0.01, def: 0.9 },
     // MICRO-RIFINITURE p.6 · the models' opacity (the data panel's «Livelli»)
     { key: "s3_opacity_rm", min: 0.05, max: 1, step: 0.01, def: 1 },
+    // def = the rules' threed_style.defaults.edges.feature_angle_deg (check-overlays compares)
+    { key: "s3_edge_angle", min: 1, max: 90, step: 1, def: 30, unit: "°" },
   ] },
 ];
 
@@ -270,6 +283,14 @@ export function overlayValue(st: OverlayState | null | undefined, key: OverlayVa
   const it = OVERLAY_VALUES.find((v) => v.key === key)!;
   const v = st?.values?.[key];
   return typeof v === "number" && Number.isFinite(v) ? Math.min(it.max, Math.max(it.min, v)) : it.def;
+}
+
+/** MICRO-PL06 p.0 · the edge angle a person set for this view, or null when
+ *  the slider is untouched: then every type keeps the angle of the rules
+ *  (a value equal to the default is stored as untouched, by `withValue`). */
+export function edgeAngleOverride(st: OverlayState | null | undefined): number | null {
+  const v = st?.values?.s3_edge_angle;
+  return typeof v === "number" && Number.isFinite(v) ? overlayValue(st, "s3_edge_angle") : null;
 }
 
 /** Move a slider. */

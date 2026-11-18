@@ -412,6 +412,9 @@ export interface SpaceSceneOptions {
   overlay?: (k: OverlayKey) => boolean;
   /** MICRO-GIZMO-ASSI · the sliders of «Geometry» (the proxies' opacity) */
   overlayValue?: (k: OverlayValueKey) => number;
+  /** MICRO-PL06 p.0 · the edge angle this view sets over the rules' (null: each
+   *  type keeps its own `feature_angle_deg`) — Overlays ▸ Geometry */
+  edgeAngle?: () => number | null;
   /** items not selectable (the Outliner's arrow), by key */
   locked?: () => ReadonlySet<string>;
   /** MICRO-RITOCCHI-CHIARI p.4 · the keys whose position is locked (the padlock):
@@ -1131,6 +1134,18 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       // MICRO-SPAZIO-3D-3 · Blender's theme: the active object's outline light
       // (#FFAA40), the other selected ones a darker orange (#F15800)
       const selColour = (item: SceneItem): number => (item.active ? SEL_ACTIVE : SEL_OTHER);
+      /** the type's feature edges of a geometry at an angle, cut by its style */
+      const typedEdges = (geom: any, th: ThreedStyle, angle: number) => {
+        const feat = new THREE.EdgesGeometry(geom, angle);
+        if (!geom.boundingBox) geom.computeBoundingBox();
+        const size = geom.boundingBox.getSize(new THREE.Vector3());
+        const pts = cutEdges(feat.getAttribute("position").array, { style: th.edges.style, size: [size.x, size.y, size.z],
+          dashRatio: th.dashRatio, gapRatio: th.gapRatio, tickRatio: th.tickRatio });
+        feat.dispose();
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+        return g;
+      };
       const outline = (geom: any, item: SceneItem, at?: any) => {
         const th = item.threed;
         // NIGHT-TAGLI-E-NEUTRE · the type's edges: the feature edges cut by the
@@ -1142,25 +1157,26 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // meshes by the centre of their geometry's bounding sphere, not by the
         // origin, and the faces write no depth — a proxy with its origin at
         // 0,0,0 keeps its fill readable (check-threed-browser measures both)
+        // MICRO-PL06 p.0 · Overlays ▸ Geometry: «Edge angle» overrides the
+        // type's angle for this view; «Proxies' edges» off hides them (a
+        // selected proxy keeps its outline: that is the selection's overlay)
         if (th?.edges.show) {
-          const feat = new THREE.EdgesGeometry(geom, th.featureAngleDeg);
-          if (!geom.boundingBox) geom.computeBoundingBox();
-          const size = geom.boundingBox.getSize(new THREE.Vector3());
-          const pts = cutEdges(feat.getAttribute("position").array, { style: th.edges.style, size: [size.x, size.y, size.z],
-            dashRatio: th.dashRatio, gapRatio: th.gapRatio, tickRatio: th.tickRatio });
-          feat.dispose();
-          const g = new THREE.BufferGeometry();
-          g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
-          const col = selOutline(item) ? selColour(item)
-            : new THREE.Color().setRGB(th.edges.rgb[0], th.edges.rgb[1], th.edges.rgb[2], THREE.LinearSRGBColorSpace);
-          // WebGL draws 1 px whatever linewidth says: `width` 1 is what the rule asks today
-          const e = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: col, linewidth: th.edges.width }));
+          const angle = opts.edgeAngle?.() ?? th.featureAngleDeg;
+          const e = new THREE.LineSegments(typedEdges(geom, th, angle), new THREE.LineBasicMaterial({
+            color: selOutline(item) ? selColour(item)
+              : new THREE.Color().setRGB(th.edges.rgb[0], th.edges.rgb[1], th.edges.rgb[2], THREE.LinearSRGBColorSpace),
+            // WebGL draws 1 px whatever linewidth says: `width` 1 is what the rule asks today
+            linewidth: th.edges.width }));
           e.userData.typeEdges = th.edges.style;
+          Object.assign(e.userData, { proxyEdges: true, edgeSrc: geom, edgeStyle: th, edgeAngle: angle, edgeSel: selOutline(item) });
+          e.visible = ov("s3_proxy_edges") || selOutline(item);
           if (at) e.position.copy(at);
           return e;
         }
         const col = selOutline(item) ? selColour(item) : new THREE.Color(item.edge ?? "#555555");
         const e = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: col }));
+        Object.assign(e.userData, { proxyEdges: true, edgeSel: selOutline(item) });
+        e.visible = ov("s3_proxy_edges") || selOutline(item);
         if (at) e.position.copy(at);
         return e;
       };
@@ -2499,7 +2515,22 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const applyOverlays = () => {
         // MICRO-RIFINITURE p.6 · the models' opacity (1: as they came)
         const rmOp = val("s3_opacity_rm", 1);
+        // MICRO-PL06 p.0 · the proxies' edges: shown or not, at the view's angle
+        const edgesOn = ov("s3_proxy_edges");
+        const angleNow = opts.edgeAngle?.() ?? null;
         content.traverse((o: any) => {
+          if (o.isLineSegments && o.userData.proxyEdges) {
+            o.visible = edgesOn || !!o.userData.edgeSel;
+            const th = o.userData.edgeStyle;
+            const want = angleNow ?? th?.featureAngleDeg;
+            if (th && o.visible && want !== o.userData.edgeAngle) {
+              const g = typedEdges(o.userData.edgeSrc, th, want);
+              o.geometry.dispose();
+              o.geometry = g;
+              o.userData.edgeAngle = want;
+            }
+            return;
+          }
           if (o.isMesh && o.userData.unitId && o.material) {
             const wire = ov("s3_proxy_wire");
             o.material.wireframe = wire;
@@ -2525,13 +2556,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         attachGizmo();
       };
       probe.__spaceProxyLook = () => {
-        const out: Record<string, { visible: boolean; opacity: number; rgb: number[]; edges: string[]; segments: number[] }> = {};
+        const out: Record<string, { visible: boolean; opacity: number; rgb: number[]; edges: string[]; segments: number[];
+          edgesShown: boolean[]; angles: (number | null)[] }> = {};
         content.traverse((o: any) => {
           if (!o.isMesh || !o.userData.unitId || out[o.userData.unitId]) return;
           const lines = o.children.filter((c: any) => c.isLineSegments);
           out[o.userData.unitId] = { visible: o.material.visible, opacity: Math.round(o.material.opacity * 1000) / 1000,
             rgb: o.material.color.toArray().map((x: number) => Math.round(x * 1000) / 1000),
             edges: lines.map((l: any) => l.userData.typeEdges ?? "contour"),
+            // MICRO-PL06 p.0 · drawn or hidden (Proxies' edges), at which angle
+            edgesShown: lines.map((l: any) => l.visible), angles: lines.map((l: any) => l.userData.edgeAngle ?? null),
             segments: lines.map((l: any) => l.geometry.getAttribute("position").count / 2) };
         });
         return out;

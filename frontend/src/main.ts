@@ -583,7 +583,7 @@ import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
 import {
   defaultOverlays, drawnOverlayCounts, farGlyphsHidden, withHideFar, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlayShown, overlaysHideSomething,
-  overlayValue, saveOverlays, VISIBILITY_KEYS, withGroup, withOverlay, withValue, type OverlayKey, type OverlayState, type OverlayValueKey, type OverlayView,
+  overlayValue, edgeAngleOverride, saveOverlays, VISIBILITY_KEYS, withGroup, withOverlay, withValue, type OverlayKey, type OverlayState, type OverlayValueKey, type OverlayView,
 } from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
 import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
@@ -22792,11 +22792,16 @@ function renderOverlayPanel(): void {
       r.min = String(it.min); r.max = String(it.max); r.step = String(it.step);
       r.value = String(overlayValue(st, it.key));
       r.dataset.ovValue = it.key;
-      out.textContent = `${Math.round(Number(r.value) * 100)} %`;
+      // MICRO-PL06 p.0 · the edge angle in degrees; untouched it says «rules»
+      const shown = () => it.unit === "°"
+        ? (edgeAngleOverride(overlaysOfWin(owner, v)) === null ? t("ov.value.byRules", { n: r.value }) : `${r.value}°`)
+        : `${Math.round(Number(r.value) * 100)} %`;
+      out.textContent = shown();
+      if (it.unit === "°") row.title = t(`ov.valueHint.${it.key}`);
       r.addEventListener("input", () => {
-        out.textContent = `${Math.round(Number(r.value) * 100)} %`;
         const next = withValue(overlaysOfWin(owner, v), it.key, Number(r.value));
         storeOverlays(v, next, owner);
+        out.textContent = shown();
         for (const h of sceneHandles.values()) h.applyOverlays();
         for (const vs of viewerScenes.values()) vs.handle.applyOverlays();
       });
@@ -27479,6 +27484,7 @@ const narrativeSceneFactory: SceneFactory = (stage, spec) => {
       isFocused: () => false,
       overlay: (k) => (k === "s3_labels_proxy" || k === "s3_labels_sketch" || k === "s3_labels_rm" ? false : space3dShown(k)),
       overlayValue: (k) => overlayValue(overlaysOf("space"), k),
+      edgeAngle: () => edgeAngleOverride(overlaysOf("space")),
       sketchVisible: () => false,
       onLoadOutcome: (key, label, url, error) => noteModelLoad(key, label, url, error),
       onTileError: (key, label, _url, e) => noteTileError(key, label, e),
@@ -36027,6 +36033,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     isFocused: () => activeWin().id === win.id,
     overlay: (k) => space3dShown(k, win.id),
     overlayValue: (k) => overlayValue(overlaysOfWin(win.id, "space"), k),
+    edgeAngle: () => edgeAngleOverride(overlaysOfWin(win.id, "space")),
     locked: () => new Set(space3dPrefs().locked),
     // MICRO-RITOCCHI-CHIARI p.4 · the padlock of the Outliner: no G / R / S on them
     pinned: () => new Set(space3dPrefs().pinned ?? []),
@@ -57472,6 +57479,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     // the document's scene: the models and their tileset; no proxies, no sketches, no labels
     overlay: (k) => (k === "s3_proxies" || k === "s3_labels_proxy" || k === "s3_labels_sketch" || k === "s3_labels_rm" ? false : space3dShown(k)),
     overlayValue: (k) => overlayValue(overlaysOf("space"), k),
+    edgeAngle: () => edgeAngleOverride(overlaysOf("space")),
     sketchVisible: () => false,
     onLoadOutcome: (key, label, url, error) => noteModelLoad(key, label, url, error),
     onTileError: (key, label, _url, e) => noteTileError(key, label, e),
