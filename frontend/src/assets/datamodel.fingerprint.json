@@ -1,7 +1,7 @@
 {
-  "digest": "sha256:24f1f367dfc266f1528d5ff22e0d252d208168a45874689447d8056cb3318f79",
+  "digest": "sha256:27fb51c18b5c0ed00ae418aef49110c5cfe65c9e8840b8661015d6d5f51e816e",
   "versions": {
-    "nodes": "1.6.49",
+    "nodes": "1.6.50",
     "node_registry": "1.6.41",
     "connections": "1.6.55",
     "visual_rules": "1.6.48",
@@ -9,7 +9,7 @@
     "translations": "1.17"
   },
   "digests": {
-    "nodes": "sha256:c380f173fceb586b1215ba0f8eae8f6077167dfc82ee8a358f0c9b38b2126ded",
+    "nodes": "sha256:20937832f901d0603b2b6f30b004ef0b74d0f8283aa45e3c0d97c832b6814152",
     "node_registry": "sha256:5669c0824d7149e22a25d424645b3b78b7c698c5338f3fd639d75c60b31483da",
     "connections": "sha256:c1d475a3ea9543dada7ac42ca73452f5c20f185ea56de2787914cad44389ad6b",
     "visual_rules": "sha256:61361d6882958305486fe914f9635e9f0dd31d3f0aca285e3dc80294857710f3",
