@@ -11,8 +11,11 @@
  */
 import {
   RULE_MISSING, labelIn, qualeOf, sameText, termOf, valueLabel,
-  type ConceptEntry, type Term, type ValueLabel, type VocabSection, type VocabSummary,
+  type AlignedConcept, type ConceptEntry, type Term, type ValueLabel, type VocabSection, type VocabSummary,
 } from "./vocab-terms";
+
+/** what the bridge answers for one URI (/vocab/concepts) */
+type Looked = { concept: ConceptEntry; vocab: VocabSummary; aligned?: AlignedConcept[] };
 
 export interface Candidate {
   uri: string;
@@ -43,6 +46,12 @@ export interface VocabHost {
   changed(): void;
   /** a .emvocab.zip chosen by the person, as bytes (null: none) */
   pickZip(doc: Document): Promise<Uint8Array | null>;
+  /** any file chosen by the person (`accept` as an <input type=file>), as bytes (MICRO-PL02) */
+  pickFile?(doc: Document, accept: string): Promise<Uint8Array | null>;
+  /** open an address outside the page (a vocabulary's terms of use) */
+  openExternal?(url: string): void;
+  /** a line in the Log */
+  log?(msg: string): void;
   /** the page's own dialog with a body of ours */
   dialog(o: { title: string; body: HTMLElement; ok: string; kind: string }): Promise<boolean>;
   /** the central catalogue's address (settings), default the release of ExtendedMatrix/vocabularies */
@@ -56,7 +65,10 @@ export class VocabState {
   installed: VocabSummary[] | null = null;
   dir = "";
   error: string | null = null;
-  private concepts = new Map<string, { concept: ConceptEntry; vocab: VocabSummary } | null>();
+  /** MICRO-PL02 · the alignments installed here and the manager's last decisions */
+  alignments: Array<{ name: string; rows: number; verified: number }> = [];
+  log: Array<Record<string, unknown>> = [];
+  private concepts = new Map<string, Looked | null>();
   private asking = new Set<string>();
   rev = 0;
   constructor(private host: VocabHost) {}
@@ -72,7 +84,7 @@ export class VocabState {
     for (const [k, v] of this.concepts) if (v) m.set(k, v.concept);
     return m;
   }
-  lookup = (uri: string): { concept: ConceptEntry; vocab: VocabSummary } | null => this.concepts.get(uri) ?? null;
+  lookup = (uri: string): Looked | null => this.concepts.get(uri) ?? null;
 
   private async get<T>(path: string): Promise<T | null> {
     try {
@@ -96,6 +108,13 @@ export class VocabState {
   async refresh(): Promise<void> {
     const j = await this.get<{ installed: VocabSummary[]; dir: string }>("/vocab/installed");
     if (j) { this.installed = j.installed; this.dir = j.dir; this.error = null; }
+    if (j) {
+      const a = await this.get<{ alignments: VocabState["alignments"] }>("/vocab/alignments");
+      this.alignments = a?.alignments ?? [];
+      const l = await this.get<{ log: VocabState["log"] }>("/vocab/log?limit=20");
+      this.log = l?.log ?? [];
+      this.error = null;
+    }
     this.concepts.clear();
     this.rev++;
     await this.prefetch();
@@ -110,7 +129,7 @@ export class VocabState {
     want.forEach((u) => this.asking.add(u));
     for (let i = 0; i < want.length; i += 40) {
       const part = want.slice(i, i + 40);
-      const j = await this.get<{ concepts: Record<string, { concept: ConceptEntry; vocab: VocabSummary }> }>(
+      const j = await this.get<{ concepts: Record<string, Looked> }>(
         `/vocab/concepts?${part.map((u) => `uri=${encodeURIComponent(u)}`).join("&")}`);
       for (const u of part) { this.concepts.set(u, j?.concepts[u] ?? null); this.asking.delete(u); }
     }
@@ -156,7 +175,9 @@ export function valueTermEl(doc: Document, host: VocabHost, state: VocabState,
     row.title = [t("vt.code", { uri: term.concept }),
       term.label ? t("vt.written", { label: term.label, lang: term.lang || "?" }) : "",
       term.version ? t("vt.version", { v: term.version }) : "",
-      lab.attribution ?? ""].filter(Boolean).join("\n");
+      lab.via ? t("vt.via", { v: lab.via.vocabulary, match: lab.via.match }) : "",
+      lab.attribution ?? "", lab.via?.attribution ?? ""].filter(Boolean).join("\n");
+    if (lab.via) row.dataset.via = lab.via.vocabulary;
     if (lab.attribution) {
       const a = doc.createElement("div");
       a.className = "vt-attr";
@@ -319,6 +340,29 @@ export function vocabContent(doc: Document, host: VocabHost, state: VocabState):
     attr.className = "vt-attr";
     attr.textContent = s.attribution ?? "";
     card.append(title, meta, attr);
+    // MICRO-PL02 · every version side by side, who brought each, who owns the scheme
+    const vers = s.versions ?? [];
+    if (vers.length > 1 || (s.carriers ?? []).length) {
+      const v = doc.createElement("div");
+      v.className = "voc-meta";
+      v.dataset.vwVersions = String(vers.length || 1);
+      v.textContent = t("vw.vocVersions", { list: versionsLine(s, t) });
+      card.appendChild(v);
+    }
+    if (s.owner) {
+      const o = doc.createElement("div");
+      o.className = "voc-meta";
+      o.dataset.vwOwner = s.owner;
+      o.textContent = t("vw.owner", { who: whoName(s.owner, t) });
+      card.appendChild(o);
+    }
+    if (s.orphan) {
+      card.dataset.orphan = "1";
+      const p = doc.createElement("p");
+      p.className = "voc-note";
+      p.textContent = t("vw.orphan", { who: (s.removed_carriers ?? []).map((c) => whoName(c, t)).join(", ") });
+      card.appendChild(p);
+    }
     if (s.status === "stub") {
       const p = doc.createElement("p");
       p.className = "voc-note";
@@ -333,8 +377,22 @@ export function vocabContent(doc: Document, host: VocabHost, state: VocabState):
     }
     const acts = doc.createElement("div");
     acts.className = "voc-acts";
-    if (s.status === "stub")
+    if (s.status === "stub") {
+      // tier C, phase 1: the source's terms page, then the file downloaded by hand (its digest checked)
+      const page = s.fetch?.terms ?? s.fetch?.url;
+      if (page && host.openExternal) acts.appendChild(btn(t("vw.openTerms"), "open-terms", () => host.openExternal!(page), page));
+      acts.appendChild(btn(t("vw.fetchByHand"), "fetch-by-hand", () => void (async () => {
+        const bytes = await (host.pickFile ? host.pickFile(doc, "*/*") : host.pickZip(doc));
+        if (!bytes) return;
+        await busy(() => state.post("/vocab/fetch-local", { id: s.id, version: s.version, file_b64: b64(bytes) }),
+                   t("vw.fetched", { id: s.id }));
+      })(), t("vw.fetchByHandTip")));
       acts.appendChild(btn(t("vw.fetchLocal"), "fetch-local", () => void busy(() => state.post("/vocab/fetch-local", { id: s.id }), t("vw.fetched", { id: s.id })), t("vw.fetchLocalTip")));
+    }
+    if (vers.length > 1)
+      for (const v of vers)
+        acts.appendChild(btn(t("vw.removeVersion", { v: v.version ?? "?" }), "remove-version",
+          () => void busy(() => state.post("/vocab/remove", { id: s.id, version: v.version }), t("vw.removed", { id: `${s.id} ${v.version ?? ""}` }))));
     acts.appendChild(btn(t("vw.remove"), "remove", () => void busy(() => state.post("/vocab/remove", { id: s.id }), t("vw.removed", { id: s.id }))));
     card.appendChild(acts);
     root.appendChild(card);
@@ -351,10 +409,14 @@ export function vocabContent(doc: Document, host: VocabHost, state: VocabState):
   inst.appendChild(btn(t("vw.fromFile"), "file", () => void (async () => {
     const bytes = await host.pickZip(doc);
     if (!bytes) return;
-    let bin = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    await busy(() => state.post("/vocab/install", { zip_b64: btoa(bin) }), t("vw.installedOk"));
-  })()));
+    // an .emvocab.zip, or a community package: the bridge hands its [[data.vocabularies]] to the manager
+    const r = await state.post<InstallAnswer>("/vocab/install", { zip_b64: b64(bytes) });
+    if (!r) { host.toast(t("vw.failed", { why: state.error ?? "?" })); return; }
+    host.toast(r.extension ? t("vw.installedFrom", { n: String((r.installed as VocabSummary[]).length), pkg: r.extension })
+                           : t("vw.installedOk"));
+    sayWarnings(host, r.warnings);
+    await state.refresh();
+  })(), t("vw.fromFileTip")));
   inst.appendChild(btn(t("vw.updates"), "updates", () => void (async () => {
     const q = new URLSearchParams({ url: host.catalogUrl() });
     const r = await fetch(`${await host.bridge()}/vocab/updates?${q}`).then((x) => x.json(), () => null) as { updates?: Array<{ id: string; url: string; available: { version: string } }> } | null;
@@ -363,6 +425,47 @@ export function vocabContent(doc: Document, host: VocabHost, state: VocabState):
     for (const u of r.updates) await busy(() => state.post("/vocab/install", { url: u.url }), t("vw.updated", { id: u.id, v: u.available.version }));
   })()));
   root.appendChild(inst);
+
+  // — alignments (MICRO-PL02): a label through a concept a person VERIFIED
+  root.appendChild(h(t("vw.alignments")));
+  const al = doc.createElement("div");
+  al.className = "voc-alignments";
+  if (!state.alignments.length) {
+    const p = doc.createElement("p");
+    p.className = "voc-note";
+    p.textContent = t("vw.alignmentsNone");
+    al.appendChild(p);
+  }
+  for (const a of state.alignments) {
+    const row = doc.createElement("div");
+    row.className = "voc-used";
+    row.dataset.alignment = a.name;
+    row.textContent = t("vw.alignment", { name: a.name, n: String(a.rows), v: String(a.verified) });
+    row.appendChild(btn(t("vw.remove"), "remove-alignment", () => void busy(() => state.post("/vocab/alignments/remove", { name: a.name }), t("vw.removed", { id: a.name }))));
+    al.appendChild(row);
+  }
+  const alActs = doc.createElement("div");
+  alActs.className = "voc-acts";
+  alActs.appendChild(btn(t("vw.alignmentsFromFile"), "alignments-file", () => void (async () => {
+    const bytes = await (host.pickFile ? host.pickFile(doc, ".yaml,.yml,.json") : host.pickZip(doc));
+    if (!bytes) return;
+    await busy(() => state.post("/vocab/alignments/install", { file_b64: b64(bytes) }), t("vw.alignmentsOk"));
+  })(), t("vw.alignmentsTip")));
+  al.appendChild(alActs);
+  root.appendChild(al);
+
+  // — what the manager decided (duplicates, a copy replaced by its owner, a package gone)
+  const said = state.log.filter((e) => e.kind === "duplicate_kept" || e.kind === "replaced_by_owner").slice(-5);
+  if (said.length) {
+    root.appendChild(h(t("vw.log")));
+    for (const e of said) {
+      const p = doc.createElement("p");
+      p.className = "voc-note";
+      p.dataset.vwLog = String(e.kind);
+      p.textContent = String((lang.startsWith("it") ? e.message_it : e.message) ?? e.kind);
+      root.appendChild(p);
+    }
+  }
 
   // — this file
   const file = host.file();
@@ -413,10 +516,48 @@ async function installFromCatalog(host: VocabHost, state: VocabState, url: strin
   const want = r.packages.filter((p) => !only || p.id === only);
   if (!want.length) { host.toast(t("vw.notInCatalog", { id: only ?? "" })); return; }
   for (const p of want) {
-    const got = await state.post("/vocab/install", { url: p.url });
+    const got = await state.post<InstallAnswer>("/vocab/install", { url: p.url });
     host.toast(got ? t("vw.updated", { id: p.id, v: p.version }) : t("vw.failed", { why: state.error ?? "?" }));
+    if (got) sayWarnings(host, got.warnings);
   }
   await state.refresh();
+}
+
+type InstallAnswer = { installed: VocabSummary | VocabSummary[]; extension?: string;
+                       warnings?: Array<{ kind: string; message: string; message_it: string }> };
+
+function b64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/** a duplicate said where the person looks: a toast and a line in the Log, in the interface's language */
+function sayWarnings(host: VocabHost, warnings: InstallAnswer["warnings"]): void {
+  for (const w of warnings ?? []) {
+    const msg = host.lang().startsWith("it") ? w.message_it : w.message;
+    host.toast(msg);
+    host.log?.(msg);
+  }
+}
+
+/** who brought a vocabulary, in words: the central repository, a node, a package, the person, this machine */
+export function whoName(c: string, t: VocabHost["t"]): string {
+  if (c === "vocabularies") return t("vw.who.central");
+  if (c === "user") return t("vw.who.user");
+  if (c === "local") return t("vw.who.local");
+  if (c.startsWith("node:")) return t("vw.who.node", { host: c.slice(5) });
+  if (c.startsWith("extension:")) return c.slice(10);
+  return c;
+}
+
+/** «0.1.0 (statuaria) · 0.2.0 (ritratti)» — s3dgraphy.vocabularies.versions_line */
+export function versionsLine(s: VocabSummary, t: VocabHost["t"]): string {
+  const rows = s.versions?.length ? s.versions : [s];
+  return rows.map((v) => {
+    const who = (v.carriers ?? []).map((c) => whoName(c, t)).join(", ");
+    return who ? `${v.version ?? "?"} (${who})` : String(v.version ?? "?");
+  }).join(" · ");
 }
 
 /** the label of a concept in the interface language, for whoever lists terms */

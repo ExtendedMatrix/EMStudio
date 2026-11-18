@@ -12046,6 +12046,11 @@ button.gr-model-name.link { background: none; border: 0; padding: 0; cursor: poi
 .gr-obj-from { margin: 0; }
 .gr-obj.gr-flash { outline: 2px solid var(--accent, #3a7bd5); outline-offset: 2px; border-radius: 4px; }
 .uo-geo { font-size: 11px; color: var(--warn-ink, #b06d00); margin: 0 2px 0 1px; flex: 0 0 auto; }
+/* MICRO-PL02 · a property's «controlled vocabulary» mark, the Inspector's sign (.vt-row) */
+.uo-vmark { font-size: 10px; margin: 0 3px 0 1px; flex: 0 0 auto; cursor: default; white-space: nowrap; }
+.uo-vmark[data-vmark="linked"] { color: var(--accent, #2f6fb5); }
+.uo-vmark[data-vmark="missing"] { color: var(--warn-ink, #b06d00); }
+.uo-vmark[data-vmark="uncontrolled"] { color: var(--text-muted, #888); opacity: 0.85; }
 .scn-vis { white-space: nowrap; }
 /* MICRO-RITOCCHI-CHIARI p.2b · the Warnings table: rows picked by hand, verbs over them */
 .tv-issues .tv-pick { width: 22px; text-align: center; padding-left: 2px; padding-right: 2px; }

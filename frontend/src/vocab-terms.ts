@@ -57,6 +57,24 @@ export interface VocabSummary {
   local_copy?: boolean;
   installed_from?: string | null;
   problem?: string;
+  // MICRO-PL02 · the manager (s3dgraphy.vocabularies): who brings it, who owns it, every version
+  carriers?: string[];
+  removed_carriers?: string[];
+  orphan?: boolean;
+  owner?: string;
+  copy_of?: string | null;
+  sha256?: string | null;
+  fetch?: { url?: string; terms?: string; digest?: string };
+  versions?: Array<{ version?: string; snapshot_date?: string; status?: string; carriers?: string[];
+                     removed_carriers?: string[]; orphan?: boolean; copy_of?: string | null; sha256?: string | null }>;
+}
+
+/** a concept a person VERIFIED as matching another (an installed alignment, MICRO-PL02) */
+export interface AlignedConcept {
+  uri: string;
+  match: "exactMatch" | "closeMatch";
+  concept: ConceptEntry;
+  vocab: VocabSummary;
 }
 
 /** a concept of an index: labels per language */
@@ -180,19 +198,25 @@ export function labelIn(c: ConceptEntry | undefined | null, lang: string | null 
 export interface ValueLabel {
   text: string;
   lang: string | null;
-  from: "vocabulary" | "stored" | "text";
+  from: "vocabulary" | "alignment" | "stored" | "text";
   concept: string | null;
   missingVocabulary: boolean;
   vocabulary: string | null;
   attribution: string | null;
+  /** from «alignment»: the concept whose label is shown, and its vocabulary */
+  via?: { concept: string; vocabulary: string; match: string; attribution: string | null };
 }
 
 /** What to SHOW for a value in `lang`: the installed vocabulary's label in that
  *  language (or the copy in the file), else the label saved, and the sign
  *  «vocabulary missing» when neither is here. `lookup(uri)` gives the concept
- *  and its vocabulary when it is installed (the bridge's answer, cached). */
+ *  and its vocabulary when it is installed (the bridge's answer, cached), and
+ *  the concepts a person VERIFIED as matching (`aligned`): when the vocabulary
+ *  has no label in `lang`, theirs is shown (AAT «limestone» → ICCD «calcare»),
+ *  before the language the value was written in — the twin of
+ *  `s3dgraphy.terms.value_label` (MICRO-PL02). */
 export function valueLabel(n: NodeLike, lang: string | null,
-                           lookup: (uri: string) => { concept: ConceptEntry; vocab: VocabSummary } | null,
+                           lookup: (uri: string) => { concept: ConceptEntry; vocab: VocabSummary; aligned?: AlignedConcept[] } | null,
                            embedded?: VocabSection | null): ValueLabel {
   const value = valueOf(n);
   const term = termOf(n);
@@ -209,6 +233,14 @@ export function valueLabel(n: NodeLike, lang: string | null,
     if (concept && vocab) attribution = String((embedded.used[vocab] ?? {}).attribution ?? "") || null;
   }
   if (concept) {
+    if (lang && !labelIn(concept, lang)) {
+      for (const a of found?.aligned ?? []) {
+        const via = labelIn(a.concept, lang);
+        if (via) return { text: via[0], lang: via[1], from: "alignment", concept: term.concept, missingVocabulary: false,
+                          vocabulary: vocab, attribution,
+                          via: { concept: a.uri, vocabulary: a.vocab.id, match: a.match, attribution: a.vocab.attribution ?? null } };
+      }
+    }
     const hit = labelIn(concept, lang) ?? labelIn(concept, term.lang);
     if (hit) return { text: hit[0], lang: hit[1], from: "vocabulary", concept: term.concept, missingVocabulary: false,
                       vocabulary: vocab, attribution };

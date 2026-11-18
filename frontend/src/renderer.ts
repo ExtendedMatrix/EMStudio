@@ -117,6 +117,11 @@ export interface RenderState {
   /** CATENA · the AI chip of a node: dashed «AI» until a person verifies it,
    *  solid «AI ✓» after (data.ai_assisted / validated_by, connections 1.6.25) */
   aiNodes?: Map<string, "pending" | "verified"> | null;
+  /** MICRO-PL02 · a property's «controlled vocabulary» mark, the Inspector's
+   *  sign: ◆ linked, ◆? its vocabulary not installed here, ◇ a controlled field
+   *  without a concept. Beside the label, inside the annotation; computed once
+   *  per document / vocabulary change (`vocab-marks.ts`), never per frame. */
+  vocabMarks?: Map<string, "linked" | "missing" | "uncontrolled"> | null;
   /** LEGENDA · the edge type picked in this window's legend: drawn on top at
    *  full strength, the others faded. Per window, never in the document. */
   highlightEdgeType?: string | null;
@@ -1232,9 +1237,18 @@ export function render(
         );
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        const maxW = n.w - 10;
+        // MICRO-PL02 · the vocabulary's mark at the right end, the label in the rest
+        const vm = state.vocabMarks?.get(n.node.id ?? n.id) ?? null;
+        const vmText = vm === "linked" ? "◆" : vm === "missing" ? "◆?" : vm === "uncontrolled" ? "◇" : "";
+        const vmW = vmText ? ctx.measureText(vmText).width + 9 : 0;
+        const maxW = n.w - 10 - vmW;
         const text = fitText(ctx, label, maxW);
-        ctx.fillText(text, n.x + n.w / 2, n.y + n.h / 2);
+        ctx.fillText(text, n.x + (n.w - vmW) / 2, n.y + n.h / 2);
+        if (vmText) {
+          ctx.fillStyle = vm === "linked" ? accentColor() : vm === "missing" ? "#b06d00" : canvasTheme().labelMuted;
+          ctx.textAlign = "right";
+          ctx.fillText(vmText, n.x + n.w - 10, n.y + n.h / 2);
+        }
       }
       if (isSel(n) || n.id === state.hoverId) {
         const active = n.id === state.selectedId || n.instanceOf === state.selectedId;

@@ -71,6 +71,9 @@ export interface UnifiedDeps {
   space?: SpaceRowDeps;
   /** MICRO-PL00 · a node with a georeference of its own: the words of its mark */
   geoMark?: (id: string) => string | null;
+  /** MICRO-PL02 · a property's «controlled vocabulary» mark (◆ ◆? ◇) and its
+   *  words; null: none (the page's cache: `vocab-marks.ts`) */
+  vocabMark?: (row: URow) => { state: string; glyph: string; tip: string } | null;
 }
 
 /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · what the old Outliner of the scene did on
@@ -217,6 +220,19 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       g.textContent = "⌖";
       g.title = r.geo;
       el.appendChild(g);
+    }
+    if (d.vocabMark && r.id && (r.kind === "node" || r.kind === "sub")) {
+      // MICRO-PL02 · beside a property: the Inspector's sign, the same reading
+      const vm = d.vocabMark(r);
+      if (vm) {
+        const g = document.createElement("span");
+        g.className = "uo-vmark";
+        g.dataset.vmark = vm.state;
+        g.textContent = vm.glyph;
+        g.title = vm.tip;
+        g.setAttribute("aria-label", vm.tip);
+        el.appendChild(g);
+      }
     }
     const lab = document.createElement("span");
     lab.className = "uo-label";
