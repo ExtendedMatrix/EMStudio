@@ -100,12 +100,24 @@ for (const c of doc.qualia_categories ?? []) {
   }
 }
 
+/** MICRO-PL09 (W6) · the qualia the community packages add AT RUNTIME (the
+ *  overlay the bridge answers, `extensions-state.ts`): after the vendored
+ *  ones, never in place of one — a package cannot redefine a core quale (its
+ *  ids carry its prefix, «stat:…»). Empty without packages. */
+const runtime: Qualia[] = [];
+export function setRuntimeQualia(items: Qualia[]): void {
+  runtime.splice(0, runtime.length, ...items.filter((q) => !list.some((x) => x.id === q.id)));
+}
+export function runtimeQualia(): readonly Qualia[] {
+  return runtime;
+}
+
 export function qualiaList(): Qualia[] {
-  return list;
+  return runtime.length ? [...list, ...runtime] : list;
 }
 
 /** The controlled vocabulary backing a node type, or null if it has none.
  *  Today only PropertyNode is vocabulary-backed (qualia). */
 export function vocabularyFor(nodeType: string | undefined): Qualia[] | null {
-  return nodeType === "property" ? list : null;
+  return nodeType === "property" ? qualiaList() : null;
 }

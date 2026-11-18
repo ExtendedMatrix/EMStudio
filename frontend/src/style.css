@@ -12348,3 +12348,36 @@ button.uo-col { cursor: pointer; }
 .uo-fstate-reference { color: var(--text-muted); }
 .uo-row.uo-flash { box-shadow: inset 0 0 0 2px var(--accent); }
 .gis-tools { min-width: 320px; max-width: 420px; max-height: 70vh; overflow: auto; }
+
+/* MICRO-PL09 (W6) · the window «Estensioni» (its frame is the Colours window's .cw-*) */
+.ext-top { display: flex; flex-wrap: wrap; gap: 4px; }
+.ext-filter { margin: 6px 0; }
+.ext-list { display: flex; flex-direction: column; gap: 6px; }
+.ext-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
+.ext-row-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; }
+.ext-name { font-weight: 600; }
+.ext-kind, .ext-used { font-size: 0.68rem; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border); opacity: 0.9; }
+.ext-kind-plugin, .ext-kind-mixed { border-color: var(--warn-ink, #b07400); }
+.ext-used { background: var(--bg-subtle); }
+.ext-facts { font-size: 0.72rem; opacity: 0.75; overflow-wrap: anywhere; }
+.ext-state { font-size: 0.76rem; }
+.ext-state.ext-active { color: var(--ok-ink, #2e7d32); }
+.ext-state.ext-codeOut, .ext-state.ext-codeOff, .ext-state.ext-pending, .ext-state.ext-incomplete { color: var(--warn-ink, #b07400); }
+.ext-part { font-size: 0.76rem; }
+.ext-part-h { font-weight: 600; }
+.ext-unverified { color: var(--warn-ink, #b07400); font-weight: 600; }
+.ext-perms { margin: 2px 0 0 0; padding-left: 16px; font-size: 0.74rem; }
+.ext-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.ext-acts .danger { color: var(--danger-ink, #b3261e); }
+.ext-missing { border: 1px solid var(--warn-ink, #b07400); border-radius: var(--radius-sm); padding: 5px 8px; margin: 6px 0; font-size: 0.78rem; }
+.ext-missing-h { font-weight: 600; }
+.ext-dirs { margin-top: 8px; overflow-wrap: anywhere; }
+.ext-confirm { display: flex; flex-direction: column; gap: 6px; max-width: 560px; font-size: 0.82rem; }
+.ext-panel { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 9px; }
+.ext-panel-code { border-color: var(--warn-ink, #b07400); }
+.ext-panel-h { font-weight: 600; margin-bottom: 3px; }
+.ext-panel-f { margin-top: 4px; font-size: 0.76rem; opacity: 0.85; }
+.ext-powers { font-weight: 600; opacity: 1; }
+.ext-voc { margin: 0 0 3px 0; padding-left: 16px; }
+.ext-remove { max-width: 520px; font-size: 0.82rem; }
+.ext-purge { display: block; margin-top: 4px; }

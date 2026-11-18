@@ -376,6 +376,9 @@ export function buildContainer(input: {
   presentation?: Presentation | null;
   /** MICRO-U · the declaration, computed by the caller (vocab-terms.declareVocabularies) */
   vocabularies?: VocabSection | null;
+  /** MICRO-PL09 (W6, REPORT G6) · `header.profiles`: the community packages the
+   *  file uses (undefined: the header as the member wrote it; [] none: no key) */
+  profiles?: Array<{ iri: string; version: string }> | null;
 }): ContainerDoc {
   const graphs: Record<string, GraphSection> = {};
   for (const { id, doc } of input.graphs) {
@@ -416,6 +419,12 @@ export function buildContainer(input: {
   };
   if (!header.format) header.format = "em.json";
   if (!header.version) header.version = "1.0";
+  // MICRO-PL09 (W6) · the packages the file uses, as the library writes them
+  // (`container._declare_profiles`): nothing written when there is none
+  if (input.profiles !== undefined) {
+    if (input.profiles && input.profiles.length) header.profiles = input.profiles;
+    else delete header.profiles;
+  }
   const out: ContainerDoc = { header, graphs };
   const active = input.activeGraphId ?? input.graphs[0]?.id ?? null;
   if (active) out.active_graph_id = active;

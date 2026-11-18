@@ -187,6 +187,8 @@ import { ColoursWindow, screenArea, type SystemWindow } from "./colours-window";
 // MICRO-U · vocabularies installed like fonts, the double value, «Collega a vocabolario…»
 import { declareVocabularies, isControlled, termOf, termPatch } from "./vocab-terms";
 import { VocabState, linkDialog, valueTermEl, vocabContent, type VocabHost } from "./vocab-ui";
+import { ExtensionsState, declareProfiles, declaredOf, formsOf, nameOfIri, qualiaOf, stringsOf, type OverlayDoc } from "./extensions-state";
+import { extensionsContent, extensionsFilter, type ExtWindowHost } from "./extensions-window";
 import { VocabMarkCache, vocabMarkOf, type VocabMarkCtx } from "./vocab-marks";
 import {
   activeScheme, addScheme, clonePresentation, emcFileName, emcText, emptyPresentation, mergePresentation,
@@ -505,7 +507,7 @@ import {
   setValidated,
   t,
 } from "./i18n";
-import { tn } from "./i18n";
+import { setRuntimeStrings, tn } from "./i18n";
 import type { Locale } from "./i18n";
 import type {
   ExtractResult,
@@ -593,7 +595,7 @@ import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dati
 import { BADGE_RULES } from "./funnel";
 import { cleanRedundant, provIndexOf, provTitle, renderInheritedEpochs } from "./provenance-ui";
 import { datingWarnings, epochAttribution, provIndex, redundancyReport, resolveProvenance } from "./provenance";
-import { type Qualia, vocabularyFor } from "./vocab";
+import { type Qualia, setRuntimeQualia, vocabularyFor } from "./vocab";
 import { versionBreakdown } from "./versions";
 import {
   hitGroupToggle,
@@ -636,7 +638,7 @@ import {
   sheetLanguage, studySheetChoice, STUDY_SHEET_KEY, fillCounts as sheetFillCounts, labelIn as sheetLabelIn,
   applyPlan as applySheetActs, type Plan as SheetPlan, type CompiledDef,
   planStatus as planSheetStatus, planConcept as planSheetConcept, schemeKeyLabel as sheetSchemeKeyLabel,
-  sheetLayout, visualField as sheetVisualField,
+  sheetLayout, visualField as sheetVisualField, setRuntimeDefinitions,
 } from "./sheet";
 import { renderSheet } from "./sheet-view";
 import { isVolatile, VOLATILE_KEY } from "./volatile";
@@ -6500,6 +6502,9 @@ function syncLegend(host: HTMLElement, win: Win | undefined, shown: Scene | null
 }
 
 function updateToolbar(): void {
+  // MICRO-PL09 (W6) · the packages the active document reads (asked again only
+  // when its declaration, the language or the installed extensions change)
+  scheduleExtOverlay();
   btnUndo.disabled = !undoStore()?.canUndo;
   btnRedo.disabled = !undoStore()?.canRedo;
   // MICRO-PULIZIA p.1 · the active graph's FILE: a graph moved out of it is
@@ -10055,6 +10060,10 @@ function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): Re
     // MICRO-U · the vocabularies the values use, like the fonts of a document
     vocabularies: declareVocabularies(graphs.map((g) => g.doc.graph as never), file?.vocabularies ?? null,
                                       vocabState.installedMap(), vocabState.conceptMap()),
+    // MICRO-PL09 (W6) · the community packages the content uses (what the file
+    // declared is kept even when not installed here)
+    profiles: declareProfiles(((graphs[0]?.doc as { header?: Record<string, unknown> } | undefined)?.header ?? {}).profiles,
+                              graphs.map((g) => g.doc.graph as never), extState.overlay?.profiles ?? []),
     activeGraphId: activeSlot
       ? String((activeSlot.store.doc.graph as Record<string, unknown>).graph_id ?? activeSlot.id)
       : null,
@@ -18150,7 +18159,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 77;   // 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 78;   // 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -25085,6 +25094,7 @@ document.getElementById("btn-tool-chronology")?.addEventListener("click", () => 
 // MICRO-S · Tools ▸ Colori…: the window «Colori» on the active Space
 document.getElementById("btn-tool-colours")?.addEventListener("click", () => openColoursWindow());
 document.getElementById("btn-tool-vocabularies")?.addEventListener("click", () => openVocabWindow());
+document.getElementById("btn-tool-extensions")?.addEventListener("click", () => openExtensionsWindow());
 document.getElementById("btn-clean-file")?.addEventListener("click", () => void cleanFilePresentation());
 document
   .getElementById("drop-hint-stratiminer")
@@ -36022,6 +36032,103 @@ function openVocabWindow(): void {
   vocabWindow.open();
   void vocabState.refresh();
 }
+// ── MICRO-PL09-ESTENSIONI-IN-EMSTUDIO (W6) · the extensions of this machine,
+// the window «Estensioni», and what the packages the document reads ADD to the
+// page at runtime: their qualia (vocab.ts), their strings (i18n.ts), their
+// compiled sheets (sheet.ts), their colour schemes (into the file, MICRO-T).
+// The bridge asks s3dgraphy.extensions / s3dgraphy.profiles; the page never
+// reads the folders and never installs on its own. ──
+const extState = new ExtensionsState({
+  bridge: () => bridgeUrl(),
+  nodeBase: () => getSettings().sync.hubUrl.trim() || null,
+  lang: () => getLocale(),
+  overlayChanged: (ov) => applyExtOverlay(ov),
+  changed: () => extWindow.repaint(true),
+});
+/** the files whose missing packages were said (once per file) */
+const extMissingSaid = new Set<string>();
+/** the packages' sheets added to the vendored ones */
+let extFormsAdded = new Set<string>();
+const extWindowHost: ExtWindowHost = {
+  t: (k, v) => t(k, v),
+  lang: () => getLocale(),
+  toast: (m) => toast(m),
+  log: (m) => logInfo(m),
+  dialog: async (o) => {
+    if (o.ok == null) {
+      await openDialog({ title: o.title, body: o.body, ok: o.cancel ?? t("ext.close"), cancel: null, kind: o.kind });
+      return { ok: false };
+    }
+    const a = await openDialog({ title: o.title, body: o.body, ok: o.ok, kind: o.kind, danger: o.danger, choices: o.choices,
+      ...(o.cancel ? { cancel: o.cancel } : {}) });
+    return { ok: a.ok, choice: a.choice };
+  },
+  pickArchive: async (d, folder) => {
+    if (isTauri()) {
+      const p = folder ? await pickFolder() : (await pickFiles(t("ext.installZip")))?.[0] ?? null;
+      return p ? { path: p, name: baseName(p) } : null;
+    }
+    const f = await new Promise<File | null>((resolve) => {
+      const input = d.createElement("input");
+      input.type = "file";
+      input.accept = ".zip,application/zip";
+      input.onchange = () => resolve(input.files?.[0] ?? null);
+      input.click();
+    });
+    if (!f) return null;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { zip_b64: btoa(bin), name: f.name };
+  },
+  canPickFolder: () => isTauri(),
+  fileName: () => emtree.activeFile()?.name ?? null,
+  openVocabularies: () => openVocabWindow(),
+  afterChange: () => { void syncExtOverlay(true); void vocabState.refresh(); },
+  importScheme: (name, emc) => importSchemesNow([{ name, doc: emc }]),
+  formsAdded: () => extFormsAdded,
+};
+const extWindow = new ColoursWindow(coloursWindowHostForVocab(), document, {
+  prefKey: "emstudio.extensions.window.v1", titleKey: "ext.title", helpKey: "ext.help", popupName: "emstudio-extensions", data: "extWindow",
+  content: (d) => extensionsContent(d, extWindowHost, extState, () => extWindow.repaint(true)),
+  sig: () => JSON.stringify([extState.rev, extState.rows?.length ?? -1, extState.unavailable, extState.missing,
+    (extState.overlay?.profiles ?? []).map((p) => `${p.name}@${p.version}${p.declared ? "*" : ""}`),
+    emtree.activeFile()?.id ?? "", extensionsFilter(), getLocale()]),
+});
+function openExtensionsWindow(): void {
+  extWindow.open();
+  void extState.refresh().then(() => syncExtOverlay(true));
+}
+/** what the overlay brings, added to the page's own data (and said when the
+ *  file declares a package this machine has not: the file opens all the same) */
+function applyExtOverlay(ov: OverlayDoc | null): void {
+  const lang = getLocale();
+  setRuntimeQualia(qualiaOf(ov, lang));
+  setRuntimeStrings(stringsOf(ov, lang));
+  const forms = formsOf(ov, lang).filter((f) => f.def).map((f) => f.def!);
+  setRuntimeDefinitions(forms as never);
+  extFormsAdded = new Set(forms.map((d) => d.header.id));
+  extWindow.repaint(true);
+  const f = emtree.activeFile();
+  if (f && extState.missing.length && !extMissingSaid.has(f.id)) {
+    extMissingSaid.add(f.id);
+    const list = extState.missing.map((m) => `${nameOfIri(m.iri)} ${m.version}`.trim()).join(", ");
+    logWarn(t("ext.missingToast", { list }));
+    toastAsk(t("ext.missingToast", { list }), [{ label: t("ext.missingOpen"), run: () => openExtensionsWindow() }]);
+  }
+}
+let extOverlayTimer = 0;
+/** after the module is up (a call during its evaluation would meet `extState`
+ *  before its line) and once per burst of toolbar updates */
+function scheduleExtOverlay(): void {
+  window.clearTimeout(extOverlayTimer);
+  extOverlayTimer = window.setTimeout(() => { void syncExtOverlay(false); }, 0);
+}
+async function syncExtOverlay(force: boolean): Promise<void> {
+  const header = (store?.doc as { header?: Record<string, unknown> } | undefined)?.header;
+  await extState.loadOverlay(declaredOf(header?.profiles), force);
+}
+onLocaleChange(() => { void syncExtOverlay(true); });
 /** MICRO-PL02 · the «controlled vocabulary» marks beside the properties (Outliner,
  *  Matrix): one cache, keyed on the graph's revision, the vocabularies' and the
  *  language; the machine's vocabularies and labels are `vocabState`'s, never a

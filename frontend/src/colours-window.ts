@@ -429,6 +429,8 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
  *  window «Vocabolari»): its preference key, title, popup name, content and
  *  repaint signature. Without it the window is «Colori», as before. */
 export interface FloatingSpec {
+  /** MICRO-PL09 · its own «?» text (default: the Colours window's) */
+  helpKey?: string;
   prefKey: string;
   titleKey: string;
   popupName: string;
@@ -591,7 +593,7 @@ export class ColoursWindow {
     const help = d.createElement("div");
     help.className = "cw-help hidden";
     help.dataset.cwHelp = "1";
-    help.textContent = t(this.spec ? "cw.help" : "cw.helpDraft");
+    help.textContent = t(this.spec ? this.spec.helpKey ?? "cw.help" : "cw.helpDraft");
     const can = detachSupport(this.page.defaultView ?? window);
     bar.append(title,
       btn("?", t("cw.helpTip"), "help", () => help.classList.toggle("hidden")),

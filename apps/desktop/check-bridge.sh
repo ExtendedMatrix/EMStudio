@@ -79,6 +79,16 @@ ask POST /reproject '{"epsg_source":3844,"x":327377.59,"y":448655.25}' "/reproje
 ask GET  "/geo/crs-info?epsg=3844" - "/geo/crs-info (em_geotiles + PROJ's database)"
 ask POST /geo/frame '{"epsg":3844,"x":327372.56,"y":448682.65}' "/geo/frame · the site's frame (em_geotiles)"
 ask GET  /tiles/globe-min - "/tiles/globe-min (em_geotiles)"
+# MICRO-PL09 (W6) · the extensions (em_extensions over s3dgraphy.extensions /
+# profiles): read only — the list, a document's overlay, and the PREVIEW of an
+# example package (it validates against the profiles' JSON schema, a data file
+# of the bundle) when em-profiles is beside EMStudio
+ask GET  /extensions/installed - "/extensions/installed (em_extensions)"
+ask POST /profiles/overlay '{"declared":[],"lang":"it"}' "/profiles/overlay · a document's packages (s3dgraphy.profiles)"
+EXAMPLE="$HERE/../../../em-profiles/examples/esempio-statuaria"
+if [[ -d "$EXAMPLE" ]]; then
+  ask POST /extensions/preview "{\"path\":\"$EXAMPLE\"}" "/extensions/preview · an example package, nothing written (schema, tomli)"
+fi
 
 # MICRO-I-STAMPA-NEL-DESKTOP · «Stampa A4…» of a recording sheet: the first
 # definition the page vendors, an empty record, printed by the frozen

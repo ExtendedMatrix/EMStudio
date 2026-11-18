@@ -152,9 +152,17 @@ export function vendoredFrom(): { commit?: string } {
   return ((VENDORED_INDEX as { from?: { commit?: string } }).from) ?? {};
 }
 
-/** Every vendored definition, the one per id this copy holds (its latest). */
+/** MICRO-PL09 (W6) · the compiled sheets the community packages bring (their
+ *  `forms`, stratigraph-templates' compiled form): after the vendored ones,
+ *  never in place of one (an id already vendored keeps the vendored). */
+const RUNTIME_DEFS: CompiledDef[] = [];
+export function setRuntimeDefinitions(defs: CompiledDef[]): void {
+  RUNTIME_DEFS.splice(0, RUNTIME_DEFS.length, ...defs.filter((d) => !DEFS.some((v) => v.header.id === d.header.id)));
+}
+
+/** Every vendored definition, the one per id this copy holds (its latest), then the packages'. */
 export function definitions(): CompiledDef[] {
-  return DEFS;
+  return RUNTIME_DEFS.length ? [...DEFS, ...RUNTIME_DEFS] : DEFS;
 }
 
 /** The definition a study uses when it says none (MICRO-G p.2: the default for
@@ -185,7 +193,7 @@ export function studySheetChoice(graphSelfData: Record<string, unknown> | undefi
  *  one asked: an id not vendored (null), a version this copy does not hold. */
 export function resolveDefinition(choice: SheetChoice):
   { def: CompiledDef | null; versionDiffers: string | null } {
-  const def = DEFS.find((d) => d.header.id === choice.id) ?? null;
+  const def = DEFS.find((d) => d.header.id === choice.id) ?? RUNTIME_DEFS.find((d) => d.header.id === choice.id) ?? null;
   return { def, versionDiffers: def && choice.version && choice.version !== def.header.version ? choice.version : null };
 }
 
