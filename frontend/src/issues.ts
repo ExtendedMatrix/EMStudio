@@ -22,6 +22,7 @@ import type { EmDocument, EmNode } from "./types";
 import { composedPropertyName } from "./naming";
 import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
 import { epochsInTreeOrder } from "./outline";
+import { RULE_MISSING, RULE_UNCONTROLLED, vocabularyRows, type VocabSection } from "./vocab-terms";
 
 export type IssueSeverity = "warn" | "info";
 
@@ -184,6 +185,17 @@ export interface IssueSources {
     clean?: (nodes: string[]) => void;
     moveToDocumentEpoch?: (nodes: string[]) => void;
     followContainer?: (nodes: string[]) => void;
+  };
+  /** MICRO-U · the subcategory «vocabolario»: a text where the field takes a
+   *  vocabulary's values (`uncontrolled`, a hint: tolerated), a term whose
+   *  vocabulary this machine has not installed (`vocabmissing`, a warning: its
+   *  saved label is shown). `installed` null = not known (no bridge): no
+   *  «missing» then. The cures: «Collega a vocabolario…», «Installa». */
+  vocabulary?: {
+    installed: Set<string> | null;
+    embedded?: VocabSection | null;
+    link?: { label: string; run: (nodeId: string) => void };
+    install?: { label: string; run: (vocabId: string) => void };
   };
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
@@ -662,6 +674,21 @@ export function issues(src: IssueSources): Issue[] {
     push({ node: w.node, sev: "warn", rule: "library", txt: w.txt });
   // FONTE · the reasoning's diagnostics, the library's too (they arrive with it)
   for (const i of reasoningIssues(src, name)) push(i);
+  // MICRO-U · the vocabulary's two rules, after the library's: the installed
+  // list arrives from the bridge later still
+  if (src.vocabulary) {
+    const v = src.vocabulary;
+    for (const r of vocabularyRows(nodes, v.installed, v.embedded)) {
+      if (r.rule === RULE_UNCONTROLLED)
+        push({ node: r.node, sev: "info", rule: RULE_UNCONTROLLED,
+               txt: t("issues.uncontrolled", { n: name(r.node), v: r.value }),
+               ...(v.link ? { fix: { kind: "button" as const, label: v.link.label, run: () => v.link!.run(r.node) } } : {}) });
+      else
+        push({ node: r.node, sev: "warn", rule: RULE_MISSING,
+               txt: t("issues.vocabMissing", { n: name(r.node), v: r.value, voc: r.vocabulary ?? "?" }),
+               ...(v.install ? { fix: { kind: "button" as const, label: v.install.label, run: () => v.install!.run(r.vocabulary ?? "") } } : {}) });
+    }
+  }
   return out;
 }
 

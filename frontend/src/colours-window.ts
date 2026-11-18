@@ -90,9 +90,9 @@ export interface ColoursWindowPref {
 }
 export const COLOURS_WIN_KEY = "emstudio.colours.window.v1";
 const DEFAULT_PREF: ColoursWindowPref = { x: -1, y: 90, w: 360, h: 520 };
-export function loadWindowPref(kv: Pick<Storage, "getItem"> | null = safeStorage()): ColoursWindowPref {
+export function loadWindowPref(kv: Pick<Storage, "getItem"> | null = safeStorage(), key = COLOURS_WIN_KEY): ColoursWindowPref {
   try {
-    const raw = kv?.getItem(COLOURS_WIN_KEY);
+    const raw = kv?.getItem(key);
     if (raw) {
       const v = JSON.parse(raw) as Partial<ColoursWindowPref>;
       if ([v.x, v.y, v.w, v.h].every((n) => typeof n === "number" && Number.isFinite(n))) return { ...DEFAULT_PREF, ...v } as ColoursWindowPref;
@@ -100,8 +100,8 @@ export function loadWindowPref(kv: Pick<Storage, "getItem"> | null = safeStorage
   } catch { /* none, or unreadable */ }
   return { ...DEFAULT_PREF };
 }
-export function saveWindowPref(p: ColoursWindowPref, kv: Pick<Storage, "setItem"> | null = safeStorage()): void {
-  try { kv?.setItem(COLOURS_WIN_KEY, JSON.stringify(p)); } catch { /* storage refused */ }
+export function saveWindowPref(p: ColoursWindowPref, kv: Pick<Storage, "setItem"> | null = safeStorage(), key = COLOURS_WIN_KEY): void {
+  try { kv?.setItem(key, JSON.stringify(p)); } catch { /* storage refused */ }
 }
 function safeStorage(): Storage | null {
   try { return typeof localStorage !== "undefined" ? localStorage : null; } catch { return null; }
@@ -387,13 +387,27 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
 /**
  * The window: a panel in the page, or (detached) a system window of its own.
  */
+/** MICRO-U · the same floating, detachable window for another content (the
+ *  window «Vocabolari»): its preference key, title, popup name, content and
+ *  repaint signature. Without it the window is «Colori», as before. */
+export interface FloatingSpec {
+  prefKey: string;
+  titleKey: string;
+  popupName: string;
+  data: string;
+  content(doc: Document): HTMLElement;
+  sig(): string;
+}
+
 export class ColoursWindow {
   private panel: HTMLElement | null = null;
   private body: HTMLElement | null = null;
   private pop: Window | null = null;
   private sys: { close(): void } | null = null;
   private off: Array<() => void> = [];
-  constructor(private host: ColoursHost, private page: Document = document) {}
+  constructor(private host: ColoursHost, private page: Document = document, private spec: FloatingSpec | null = null) {}
+  private pref(): ColoursWindowPref { return loadWindowPref(undefined, this.spec?.prefKey); }
+  private keepPref(p: ColoursWindowPref): void { saveWindowPref(p, undefined, this.spec?.prefKey); }
 
   get isOpen(): boolean { return !!this.panel || !!this.pop; }
   get detached(): boolean { return !!this.pop; }
@@ -403,7 +417,7 @@ export class ColoursWindow {
   open(): void {
     if (this.pop && !this.pop.closed) { this.pop.focus(); this.repaint(); return; }
     if (this.panel) { this.repaint(); return; }
-    const pref = loadWindowPref();
+    const pref = this.pref();
     if (pref.detached && this.detach(false)) return;
     this.mountPanel();
   }
@@ -417,12 +431,12 @@ export class ColoursWindow {
    *  when what it shows changed (a rebuild closes an open list or picker) */
   repaint(force = false): void {
     if (!this.body) return;
-    const sig = JSON.stringify([this.host.state(), this.host.space(), this.host.rev()]);
+    const sig = this.spec ? this.spec.sig() : JSON.stringify([this.host.state(), this.host.space(), this.host.rev()]);
     if (!force && sig === this.sig && this.body.childElementCount) return;
     this.sig = sig;
     const d = this.body.ownerDocument;
     const scroll = this.body.scrollTop;
-    this.body.replaceChildren(coloursContent(d, this.host));
+    this.body.replaceChildren(this.spec ? this.spec.content(d) : coloursContent(d, this.host));
     this.body.scrollTop = scroll;
   }
 
@@ -430,14 +444,14 @@ export class ColoursWindow {
     const t = this.host.t;
     const frame = d.createElement("div");
     frame.className = inPage ? "cw-win" : "cw-win cw-sys";
-    frame.dataset.coloursWindow = inPage ? "panel" : "detached";
+    frame.dataset[this.spec?.data ?? "coloursWindow"] = inPage ? "panel" : "detached";
     frame.setAttribute("role", "dialog");
-    frame.setAttribute("aria-label", t("cw.title"));
+    frame.setAttribute("aria-label", t(this.spec?.titleKey ?? "cw.title"));
     const bar = d.createElement("div");
     bar.className = "cw-bar";
     const title = d.createElement("span");
     title.className = "cw-title";
-    title.textContent = t("cw.title");
+    title.textContent = t(this.spec?.titleKey ?? "cw.title");
     const btn = (txt: string, tip: string, key: string, fn: () => void): HTMLButtonElement => {
       const b = d.createElement("button");
       b.type = "button"; b.textContent = txt; b.title = tip; b.dataset.cw = key;
@@ -466,14 +480,14 @@ export class ColoursWindow {
   private mountPanel(): void {
     const d = this.page;
     const vw = d.defaultView?.innerWidth ?? 1200, vh = d.defaultView?.innerHeight ?? 800;
-    const p = clampPanel(loadWindowPref(), vw, vh);
+    const p = clampPanel(this.pref(), vw, vh);
     const frame = this.chrome(d, true);
     Object.assign(frame.style, { left: `${p.x}px`, top: `${p.y}px`, width: `${p.w}px`, height: `${p.h}px` });
     d.body.appendChild(frame);
     this.panel = frame;
     const save = () => {
       const r = frame.getBoundingClientRect();
-      if (r.width && r.height) saveWindowPref({ ...loadWindowPref(), x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), detached: false });
+      if (r.width && r.height) this.keepPref({ ...this.pref(), x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), detached: false });
     };
     // drag by the bar
     const bar = frame.querySelector<HTMLElement>(".cw-bar")!;
@@ -512,26 +526,26 @@ export class ColoursWindow {
   detach(asked: boolean): boolean {
     const main = this.page.defaultView;
     if (!main || !detachSupport(main).ok) return false;
-    const pref = loadWindowPref();
+    const pref = this.pref();
     const from = this.panel?.getBoundingClientRect();
     const sx = main.screenX ?? 0, sy = main.screenY ?? 0;
     const r = pref.detached && !asked && pref.sw && pref.sh
       ? { x: pref.sx ?? sx + 80, y: pref.sy ?? sy + 80, w: pref.sw, h: pref.sh }
       : { x: Math.round(sx + (from?.left ?? 80)), y: Math.round(sy + (from?.top ?? 80) + 40), w: Math.round(from?.width ?? pref.w), h: Math.round(from?.height ?? pref.h) };
-    const pop = main.open(DETACH_URL, "emstudio-colours", popupFeatures(r));
+    const pop = main.open(DETACH_URL, this.spec?.popupName ?? "emstudio-colours", popupFeatures(r));
     if (!pop) { if (asked) this.host.toast(this.host.t("tile.detachBlocked")); return false; }
     this.unmount();
     const d = pop.document;
     d.open();
     d.write('<!doctype html><html><head><meta charset="utf-8"><title>EMStudio</title></head><body></body></html>');
     d.close();
-    d.title = `${this.host.t("cw.title")} — EMStudio`;
+    d.title = `${this.host.t(this.spec?.titleKey ?? "cw.title")} — EMStudio`;
     const off: Array<() => void> = [mirrorLook(this.page, d)];
     const frame = this.chrome(d, false);
     d.body.appendChild(frame);
     this.pop = pop;
     off.push(wireRelay(pop, this.page, { isWriting: (el) => this.host.isWriting(el), ported: () => true, onPress: () => {} }));
-    const keep = () => saveWindowPref({ ...loadWindowPref(), detached: true, sx: pop.screenX, sy: pop.screenY, sw: pop.outerWidth || r.w, sh: pop.outerHeight || r.h });
+    const keep = () => this.keepPref({ ...this.pref(), detached: true, sx: pop.screenX, sy: pop.screenY, sw: pop.outerWidth || r.w, sh: pop.outerHeight || r.h });
     pop.addEventListener("resize", keep);
     const gone = () => {
       if (this.pop !== pop) return;
@@ -544,7 +558,7 @@ export class ColoursWindow {
     pop.addEventListener("pagehide", gone);
     this.sys = this.host.systemWindow?.(pop, gone) ?? null;
     this.off = off;
-    saveWindowPref({ ...loadWindowPref(), detached: true, sx: r.x, sy: r.y, sw: r.w, sh: r.h });
+    this.keepPref({ ...this.pref(), detached: true, sx: r.x, sy: r.y, sw: r.w, sh: r.h });
     this.repaint(true);
     return true;
   }
@@ -556,7 +570,7 @@ export class ColoursWindow {
     this.off.forEach((f) => f());
     this.off = [];
     this.body = null;
-    saveWindowPref({ ...loadWindowPref(), detached: false });
+    this.keepPref({ ...this.pref(), detached: false });
     if (p) this.closeSys(p);
     this.mountPanel();
   }

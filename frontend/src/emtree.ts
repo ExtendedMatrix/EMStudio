@@ -27,6 +27,7 @@
  */
 
 import type { Presentation } from "./presentation";
+import type { VocabSection } from "./vocab-terms";
 import { shownCode } from "./hdto";
 // MICRO-CONTENTS-3 G8 · counts with their plural (i18n is a leaf module)
 import { tn } from "./i18n";
@@ -266,6 +267,9 @@ export interface OpenFile {
   /** MICRO-T · the file's presentation (its colour schemes, and the one each
    *  graph uses): read with it, written back with it (presentation.ts) */
   presentation?: Presentation | null;
+  /** MICRO-U · the vocabularies the file declares (and its copy of their terms,
+   *  when `embed`): read with it, recomputed when it is written (vocab-terms.ts) */
+  vocabularies?: VocabSection | null;
 }
 
 /** Inside the desktop shell (Tauri), read as `tauri.ts::isTauri` does — not

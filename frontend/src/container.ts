@@ -39,6 +39,7 @@ import { contentSignature, mergePayloads } from "./crdt";
 import { isPeriodizationsSection, PERIODIZATIONS_MEMBER_ID } from "./horizons";
 import { EXPERIMENTAL } from "./experimental";
 import { PRESENTATION_KEY, presentationSection, readPresentation, type Presentation } from "./presentation";
+import { VOCABULARIES_KEY, readVocabularies, type VocabSection } from "./vocab-terms";
 
 /** EXPERIMENTAL · the Periodizations member read apart, by its marker, like the
  *  shelf and the DTC corpus (reading rule 5, §3). Off — the default, the switch
@@ -88,6 +89,8 @@ export interface ContainerDoc {
   version?: ProjectVersion;
   /** MICRO-T · ways of looking at the graphs (the colour schemes): presentation.ts */
   presentation?: Record<string, unknown>;
+  /** MICRO-U · the vocabularies the values use, like a document's fonts: vocab-terms.ts */
+  vocabularies?: Record<string, unknown>;
 }
 
 /** One member, ready for a DocumentStore: the per-graph document shape. */
@@ -118,6 +121,8 @@ export interface ParsedContainer {
   freshLayouts: string[];
   /** MICRO-T · the colour schemes the file carries (empty: none) */
   presentation?: Presentation;
+  /** MICRO-U · the declaration of the vocabularies (null: none) */
+  vocabularies?: VocabSection | null;
   warnings: string[];
 }
 
@@ -267,6 +272,8 @@ export function newCorpusSection(id: string = DTC_CORPUS_MEMBER_ID): GraphSectio
 export function parseContainer(doc: unknown): ParsedContainer {
   // MICRO-T · the presentation, read the same for both shapes
   const { presentation, warnings } = readPresentation(doc);
+  // MICRO-U · and the vocabularies it declares
+  const vocabularies = readVocabularies(doc);
   if (!isContainer(doc)) {
     const single = doc as EmDocument | null;
     if (!single?.graph?.nodes) {
@@ -278,7 +285,7 @@ export function parseContainer(doc: unknown): ParsedContainer {
     return { members: [{ id, doc: single }], shelf: null, corpus: null,
              activeGraphId: id, wasLegacy: true,
              version: readVersion((single as unknown as ContainerDoc).version),
-             freshLayouts: [], presentation, warnings };
+             freshLayouts: [], presentation, vocabularies, warnings };
   }
 
   const header = doc.header ?? { format: "em.json", version: "1.0" };
@@ -348,7 +355,7 @@ export function parseContainer(doc: unknown): ParsedContainer {
     );
   }
   return { members, shelf, corpus, periodizations, activeGraphId, wasLegacy: false,
-           version: readVersion(doc.version), freshLayouts: fresh, presentation, warnings };
+           version: readVersion(doc.version), freshLayouts: fresh, presentation, vocabularies, warnings };
 }
 
 /**
@@ -367,6 +374,8 @@ export function buildContainer(input: {
   activeGraphId?: string | null;
   /** MICRO-T · the file's colour schemes (written only when it has some) */
   presentation?: Presentation | null;
+  /** MICRO-U · the declaration, computed by the caller (vocab-terms.declareVocabularies) */
+  vocabularies?: VocabSection | null;
 }): ContainerDoc {
   const graphs: Record<string, GraphSection> = {};
   for (const { id, doc } of input.graphs) {
@@ -417,6 +426,8 @@ export function buildContainer(input: {
   if (hasLayout(activeLayout)) out.layout = activeLayout as Record<string, unknown>;
   const pres = presentationSection(input.presentation);
   if (pres) out[PRESENTATION_KEY as "presentation"] = pres;
+  if (input.vocabularies && Object.keys(input.vocabularies.used ?? {}).length)
+    out[VOCABULARIES_KEY as "vocabularies"] = input.vocabularies as unknown as Record<string, unknown>;
   return out;
 }
 

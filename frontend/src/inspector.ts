@@ -31,6 +31,10 @@ import type { ChronEntry, ChronStatus } from "./chron-bridge";
 
 export interface InspectorCallbacks {
   onJump: (nodeId: string) => void;
+  /** MICRO-U · under a property's value: its term (◆, the label in the
+   *  interface language, the vocabulary) or the sign «not controlled» (◇) with
+   *  «Collega a vocabolario…» (vocab-ui.ts) */
+  valueTerm?: (root: HTMLElement, nodeId: string) => void;
   /** the rapporti of a node with units of OTHER graphs of the same file
    *  (`links.ts`, E.D. 11 Oct 2026), each with the gesture that goes there */
   crossGraphLinks?: (nodeId: string) => Array<{
@@ -717,6 +721,7 @@ export function renderInspector(
     valIn.placeholder =
       ptype.startsWith("absolute_time") ? "e.g. -27  (negative = BCE)" : "value…";
     root.appendChild(valIn);
+    cb.valueTerm?.(root, nodeId);
     bindMulti(scope, nodeId, valIn, t("multi.f.value"), (n) => n.node_type === "property" && !isGeometryProperty(n),
       (id, v) => { if (v.trim() !== propertyValue(store.node(id))) store.setPropertyValue(id, v); });
     // MICRO-K §A (E.D., 17 Nov 2026): on the PropertyNode `definition` the

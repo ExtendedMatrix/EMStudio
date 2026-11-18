@@ -12222,3 +12222,31 @@ button.uo-col { cursor: pointer; }
 /* MICRO-Q p.1 · a fixed group's lines in the tooltip */
 #tooltip .tt-pinned { margin-top: 4px; color: var(--text-muted); }
 #tooltip .tt-warn { margin-top: 2px; color: #b07800; font-weight: 600; }
+/* MICRO-U · the window «Vocabolari», the sign beside a controlled value, «Collega a vocabolario…» */
+.voc-root { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
+.voc-root .cw-sect { margin: 6px 0 2px; font-size: 0.78rem; font-weight: 600; }
+.voc-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
+.voc-card[data-status="broken"] { border-color: var(--warn-ink, #c80); }
+.voc-title { font-weight: 600; }
+.voc-meta { font-size: 0.74rem; opacity: 0.85; }
+.voc-note { font-size: 0.76rem; opacity: 0.85; margin: 0; }
+.voc-acts { display: flex; gap: 4px; flex-wrap: wrap; }
+.voc-used { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.78rem; }
+.voc-used[data-state="missing"] { color: var(--warn-ink, #b60); }
+.voc-embed { display: flex; align-items: center; gap: 4px; font-size: 0.78rem; margin-top: 4px; }
+.vt-attr { font-size: 0.7rem; opacity: 0.75; flex-basis: 100%; }
+.vt-row { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 2px 0 6px; font-size: 0.76rem; }
+.vt-sign { font-size: 0.8rem; }
+.vt-row[data-state="linked"] .vt-sign { color: var(--accent, #2f6fb5); }
+.vt-row[data-state="missing"] .vt-sign, .vt-row[data-state="missing"] .vt-words { color: var(--warn-ink, #b60); }
+.vt-row[data-state="uncontrolled"] .vt-sign, .vt-row[data-state="uncontrolled"] .vt-words { opacity: 0.8; font-style: italic; }
+.vl-body { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.vl-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px; }
+.vl-cand { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.vl-cand:hover { background: rgba(127, 127, 127, 0.12); }
+.vl-m { font-size: 0.7rem; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border); }
+.vl-m.exact { border-color: var(--accent, #2f6fb5); }
+.vl-v { font-size: 0.72rem; opacity: 0.75; }
+.vl-scope { display: flex; flex-direction: column; gap: 2px; }
+.vl-scope .dim { opacity: 0.5; }
+.vl-note, .vl-none { font-size: 0.76rem; opacity: 0.85; margin: 0; }
