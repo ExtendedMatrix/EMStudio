@@ -386,6 +386,18 @@ export async function windowFrames(): Promise<Array<{ label: string; x: number; 
     return [];
   }
 }
+/** MICRO-PL09 p.0 · a palette's system window (the window «Colori»,
+ *  «Vocabolari»): a child of the main window — always above it, moved with it
+ *  (macOS). An older shell: nothing (the window stays a window of its own) */
+export async function keepDetachedAbove(label: string): Promise<void> {
+  if (!isTauri()) return;
+  try { await invoke<boolean>("detached_keep_above", { label }); } catch { /* an older shell */ }
+}
+/** …brought in front, and inside a visible screen when it was off it */
+export async function frontDetachedWindow(label: string): Promise<void> {
+  if (!isTauri()) return;
+  try { await invoke<boolean>("detached_front", { label }); } catch { /* an older shell */ }
+}
 export async function closeDetachedWindow(label: string): Promise<void> {
   if (!isTauri()) return;
   try {

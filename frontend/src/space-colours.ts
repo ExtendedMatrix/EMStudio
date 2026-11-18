@@ -71,6 +71,31 @@ export const noValueKey = (p: string) => `no property ${p} node`;
 export const emptyValueKey = (p: string) => `empty property ${p} node`;
 export const isSentinel = (p: string, v: string) => v === noValueKey(p) || v === emptyValueKey(p);
 export const isNumeric = (v: string): boolean => v.trim() !== "" && Number.isFinite(Number(v.trim()));
+/** MICRO-PL09 p.0 (E.D., 18 Nov 2026: «Applica la scala» on `height` in XX sec
+ *  looked as if it did nothing) · a quantity written with its unit — «16.8 cm»,
+ *  «32 cm», «1,5 m» — is a number too: its number and its unit. TempluMare
+ *  v11's height/width/depth are all so; read as text, a numeric scale put them
+ *  in no order at all (every value compared as −∞), neighbours one colour. */
+export function quantity(v: string): { n: number; unit: string } | null {
+  const m = /^\s*([-+]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:e[-+]?\d+)?)\s*([^\d\s.,+-].*?)?\s*$/i.exec(v);
+  if (!m) return null;
+  const n = Number(m[1].replace(",", "."));
+  return Number.isFinite(n) ? { n, unit: (m[2] ?? "").trim() } : null;
+}
+/** the values' numbers when every one is a number in ONE unit (none, or «cm»
+ *  for all): null otherwise — «30» and «30 cm» together, or «cm» and «m», stay text */
+export function quantities(values: Iterable<string>): Map<string, number> | null {
+  const out = new Map<string, number>();
+  let unit: string | null = null;
+  for (const v of values) {
+    const q = quantity(v);
+    if (!q) return null;
+    if (unit === null) unit = q.unit;
+    else if (q.unit !== unit) return null;
+    out.set(v, q.n);
+  }
+  return out.size ? out : null;
+}
 
 type N = { id: string; node_type?: string; name?: unknown; description?: unknown; data?: unknown };
 type E = { source: string; target: string; edge_type: string };
@@ -111,7 +136,7 @@ export function propertyNames(g: { nodes: N[]; edges: E[] }, units: string[]): A
 export type ValueKind = "numeric" | "text" | "none";
 export function valueKind(prop: string, values: Iterable<string>): ValueKind {
   const real = [...new Set(values)].filter((v) => !isSentinel(prop, v));
-  return !real.length ? "none" : real.every(isNumeric) ? "numeric" : "text";
+  return !real.length ? "none" : quantities(real) ? "numeric" : "text";
 }
 /** is this scale for numbers? (a numeric scale on text follows the alphabet: said, MICRO-S) */
 export const isNumericScale = (type: RampType): boolean => type !== "qualitative";
@@ -154,8 +179,9 @@ export function continuousColour(x: number, lo: number, hi: number, type: RampTy
 /** the min and max of a property's numbers (null: they are not numbers) */
 export function valueRange(prop: string, values: Iterable<string>): { lo: number; hi: number } | null {
   const real = [...new Set(values)].filter((v) => !isSentinel(prop, v));
-  if (!real.length || !real.every(isNumeric)) return null;
-  const ns = real.map(Number);
+  const q = real.length ? quantities(real) : null;
+  if (!q) return null;
+  const ns = [...q.values()];
   return { lo: Math.min(...ns), hi: Math.max(...ns) };
 }
 
@@ -169,10 +195,11 @@ export function rampScheme(prop: string, values: string[], type: RampType, name:
                            range?: { lo: number; hi: number } | null): Map<string, string> {
   const real = [...new Set(values)].filter((v) => !isSentinel(prop, v));
   const out = new Map<string, string>();
-  if (type !== "qualitative" && real.length > 0 && real.every(isNumeric)) {
+  const q = real.length ? quantities(real) : null;
+  if (type !== "qualitative" && q) {
     const own = valueRange(prop, real)!;
     const { lo, hi } = range && Number.isFinite(range.lo) && Number.isFinite(range.hi) ? range : own;
-    for (const v of real) out.set(v, continuousColour(Number(v), lo, hi, type, name));
+    for (const v of real) out.set(v, continuousColour(q.get(v)!, lo, hi, type, name));
   } else if (type === "qualitative" && real.length > RAMPS[type][name].colors.length) {
     const colors = RAMPS[type][name].colors;
     const sorted = [...real].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -326,8 +353,8 @@ export function propertyRows(state: ColourState, units: string[], values: Map<st
     count.set(k, (count.get(k) ?? 0) + 1);
   }
   const keys = [...count.keys()].filter((k) => !isSentinel(prop, k));
-  const numeric = keys.length > 0 && keys.every(isNumeric);
-  keys.sort((a, b) => (numeric ? Number(a) - Number(b) : a.localeCompare(b, undefined, { numeric: true })));
+  const q = keys.length ? quantities(keys) : null;
+  keys.sort((a, b) => (q ? q.get(a)! - q.get(b)! : a.localeCompare(b, undefined, { numeric: true })));
   const out: LegendEntry[] = keys.map((k) => ({ key: k, colour: colourOfKey(state, k)!, label: k, count: count.get(k)! }));
   const ek = emptyValueKey(prop), nk = noValueKey(prop);
   out.push({ key: ek, colour: colourOfKey(state, ek)!, label: "", count: count.get(ek) ?? 0, special: "empty" });

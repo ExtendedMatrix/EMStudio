@@ -211,6 +211,56 @@ eq(W.loadWindowPref(store), { x: 50, y: 60, w: 400, h: 500 }, "the panel's place
 eq(W.loadWindowPref({ getItem: () => { throw new Error("denied"); } }).w, 360, "storage refused: the default");
 eq(W.clampPanel({ x: 5000, y: 5000, w: 400, h: 500 }, 1200, 800), { x: 792, y: 752, w: 400, h: 500 }, "kept inside the page");
 
+// ── 4b · MICRO-PL09 part 0 ──────────────────────────────────────────────────
+// quantities with a unit are numbers (v11's height: «16.8 cm»)
+eq([C.quantity("16.8 cm"), C.quantity("1,5 m"), C.quantity("Podio 3")], [{ n: 16.8, unit: "cm" }, { n: 1.5, unit: "m" }, null], "a number with its unit is read as a quantity");
+eq(C.valueKind("h", ["16.8 cm", "32 cm", C.noValueKey("h")]), "numeric", "values in one unit: numeric");
+eq(C.valueKind("h", ["16.8 cm", "32 m"]), "text", "…in two units: text");
+eq(C.valueRange("h", ["16.8 cm", "29.6 cm", "32.8 cm"]), { lo: 16.8, hi: 32.8 }, "min and max of quantities");
+const hq = C.rampScheme("h", ["29.6 cm", "16.8 cm", "32.8 cm"], "sequential", "viridis");
+eq([hq.get("16.8 cm"), hq.get("32.8 cm")], [seqc[0], seqc.at(-1)], "a sequential scale on quantities: in their order (it was no order: every value −∞)");
+eq(C.propertyRows({ ...C.defaultColourState(), property: "h" }, ["a", "b"], new Map([["a", "32 cm"], ["b", "4 cm"]])).filter((r) => !r.special).map((r) => r.label), ["4 cm", "32 cm"], "rows of quantities sorted by number");
+// the scale picked survives a rebuild of the content, and is the one applied (4c)
+{
+  let st4 = C.startProperty(C.defaultColourState(), "h", vn.values());
+  const picks = new Map();
+  const quiet = [];
+  const h4 = { ...host, units: () => ["a", "b", "c"], propertyNames: () => C.propertyNames(gn, ["a", "b", "c"]), values: (p) => C.propertyValues(gn, p, ["a", "b", "c"]),
+    state: () => st4, set: (x, q) => { st4 = x; quiet.push(!!q); },
+    rampPick: { get: (p) => picks.get(p) ?? null, set: (p, v) => (v ? picks.set(p, v) : picks.delete(p)) } };
+  let b4 = W.coloursContent(document, h4);
+  const r4 = b4.querySelector("[data-cw-ramp]");
+  choose(r4, "diverging/red_blue");
+  r4.dispatchEvent(new document.defaultView.Event("change"));
+  b4 = W.coloursContent(document, h4);   // a repaint between the choice and the click
+  eq(b4.querySelector("[data-cw-ramp]").value, "diverging/red_blue", "a rebuild keeps the scale chosen and not applied");
+  b4.querySelector("[data-cw-apply]").dispatchEvent(new document.defaultView.Event("click"));
+  eq(st4.ramp, { type: "diverging", name: "red_blue" }, "…and «Applica la scala» applies THAT one");
+  const sw4 = b4.querySelector('[data-cw-key="10"] input[type="color"]');
+  sw4.value = "#123456";
+  sw4.dispatchEvent(new document.defaultView.Event("change"));
+  eq([st4.scheme["10"], quiet.at(-1)], ["#123456", true], "a swatch writes quietly (no rebuild under an open picker)");
+}
+// a document closed: the window says so, no file section
+eq(W.coloursContent(document, { ...host, space: () => ({ winId: "w1", epoch: null, noGraph: true }), fileSchemes: () => null }).querySelector("[data-cw-no-graph]")?.textContent, "cw.noGraph", "no graph open: said");
+// a system window kept on the screen (4a: WKWebView put it below the screen)
+eq(W.onScreenRect({ x: 100, y: 1117 + 300, w: 360, h: 520 }, { x: 0, y: 25, w: 1512, h: 920 }), { x: 100, y: 425, w: 360, h: 520 }, "a place below the screen: brought in");
+eq(W.onScreenRect({ x: -900, y: 80, w: 360, h: 520 }, { x: 0, y: 25, w: 1512, h: 920 }).x, 0, "…left of it: brought in");
+// the legend (space-legend.ts)
+const L = await load("space-legend.ts");
+eq(L.nearestCorner(900, 20, 200, 100, 1000, 600), "tr", "dropped top right: the corner top right");
+eq(L.nearestCorner(10, 500, 200, 100, 1000, 600), "bl", "…bottom left");
+eq(L.legendRowsShown(Array.from({ length: 14 }, (_, i) => i), false), { shown: [0, 1, 2, 3, 4, 5, 6, 7], more: 6 }, "14 rows: 8 shown, «+6 altri»");
+eq(L.legendRowsShown([1, 2, 3, 4, 5, 6, 7, 8, 9], false).more, 0, "9 rows: all (one hidden row is not worth a line)");
+eq(L.legendRowsShown(Array.from({ length: 14 }, (_, i) => i), true).more, 0, "opened: all");
+{
+  const kv2 = new Map();
+  const st2 = { getItem: (k) => kv2.get(k) ?? null, setItem: (k, v) => kv2.set(k, String(v)) };
+  eq(L.loadLegendPref("space:1", st2), L.defaultLegendPref(), "a view without a legend kept: bottom left, open");
+  L.saveLegendPref("space:1", { corner: "tr", w: 300, h: 200, folded: true, all: false }, st2);
+  eq([L.loadLegendPref("space:1", st2).corner, L.loadLegendPref("space:1", st2).folded, L.loadLegendPref("space:2", st2).corner], ["tr", true, "bl"], "kept per view");
+}
+
 // ── 5 · TempluMare v10 (a copy) ─────────────────────────────────────────────
 const V10 = process.env.V10 || "/tmp/microS/T/EM/TempluMare_v10.em.json";
 if (fs.existsSync(V10)) {

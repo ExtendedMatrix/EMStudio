@@ -182,8 +182,8 @@ import {
 import { DocumentStore, editorHand, setRoomAuthor, stripYedDrawing } from "./model";
 import { presenceIndex } from "./epoch-presence";
 import { RAMPS, applyRamp, colourPlan, emcOfState, emcRead, hexToLinear, legendClick, legendShows, loadColourState, mix as colourMix,
-         propertyNames, propertyValues, saveColourState, startProperty, type ColourPlan, type ColourState, type RampType } from "./space-colours";
-import { ColoursWindow } from "./colours-window";
+         propertyNames, propertyValues, saveColourState, startProperty, defaultColourState, type ColourPlan, type ColourState, type RampType } from "./space-colours";
+import { ColoursWindow, screenArea, type SystemWindow } from "./colours-window";
 // MICRO-U · vocabularies installed like fonts, the double value, «Collega a vocabolario…»
 import { declareVocabularies, isControlled, termOf, termPatch } from "./vocab-terms";
 import { VocabState, linkDialog, valueTermEl, vocabContent, type VocabHost } from "./vocab-ui";
@@ -318,6 +318,7 @@ import { closeIngress, ingressIsOpen, openIngress } from "./ingress-ui";
 import { proposalNow, proposeConversion, renderGeorefSection, renderSitePinProposal, type GeorefDeps } from "./georef-panel";
 import { cardModelsOf, chooseGraph, geoObjectOf, modelStateWords, renderGeorefCard, renderGeorefInspector, renderGeorefProvRow, renderObjectGeoref,
   type CardModel, type GeorefCardDeps, type GeorefGraph } from "./georef-card";
+import { LEGEND_ROWS, legendRowsShown, loadLegendPref, nearestCorner, saveLegendPref, type LegendPref } from "./space-legend";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
@@ -454,6 +455,8 @@ import {
   readBinaryFile,
   writeBinaryFile,
   closeDetachedWindow,
+  frontDetachedWindow,
+  keepDetachedAbove,
   onDetachedWindows,
   windowFrames,
   onDesktopDragDrop,
@@ -3118,6 +3121,33 @@ window.__EM_SCENE__ = () => {
              }) };
   },
   setSpaceEpoch: (id: string) => { spaceEpochId = id; refreshSurfaces("scene"); },
+  /** MICRO-PL09 p.0 · what the app still holds of a document (after File ▸ Close:
+   *  nothing): the Space's state, each Space's scene and legend, the window
+   *  «Colori», the selection — `check-close-residue.mjs` reads it */
+  documentResidue: () => {
+    const scenes = [...sceneHandles.keys()].map((id) => {
+      const host = document.querySelector<HTMLElement>(`.scn-host[data-scn="${id}"]`) as (HTMLElement & { __spaceResidue?: () => unknown }) | null;
+      const leg = document.querySelector<HTMLElement>(`[data-scn-legend="${id}"]`);
+      const ov = host?.querySelector<HTMLElement>(".scn-ov");
+      return { id, scene: host?.__spaceResidue?.() ?? null,
+        legend: leg && !leg.classList.contains("hidden") ? leg.textContent : null,
+        summary: ov && !ov.classList.contains("hidden") ? ov.textContent : null,
+        gis: gisSpaces.get(id)?.state() ?? null };
+    });
+    const cw = document.querySelector<HTMLElement>("[data-colours-window] .cw-scroll");
+    return {
+      document: !!store, files: emtree.files.length,
+      colourStates: spaceColourStates.size, colourDrafts: spaceColourDrafts.size,
+      space: { epoch: spaceEpochId, isolated: spaceIsolated, resident: spaceResident?.ids.size ?? 0, memo: !!spaceMemo || !!hzSpaceMemo,
+        substituted: spaceSubstituted.size, alt: spaceAltInfo.size + altShown.size, handoff: tilesHandoff.size, leaves: leafCache.size,
+        flowPrints: flowUrlPrint.size, proxyFolder: !!proxyFolder, sketch: spaceSketchSel, sketches: spaceSketchSet.size, inspTiles: !!inspTilesBar },
+      selection: { id: selectedId, ids: selectedIds.size, narrative: selectedNarrativeId },
+      scenes,
+      coloursWindow: coloursWindow.isOpen ? { noGraph: !!cw?.querySelector("[data-cw-no-graph]"), text: cw?.textContent?.slice(0, 200) ?? null } : null,
+    };
+  },
+  /** MICRO-PL09 p.0 · the window «Colori»: its draft and its state */
+  coloursDraft: () => { const w = coloursSpaceWin(); const d = w && store ? colourDraftOf(w.id) : null; return d ? { dirty: d.dirty, base: d.base, now: d.now } : null; },
   /** MICRO-NARRATIVE-MODULI · an export of the story, as the Export menu makes it */
   exportNarrative: (format: string, force = false) => exportNarrative(format, { force }),
   /** …the figures this process renders for it, by key */
@@ -22956,6 +22986,8 @@ function openEMTree(): void {
 
 /** Close one slot and activate its neighbour (or empty the workspace). */
 function closeSlot(id: string): void {
+  const gone = emtree.get(id);
+  if (gone) forgetSpaceOf(new Set([String((gone.store.doc.graph as Record<string, unknown>).graph_id ?? "")]));
   const nextId = emtree.remove(id);
   if (nextId) {
     // The neighbour becomes active. `activateSlot` refuses a no-op switch, so
@@ -22989,6 +23021,8 @@ async function closeGraphAsking(id: string): Promise<void> {
 /** F2 · close a file and every graph of it (the caller has asked about unsaved work). */
 function closeFile(fileId: string): void {
   const wasActive = emtree.activeFile()?.id === fileId;
+  // MICRO-PL09 p.0 · what the Space kept for its graphs goes with them
+  forgetSpaceOf(new Set(emtree.slotsOf(fileId).map((sl) => String((sl.store.doc.graph as Record<string, unknown>).graph_id ?? ""))));
   emtree.removeFile(fileId);
   if (shelfHomeFileId === fileId) {
     shelfHomeFileId = null;
@@ -24308,6 +24342,7 @@ function closeWorkspace(): void {
   if (shelfEntries().length) shelfQuietly(() => resetShelf());
   shelfHomeFileId = null;
   storageToStart();
+  forgetSpaceOf(null);
   showDocument(null);
   logInfo(t("toast.workspaceEmpty"));
 }
@@ -28828,7 +28863,7 @@ function closeSystemWindow(p: Popout): void {
 }
 /** MICRO-OVERLAY-PER-FINESTRA p.0 · the popouts opened on the desktop whose
  *  label the shell has not said yet, oldest first (one `window.open` at a time) */
-const labelWaiting: Array<{ label?: string; gone: boolean }> = [];
+const labelWaiting: Array<{ label?: string; gone: boolean; onLabel?: (label: string) => void }> = [];
 /** MICRO-S · the other system windows the page opened (the window «Colori»):
  *  their label, and what to do when the shell closes them */
 const otherSystemWindows = new Set<{ label?: string; gone: boolean; onClosed: () => void }>();
@@ -28837,7 +28872,8 @@ void onDetachedWindows(
     const p = labelWaiting.shift();
     if (!p) return;
     p.label = label;
-    if (p.gone) void closeDetachedWindow(label);   // closed before the shell spoke
+    if (p.gone) { void closeDetachedWindow(label); return; }   // closed before the shell spoke
+    p.onLabel?.(label);
   },
   (label) => {
     const p = [...popouts.values()].find((x) => x.label === label);
@@ -28850,17 +28886,53 @@ void onDetachedWindows(
  *  windows: on the desktop its label is learnt (in order) so the page can close
  *  it — `close()` from the page does nothing on macOS — and its closing by the
  *  shell is heard */
-function adoptSystemWindow(pop: Window, onClosed: () => void): { close(): void } {
-  const rec: { label?: string; gone: boolean; onClosed: () => void } = { gone: false, onClosed };
+function adoptSystemWindow(pop: Window, onClosed: () => void): SystemWindow {
+  // MICRO-PL09 p.0 (4b, E.D. dev.132: the detached «Colori» «finisce dietro la
+  // finestra principale e non c'è modo di riportarla davanti») · on the desktop,
+  // once its label is known, the window is made a CHILD of the main one (the
+  // shell's `detached_keep_above`: macOS keeps a child above its parent and
+  // moves it with it, as a palette) and its frame is watched (where it is, for
+  // the next opening: WKWebView's screenX/screenY are not the window's)
+  let watch = 0;
+  const stop = () => { if (watch) { window.clearInterval(watch); watch = 0; } };
+  const rec: { label?: string; gone: boolean; onClosed: () => void; onLabel?: (label: string) => void } = {
+    gone: false,
+    onClosed: () => { stop(); onClosed(); },
+    onLabel: (label) => {
+      void keepDetachedAbove(label);
+      void refreshDeskFrames();
+      watch = window.setInterval(() => { if (rec.gone) stop(); else void refreshDeskFrames(); }, 1000);
+    },
+  };
   if (isTauri()) { labelWaiting.push(rec); otherSystemWindows.add(rec); }
+  sysWinRecs.set(pop, rec);
   return {
     close: () => {
       rec.gone = true;
+      stop();
       otherSystemWindows.delete(rec);
       try { pop.close(); } catch { /* already closing */ }
       if (rec.label) void closeDetachedWindow(rec.label);
     },
+    // in front of EMStudio and inside the visible screen (the shell moves it in);
+    // before the shell has said its label, the page's focus is all there is
+    front: () => {
+      if (rec.label) void frontDetachedWindow(rec.label);
+      try { pop.focus(); } catch { /* gone */ }
+    },
   };
+}
+/** MICRO-PL09 p.0 · the system windows adopted, by their window: their label */
+const sysWinRecs = new WeakMap<Window, { label?: string }>();
+/** a system window's frame as the shell says it (null: not known yet) */
+function sysFrameOf(pop: Window): { x: number; y: number; w: number; h: number } | null {
+  const l = sysWinRecs.get(pop)?.label;
+  return l ? deskFrames.get(l) ?? null : null;
+}
+/** the visible area of the screen the main window is on (the shell's `screen`
+ *  frame; an older shell: the page's own numbers) */
+function deskScreenArea(): { x: number; y: number; w: number; h: number } {
+  return deskFrames.get("screen") ?? screenArea(window);
 }
 
 /** «Back into the main window»: the window's twin takes half of the main
@@ -35480,8 +35552,52 @@ function sideTab(tab: HTMLElement, dir: 1 | -1, open: () => void): void {
 // person and document in this machine's preferences. MICRO-T · a graph whose
 // file names a colour scheme of its own (`presentation`) opens with that one.
 const spaceColourStates = new Map<string, ColourState>();
+/** MICRO-PL09 p.0 (E.D., 18 Nov 2026: after File ▸ Close «Untitled · no graph
+ *  open» the Space kept the legend of the file closed, the tileset's counter and
+ *  its memory) · what the Space holds for a document, forgotten when it closes:
+ *  the colour schemes and drafts of its graphs (`graphIds`; null = every one,
+ *  no document left), and — no document left — the epoch shown, the isolated
+ *  object, the resident files, the memos of the Space, the containers' sides,
+ *  the tilesets handed over, the sketch selected, the tiles' bar in the
+ *  Inspector. The scene gives back its files, GPU and tilesets by itself at the
+ *  next update (`update(…, {release})`, scene3d.ts). The inventory, measured:
+ *  `__EM_DRAG__.documentResidue()` (check-close-residue.mjs) */
+function forgetSpaceOf(graphIds: Set<string> | null): void {
+  const mine = (k: string) => !graphIds || graphIds.has(k.split("\u0000")[1] ?? "");
+  for (const k of [...spaceColourStates.keys()]) if (mine(k)) spaceColourStates.delete(k);
+  for (const k of [...spaceColourDrafts.keys()]) if (mine(k)) spaceColourDrafts.delete(k);
+  if (graphIds) return;
+  spaceEpochId = null;
+  spaceIsolated = null;
+  spaceResident = null;
+  spaceMemo = null;
+  hzSpaceMemo = null;
+  spaceSubstituted.clear();
+  spaceAltInfo = new Map();
+  tilesHandoff.clear();
+  proxyFolder = null;
+  proxyFolderAsked = "";
+  altShown.clear();
+  leafCache.clear();
+  flowUrlPrint.clear();
+  memoryToldOf.clear();
+  tileErrorSaid.clear();
+  spaceReveal.clear();
+  spaceSketchSel = null;
+  spaceSketchSet = new Set();
+  geoExtrasMemo = null;
+  geoMarksMemo = null;
+  x3dMarksMemo = null;
+  rmCountsMemo = null;
+  epochDropMemo = null;
+  bridgeReport = null;
+  inspTilesBar?.dispose();
+  inspTilesBar = null;
+}
 const colourDocKey = (): string => String(store?.doc.graph.graph_id ?? "doc");
 function spaceColoursOf(winId: string): ColourState {
+  // MICRO-PL09 p.0 · no document: no scheme (nothing kept for a document that is not there)
+  if (!store) return defaultColourState();
   const k = `${winId}\u0000${colourDocKey()}`;
   let s = spaceColourStates.get(k);
   if (!s) {
@@ -35642,8 +35758,96 @@ async function cleanFilePresentation(): Promise<void> {
   changePresentation(t("pres.cleaned", { f: file.name, what }), (p) => { for (const n of schemeNames(p)) removeScheme(p, n); });
 }
 function setSpaceColours(winId: string, s: ColourState): void {
-  spaceColourStates.set(`${winId}\u0000${colourDocKey()}`, s);
+  const k = `${winId}\u0000${colourDocKey()}`;
+  spaceColourStates.set(k, s);
+  // MICRO-PL09 p.0 · with the window's draft open, a gesture elsewhere (the
+  // legend, the quick menu) is part of what the person is trying: the draft
+  if (spaceColourDrafts.has(k)) { coloursWindow.repaint(); return; }
   saveColourState(editorHand().orcid, colourDocKey(), s);
+}
+// ── MICRO-PL09 p.0 (E.D., 18 Nov 2026: «i cambi oggi si applicano subito») · the
+// window «Colori» works on a DRAFT: every change in it (a value's colour, the two
+// special ones', a scale, the property, the mode) is previewed at once in the
+// Space and kept nowhere; «Applica» confirms it (one undo step, a line in the
+// Log, the file's scheme in use updated as MICRO-T keeps it), «Annulla» puts
+// the Space back as it was. `base`: the scheme as applied, before the draft.
+const spaceColourDrafts = new Map<string, { base: ColourState }>();
+/** what a scheme IS (the legend's isolate/hide are a gesture of the moment, not a change) */
+function colourSig(s: ColourState): string {
+  const scheme = Object.fromEntries(Object.entries(s.scheme).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  return JSON.stringify([s.mode, s.variant, s.property, scheme, s.ramp, s.range ?? null, !!s.leaveNone]);
+}
+function previewSpaceColours(winId: string, s: ColourState): void {
+  const k = `${winId}\u0000${colourDocKey()}`;
+  const d = spaceColourDrafts.get(k);
+  if (!d) spaceColourDrafts.set(k, { base: spaceColoursOf(winId) });
+  spaceColourStates.set(k, s);
+}
+function colourDraftOf(winId: string): { base: ColourState; now: ColourState; dirty: boolean } | null {
+  const k = `${winId}\u0000${colourDocKey()}`;
+  const d = spaceColourDrafts.get(k);
+  if (!d) return null;
+  const now = spaceColoursOf(winId);
+  return { base: d.base, now, dirty: colourSig(now) !== colourSig(d.base) };
+}
+function discardColourDraft(winId: string): void {
+  const k = `${winId}\u0000${colourDocKey()}`;
+  const d = spaceColourDrafts.get(k);
+  if (!d) return;
+  spaceColourDrafts.delete(k);
+  spaceColourStates.set(k, { ...d.base, isolated: null, hidden: [] });
+  refreshSurfaces("scene");
+  coloursWindow.repaint(true);
+  logInfo(t("cw.draftDiscarded"));
+}
+/** «Applica»: the draft becomes the scheme (this machine's preference, as
+ *  before); when the graph uses a scheme of its FILE for the same property,
+ *  that scheme follows (MICRO-T: the file keeps what is in use). One step:
+ *  «Annulla» in the toast puts the scheme — and the file — back */
+function applyColourDraft(winId: string): void {
+  const k = `${winId}\u0000${colourDocKey()}`;
+  const d = colourDraftOf(winId);
+  if (!d) return;
+  spaceColourDrafts.delete(k);
+  const docKey = colourDocKey();
+  const person = editorHand().orcid;
+  const now = d.now;
+  saveColourState(person, docKey, now);
+  const what = now.mode === "property" ? `${t("col.mode.property")} · ${now.property ?? ""}` : now.mode === "epochs" ? `${t("col.mode.epochs")} · ${t(`col.variant.${now.variant}`)}` : t("col.mode.em");
+  // the file's scheme in use, for this property: it follows the scheme applied
+  const file = emtree.activeFile();
+  const act = activeScheme(file?.presentation, docKey);
+  const fileBefore = file?.presentation ? clonePresentation(file.presentation) : null;
+  const fileDirty = file?.dirty ?? false;
+  let inFile = false;
+  if (file?.presentation && act && now.mode === "property" && now.property && act.scheme.metadata.property_name === now.property) {
+    const emc = schemeOfState(emcOfState(now, String(store?.doc.graph.graph_id ?? "")), fileValueCodes(now.property));
+    addScheme(file.presentation, act.name, emc, true);
+    setActive(file.presentation, docKey, act.name);
+    file.dirty = true;
+    inFile = true;
+    updateToolbar(); refreshEMTree();
+  }
+  const msg = t(inFile ? "cw.draftAppliedFile" : "cw.draftApplied", { what, s: act?.name ?? "" });
+  logInfo(msg);
+  refreshSurfaces("scene");
+  coloursWindow.repaint(true);
+  toastUndoWith(msg, () => {
+    // back: the scheme before the draft, and the file as it was
+    if (colourDocKey() !== docKey) return;
+    spaceColourStates.set(k, { ...d.base, isolated: null, hidden: [] });
+    saveColourState(person, docKey, d.base);
+    if (inFile && file) { file.presentation = fileBefore; file.dirty = fileDirty; updateToolbar(); refreshEMTree(); }
+    refreshSurfaces("scene");
+    coloursWindow.repaint(true);
+    logInfo(t("cw.draftUndone", { what }));
+  });
+}
+/** closing the window with a draft: apply, drop, or keep working */
+async function askColourDraft(): Promise<"apply" | "discard" | "keep"> {
+  const a = await openDialog({ title: t("cw.title"), message: t("cw.draftAsk"), ok: t("cw.draftApply"), cancel: t("cw.draftKeep"),
+    choices: [{ key: "discard", label: t("cw.draftDrop") }], kind: "colours-draft" });
+  return a.choice === "discard" ? "discard" : a.ok ? "apply" : "keep";
 }
 /** the epochs as the legend lists them: each top epoch, then its sub-epochs */
 function colourEpochs(sp: Space): Array<{ id: string; name: string; color: string | null }> {
@@ -35676,10 +35880,20 @@ const coloursWindowHost: ConstructorParameters<typeof ColoursWindow>[0] = {
     const win = coloursSpaceWin();
     if (!win) return null;
     const sp = currentSpace(), ep = sp ? spaceEpochOf(sp) : null;
-    return { winId: win.id, epoch: sp && ep ? sp.summary(ep)?.epoch.name ?? null : null };
+    return { winId: win.id, epoch: sp && ep ? sp.summary(ep)?.epoch.name ?? null : null, ...(store ? {} : { noGraph: true }) };
   },
   state: () => { const w = coloursSpaceWin(); return w ? spaceColoursOf(w.id) : null; },
-  set: (s) => { const w = coloursSpaceWin(); if (!w) return; setSpaceColours(w.id, s); refreshSurfaces("scene"); },
+  // MICRO-PL09 p.0 · the window's changes are a draft, previewed
+  set: (s) => { const w = coloursSpaceWin(); if (!w || !store) return; previewSpaceColours(w.id, s); refreshSurfaces("scene"); },
+  draft: () => { const w = coloursSpaceWin(); const d = w && store ? colourDraftOf(w.id) : null; return d ? { dirty: d.dirty } : null; },
+  applyDraft: () => { const w = coloursSpaceWin(); if (w) applyColourDraft(w.id); },
+  discardDraft: () => { const w = coloursSpaceWin(); if (w) discardColourDraft(w.id); },
+  askDraft: () => askColourDraft(),
+  ...(isTauri() ? {
+    screenOrigin: () => screenOrigin(),
+    screenArea: () => deskScreenArea(),
+    sysFrame: (pop: Window) => sysFrameOf(pop),
+  } : {}),
   units: () => { const c = coloursSpaceNow(); return c ? c.sp.summary(c.ep)?.withProxy ?? [] : []; },
   propertyNames: () => { const c = coloursSpaceNow(); return c && store ? propertyNames(store.doc.graph as never, c.sp.summary(c.ep)?.withProxy ?? []) : []; },
   values: (prop) => { const c = coloursSpaceNow(); return c && store ? propertyValues(store.doc.graph as never, prop, c.sp.summary(c.ep)?.withProxy ?? []) : new Map(); },
@@ -35924,16 +36138,40 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   // MICRO-K §B5 · the legend sits ABOVE the strips of the models (the ones not
   // loaded, the tileset's controls) and its chip, never over them: its bottom
   // follows their height, read when it is painted and when they change size
+  // MICRO-PL09 p.0 · …in the corner the view chose (`space-legend.ts`): the
+  // bottom ones above the strips, the top ones under the epoch's line, the
+  // right ones clear of the navigation gizmo
   const placeLegend = (): void => {
+    const pref = loadLegendPref(win.id);
     const strips = host.querySelector<HTMLElement>(".scn-strips");
     const chip = host.querySelector<HTMLElement>(".scn-tchip:not(.hidden)");
     const under = Math.max(strips?.offsetHeight ?? 0, chip?.offsetHeight ?? 0);
     const bottom = Math.max(34, under + 16);
-    legendEl.style.bottom = `${bottom}px`;
-    legendEl.style.maxHeight = `calc(100% - ${bottom + 56}px)`;
+    const top = pref.corner[0] === "t";
+    legendEl.dataset.corner = pref.corner;
+    Object.assign(legendEl.style, {
+      top: top ? "44px" : "", bottom: top ? "" : `${bottom}px`,
+      left: pref.corner[1] === "l" ? "10px" : "", right: pref.corner[1] === "r" ? "64px" : "",
+      maxHeight: `calc(100% - ${top ? 44 + 34 : bottom + 56}px)`,
+    });
   };
   const legendRO = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => placeLegend()) : null;
   legendRO?.observe(host);
+  // MICRO-PL09 p.0 · resized by its corner (CSS `resize`, which writes the
+  // element's width and height): the size kept for this view when it settles
+  let legendSized = "";
+  let legendSizeTimer = 0;
+  const legendSizeRO = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+    window.clearTimeout(legendSizeTimer);
+    legendSizeTimer = window.setTimeout(() => {
+      const sig = `${legendEl.style.width}|${legendEl.style.height}`;
+      if (sig === legendSized || legendEl.classList.contains("folded") || legendEl.classList.contains("hidden")) return;
+      legendSized = sig;
+      const w = parseFloat(legendEl.style.width), h = parseFloat(legendEl.style.height);
+      saveLegendPref(win.id, { ...loadLegendPref(win.id), w: Number.isFinite(w) ? w : null, h: Number.isFinite(h) ? h : null });
+    }, 250);
+  }) : null;
+  legendSizeRO?.observe(legendEl);
   // MICRO-PANNELLI-LATERALI · the Outliner closed leaves the same triangle as the
   // N panel's, on the left edge: a click opens it, and so does a drag inwards
   const tab = document.createElement("button");
@@ -36381,7 +36619,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   // ── MICRO-E p.6 · «Colori ▾» and its legend ────────────────────────────────
   let colMenu: HTMLElement | null = null;
   function closeColours(): void { colMenu?.remove(); colMenu = null; document.removeEventListener("pointerdown", colOutside, true); document.removeEventListener("keydown", colKey, true); }
-  function colOutside(e: Event): void { const el = e.target as HTMLElement; if (colMenu && !colMenu.contains(el) && !el.closest("[data-colours]")) closeColours(); }
+  function colOutside(e: Event): void { const el = e.target as HTMLElement; if (colMenu && !colMenu.contains(el) && !el.closest("[data-colours], [data-colours-menu]")) closeColours(); }
   function colKey(e: KeyboardEvent): void { if (e.key === "Escape" && colMenu) { e.stopPropagation(); closeColours(); } }
   function setColours(s2: ColourState): void { setSpaceColours(win.id, s2); if (colMenu) colMenu.replaceChildren(coloursBody()); refresh(); }
   function coloursUnits(): string[] {
@@ -36540,20 +36778,73 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     document.addEventListener("pointerdown", colOutside, true);
     document.addEventListener("keydown", colKey, true);
   }
-  /** the legend: colour, value, number; a click isolates, another hides, a third gives back */
+  /** the legend: colour, value, number; a click isolates, another hides, a third gives back.
+   *  MICRO-PL09 p.0 · it folds into one line, shows the first rows and «+N altri»,
+   *  is resized by its corner and moved by its head to a corner; ✎ opens the
+   *  window «Colori» on its scheme. Per view, in this machine's preferences */
   function paintLegend(cs: ColourState, plan: ColourPlan): void {
     legendEl.textContent = "";
     legendEl.classList.toggle("hidden", cs.mode === "em" || !plan.legend.length);
     legendEl.dataset.mode = cs.mode;
     if (cs.mode === "em" || !plan.legend.length) return;
+    const pref = loadLegendPref(win.id);
+    const keep = (p: Partial<LegendPref>) => saveLegendPref(win.id, { ...loadLegendPref(win.id), ...p });
+    legendEl.classList.toggle("folded", pref.folded);
+    legendEl.style.width = pref.folded || pref.w == null ? "" : `${pref.w}px`;
+    legendEl.style.height = pref.folded || pref.h == null ? "" : `${pref.h}px`;
+    legendSized = `${legendEl.style.width}|${legendEl.style.height}`;
     const strips = host.querySelector<HTMLElement>(".scn-strips");
     if (strips && legendRO) legendRO.observe(strips);
     requestAnimationFrame(placeLegend);
     const head = document.createElement("div");
     head.className = "scn-legend-h";
-    head.textContent = cs.mode === "epochs" ? `${t("col.mode.epochs")} · ${t(`col.variant.${cs.variant}`)}` : `${t("col.mode.property")} · ${cs.property ?? ""}`;
+    head.dataset.legendHead = "1";
+    const what = cs.mode === "epochs" ? `${t("col.mode.epochs")} · ${t(`col.variant.${cs.variant}`)}` : `${t("col.mode.property")} · ${cs.property ?? ""}`;
+    const fold = document.createElement("button");
+    fold.type = "button";
+    fold.className = "scn-legend-fold";
+    fold.dataset.legendFold = pref.folded ? "closed" : "open";
+    fold.textContent = pref.folded ? "▸" : "▾";
+    fold.title = t(pref.folded ? "col.legendOpen" : "col.legendFold");
+    fold.addEventListener("click", (ev) => { ev.stopPropagation(); keep({ folded: !pref.folded }); paintLegend(spaceColoursOf(win.id), plan); });
+    const title = document.createElement("span");
+    title.className = "scn-legend-title";
+    title.textContent = pref.folded ? `${what} · ${tn("col.legendValues", plan.legend.length)}` : what;
+    title.title = t("col.legendMove");
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "scn-legend-edit";
+    edit.dataset.legendEdit = "1";
+    edit.textContent = "✎";
+    edit.title = t("col.legendEdit");
+    edit.addEventListener("click", (ev) => { ev.stopPropagation(); openColoursWindow(win.id); });
+    head.append(fold, title, edit);
+    // moved by its head: dropped, it goes to the nearest corner of the scene
+    head.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0 || (ev.target as HTMLElement).closest("button")) return;
+      ev.preventDefault();
+      const hr = host.getBoundingClientRect(), r0 = legendEl.getBoundingClientRect();
+      const dx = ev.clientX - r0.left, dy = ev.clientY - r0.top;
+      let moved = false;
+      const move = (e2: PointerEvent) => {
+        moved = true;
+        legendEl.classList.add("dragging");
+        Object.assign(legendEl.style, { left: `${e2.clientX - dx - hr.left}px`, top: `${e2.clientY - dy - hr.top}px`, right: "", bottom: "" });
+      };
+      const up = (e2: PointerEvent) => {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        legendEl.classList.remove("dragging");
+        if (!moved) return;
+        keep({ corner: nearestCorner(e2.clientX - dx - hr.left, e2.clientY - dy - hr.top, r0.width, r0.height, hr.width, hr.height) });
+        placeLegend();
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    });
     head.title = t("col.legendHint");
     legendEl.appendChild(head);
+    if (pref.folded) return;
     if (cs.mode === "epochs") {
       // the two variants, one click away
       const vs = document.createElement("div");
@@ -36577,9 +36868,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         legendEl.appendChild(c);
       }
     }
+    const rowsShown = legendRowsShown(plan.legend, pref.all);
     const list = document.createElement("div");
     list.className = "scn-legend-list";
-    for (const e of plan.legend) {
+    for (const e of rowsShown.shown) {
       const r = document.createElement("div");
       r.className = "scn-legend-row";
       r.dataset.legendKey = e.key;
@@ -36617,6 +36909,15 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       list.appendChild(r);
     }
     legendEl.appendChild(list);
+    if (rowsShown.more || (pref.all && plan.legend.length > LEGEND_ROWS + 1)) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "scn-legend-more";
+      more.dataset.legendMore = String(rowsShown.more);
+      more.textContent = rowsShown.more ? tn("col.legendMore", rowsShown.more) : t("col.legendLess");
+      more.addEventListener("click", (ev) => { ev.stopPropagation(); keep({ all: !pref.all }); paintLegend(spaceColoursOf(win.id), plan); });
+      legendEl.appendChild(more);
+    }
   }
   const spaceLayersSection = (): HTMLElement => {
     const box = document.createElement("details");
@@ -36663,8 +36964,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   const onBar = (e: Event) => {
     const vb = (e.target as HTMLElement).closest<HTMLElement>("[data-vis]");
     if (vb) { e.stopPropagation(); closeColours(); openVis(vb); return; }
+    const cm = (e.target as HTMLElement).closest<HTMLElement>("[data-colours-menu]");
+    if (cm) { e.stopPropagation(); closeVis(); openColours(cm.previousElementSibling as HTMLElement ?? cm); return; }
     const cb = (e.target as HTMLElement).closest<HTMLElement>("[data-colours]");
-    if (cb) { e.stopPropagation(); openColours(cb); return; }
+    if (cb) { e.stopPropagation(); closeColours(); closeVis(); openColoursWindow(win.id); return; }
     if ((e.target as HTMLElement).closest("[data-door-plus]")) { e.stopPropagation(); void doorFromMenu({ epoch: doorEpochHere() }); return; }
     // the globe's chip turns the territory on and off no more: that is a category,
     // switched in «Visibilità ▾» (it opens there, on «Territorio / GIS»)
@@ -36714,6 +37017,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   };
   bar.addEventListener("click", onBar);
   tail.addEventListener("click", onBar);
+  // MICRO-PL09 p.0 · a right click on «Colori» opens the quick menu
+  tail.addEventListener("contextmenu", (e) => {
+    const cb = (e.target as HTMLElement).closest<HTMLElement>("[data-colours]");
+    if (!cb) return;
+    e.preventDefault(); e.stopPropagation();
+    closeVis(); openColours(cb);
+  });
   // p.3 · the epochs' menu: a choice is the click on that epoch's button
   bar.addEventListener("change", (e) => {
     const pick = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-epoch-pick]");
@@ -36725,6 +37035,18 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     refreshInspector();
     refresh();
   });
+  // MICRO-PL09 p.0 (E.D., 18 Nov 2026: after File ▸ Close the legend, the
+  // tileset's counter and its memory stayed) · the scene is told when the
+  // document in front changed (closed, or another): it gives back what the
+  // new items do not use — files, GPU, tilesets, versions —, and the legend
+  // of a scene with nothing coloured goes
+  let shownDoc: string | undefined;
+  const push = (its: SceneItem[]): void => {
+    const k = store ? `${emtree.activeId ?? ""}\u0000${colourDocKey()}` : "";
+    handle.update(its, k !== shownDoc ? { release: true } : undefined);
+    shownDoc = k;
+  };
+  const noLegend = (): void => { legendEl.textContent = ""; legendEl.classList.add("hidden"); };
   const refresh = (): void => {
     askResident();
     const sp = currentSpace();
@@ -36878,8 +37200,20 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     colb.type = "button";
     colb.className = "scn-tg scn-col";
     colb.dataset.colours = csNow.mode;
-    colb.textContent = csNow.mode === "em" ? `${t("col.title")} ▾` : `${t("col.title")} · ${t(`col.mode.${csNow.mode}`)} ▾`;
-    colb.title = t("col.tip");
+    // MICRO-PL09 p.0 (E.D., 18 Nov 2026: «non trovo come cambiare i colori a mano») ·
+    // the button opens the window «Colori» itself; the quick menu is the ▾ beside
+    // it (or a right click on it)
+    colb.textContent = csNow.mode === "em" ? t("col.title") : `${t("col.title")} · ${t(`col.mode.${csNow.mode}`)}`;
+    colb.title = t("col.tipWindow");
+    const colm = document.createElement("button");
+    colm.type = "button";
+    colm.className = "scn-tg scn-col-menu";
+    colm.dataset.coloursMenu = "1";
+    colm.textContent = "▾";
+    colm.title = t("col.tipMenu");
+    const colPair = document.createElement("span");
+    colPair.className = "scn-col-pair";
+    colPair.append(colb, colm);
     // MICRO-E p.1 · «+»: the one door, the epoch shown proposed
     const plus = document.createElement("button");
     plus.type = "button";
@@ -36898,7 +37232,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     geoB.title = ge === null ? t("gr.openNone") : t("gr.open", { epsg: String(ge) });
     geoB.dataset.grEpsg = ge === null ? "" : String(ge);
     geoB.addEventListener("click", (e) => { e.stopPropagation(); if (grCardEl) closeGeorefCard(); else openGeorefCard(); });
-    tail.replaceChildren(plus, geoB, colb, vis, sceneSearch(win), more);
+    tail.replaceChildren(plus, geoB, colPair, vis, sceneSearch(win), more);
     gisSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
@@ -36945,7 +37279,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       overlay.textContent = "";
       overlay.classList.add("hidden");
       empty.classList.add("hidden");
-      handle.update([previewItem]);
+      noLegend();
+      push([previewItem]);
       return;
     }
     if (!store || !sp || !sum) {
@@ -36953,7 +37288,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       overlay.classList.add("hidden");
       empty.classList.remove("hidden");
       empty.innerHTML = `<b>${escapeHtml(t(store ? "space.noEpochs" : "menu.noGraph"))}</b>`;
-      handle.update([]);
+      noLegend();
+      push([]);
+      // MICRO-PL09 p.0 · the window «Colori» follows: «no graph open»
+      if (coloursWindow.isOpen && coloursSpaceWin()?.id === win.id) coloursWindow.repaint();
       return;
     }
     const st = store;
@@ -37033,7 +37371,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       // MICRO-LAB bande-2 · read by horizons, the scene says «horizon»
       empty.innerHTML = `<b>${escapeHtml(t("space.emptyTitle", { x: sum.epoch.name }))}</b> `;
       empty.appendChild(helpGlyph(t(spaceBandsWin() ? "space.emptyBodyHz" : "space.emptyBody", { n: String(sum.units.length) }), "space-empty"));
-      handle.update([]);
+      noLegend();
+      push([]);
       return;
     }
     // MICRO-SPAZIO-3D-3 · the one selection, and its active
@@ -37175,7 +37514,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       overlay.classList.remove("hidden");   // MICRO-PL07 p.0 · said even with the summary taken away
       overlay.title = `${overlay.title}\n${line.textContent}`;
     }
-    handle.update(items);
+    push(items);
     handle.syncSketches();
     // MICRO-TESTATE-COERENTI p.6 · the camera stays where it is at an epoch change:
     // when it then sees nothing of the epoch the line says it and offers «⤢ inquadra»

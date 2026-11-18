@@ -246,7 +246,11 @@ export interface SceneMenuRequest {
 }
 
 export interface SpaceSceneHandle {
-  update(items: SceneItem[]): void;
+  /** MICRO-PL09 p.0 · `release`: the document changed (closed, another in
+   *  front) — after this rebuild everything the scene holds for items no longer
+   *  there leaves the memory: the files' cache, the GPU's geometries and
+   *  textures, the tilesets, the flow's versions, the chip's counter */
+  update(items: SceneItem[], o?: { release?: boolean }): void;
   frame(): void;
   /** MICRO-TESTATE-COERENTI p.6 · does the camera see anything of what is drawn?
    *  null when nothing has a box yet */
@@ -538,6 +542,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   let items: SceneItem[] = [];
   let disposed = false;
   let rebuild: (() => void) | null = null;
+  /** MICRO-PL09 p.0 · the next rebuild gives back what is not in use (`update(…, {release})`) */
+  let releaseNext = false;
   let frameIt: (() => void) | null = null;
   let cleanup: (() => void) | null = null;
   const drawn = new Map<string, Drawn>();
@@ -701,9 +707,29 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 (e: any) => res({ fail: "missing", unanswered: !e?.response && e instanceof TypeError && /fetch|load failed|network/i.test(String(e?.message)), err: e }))));
           cache.set(url, p);
           const mine = p;
-          void p.then((x) => { if ("fail" in x) { if (cache.get(url) === mine) cache.delete(url); } else measured(url, x.root); });
+          void p.then((x) => { if ("fail" in x) { if (cache.get(url) === mine) cache.delete(url); } else { markFile(x.root); measured(url, x.root); } });
         }
         return p;
+      };
+      /** MICRO-PL09 p.0 · a file's geometries and materials are the cache's: the
+       *  clones drawn share them, a rebuild never gives them back (only `evict`) */
+      const markFile = (root: any) => root.traverse((o: any) => {
+        if (o.geometry) o.geometry.userData.fromFile = true;
+        for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) m.userData.fromFile = true;
+      });
+      /** …and what a rebuild made by itself (a proxy's convex shapes and spheres,
+       *  the edges, the selection boxes, the grid and the axes) goes back to the
+       *  GPU when the rebuild clears it: before, every rebuild left its
+       *  geometries behind (measured on v11: 76 → 93 after File ▸ Close). A
+       *  tileset's object is its layer's (`dispose`), never walked */
+      const giveBack = (root: any) => {
+        const walk = (o: any) => {
+          if (o.userData?.tiles) return;
+          if (o.geometry && !o.geometry.userData?.fromFile) o.geometry.dispose?.();
+          for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) if (!m.userData?.fromFile) m.dispose?.();
+          for (const c of o.children ?? []) walk(c);
+        };
+        for (const c of root.children) walk(c);
       };
       /** MICRO-PROVA-DEV48 p.5 · what a file loaded holds, counted once per load */
       const measured = (url: string, root: any) => {
@@ -741,6 +767,17 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       // MICRO-GIS-BASE · what the GPU holds (three's own count): a version left behind shows here
       (probe as Record<string, unknown>).__spaceMemory = () => ({ geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
         programs: renderer.info.programs?.length ?? null, cached: cache.size });
+      // MICRO-PL09 p.0 · what the scene still holds (a closed document must leave none of it):
+      // the meshes and tilesets drawn, the bytes the tilesets and the flow count, the chip
+      (probe as Record<string, unknown>).__spaceResidue = () => {
+        let meshes = 0;
+        content.traverse((o: any) => { if (o.isMesh || o.isLineSegments || o.isPoints) meshes++; });
+        let tileBytes = 0;
+        for (const l of layers.values()) tileBytes += Number(l.layer.status().bytes) || 0;
+        return { items: items.length, meshes, layers: layers.size, tileBytes, flowBytes: [...flowBytes.values()].reduce((a, b) => a + b, 0),
+          flow: flowState.size, cached: cache.size, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
+          chip: tchip.classList.contains("hidden") ? null : tchip.textContent };
+      };
       // MICRO-PROVA-DEV47 p.3a · an OBJ version (the survey's levels of the
       // author, RB/LOD0–2 of Templu Mare): the .obj, the .mtl it calls, the
       // textures the .mtl calls, every file through the set's addresses. The
@@ -788,7 +825,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           })();
           cache.set(k, p);
           const mine = p;
-          void p.then((x) => { if ("fail" in x) { if (cache.get(k) === mine) cache.delete(k); } else measured(url, x.root); });
+          void p.then((x) => { if ("fail" in x) { if (cache.get(k) === mine) cache.delete(k); } else { markFile(x.root); measured(url, x.root); } });
         }
         return p;
       };
@@ -1898,6 +1935,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
 
       // ── the decorators: grid and axes, the epoch's box ───────────────────
       const buildDecor = () => {
+        giveBack(decor);
         decor.clear();
         const b = extent();
         const c = b.getCenter(new THREE.Vector3());
@@ -1992,6 +2030,40 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         return true;
       };
 
+      /** MICRO-PL09 p.0 (E.D., 18 Nov 2026: after File ▸ Close «Tileset · auto ·
+       *  L3–6 · 48.5 MB / 1.00 GB» and its memory stayed) · what the items drawn
+       *  now do not use leaves: the files' cache (their geometries and textures
+       *  given back to the GPU), the flow's bytes, the choices made per file or
+       *  per item (a LOD, «Carica comunque», the tileset over a glb), the
+       *  containers' sides; then the chip is asked again (no layer: hidden) */
+      /** the tilesets the last rebuild draws (a layer arriving late for an older one is let go) */
+      let usedTiles = new Set<string>();
+      const forgetUnused = () => {
+        const keys = new Set(items.map((i) => `${i.kind}:${i.id}`));
+        const inUse = new Set<string>();
+        for (const it of items) {
+          if (it.url) { inUse.add(it.url); inUse.add(`obj\u0000${it.url}`); }
+          if (it.tileset) inUse.add(it.tileset);
+          for (const part of it.parts ?? []) inUse.add(part.url);
+          for (const v of it.flow ?? []) { inUse.add(cacheKeyOf(v)); inUse.add(v.url); }
+        }
+        for (const k of [...cache.keys()]) if (!inUse.has(k)) evict(k);
+        for (const u of [...flowBytes.keys()]) if (!inUse.has(u)) flowBytes.delete(u);
+        for (const k of [...lodSets.keys()]) if (![...inUse].some((u) => u.startsWith(k))) lodSets.delete(k);
+        for (const k of [...lodChoice.keys()]) if (!keys.has(k)) lodChoice.delete(k);
+        for (const k of [...useTileset]) if (!keys.has(k)) useTileset.delete(k);
+        for (const k of [...forced]) if (!inUse.has(k)) forced.delete(k);
+        for (const k of [...memForced]) if (!inUse.has(k)) memForced.delete(k);
+        const groups = new Set(items.map((i) => i.alt?.group).filter(Boolean) as string[]);
+        for (const g of [...altState.keys()]) if (!groups.has(g)) altState.delete(g);
+        for (const g of [...altReleased]) if (!groups.has(g)) altReleased.delete(g);
+        for (const g of [...altHiddenSince.keys()]) if (!groups.has(g)) altHiddenSince.delete(g);
+        for (const g of [...altInfo.keys()]) if (!groups.has(g)) altInfo.delete(g);
+        lastUrlOf.clear();
+        if (!flowState.size) flowStrip.classList.add("hidden");
+        if (!items.some((i) => i.alt)) altStrip.classList.add("hidden");
+        chipTick();
+      };
       rebuild = () => {
         const gen = ++generation;
         memUsed = 0;
@@ -2000,6 +2072,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // a model that changed version (its mode, the hardware profile, a level
         // chosen) gives the file it drew back to the GPU when nothing else draws it
         releaseReplaced();
+        giveBack(content);
         content.clear();
         labels.textContent = "";
         anchors.length = 0;
@@ -2049,6 +2122,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             drawn.set(key, { item, as: "pending", url: tsUrl });
             const el = stripOf(item);
             pending.push(tilesTurn.then<Live | null | "held">(() => {
+              // MICRO-PL09 p.0 · a generation gone (the document closed meanwhile) opens no layer
+              if (gen !== generation || disposed) return "held";
               let tsMb = tilesMb;
               if (opts.memory && fresh && gen === generation && !disposed) {
                 const m = opts.memory();
@@ -2064,7 +2139,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 item.tilesStart?.errorScale, item.tilesStart?.errorChoice);
             }).then(async (live) => {
               if (live === "held") return;
-              if (gen !== generation || disposed) return;
+              if (gen !== generation || disposed) {
+                // …and a layer that came for it, when nobody draws it now, leaves at once
+                if (live && !usedTiles.has(tsUrl)) for (const [u, l] of layers) if (l === live) { l.layer.dispose(); l.bar.el.remove(); layers.delete(u); }
+                return;
+              }
               if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
               live.layer.object.userData.tiles = true;
               live.layer.object.traverse((o: any) => { o.userData.rmId = item.id; });
@@ -2132,7 +2211,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               await memWait();
               const held = gen === generation && memGate(key, item, v.url, { bytes: v.bytes ?? null }, null, later);
               memPass();
-              if (held) return;
+              if (held || gen !== generation || disposed) return;
               const got = await loadV(v);
               if (gen !== generation || disposed) return;
               opts.onLoadOutcome?.(key, item.label, v.url, "fail" in got ? got.err ?? null : null);
@@ -2322,6 +2401,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           } else later.push(item);
         }
         for (const [u, l] of layers) if (!used.has(u)) { l.layer.dispose(); layers.delete(u); }
+        usedTiles = used;
+        if (releaseNext) { releaseNext = false; forgetUnused(); }
         // every model has its turn queued: the tilesets go when the last one is decided
         void memTurn.then(() => releaseTiles());
         void Promise.all(pending).then(() => {
@@ -2734,7 +2815,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         hiddenMs: altHiddenSince.has(g) ? Math.round(performance.now() - altHiddenSince.get(g)!) : null, released: altReleased.has(g),
         warming: [...altWarming].some((l) => [...layers.values()].includes(l)) }]));
       const flowTick = () => {
-        if (!flowState.size) { flowStrip.classList.add("hidden"); return; }
+        // MICRO-PL09 p.0 · the chip says it too: «Versioni per distanza · … 161.6 MB»
+        // stayed on an empty scene after File ▸ Close (the chip was asked only here)
+        if (!flowState.size) { if (!flowStrip.classList.contains("hidden")) { flowStrip.classList.add("hidden"); queueMicrotask(chipTick); } return; }
         const H = Math.max(1, renderer.domElement.clientHeight);
         const camPos = camera.position;
         // the distance of each model, and the share of the screen it fills
@@ -4055,8 +4138,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   });
 
   return {
-    update(next) {
+    update(next, o) {
       items = next;
+      if (o?.release) releaseNext = true;
       rebuild?.();
     },
     frame() { frameIt?.(); },

@@ -41,10 +41,23 @@ import {
 export interface ColoursHost {
   t(key: string, vars?: Record<string, string>): string;
   fmtN(n: number): string;
-  /** the Space window coloured, and what it shows (null: no Space open) */
-  space(): { winId: string; epoch: string | null } | null;
+  /** the Space window coloured, and what it shows (null: no Space open;
+   *  `noGraph`: a Space, and no graph in it — MICRO-PL09 p.0, File ▸ Close) */
+  space(): { winId: string; epoch: string | null; noGraph?: boolean } | null;
   state(): ColourState | null;
-  set(s: ColourState): void;
+  /** MICRO-PL09 p.0 · in the window a change is a DRAFT the Space previews
+   *  (`draft` / `applyDraft` / `discardDraft`); `quiet`: the window already
+   *  shows it (a swatch being picked), its content is not rebuilt */
+  set(s: ColourState, quiet?: boolean): void;
+  /** MICRO-PL09 p.0 · the scale chosen in the selector and not applied yet
+   *  (a rebuild of the content keeps it: 4c) */
+  rampPick?: { get(prop: string): string | null; set(prop: string, v: string | null): void };
+  /** MICRO-PL09 p.0 · the draft: changes not applied (null: none) */
+  draft?(): { dirty: boolean } | null;
+  applyDraft?(): void;
+  discardDraft?(): void;
+  /** closing with a draft: apply it, drop it, or keep the window open */
+  askDraft?(): Promise<"apply" | "discard" | "keep">;
   /** the units drawn with a proxy in the epoch shown */
   units(): string[];
   propertyNames(): Array<{ name: string; units: number }>;
@@ -61,7 +74,13 @@ export interface ColoursHost {
   isWriting(el: Element | null): boolean;
   /** a system window just opened: the host learns it (on the desktop the page
    *  cannot close it by itself) and says when the shell closed it */
-  systemWindow?(pop: Window, onClosed: () => void): { close(): void };
+  systemWindow?(pop: Window, onClosed: () => void): SystemWindow;
+  /** MICRO-PL09 p.0 · on the desktop, the main window's top-left and the
+   *  screen's visible area as the SHELL says them, and a system window's frame
+   *  (WKWebView's screenX/screenY are not the window's) */
+  screenOrigin?(): { x: number; y: number };
+  screenArea?(): { x: number; y: number; w: number; h: number };
+  sysFrame?(pop: Window): { x: number; y: number; w: number; h: number } | null;
   /** MICRO-T · the schemes of the file of the graph shown (null: the graph is
    *  in no file yet) */
   fileSchemes?(): { file: string; schemes: FileScheme[] } | null;
@@ -122,7 +141,7 @@ const HEX = /^#[0-9a-f]{6}$/i;
  */
 export function coloursContent(doc: Document, host: ColoursHost): HTMLElement {
   const box = modeContent(doc, host);
-  if (host.fileSchemes && host.state() && host.space()) box.appendChild(fileSection(doc, host));
+  if (host.fileSchemes && host.state() && host.space() && !host.space()?.noGraph) box.appendChild(fileSection(doc, host));
   return box;
 }
 
@@ -183,6 +202,8 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
   const cs = host.state();
   const sp = host.space();
   if (!cs || !sp) { box.appendChild(el("p", "cw-hint", t("cw.noSpace"))); return box; }
+  // MICRO-PL09 p.0 · the document closed: nothing of it is left to colour
+  if (sp.noGraph) { const p = el("p", "cw-hint", t("cw.noGraph")); p.dataset.cwNoGraph = "1"; box.appendChild(p); return box; }
   box.appendChild(el("div", "cw-where", sp.epoch ? t("cw.where", { e: sp.epoch, n: host.fmtN(host.units().length) }) : t("cw.noEpoch")));
   const seg = el("div", "col-modes cw-modes");
   for (const m of ["em", "epochs", "property"] as const) {
@@ -209,8 +230,9 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
     box.append(vs, el("p", "cw-hint", t(`col.variantHint.${cs.variant}`)));
     const plan = host.plan();
     const list = el("div", "cw-list");
+    // an epoch's colour is the GRAPH's (a change, an undo): written when the picker closes
     for (const e of plan?.legend ?? []) list.appendChild(row(e, e.none ? t("col.noEpoch") : e.label, e.epochId
-      ? (hex) => host.setEpochColour(e.epochId!, hex) : null, null));
+      ? (hex, live) => { if (!live) host.setEpochColour(e.epochId!, hex); } : null, null));
     box.appendChild(list);
     return box;
   }
@@ -252,7 +274,12 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
   const rsel = el("select");
   rsel.dataset.cwRamp = "1";
   const order: RampType[] = kind === "numeric" ? ["sequential", "diverging", "qualitative"] : ["qualitative", "sequential", "diverging"];
-  const cur = cs.ramp ? `${cs.ramp.type}/${cs.ramp.name}` : "";
+  // MICRO-PL09 p.0 (4c) · the scale chosen and not applied yet survives a
+  // rebuild of the content: before, any repaint between the choice and the
+  // click (the Space's own refresh, a colour picked) put the selector back on
+  // the scheme's scale, and «Applica la scala» applied THAT one — nothing
+  // changed, or the colours chosen by hand were overwritten
+  const cur = host.rampPick?.get(prop) ?? (cs.ramp ? `${cs.ramp.type}/${cs.ramp.name}` : "");
   for (const type of order)
     for (const [k, r] of Object.entries(RAMPS[type])) {
       const o = el("option", "", `${r.name} · ${t(`col.scaleType.${type}`)}${kind === "text" && isNumericScale(type) ? ` (${t("cw.forNumbers")})` : ""}`);
@@ -269,10 +296,11 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
   };
   const warn = el("p", "cw-warn hidden", t("cw.numericOnText"));
   warn.dataset.cwWarn = "1";
-  rsel.onchange = paintRamp;
+  rsel.onchange = () => { host.rampPick?.set(prop, rsel.value || null); paintRamp(); };
   const ap = el("button", "", t("col.apply"));
   ap.type = "button";
   ap.dataset.cwApply = "1";
+  ap.title = t("cw.applyScaleHint");
   sr.append(`${t("col.scale")} `, rsel, ramp, ap);
   box.append(sr, warn);
   // min / max of a numeric scale
@@ -296,7 +324,7 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
     const [type, name] = (rsel.value || rsel.querySelector("option")!.value).split("/") as [RampType, string];
     const range = lo && hi && Number.isFinite(Number(lo.value)) && Number.isFinite(Number(hi.value)) && lo.value !== "" && hi.value !== ""
       ? { lo: Number(lo.value), hi: Number(hi.value) } : null;
-    host.set(applyRamp(cs, values.values(), type, name, range));
+    host.set(applyRamp(host.state() ?? cs, values.values(), type, name, range));
     if (kind === "text" && isNumericScale(type)) host.toast(t("cw.numericOnTextDone"));
   };
   paintRamp();
@@ -309,7 +337,7 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
   list.appendChild(head);
   const setKey = (key: string) => (hex: string) => {
     const now = host.state();
-    if (now) host.set({ ...now, scheme: { ...now.scheme, [key]: hex } });
+    if (now && now.scheme[key] !== hex) host.set({ ...now, scheme: { ...now.scheme, [key]: hex } }, true);
   };
   const real = rows.filter((r) => !r.special);
   if (!real.length) list.appendChild(el("p", "cw-hint", t("cw.noValues")));
@@ -360,7 +388,8 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
     return host.units().filter((u) => (values.get(u) ?? ek) === key);
   }
   /** a value: the swatch (a colour picker), its name (a click selects its units), its number */
-  function row(e: LegendEntry, label: string, onColour: ((hex: string) => void) | null, onPick: (() => void) | null): HTMLElement {
+  /** `onColour(hex, live)`: live = while the picker is open (an «input»), else its «change» */
+  function row(e: LegendEntry, label: string, onColour: ((hex: string, live: boolean) => void) | null, onPick: (() => void) | null): HTMLElement {
     const r = el("div", "cw-val");
     r.dataset.cwKey = e.key;
     if (e.special) r.dataset.cwSpecial = e.special;
@@ -370,7 +399,16 @@ function modeContent(doc: Document, host: ColoursHost): HTMLElement {
     sw.value = HEX.test(e.colour) ? e.colour.toLowerCase() : "#9a9a9a";
     sw.disabled = !onColour || !!e.untouched;
     sw.title = e.epochId ? t("col.epochColour", { e: e.label }) : t("col.valueColour", { v: label });
-    if (onColour) sw.addEventListener("change", () => onColour(sw.value.toUpperCase()));
+    // MICRO-PL09 p.0 · the Space previews the colour WHILE it is picked (WebKit,
+    // the desktop's engine, says «change» only when its picker closes): every
+    // «input», at most every 120 ms, quiet — the content is not rebuilt under
+    // the open picker
+    if (onColour) {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const send = () => { timer = null; onColour(sw.value.toUpperCase(), true); };
+      sw.addEventListener("input", () => { if (!timer) timer = setTimeout(send, 120); });
+      sw.addEventListener("change", () => { if (timer) { clearTimeout(timer); timer = null; } onColour(sw.value.toUpperCase(), false); });
+    }
     const lab = el(onPick ? "button" : "span", "cw-lab", label);
     if (onPick) {
       (lab as HTMLButtonElement).type = "button";
@@ -399,13 +437,58 @@ export interface FloatingSpec {
   sig(): string;
 }
 
+/** MICRO-PL09 p.0 (4a/4b) · a system window's place, kept on a screen: a
+ *  remembered or computed rectangle that would leave its title bar off the
+ *  visible area (`area`: the screen's, in the same coordinates) is brought in */
+export function onScreenRect(r: { x: number; y: number; w: number; h: number },
+                             area: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number } {
+  const w = Math.max(280, Math.min(r.w, area.w)), h = Math.max(200, Math.min(r.h, area.h));
+  const x = Math.max(area.x, Math.min(r.x, area.x + area.w - w));
+  const y = Math.max(area.y, Math.min(r.y, area.y + area.h - h));
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+}
+/** the screen's visible area as the page sees it (WebKit and Chromium both
+ *  give `availLeft/availTop`; the desktop's frames come from the shell) */
+export function screenArea(w: Window): { x: number; y: number; w: number; h: number } {
+  const sc = w.screen as Screen & { availLeft?: number; availTop?: number };
+  return { x: sc?.availLeft ?? 0, y: sc?.availTop ?? 0, w: sc?.availWidth || 1440, h: sc?.availHeight || 900 };
+}
+
+/** the system window the host learnt (the desktop's label): closed, brought forward, where */
+export interface SystemWindow {
+  close(): void;
+  /** MICRO-PL09 p.0 · in front of EMStudio and inside the visible screen */
+  front?(): void;
+}
+
 export class ColoursWindow {
   private panel: HTMLElement | null = null;
   private body: HTMLElement | null = null;
+  private foot: HTMLElement | null = null;
   private pop: Window | null = null;
-  private sys: { close(): void } | null = null;
+  private sys: SystemWindow | null = null;
   private off: Array<() => void> = [];
-  constructor(private host: ColoursHost, private page: Document = document, private spec: FloatingSpec | null = null) {}
+  /** MICRO-PL09 p.0 · the scale chosen per property, not applied yet (4c) */
+  private picks = new Map<string, string>();
+  /** a press inside the window: a rebuild waits for its release (a click
+   *  whose button was replaced between down and up never arrives — 4c) */
+  private pressing = false;
+  private waiting = false;
+  private asking = false;
+  /** the content's host: the page's, with the window's own memory of the scale picked */
+  private readonly inner: ColoursHost;
+  constructor(private host: ColoursHost, private page: Document = document, private spec: FloatingSpec | null = null) {
+    this.inner = {
+      ...host,
+      set: (st: ColourState, quiet?: boolean) => {
+        host.set(st, quiet);
+        // a swatch being picked shows its colour already: no rebuild under it
+        if (quiet) this.sig = this.sigNow();
+        this.paintFoot();
+      },
+      rampPick: { get: (p) => this.picks.get(p) ?? null, set: (p, v) => { if (v) this.picks.set(p, v); else this.picks.delete(p); } },
+    };
+  }
   private pref(): ColoursWindowPref { return loadWindowPref(undefined, this.spec?.prefKey); }
   private keepPref(p: ColoursWindowPref): void { saveWindowPref(p, undefined, this.spec?.prefKey); }
 
@@ -415,29 +498,75 @@ export class ColoursWindow {
   get root(): HTMLElement | null { return this.panel; }
 
   open(): void {
-    if (this.pop && !this.pop.closed) { this.pop.focus(); this.repaint(); return; }
-    if (this.panel) { this.repaint(); return; }
+    // MICRO-PL09 p.0 (4b) · open already: brought forward (and onto the screen), never a second one
+    if (this.pop && !this.pop.closed) { this.front(); this.repaint(); return; }
+    if (this.panel) { this.panel.classList.add("cw-flash"); setTimeout(() => this.panel?.classList.remove("cw-flash"), 600); this.repaint(); return; }
     const pref = this.pref();
     if (pref.detached && this.detach(false)) return;
     this.mountPanel();
+  }
+  /** the system window in front of EMStudio, inside the visible screen */
+  private front(): void {
+    const p = this.pop;
+    if (!p) return;
+    if (this.sys?.front) { this.sys.front(); return; }
+    // a browser: the popup is ours to move
+    try {
+      const a = screenArea(this.page.defaultView ?? window);
+      const r = onScreenRect({ x: p.screenX, y: p.screenY, w: p.outerWidth, h: p.outerHeight }, a);
+      if (r.x !== p.screenX || r.y !== p.screenY) p.moveTo(r.x, r.y);
+    } catch { /* not ours to move */ }
+    try { p.focus(); } catch { /* gone */ }
   }
   close(): void {
     this.unmount();
     if (this.pop) { const p = this.pop; this.pop = null; this.closeSys(p); }
   }
-  toggle(): void { if (this.isOpen) this.close(); else this.open(); }
+  /** MICRO-PL09 p.0 · × (and Tools ▸ Colori… again): a draft not applied is asked about first */
+  async requestClose(): Promise<void> {
+    if (!this.spec && this.host.draft?.()?.dirty && this.host.askDraft) {
+      if (this.asking) return;
+      this.asking = true;
+      try {
+        const a = await this.host.askDraft();
+        if (a === "keep") { this.front(); return; }
+        if (a === "apply") this.host.applyDraft?.(); else this.host.discardDraft?.();
+      } finally { this.asking = false; }
+    }
+    this.close();
+  }
+  toggle(): void { if (this.isOpen) void this.requestClose(); else this.open(); }
   private sig = "";
+  private sigNow(): string {
+    return this.spec ? this.spec.sig() : JSON.stringify([this.host.state(), this.host.space(), this.host.rev()]);
+  }
   /** the Space changed (epoch, scheme, document): the content again — only
    *  when what it shows changed (a rebuild closes an open list or picker) */
   repaint(force = false): void {
     if (!this.body) return;
-    const sig = this.spec ? this.spec.sig() : JSON.stringify([this.host.state(), this.host.space(), this.host.rev()]);
+    this.paintFoot();
+    if (this.pressing) { this.waiting = true; return; }
+    const sig = this.sigNow();
     if (!force && sig === this.sig && this.body.childElementCount) return;
     this.sig = sig;
     const d = this.body.ownerDocument;
     const scroll = this.body.scrollTop;
-    this.body.replaceChildren(this.spec ? this.spec.content(d) : coloursContent(d, this.host));
+    this.body.replaceChildren(this.spec ? this.spec.content(d) : coloursContent(d, this.inner));
     this.body.scrollTop = scroll;
+  }
+  /** MICRO-PL09 p.0 · the window's foot: «modifiche non applicate», Annulla, Applica */
+  private paintFoot(): void {
+    const f = this.foot;
+    if (!f || this.spec) return;
+    const t = this.host.t;
+    const dirty = !!this.host.draft?.()?.dirty;
+    const noGraph = !!this.host.space()?.noGraph || !this.host.space();
+    f.classList.toggle("dirty", dirty);
+    f.classList.toggle("hidden", noGraph);
+    f.dataset.cwDirty = String(dirty);
+    const say = f.querySelector<HTMLElement>(".cw-foot-say")!;
+    say.textContent = dirty ? t("cw.draftDirty") : t("cw.draftClean");
+    for (const b of f.querySelectorAll<HTMLButtonElement>("button")) b.disabled = !dirty;
   }
 
   private chrome(d: Document, inPage: boolean): HTMLElement {
@@ -462,18 +591,45 @@ export class ColoursWindow {
     const help = d.createElement("div");
     help.className = "cw-help hidden";
     help.dataset.cwHelp = "1";
-    help.textContent = t("cw.help");
+    help.textContent = t(this.spec ? "cw.help" : "cw.helpDraft");
     const can = detachSupport(this.page.defaultView ?? window);
     bar.append(title,
       btn("?", t("cw.helpTip"), "help", () => help.classList.toggle("hidden")),
       ...(inPage ? can.ok ? [btn("⇱", t("cw.detach"), "detach", () => this.detach(true))] : []
         : [btn("⇲", t("cw.attach"), "attach", () => this.attach())]),
-      btn("×", t("cw.close"), "close", () => this.close()));
+      btn("×", t("cw.close"), "close", () => void this.requestClose()));
     const body = d.createElement("div");
     body.className = "cw-scroll";
     frame.append(bar, help, body);
     this.body = body;
+    this.foot = null;
+    if (!this.spec) {
+      // MICRO-PL09 p.0 · Applica confirms the draft (one undo step, the Log, the
+      // file's scheme in use); Annulla puts the Space back as it was
+      const foot = d.createElement("div");
+      foot.className = "cw-foot";
+      foot.dataset.cwFoot = "1";
+      const say = d.createElement("span");
+      say.className = "cw-foot-say";
+      const cancel = btn(t("cw.draftCancel"), t("cw.draftCancelHint"), "discard", () => { this.host.discardDraft?.(); this.paintFoot(); });
+      const ok = btn(t("cw.draftApply"), t("cw.draftApplyHint"), "apply", () => { this.host.applyDraft?.(); this.paintFoot(); });
+      ok.classList.add("primary");
+      foot.append(say, cancel, ok);
+      frame.appendChild(foot);
+      this.foot = foot;
+    }
     for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) frame.addEventListener(ev, (e) => e.stopPropagation());
+    // a press inside: the repaints wait for its release (4c)
+    frame.addEventListener("pointerdown", () => { this.pressing = true; }, true);
+    const release = () => {
+      if (!this.pressing) return;
+      this.pressing = false;
+      // after the click has been dispatched
+      setTimeout(() => { if (this.waiting) { this.waiting = false; this.repaint(); } }, 0);
+    };
+    d.addEventListener("pointerup", release, true);
+    d.addEventListener("pointercancel", release, true);
+    this.off.push(() => { d.removeEventListener("pointerup", release, true); d.removeEventListener("pointercancel", release, true); });
     return frame;
   }
 
@@ -520,6 +676,9 @@ export class ColoursWindow {
     this.panel?.remove();
     this.panel = null;
     this.body = null;
+    this.foot = null;
+    this.pressing = false;
+    this.waiting = false;
   }
 
   /** out into a system window; false: the page could not open one */
@@ -528,10 +687,17 @@ export class ColoursWindow {
     if (!main || !detachSupport(main).ok) return false;
     const pref = this.pref();
     const from = this.panel?.getBoundingClientRect();
-    const sx = main.screenX ?? 0, sy = main.screenY ?? 0;
-    const r = pref.detached && !asked && pref.sw && pref.sh
-      ? { x: pref.sx ?? sx + 80, y: pref.sy ?? sy + 80, w: pref.sw, h: pref.sh }
-      : { x: Math.round(sx + (from?.left ?? 80)), y: Math.round(sy + (from?.top ?? 80) + 40), w: Math.round(from?.width ?? pref.w), h: Math.round(from?.height ?? pref.h) };
+    // MICRO-PL09 p.0 (4a, E.D. dev.132: the system window «finisce in basso, fuori
+    // dallo schermo») · where the main window is, as the SYSTEM says on the
+    // desktop: WKWebView's screenX/screenY are 0 and the screen's height
+    // (measured 24 Oct, `window_frames` in the shell) — the window was opened,
+    // and remembered, below the screen. A remembered place is used only on screen
+    const origin = this.host.screenOrigin?.() ?? { x: main.screenX ?? 0, y: main.screenY ?? 0 };
+    const area = this.host.screenArea?.() ?? screenArea(main);
+    const near = { x: Math.round(origin.x + (from?.left ?? 80)), y: Math.round(origin.y + (from?.top ?? 80) + 40),
+      w: Math.round(from?.width ?? pref.w), h: Math.round(from?.height ?? pref.h) };
+    const r = onScreenRect(pref.detached && !asked && pref.sw && pref.sh && pref.sx != null && pref.sy != null
+      ? { x: pref.sx, y: pref.sy, w: pref.sw, h: pref.sh } : near, area);
     const pop = main.open(DETACH_URL, this.spec?.popupName ?? "emstudio-colours", popupFeatures(r));
     if (!pop) { if (asked) this.host.toast(this.host.t("tile.detachBlocked")); return false; }
     this.unmount();
@@ -545,8 +711,21 @@ export class ColoursWindow {
     d.body.appendChild(frame);
     this.pop = pop;
     off.push(wireRelay(pop, this.page, { isWriting: (el) => this.host.isWriting(el), ported: () => true, onPress: () => {} }));
-    const keep = () => this.keepPref({ ...this.pref(), detached: true, sx: pop.screenX, sy: pop.screenY, sw: pop.outerWidth || r.w, sh: pop.outerHeight || r.h });
+    // where it is: the shell's frame on the desktop, the popup's own in a browser
+    let kept = "";
+    const keep = () => {
+      const f = this.host.sysFrame?.(pop) ?? null;
+      if (!f && this.host.screenOrigin) return;   // the desktop without its frame yet: WKWebView's numbers are not kept
+      const at = f ?? { x: pop.screenX, y: pop.screenY, w: pop.outerWidth || r.w, h: pop.outerHeight || r.h };
+      const sig = `${at.x},${at.y},${at.w},${at.h}`;
+      if (sig === kept) return;
+      kept = sig;
+      this.keepPref({ ...this.pref(), detached: true, sx: at.x, sy: at.y, sw: at.w || r.w, sh: at.h || r.h });
+    };
     pop.addEventListener("resize", keep);
+    // a system window moved says nothing: where it is, read once a second
+    const watch = (this.page.defaultView ?? window).setInterval(() => { if (!pop.closed) keep(); }, 1000);
+    off.push(() => (this.page.defaultView ?? window).clearInterval(watch));
     const gone = () => {
       if (this.pop !== pop) return;
       try { keep(); } catch { /* a window already gone */ }
@@ -554,25 +733,39 @@ export class ColoursWindow {
       this.pop = null;
       this.sys = null;
       this.body = null;
+      this.foot = null;
+      // MICRO-PL09 p.0 · closed by the system with a draft open: asked in the page
+      if (!this.spec && this.host.draft?.()?.dirty && this.host.askDraft && !this.asking) {
+        this.asking = true;
+        void this.host.askDraft().then((a) => {
+          this.asking = false;
+          if (a === "apply") this.host.applyDraft?.();
+          else if (a === "discard") this.host.discardDraft?.();
+          else { this.keepPref({ ...this.pref(), detached: false }); this.mountPanel(); }
+        });
+      }
     };
     pop.addEventListener("pagehide", gone);
     this.sys = this.host.systemWindow?.(pop, gone) ?? null;
-    this.off = off;
+    this.off = [...this.off, ...off];
     this.keepPref({ ...this.pref(), detached: true, sx: r.x, sy: r.y, sw: r.w, sh: r.h });
     this.repaint(true);
     return true;
   }
 
-  /** back into the page */
+  /** back into the page: the panel where it was in the page (kept inside it),
+   *  the system window closed — by its label on the desktop (4a) */
   attach(): void {
     const p = this.pop;
     this.pop = null;
     this.off.forEach((f) => f());
     this.off = [];
     this.body = null;
+    this.foot = null;
     this.keepPref({ ...this.pref(), detached: false });
     if (p) this.closeSys(p);
     this.mountPanel();
+    try { this.page.defaultView?.focus(); } catch { /* the page */ }
   }
   private closeSys(p: Window): void {
     const sys = this.sys;
