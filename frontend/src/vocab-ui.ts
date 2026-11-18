@@ -52,6 +52,10 @@ export interface VocabHost {
   openExternal?(url: string): void;
   /** a line in the Log */
   log?(msg: string): void;
+  /** the StratiGraph node's base (`<hub>`), when one is configured: the READ routes
+   *  are asked there (`<hub>/v1/vocab/*`) when the bridge does not answer — the web
+   *  page without a bridge (MICRO-PL02; the node serves tiers A/B only) */
+  nodeBase?(): string | null;
   /** the page's own dialog with a body of ours */
   dialog(o: { title: string; body: HTMLElement; ok: string; kind: string }): Promise<boolean>;
   /** the central catalogue's address (settings), default the release of ExtendedMatrix/vocabularies */
@@ -86,13 +90,29 @@ export class VocabState {
   }
   lookup = (uri: string): Looked | null => this.concepts.get(uri) ?? null;
 
+  /** where the read routes answered last: the bridge, or the node (`from`) */
+  from: "bridge" | "node" = "bridge";
   private async get<T>(path: string): Promise<T | null> {
-    try {
-      const r = await fetch(`${await this.host.bridge()}${path}`, { cache: "no-store" });
+    const ask = async (base: string): Promise<T | null> => {
+      const r = await fetch(`${base}${path}`, { cache: "no-store" });
       const j = await r.json() as T & { ok?: boolean; error?: string };
       if (!r.ok || j.ok === false) { this.error = j.error ?? `HTTP ${r.status}`; return null; }
       return j;
-    } catch (e) { this.error = String(e); return null; }
+    };
+    try {
+      const got = await ask(await this.host.bridge());
+      this.from = "bridge";
+      return got;
+    } catch (e) {
+      this.error = String(e);
+      const node = this.host.nodeBase?.();
+      if (!node) return null;
+      try {
+        const got = await ask(`${node.replace(/\/$/, "")}/v1`);
+        this.from = "node";
+        return got;
+      } catch (e2) { this.error = String(e2); return null; }
+    }
   }
   async post<T>(path: string, body: unknown): Promise<T | null> {
     try {

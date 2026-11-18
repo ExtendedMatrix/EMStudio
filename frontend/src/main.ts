@@ -35713,6 +35713,7 @@ const vocabHost: VocabHost = {
   }),
   openExternal: (url) => { if (isTauri()) void openInSystemBrowser(url); else window.open(url, "_blank", "noopener"); },
   log: (m) => logInfo(m),
+  nodeBase: () => getSettings().sync.hubUrl.trim() || null,
   dialog: async (o) => (await openDialog({ title: o.title, body: o.body, ok: o.ok, kind: o.kind })).ok,
   catalogUrl: () => VOCAB_CENTRAL_CATALOG,
   nodeCatalogUrl: () => {

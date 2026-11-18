@@ -95,6 +95,27 @@ const sign = U.valueTermEl(document, host, Object.assign(new U.VocabState(host),
   label: () => V.valueLabel(node, "it", () => ({ concept: limeEntry, vocab: aat, aligned: [calcare] })) }), node, true, () => {});
 eq(sign.dataset.via, "iccd-ra-materia", "the Inspector's sign says the label came through the ICCD");
 
+// ── no bridge: the reads go to the node (<hub>/v1/vocab/*) ──────────────────
+{
+  const asked = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    asked.push(String(url));
+    if (String(url).startsWith("http://x")) throw new TypeError("Failed to fetch");
+    const body = String(url).includes("/vocab/installed") ? { ok: true, dir: "vocabularies/", installed: [{ id: "getty-aat-materials", status: "ready" }] }
+      : String(url).includes("/vocab/concepts") ? { ok: true, concepts: {} }
+      : { ok: false, error: "not on the node" };   // alignments, log: the node does not serve them
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const nodeHost = { ...host, changed: () => {}, nodeBase: () => "https://node.example/em/" };
+  const s2 = new U.VocabState(nodeHost);
+  await s2.refresh();
+  globalThis.fetch = realFetch;
+  eq(s2.installed.map((s) => s.id), ["getty-aat-materials"], "the bridge silent: the node's vocabularies");
+  eq(s2.from, "node", "…and the state says where they came from");
+  ok(asked.includes("https://node.example/em/v1/vocab/installed"), "asked at <hub>/v1/vocab/installed");
+}
+
 // ── the bridge's routes over s3dgraphy.vocabularies ─────────────────────────
 const S3D = process.env.S3D ?? path.resolve(SRC, "../../../s3Dgraphy");
 const py = path.join(S3D, ".venv/bin/python");
