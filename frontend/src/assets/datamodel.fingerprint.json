@@ -1,7 +1,7 @@
 {
-  "digest": "sha256:27fb51c18b5c0ed00ae418aef49110c5cfe65c9e8840b8661015d6d5f51e816e",
+  "digest": "sha256:feaee8d2599ad9a0672e8963f6ce8bfd409e09359f8dcbd5c3d439e35b17d0be",
   "versions": {
-    "nodes": "1.6.50",
+    "nodes": "1.6.51",
     "node_registry": "1.6.41",
     "connections": "1.6.55",
     "visual_rules": "1.6.48",
@@ -9,7 +9,7 @@
     "translations": "1.17"
   },
   "digests": {
-    "nodes": "sha256:20937832f901d0603b2b6f30b004ef0b74d0f8283aa45e3c0d97c832b6814152",
+    "nodes": "sha256:21c7a2346f9b670207802c036135ed65f9d055ae7984b78a3a565d8170af2117",
     "node_registry": "sha256:5669c0824d7149e22a25d424645b3b78b7c698c5338f3fd639d75c60b31483da",
     "connections": "sha256:c1d475a3ea9543dada7ac42ca73452f5c20f185ea56de2787914cad44389ad6b",
     "visual_rules": "sha256:61361d6882958305486fe914f9635e9f0dd31d3f0aca285e3dc80294857710f3",
@@ -24,6 +24,6 @@
     "qualia": "em_qualia_types.json",
     "translations": "datamodel_translations.json"
   },
-  "s3dgraphy": "1.6.0.dev121",
+  "s3dgraphy": "1.6.0.dev122",
   "_note": "written by scripts/sync-datamodels.sh; checked by scripts/check-datamodel.mjs. Never edit by hand."
 }
