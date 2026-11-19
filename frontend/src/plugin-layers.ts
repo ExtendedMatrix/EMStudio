@@ -41,6 +41,15 @@
  * command runs with `geometry = {primitive, vertices, on, frame: "layer",
  * at: [{on, uv}…], through}` — `through` the slices shown «down to» the
  * cursor of that stack: the plugin reads the anomaly on each of them.
+ *
+ * MICRO-GEO16 (row G16) · what was traced comes back ON the planes: an item's
+ * `marks` (s3Dgraphy's shape, the plugin's extractors) are drawn on its plane
+ * — a point, a line, an outline — in the plane's own coordinates, so a mark
+ * follows its slice (the cursor, the drape, a section's line); the plane is
+ * pushed back a little in depth (polygon offset) so a mark is never under it.
+ * While tracing, the vertices placed are drawn at once (a provisional sign,
+ * over everything) until the trace is written or dropped; a tool armed in one
+ * document is dropped when the Space shows another.
  */
 import { fileOf, frameOf, gisLayersOf, surfacesOf, toThree, type SceneFrame } from "./gis-scene";
 import type { GeoCtx, GeoDriver, SpaceSceneHandle, ToolHit } from "./scene3d";
@@ -55,6 +64,9 @@ export const ALL_MAX = 60;
 export const UP_TO_MAX = 60;
 /** the cells of a draped plane (per side): one grid of heights per stack */
 export const DRAPE_CELLS = 32;
+/** MICRO-GEO16 · the colour of a traced anomaly on its plane, and of a trace being placed */
+export const MARK_COLOR = 0x00e5ff;
+export const PENDING_COLOR = 0xffd400;
 
 export type DisplayMode = "all" | "one" | "up_to";
 
@@ -68,7 +80,12 @@ export interface LayerItem {
   depth_top: number | null;
   depth_bottom: number | null;
   line: [[number, number], [number, number]] | null;
+  /** MICRO-GEO16 · the signs on this plane (an anomaly traced on the slice), in its extent's coordinates */
+  marks?: LayerMark[];
 }
+
+/** a sign a plugin draws on a plane (`space.layer@1` items' `marks`) */
+export interface LayerMark { id: string; label: string; primitive: "point" | "polyline" | "surface"; points: Array<[number, number]> }
 
 /** one layer as s3Dgraphy's `shape("space.layer@1")` gives it */
 export interface LayerWire {
@@ -273,6 +290,39 @@ export function planeGeometry(l: LayerWire, it: LayerItem, pl: Placement, ground
   return { pos, uv, index };
 }
 
+/** MICRO-GEO16 · a mark's points in three's axes, on its plane: the plane's own mapping
+ *  (a section along its line, a horizontal one at ground − depth or on the drape, its
+ *  segments cut so the sign follows the ground); a surface closed on its first point. */
+export function markGeometry(l: LayerWire, it: LayerItem, pl: Placement, ground: number,
+                             drape: ReturnType<typeof drapeOf> | null, m: Pick<LayerMark, "primitive" | "points">): number[] {
+  const [x0, , x1] = it.extent;
+  const vertical = it.orientation === "vertical";
+  const sec = vertical ? sectionLine(l, it).line : null;
+  const ga = sec && drape ? drapeHeight(drape, sec[0][0], sec[0][1]) : ground;
+  const gb = sec && drape ? drapeHeight(drape, sec[1][0], sec[1][1]) : ground;
+  const depth = planeDepth(it);
+  const at = (x: number, y: number): number[] => {
+    if (sec) {
+      const u = (x - x0) / (x1 - x0 || 1);
+      const [tx, tz] = pl.xz(sec[0][0] + (sec[1][0] - sec[0][0]) * u, sec[0][1] + (sec[1][1] - sec[0][1]) * u);
+      return [tx, ga + (gb - ga) * u + y, tz];
+    }
+    const [tx, tz] = pl.xz(x, y);
+    return [tx, (drape ? drapeHeight(drape, x, y) : ground) - depth, tz];
+  };
+  const pts = m.primitive === "surface" ? [...m.points, m.points[0]] : m.points;
+  if (m.primitive === "point" || pts.length < 2) return pts.length ? at(pts[0][0], pts[0][1]) : [];
+  const cut = drape && !vertical ? 8 : 1;
+  const out: number[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+    for (let k = 0; k < cut; k++) out.push(...at(ax + ((bx - ax) * k) / cut, ay + ((by - ay) * k) / cut));
+  }
+  const last = pts[pts.length - 1];
+  out.push(...at(last[0], last[1]));
+  return out;
+}
+
 // ── tracing on the planes (MICRO-GEO13, row G12) ─────────────────────────────
 
 /** a plugin's tool of the Space (`space.tool@1`) as the layers' bar offers it */
@@ -346,6 +396,8 @@ export interface LayerDriverOptions {
 
 export interface LayerDriver extends GeoDriver {
   set(layers: PluginLayer[], prefs: (key: string) => LayerPref): void;
+  /** MICRO-GEO16 · the vertices of a trace being placed (three's axes), drawn over everything; [] = none */
+  pending(points: V3[], closed: boolean): void;
   state(): Record<string, unknown>;
 }
 
@@ -361,15 +413,69 @@ export function createLayerDriver(o: LayerDriverOptions): LayerDriver {
   let busy: Promise<void> | null = null;
   let again = false;
   let loaded = 0;
+  let pend: { points: V3[]; closed: boolean } = { points: [], closed: false };
+  let pendObj: any = null;
 
+  const dispose = (obj: any) => {
+    obj?.removeFromParent?.();
+    obj?.traverse?.((x: any) => { x.geometry?.dispose?.(); x.material?.dispose?.(); });
+  };
   const free = (key: string) => {
     const d = drawn.get(key);
     if (!d) return;
-    d.mesh?.removeFromParent?.();
-    d.mesh?.geometry?.dispose?.();
-    d.mesh?.material?.dispose?.();
+    dispose(d.mesh);
     d.texture?.dispose?.();
     drawn.delete(key);
+  };
+
+  /** the signs of one plane: a line (an outline for an area) with its vertices, a dot for a point */
+  const marksObject = (l: LayerWire, it: LayerItem, pl: Placement, flat: number, drape: ReturnType<typeof drapeOf> | null): any => {
+    const { THREE } = ctx!;
+    const g = new THREE.Group();
+    g.userData = { helper: true, layerMarks: it.id };
+    for (const m of it.marks ?? []) {
+      const pos = markGeometry(l, it, pl, flat, drape, m);
+      if (!pos.length) continue;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      if (m.primitive !== "point") {
+        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: MARK_COLOR }));
+        line.userData = { helper: true, layerMark: m.id, label: m.label };
+        line.renderOrder = 4;
+        g.add(line);
+      }
+      let vx = geo;
+      if (m.primitive !== "point") {               // the vertices the person placed, as dots
+        vx = new THREE.BufferGeometry();
+        vx.setAttribute("position", new THREE.Float32BufferAttribute(
+          m.points.flatMap((q) => markGeometry(l, it, pl, flat, drape, { primitive: "point", points: [q] })), 3));
+      }
+      const dots = new THREE.Points(vx, new THREE.PointsMaterial({ color: MARK_COLOR, size: m.primitive === "point" ? 9 : 5, sizeAttenuation: false }));
+      dots.userData = { helper: true, layerMark: m.id, label: m.label };
+      dots.renderOrder = 4;
+      g.add(dots);
+    }
+    return g;
+  };
+
+  /** the provisional sign of a trace being placed: over everything, until written or dropped */
+  const drawPending = () => {
+    dispose(pendObj);
+    pendObj = null;
+    if (!ctx || !group || !pend.points.length) return;
+    const { THREE } = ctx;
+    const pts = pend.closed && pend.points.length > 2 ? [...pend.points, pend.points[0]] : pend.points;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pts.flatMap((p) => [p[0], p[1], p[2]]), 3));
+    const o = new THREE.Group();
+    o.userData = { helper: true, tracePending: pend.points.length };
+    const top = { depthTest: false, depthWrite: false, transparent: true };
+    if (pts.length > 1) { const ln = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: PENDING_COLOR, ...top })); ln.renderOrder = 9; o.add(ln); }
+    const dots = new THREE.Points(geo, new THREE.PointsMaterial({ color: PENDING_COLOR, size: 8, sizeAttenuation: false, ...top }));
+    dots.renderOrder = 9;
+    o.add(dots);
+    group.add(o);
+    pendObj = o;
   };
 
   const texture = async (plugin: string, path: string): Promise<{ map: any; bytes: number } | null> => {
@@ -433,6 +539,17 @@ export function createLayerDriver(o: LayerDriverOptions): LayerDriver {
         const mk = `${k}#${it.id}`;
         keep.add(mk);
         const sig = JSON.stringify([it.extent, it.depth_top, it.depth_bottom, it.line, pl.how, pl.why, Math.round(flat * 100), !!drape, drape?.holes ?? 0, l.frame, o.frame]);
+        if (it.marks?.length) {                     // MICRO-GEO16 · the anomalies traced on this slice
+          const xk = `${mk}~marks`;
+          keep.add(xk);
+          const xsig = sig + JSON.stringify(it.marks);
+          if (drawn.get(xk)?.sig !== xsig) {
+            free(xk);
+            const obj = marksObject(l, it, pl, flat, drape);
+            group.add(obj);
+            drawn.set(xk, { mesh: obj, sig: xsig, image: null, texture: null, bytes: 0 });
+          }
+        }
         const had = drawn.get(mk);
         if (had && had.sig === sig && had.image === it.image) {
           had.mesh.material.opacity = opacity;
@@ -450,8 +567,10 @@ export function createLayerDriver(o: LayerDriverOptions): LayerDriver {
         const tex = it.image ? await texture(p.plugin, it.image) : null;
         if (!ctx || !group) { tex?.map?.dispose?.(); return; }
         if (!tex) noPicture++;
+        // pushed back a little in depth: the marks drawn on the plane (MICRO-GEO16) are never under it
         const m = new THREE.MeshBasicMaterial({ map: tex?.map ?? null, color: tex ? 0xffffff : 0x9a8f7a, side: THREE.DoubleSide,
-          transparent: opacity < 1 || !tex, opacity: tex ? opacity : opacity * 0.35, alphaTest: tex ? 0.02 : 0, depthWrite: opacity >= 1 && !!tex });
+          transparent: opacity < 1 || !tex, opacity: tex ? opacity : opacity * 0.35, alphaTest: tex ? 0.02 : 0, depthWrite: opacity >= 1 && !!tex,
+          polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
         const mesh = new THREE.Mesh(geo, m);
         mesh.userData = { helper: true, pluginLayer: k, layerItem: it.id, plugin: p.plugin };
         mesh.renderOrder = 3;
@@ -481,10 +600,13 @@ export function createLayerDriver(o: LayerDriverOptions): LayerDriver {
       group.userData.helper = true;
       group.name = "plugin-layers";
       c.scene.add(group);
+      drawPending();
       sync();
     },
     detach() {
       for (const k of [...drawn.keys()]) free(k);
+      dispose(pendObj);
+      pendObj = null;
       group?.removeFromParent();
       group = null;
       ctx = null;
@@ -502,14 +624,19 @@ export function createLayerDriver(o: LayerDriverOptions): LayerDriver {
       want = { layers, prefs };
       sync();
     },
+    pending(points, closed) {
+      pend = { points: points.slice(), closed };
+      drawPending();
+    },
     state() {
       const box = ctx && group?.children.length ? new ctx.THREE.Box3().setFromObject(group) : null;
-      let bytes = 0, textures = 0;
-      for (const d of drawn.values()) { bytes += d.bytes; if (d.texture) textures++; }
-      return { inScene: !!group?.parent, busy: !!busy, planes: drawn.size, textures, textureBytes: bytes, loadedEver: loaded,
+      let bytes = 0, textures = 0, marks = 0;
+      for (const [k, d] of drawn) { bytes += d.bytes; if (d.texture) textures++; if (k.endsWith("~marks")) marks += d.mesh.children.filter((x: any) => x.isPoints).length; }
+      const planes = [...drawn.keys()].filter((k) => !k.endsWith("~marks")).length;
+      return { inScene: !!group?.parent, busy: !!busy, planes, textures, textureBytes: bytes, loadedEver: loaded, marks, pending: pend.points.length,
         box: box && !box.isEmpty() ? [box.min.toArray(), box.max.toArray()] : null,
         layers: [...info.entries()].filter(([k]) => !k.endsWith("#lines")).map(([k, v]) => ({ key: k, ...v, rowLines: info.get(`${k}#lines`) ?? null })),
-        meshes: [...drawn.entries()].map(([k, d]) => { d.mesh.geometry.computeBoundingBox(); const bb = d.mesh.geometry.boundingBox;
+        meshes: [...drawn.entries()].filter(([k]) => !k.endsWith("~marks")).map(([k, d]) => { d.mesh.geometry.computeBoundingBox(); const bb = d.mesh.geometry.boundingBox;
           return { key: k, textured: !!d.texture, box: [bb.min.toArray(), bb.max.toArray()], vertices: d.mesh.geometry.attributes.position.count }; }) };
     },
   };
@@ -553,6 +680,8 @@ export interface LayerSpace {
   toolClick(hit: ToolHit | null, dbl: boolean): boolean;
   /** arm a tool (its id) or none; the probes' seam */
   arm(id: string | null): void;
+  /** MICRO-GEO16 · a stack shown (this machine's preference): the Outliner's eye */
+  shown(key: string): boolean;
 }
 
 export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
@@ -637,6 +766,7 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
   const drawBar = () => {
     const ts = offered();
     if (armed && !ts.some((x) => x.id === armed!.id)) { armed = null; clicks = []; }
+    driver?.pending(clicks.map((c) => c.point), armed?.primitive === "surface");
     bar.classList.toggle("hidden", !ts.length);
     bar.textContent = "";
     if (!ts.length) return;
@@ -652,7 +782,8 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     if (armed) {
       const s = document.createElement("span");
       s.className = "plg-trace-state";
-      s.textContent = busy ? t("plyr.trace.busy") : t("plyr.trace.state", { n: String(clicks.length), tool: armed.label() });
+      s.textContent = busy ? t("plyr.trace.busy") : clicks.length === 1 ? t("plyr.trace.state_one", { tool: armed.label() })
+        : t("plyr.trace.state", { n: String(clicks.length), tool: armed.label() });
       bar.appendChild(s);
       if (traceVerdict(armed, clicks.length) === "may_close") {
         const ok = document.createElement("button");
@@ -695,6 +826,7 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     else if (e.key === "Enter" && armed && traceVerdict(armed, clicks.length) === "may_close") { e.preventDefault(); e.stopPropagation(); void finish(); }
   });
   const toolClick = (hit: ToolHit | null, dbl: boolean): boolean => {
+    followDoc();
     if (!armed) return false;
     if (dbl) {
       if (traceVerdict(armed, clicks.length) === "may_close") void finish();
@@ -713,8 +845,15 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     return true;
   };
 
+  // MICRO-GEO16 · another document in the Space: its preferences, and no tool armed from the one before
+  function followDoc(): void {
+    if (key() === loadedFor) return;
+    prefs = load();
+    loadedFor = key();
+    if (armed || clicks.length) { armed = null; clicks = []; drawBar(); }
+  }
   const sync = async () => {
-    if (key() !== loadedFor) { prefs = load(); loadedFor = key(); }
+    followDoc();
     const ls = d.layers();
     drawHud();
     drawBar();
@@ -742,6 +881,7 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
       });
       driverSig = sig;
       d.handle.setLayers(driver);
+      driver.pending(clicks.map((c) => c.point), armed?.primitive === "surface");
     }
     driver.set(ls, pref);
   };
@@ -872,5 +1012,6 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     setPref,
     toolClick,
     arm,
+    shown: (k: string) => { followDoc(); return !pref(k).hidden; },
   };
 }

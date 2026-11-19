@@ -15,6 +15,10 @@
 //   · MICRO-GEO13 (row G12): the tools offered on the planes (the plugin
 //     that drew the layer), the geometry «layer» (each vertex its slice and
 //     uv), the slices «down to» the cursor, the plane's uv (east, north);
+//   · MICRO-GEO16 (row G16): the marks of an anomaly on its plane (a line,
+//     a point, a closed area; on a section along its line; draped, cut to
+//     follow the ground), the provisional sign of a trace, a tool dropped
+//     when the Space shows another document;
 //   · the wiring: the scene's third driver (setLayers), main.ts asking
 //     space.layer@1 while a Space is open and drawing after each answer, the
 //     pictures fetched behind the secret, the words EN + IT.
@@ -150,6 +154,40 @@ eq(geom, { primitive: "polyline", frame: "layer", on: "D.03", vertices: [[1, 2, 
   ok(ne && sw && ne[1] < sw[1], "v grows to the north (three's z = −north)");
 }
 
+// ── MICRO-GEO16 (row G16 b, e) · the anomalies on their planes ───────────────
+{
+  const plB = L.placementOf(bas, null);
+  const it = { ...bas.items[0], marks: [] };
+  const line = L.markGeometry(bas, it, plB, 0, null, { primitive: "polyline", points: [[23, 25], [69, 25]] });
+  near(line, [23, -1.25, -25, 69, -1.25, -25], 1e-9, "a line on a slice: on its plane (ground − 1.25), x east, z = −north");
+  const pt = L.markGeometry(bas, it, plB, 0, null, { primitive: "point", points: [[10, 5], [99, 99]] });
+  near(pt, [10, -1.25, -5], 1e-9, "a point: its first place only");
+  const area = L.markGeometry(bas, it, plB, 0, null, { primitive: "surface", points: [[0, 0], [10, 0], [10, 10]] });
+  eq(area.length / 3, 4, "an area: closed on its first point");
+  near(area.slice(-3), area.slice(0, 3), 1e-9, "…the last point is the first");
+  // a section: along its line (the row south of the stack), y = −depth above the ground
+  const v1 = bas.items[6];
+  const sl = L.sectionLine(bas, v1).line;
+  const onSec = L.markGeometry(bas, v1, plB, 0, null, { primitive: "point", points: [[46, -4]] });
+  near(onSec, [sl[0][0] + 46, -4, -sl[0][1]], 1e-9, "a point on a section: halfway along its line, 4 m down");
+  // the same place as the plane's own uv: the mark lands where the person clicked
+  const g = L.planeGeometry(bas, it, plB, 0);
+  near(L.markGeometry(bas, it, plB, 0, null, { primitive: "point", points: [[92, 50]] }), g.pos.slice(9, 12), 1e-9, "the corner (92, 50) is the plane's north-east vertex");
+  // draped: the segments cut so the sign follows the ground, each point at drape − depth
+  const dr2 = L.drapeOf(ilici, w, grid, 0, scene.z, 8);
+  const s1 = { ...ilici.items[0], depth_top: 1, depth_bottom: 2 };
+  const dl = L.markGeometry(ilici, s1, w, 0, dr2, { primitive: "polyline", points: [[0, 0], [40, 0]] });
+  eq(dl.length / 3, 9, "a draped line: 8 pieces per segment");
+  near(dl[1], L.drapeHeight(dr2, 0, 0) - 1.5, 1e-9, "…each point on the drape minus the depth");
+}
+ok(/polygonOffset: true, polygonOffsetFactor: 1/.test(fs.readFileSync(`${SRC}plugin-layers.ts`, "utf8")), "the plane pushed back: the marks are never under it");
+ok(/if \(it\.marks\?\.length\) \{/.test(fs.readFileSync(`${SRC}plugin-layers.ts`, "utf8")), "the marks drawn for a plane shown (none for a hidden one)");
+ok(/driver\?\.pending\(clicks\.map\(\(c\) => c\.point\), armed\?\.primitive === "surface"\)/.test(fs.readFileSync(`${SRC}plugin-layers.ts`, "utf8")),
+  "the vertices placed drawn at once (a provisional sign), with the bar");
+ok(/function followDoc\(\): void \{[\s\S]*?if \(armed \|\| clicks\.length\) \{ armed = null; clicks = \[\]; drawBar\(\); \}/.test(fs.readFileSync(`${SRC}plugin-layers.ts`, "utf8"))
+  && /const toolClick = \(hit: ToolHit \| null, dbl: boolean\): boolean => \{\n    followDoc\(\);/.test(fs.readFileSync(`${SRC}plugin-layers.ts`, "utf8")),
+  "another document: the tool armed in the one before is dropped");
+
 // ── the wiring ───────────────────────────────────────────────────────────────
 const main = fs.readFileSync(`${SRC}main.ts`, "utf8");
 const scene3d = fs.readFileSync(`${SRC}scene3d.ts`, "utf8");
@@ -159,7 +197,7 @@ ok(/setLayers\(g: GeoDriver \| null\): void;/.test(scene3d) && /plgLayers\?\.far
   "the scene's third driver: attached, its far plane reached");
 ok(/\| "space\.layer";/.test(pcs), "space.layer a slot the page knows");
 ok(/if \(layerSpaces\.size\) for \(const c of ps\.commandsIn\("space\.layer"\)\) add\("space\.layer@1"/.test(main), "asked while a Space is open");
-ok(/if \(layerSpaces\.size && plugins\(\)\.commandsIn\("space\.layer"\)\.length\) refreshSurfaces\("scene"\)/.test(main)
+ok(/if \(layerSpaces\.size && plugins\(\)\.commandsIn\("space\.layer"\)\.length\) \{[^\n]*\n\s+refreshSurfaces\("scene"\);/.test(main)
   && /gisSpace\.refresh\(\);\n    layerSpace\.refresh\(\);/.test(main), "drawn after each answer (the Space's refresh)");
 ok(/store && \(!sp \|\| !sum\) && pluginLayersNow\(\)\.length/.test(main), "a graph without epochs but with layers: the scene not covered");
 ok(/if \(pluginLayersNow\(\)\.length\) box\.appendChild\(layerSpace\.section\(\)\)/.test(main), "its section in «Visibilità ▾»");
@@ -180,6 +218,13 @@ ok(/\.reduce<typeof ls\[number\] \| undefined>\(\(best, x\) => !best \|\| horizo
 // MICRO-GEO15: «1 fetta», not «1 fette» — the count picks one or other
 for (const k of ["slices", "sections"]) for (const n of ["one", "other"]) keys.push(`plyr.planes.${k}.${n}`);
 ok(/t\(`plyr\.planes\.\$\{k\}\.\$\{n === 1 \? "one" : "other"\}`/.test(pls), "the row counts slices and sections in the singular for one");
+// MICRO-GEO16 (row G16 f) · the stacks in the Outliner: read live, the eye is the stack's «shown»
+ok(/v\.layers = \(\) => pluginLayersNow\(\)\.map\(/.test(main), "the Outliner's facts read the plugins' stacks live");
+ok(/if \(k\.startsWith\("plyr:"\)\) \{[\s\S]*?for \(const l of layerSpaces\.values\(\)\) l\.setPref\(k\.slice\(5\), \{ hidden: on \}\);/.test(main)
+  && /eyeOpen: \(k\) => \(k\.startsWith\("plyr:"\) \? \[\.\.\.layerSpaces\.values\(\)\]\[0\]\?\.shown\(k\.slice\(5\)\)/.test(main),
+  "the eye of a stack's row: its «shown» in every Space");
+ok(/refreshSurfaces\("outliner"\);\s+\/\/ MICRO-GEO16 · their rows under «no epoch»/.test(main), "the rows follow the plugins' answers");
+keys.push("uo.sp.layers");
 for (const k of keys) eq(i18n.split(`"${k}":`).length - 1, 2, `${k} in EN and IT`);
 
 console.log(`check-plugin-layers: ${checks} checks ok`);

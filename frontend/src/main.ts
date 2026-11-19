@@ -313,7 +313,7 @@ import { chooseForHardware, chooseVersion, HARDWARE, SCENE_USES, USES, type Hard
 import { ERROR_MANUAL_MIN, ERROR_PROFILES, normaliseErrorChoice, type ErrorChoice } from "./tiles-error";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { mountGisSpace, type GisDocumentAsk, type GisSpace, type GisSpaceDeps } from "./gis-space";
-import { layersOfValues, mountLayerSpace, type LayerSpace, type LayerTool, type PluginLayer } from "./plugin-layers";
+import { horizontalsOf, layerKey, layersOfValues, mountLayerSpace, verticalsOf, type LayerSpace, type LayerTool, type PluginLayer } from "./plugin-layers";
 import { STUDY_ONLY, studyOnlyNodes } from "./study-only";
 import { dataToThree, epsgOf, frameOffset, georefSummary, gridToScene, isIdentity4, mul4, parseShiftTxt, translation } from "./georef";
 import {
@@ -13184,6 +13184,9 @@ function unifiedFacts(): ThreeFacts {
     // MICRO-PL07 p.0 · «Senza proxy (46)»: the Space's own count, the one its summary said
     v.withoutProxy = (epochId) => currentSpace()?.summary(epochId)?.without ?? null;
   }
+  // MICRO-GEO16 (row G16 f) · the plugins' stacks, read live (their answers come after the graph's revision)
+  v.layers = () => pluginLayersNow().map((p) => ({ key: layerKey(p), id: p.layer.id, name: p.layer.name,
+    slices: horizontalsOf(p.layer).length, sections: verticalsOf(p.layer).length }));
   unifiedFactsMemo = { store: st, rev: st.rev, sp, v };
   v.sketches = sp ? listSketches().map((x) => ({ id: x.id, name: x.name })) : [];
   return v;
@@ -14282,7 +14285,9 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
                     space: { proxies: t("uo.sp.proxies"), models: t("uo.sp.models"), rmdoc: t("uo.sp.rmdoc"), rmsf: t("uo.sp.rmsf"), gis: t("uo.sp.gis"),
                              x3d: t("uo.sp.x3d"), sketches: t("s3.sketches"), x3dOff: t("uo.x3dGhost"),
                              survives: (from) => t("uo.sp.survives", { from }), survivesMark: "⟲",
-                             withoutProxy: (n) => t("uo.sp.withoutProxy", { n: String(n) }), withoutProxyTitle: t("uo.sp.withoutProxyTitle") },
+                             withoutProxy: (n) => t("uo.sp.withoutProxy", { n: String(n) }), withoutProxyTitle: t("uo.sp.withoutProxyTitle"),
+                             layers: t("uo.sp.layers"), layersCount: (a, b) => [["slices", a], ["sections", b]]
+                               .map(([w, n]) => t(`plyr.planes.${w}.${n === 1 ? "one" : "other"}`, { n: String(n) })).join(", ") },
                     container: { alternative: t("uo.c.alternative"), livesIn: (e) => t("uo.c.livesIn", { epochs: e }),
                                  outOfStep: (n, theirs, ref) => t("al.epochsOut", { n: String(n), theirs, ref }), follows: t("uo.c.follows"),
                                  ownChoice: (e) => t("uo.c.ownChoice", { epochs: e }) } }),
@@ -14299,8 +14304,15 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
       if (!framed && key.startsWith("proxy:")) openUnitInSpace(key.slice(6));
     },
     geoMark: (id) => geoMarks().get(id) ?? null,
-    eyeOpen: (k) => !space3dPrefs().hidden.includes(k),
+    eyeOpen: (k) => (k.startsWith("plyr:") ? [...layerSpaces.values()][0]?.shown(k.slice(5)) ?? true : !space3dPrefs().hidden.includes(k)),
     toggleEye: (k) => {
+      // MICRO-GEO16 · a plugin's stack: its «shown» in every Space open (this machine's preferences)
+      if (k.startsWith("plyr:")) {
+        const on = [...layerSpaces.values()][0]?.shown(k.slice(5)) ?? true;
+        for (const l of layerSpaces.values()) l.setPref(k.slice(5), { hidden: on });
+        refreshSurfaces("outliner");
+        return;
+      }
       const p = space3dPrefs();
       // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · an extractor whose document is not lit:
       // its eye is FORCED (a ghost in the scene), not hidden / shown
@@ -66286,7 +66298,10 @@ async function runPluginCompute(): Promise<void> {
     return;
   }
   renderPluginStatus();
-  if (layerSpaces.size && plugins().commandsIn("space.layer").length) refreshSurfaces("scene");   // MICRO-GEO12 · the layers of the Space
+  if (layerSpaces.size && plugins().commandsIn("space.layer").length) {   // MICRO-GEO12 · the layers of the Space
+    refreshSurfaces("scene");
+    refreshSurfaces("outliner");                     // MICRO-GEO16 · their rows under «no epoch»
+  }
   if (selectedId && sectionsFor(plugins(), String(st.node(selectedId)?.node_type ?? "")).length) refreshInspector();
   if (plugins().commandsIn("tabular.column").length) renderEmData();
   if (windowsOf().some((w) => w.type === "plugin-panel")) refreshSurfaces("plugin-panel");

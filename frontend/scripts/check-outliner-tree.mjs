@@ -284,4 +284,20 @@ if (path) {
   rows = flat(() => ({ ...facts(), withoutProxy: () => [] }));
   ok(!rows.some((r) => r.key.endsWith("/nopx")), "nothing without a proxy: no branch");
 }
+// MICRO-GEO16 (row G16 f) · the stacks a plugin draws in the Space: a row each under «no
+// epoch» (read live from facts.layers), its eye the stack's «shown», a click its acquisition
+{
+  const t5 = { ...texts, space: { proxies: "Proxy", models: "Modelli", rmdoc: "RMDoc", rmsf: "RMSF", gis: "GIS",
+    layers: "Pile di fette", layersCount: (a, b) => `${a} fette, ${b} sezioni` } };
+  const withLayers = () => ({ ...facts(), layers: () => [{ key: "geofisica/acq:x", id: "US1", name: "Alcudia", slices: 601, sections: 0 }] });
+  const flat = (f, toggled = new Set()) => O.flattenOutliner({ sources: [{ ...sources[0], graphs: [{ ...sources[0].graphs[0], facts: f }] }],
+    opts: { ...O.DEFAULT_OPTS, space: true }, texts: t5, toggled });
+  let rows = flat(withLayers);
+  const grp = rows.find((r) => r.key === "s1|sp/-/plyr");
+  ok(!!grp && grp.kind === "group" && grp.label === "Pile di fette", "«Pile di fette» under «no epoch»");
+  const row = rows.find((r) => r.key === "s1|sp/-/plyr/geofisica/acq:x");
+  ok(!!row && row.eye === "plyr:geofisica/acq:x" && row.label === "Alcudia" && row.note === "601 fette, 0 sezioni" && row.id === "US1",
+    "…a row per stack: its eye, its count, a click selects its node");
+  ok(!flat(facts).some((r) => r.key.endsWith("/plyr")), "no stack drawn: no branch");
+}
 console.log(`check-outliner-tree: ${checks} checks OK`);

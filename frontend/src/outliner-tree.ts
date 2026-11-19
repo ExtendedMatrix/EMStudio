@@ -117,6 +117,10 @@ export interface ThreeFacts {
   /** MICRO-PL07 p.0 · the units alive in an epoch without a proxy, as the
    *  Space's summary counts them (`Space.summary(epoch).without`) */
   withoutProxy?: (epochId: string) => string[] | null;
+  /** MICRO-GEO16 (row G16 f) · the stacks the plugins draw in the Space
+   *  (`space.layer@1`), read live: a row each under «no epoch», its eye the
+   *  stack's «shown», a click selects the stack's node (the acquisition) */
+  layers?: () => Array<{ key: string; id: string; name: string; slices: number; sections: number }>;
 }
 
 export interface VersionIn { id: string; name: string; drawn: boolean; chosen: boolean; level?: string; uses?: string[]; auto?: boolean }
@@ -170,7 +174,9 @@ export interface Texts {
     /** MICRO-TESTATE-COERENTI p.7 · a unit that survives in the epoch, not born there */
     survives?: (from: string) => string; survivesMark?: string;
     /** MICRO-PL07 p.0 · «Senza proxy (46)» under an epoch, and its tooltip */
-    withoutProxy?: (n: number) => string; withoutProxyTitle?: string };
+    withoutProxy?: (n: number) => string; withoutProxyTitle?: string;
+    /** MICRO-GEO16 · the stacks a plugin draws in the Space (`space.layer@1`) */
+    layers?: string; layersCount?: (slices: number, sections: number) => string };
   /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 · a container's alternative, a member out
    *  of its epoch, a container out of step */
   container?: { alternative: string; livesIn: (epochs: string) => string; outOfStep: (n: number, theirs: string, ref: string) => string; follows: string;
@@ -711,6 +717,11 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
         ...(W.withoutProxyTitle ? { title: W.withoutProxyTitle } : {}) },
         kids: us.map((u) => leaf(u, `sp/${at}/nopx/${u.id}`, true)), def: false }];
     };
+    // MICRO-GEO16 (row G16 f) · a stack a plugin draws: its eye is the stack's «shown» (this machine)
+    const layerRows = (at: string): TNode[] => (facts.layers?.() ?? []).map((x) => ({
+      row: { key: k(`sp/${at}/plyr/${x.key}`), kind: "node" as const, label: x.name, id: byId.has(x.id) ? x.id : undefined, slot: g.slot,
+        glyphText: "▤", eye: `plyr:${x.key}`, ...(W.layersCount ? { note: W.layersCount(x.slices, x.sections) } : {}) },
+      present: true, match: x.name.toLowerCase() }));
     const block = (at: string, units: EmNode[], inEp: (id: string) => boolean, gis: boolean): TNode[] => [
       ...typeGroup(at, "px", W.proxies, units.filter((u) => facts.proxies.has(u.id)).sort(byName).map((u) => pxLeaf(u, at)), undefined, "proxy"),
       ...withoutProxy(at, units),
@@ -718,6 +729,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
       ...typeGroup(at, "rmdoc", W.rmdoc, subOf(at, rmdocMap, docs, inEp, "representation_model_doc"), "representation_model_doc"),
       ...typeGroup(at, "rmsf", W.rmsf, subOf(at, facts.rmsf, finds, inEp, "representation_model_sf"), "representation_model_sf"),
       ...(gis ? typeGroup(at, "gis", W.gis, gisRows(`sp/${at}/gis/`)) : []),
+      ...(gis && W.layers ? typeGroup(at, "plyr", W.layers, layerRows(at)) : []),
       ...(W.x3d ? typeGroup(at, "x3d", W.x3d, x3dIn(at), "extractor") : []),
     ];
     const out: TNode[] = [];
