@@ -38,6 +38,10 @@ export interface ExtCodeSection {
   /** where activation lives (enabled.json): the version active now */
   active_version?: string | null;
   verified?: boolean;
+  /** MICRO-PL24 (X4) · who read this code, when, in which repository's list */
+  reviewed?: ExtReview | null;
+  /** MICRO-PL24 · how the trust came: the person's answer, or a review alone */
+  trusted_by?: "person" | "review" | null;
   trusted?: unknown;
   reason?: ExtProblem | null;
   inactive_reason?: ExtProblem | null;
@@ -97,16 +101,23 @@ export interface ExtPreview {
     module_collision?: ExtProblem | null; trust_question?: ExtProblem | null;
     /** MICRO-PL18 · «codice aggiornato 0.1.0 → 0.2.0» (an update of the code) */
     updated?: ExtProblem | null;
+    /** MICRO-PL24 (X4) · reviewed in a repository whose reviews count: no trust question */
+    reviewed?: ExtReview | null; review_note?: ExtProblem | null; digest?: string | null;
   };
   requires?: { missing?: ExtProblem[]; optional?: ExtProblem[]; cycle?: string[] | null };
 }
 
 // ── MICRO-PL22 (X2) · the repositories of this machine ──────────────────────
 
+/** MICRO-PL24 (X4) · a review: who read the code (its digest), when, in which role, in which repository */
+export interface ExtReview { by: string; on: string; as?: string; note?: string; digest?: string; repo?: string }
+
 /** a repository as the bridge gives it: never the token, only whether there is one */
 export interface ExtRepo {
   name: string; url: string; enabled: boolean; check_on_startup: boolean; has_token: boolean; local: boolean;
   added_at?: string; synced_at?: string | null; entries?: number | null; error?: ExtProblem | null;
+  /** MICRO-PL24 (X4) · its reviews count here (default: the official index's only) */
+  trust_reviews?: boolean; official?: boolean;
 }
 /** «Consenti l'accesso in rete»: the machine's switch, and the environment that wins over it */
 export interface ExtOnline { on: boolean; setting: boolean; env: string | null }
@@ -114,13 +125,15 @@ export interface ExtOnline { on: boolean; setting: boolean; env: string | null }
 export interface ExtAvailable {
   repo: string; id: string; version: string; versions: string[]; name?: string | Record<string, string>;
   tagline?: string; type?: string; license?: string[] | string; maintainer?: string; archive_size?: number;
-  permissions?: Record<string, string>; reviewed?: unknown; requires?: { extensions?: Array<{ id: string; version?: string; part?: string; optional?: boolean }> };
+  permissions?: Record<string, string>; reviewed?: ExtReview | null; verified?: boolean; requires?: { extensions?: Array<{ id: string; version?: string; part?: string; optional?: boolean }> };
   sections?: Record<string, unknown>; installed: string | null; update: boolean; same_source: boolean;
 }
 export interface ExtBlocked { repo: string; id: string; reason?: string; reason_it?: string; problem: ExtProblem }
 export interface ExtUpdate { id: string; repo: string; installed: string; version: string;
   /** MICRO-PL23 · from «Controlla aggiornamenti»: «Aggiorna» would ask the trust again, and why */
-  trust_needed?: boolean; trust_changes?: string[]; code?: boolean; code_left_out?: boolean }
+  trust_needed?: boolean; trust_changes?: string[]; code?: boolean; code_left_out?: boolean;
+  /** MICRO-PL24 · its code is reviewed in a repository whose reviews count: no question */
+  verified?: boolean; reviewed?: ExtReview | null }
 /** MICRO-PL23 (X3) · what a repository has only for other machines */
 export interface ExtOtherPlatform { repo: string; id: string; platforms: string[]; platform: string; problem: ExtProblem }
 /** MICRO-PL23 · the versions of an extension side by side */
@@ -155,6 +168,17 @@ export interface ExtPlan {
 export interface ExtSyncAnswer {
   repositories: Array<{ name: string; ok: boolean; entries: number | null; problems: ExtProblem[] }>;
   updates: ExtUpdate[]; online_access: boolean;
+  /** MICRO-PL24 (X4) · what is installed, looked at again: reviews arrived, reviews withdrawn */
+  reviews?: ExtReviewsChange;
+}
+/** MICRO-PL24 · the installed codes whose review changed (a sync, a repository's reviews turned on or off) */
+export interface ExtReviewsChange {
+  verified: Array<{ id: string; version?: string; source?: string; reviewed?: ExtReview; problem: ExtProblem }>;
+  withdrawn: Array<{ id: string; version?: string; source?: string; problem: ExtProblem }>;
+}
+/** MICRO-PL24 · the problems a reviews' change says (for the Log), arrived first */
+export function reviewsChangeProblems(c: ExtReviewsChange | null | undefined): ExtProblem[] {
+  return [...(c?.verified ?? []), ...(c?.withdrawn ?? [])].map((x) => x.problem);
 }
 export interface ExtRepoResult {
   installed: (ExtRow & { status?: string; warnings?: ExtProblem[] }) | null;
@@ -580,15 +604,15 @@ export class ExtensionsState {
     return r;
   }
   setOnline(on: boolean) { return this.call<{ online: ExtOnline }>("/extensions/online", { on }); }
-  addRepo(o: { url: string; name?: string; token?: string; check_on_startup?: boolean }) {
+  addRepo(o: { url: string; name?: string; token?: string; check_on_startup?: boolean; trust_reviews?: boolean }) {
     return this.call<{ repository: ExtRepo }>("/extensions/repos/add", o);
   }
-  updateRepo(name: string, changes: { url?: string; token?: string | null; enabled?: boolean; check_on_startup?: boolean }) {
-    return this.call<{ repository: ExtRepo }>("/extensions/repos/update", { name, ...changes });
+  updateRepo(name: string, changes: { url?: string; token?: string | null; enabled?: boolean; check_on_startup?: boolean; trust_reviews?: boolean }) {
+    return this.call<{ repository: ExtRepo & { reviews?: ExtReviewsChange } }>("/extensions/repos/update", { name, ...changes });
   }
   removeRepo(name: string) { return this.call<{ removed: boolean }>("/extensions/repos/remove", { name }); }
   previewFrom(repo: string, id: string, version?: string) {
-    return this.call<{ preview: ExtPreview & { repository?: { name: string; url?: string; archive_hash?: string; reviewed?: unknown; cached?: boolean }; plan?: ExtPlan } }>(
+    return this.call<{ preview: ExtPreview & { repository?: { name: string; url?: string; archive_hash?: string; reviewed?: ExtReview | null; cached?: boolean; trust_reviews?: boolean }; plan?: ExtPlan } }>(
       "/extensions/repos/preview", { repo, id, version });
   }
   installFrom(repo: string, id: string, o: { version?: string; parts: "all" | "data"; trust: boolean; withRequires: boolean; trustRequires: boolean }) {

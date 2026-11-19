@@ -64,8 +64,8 @@ import type { DevInfo } from "./plugin-commands";
 import {
   availableRows, formsOf, labelIn, licenceText, nameOfIri, passesFilter, problemText, rowKind, rowState, schemesOf, sizeText,
   type ExtArchive, type ExtAvailable, type ExtFilter, type ExtPlan, type ExtPreview, type ExtProblem, type ExtRemovalPlan,
-  type ExtRepo, type ExtRow, type ExtensionsState, type ExtNewer, type ExtVersions, type ExtUpdate,
-  updatesNeedingTrust,
+  type ExtRepo, type ExtRow, type ExtensionsState, type ExtNewer, type ExtVersions, type ExtUpdate, type ExtReview,
+  reviewsChangeProblems, updatesNeedingTrust,
 } from "./extensions-state";
 
 export interface ExtWindowHost {
@@ -100,6 +100,18 @@ export interface ExtWindowHost {
   redeclare?(n: ExtNewer): Promise<string | null>;
   /** MICRO-PL23 · the bridge answers the updates' routes (level 86): null when it does, else why not */
   updatesWhy?(): string | null;
+  /** MICRO-PL24 · the bridge takes «Fidati delle revisioni» per repository (level 87): null when it does, else why not */
+  reviewsWhy?(): string | null;
+}
+
+/** MICRO-PL24 (X4) · «rivisto da X il Y» (with the repository when known): a code someone named has read */
+export function reviewedMark(doc: Document, t: ExtWindowHost["t"], rv: ExtReview | null | undefined): HTMLElement {
+  const el = maker(doc);
+  const m = el("span", "ext-verified ext-reviewed",
+    rv?.repo ? t("ext.reviewedFrom", { by: rv.by, on: rv.on, r: rv.repo }) : t("ext.reviewedBy", { by: rv?.by ?? "?", on: rv?.on ?? "?" }));
+  m.dataset.extReviewed = rv?.by ?? "1";
+  if (rv?.as) m.title = rv.as === "editor" ? t("ext.reviewAsEditor") : rv.as.startsWith("curator:") ? t("ext.reviewAsCurator", { p: rv.as.slice(8) }) : rv.as;
+  return m;
 }
 
 /** MICRO-PL18 · what the section «Cartella di sviluppo» needs from the page */
@@ -300,7 +312,8 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
       c.append(el("span", "ext-part-h", t("ext.code")), " ");
       if (code.status === "installed") {
         c.append(`${t("ext.versions", { v: (code.versions ?? [code.version]).filter(Boolean).join(" · ") })} · `,
-          el("span", "ext-unverified", isRepoSource(r.source) ? t("ext.unverifiedFrom", { r: r.source! }) : t("ext.unverified")),
+          code.verified ? reviewedMark(doc, t, code.reviewed)
+            : el("span", "ext-unverified", isRepoSource(r.source) ? t("ext.unverifiedFrom", { r: r.source! }) : t("ext.unverified")),
           ` · ${t(code.active ? "ext.active" : "ext.inactive")}`);
       } else c.append(el("span", "cw-hint", t("ext.codeNotHere")));
       if (code.status === "installed" && code.active_version && code.active_version !== code.version) {
@@ -546,6 +559,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     const head = el("div", "ext-row-h");
     head.append(el("b", "ext-name", r.name), " ", el("span", "ext-kind", t(r.local ? "ext.repoLocal" : "ext.repoRemote")));
     if (r.has_token) head.append(" ", el("span", "ext-kind", t("ext.repoToken")));
+    if (r.official) { const o = el("span", "ext-kind ext-official", t("ext.repoOfficialMark")); o.dataset.extRepoOfficial = "1"; head.append(" ", o); }
     if (!r.enabled) head.append(" ", el("span", "cw-hint", t("ext.repoDisabled")));
     row.appendChild(head);
     const facts = el("div", "ext-facts", r.url);
@@ -558,6 +572,21 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     row.appendChild(s);
     const probs = state.syncProblems?.[r.name] ?? (r.error ? [r.error] : []);
     for (const p of probs) { const w = el("p", "cw-warn", problemText(p, lang)); w.dataset.extRepoProblem = p.code; row.appendChild(w); }
+    // MICRO-PL24 (X4) · whether its reviews count here: on for the official index, off for any other until the person says so
+    if (!host.reviewsWhy?.()) {
+      const lr = el("label", "ext-startup ext-trust-reviews");
+      const cr = el("input");
+      cr.type = "checkbox";
+      cr.checked = !!r.trust_reviews;
+      cr.dataset.extRepoReviews = r.name;
+      cr.title = t("ext.repoTrustReviewsHint");
+      cr.onchange = () => void act(state.updateRepo(r.name, { trust_reviews: cr.checked }).then(async (x) => {
+        if (x.ok) for (const p of reviewsChangeProblems(x.j.repository.reviews)) host.log(problemText(p, lang));
+        await state.refreshRepos(); await state.refresh?.(); return x;
+      }), t(cr.checked ? "ext.repoTrustReviewsOn" : "ext.repoTrustReviewsOff", { r: r.name }));
+      lr.append(cr, ` ${t("ext.repoTrustReviews")}`);
+      row.appendChild(lr);
+    }
     const acts = el("div", "cw-row ext-acts");
     acts.append(btn(t("ext.repoSync"), "repo-sync", () => void syncFlow(r.name), t("ext.repoSyncHint")), " ");
     const lab = el("label", "ext-startup");
@@ -593,6 +622,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     if (st) { const x = el("div", a.update ? "ext-updated" : "cw-hint", st); x.dataset.extAvailState = a.update ? "update" : "installed"; row.appendChild(x); }
     const perms = Object.entries(a.permissions ?? {});
     if (perms.length) row.appendChild(el("div", "cw-hint", t("ext.availPerms", { p: perms.map(([k]) => k).join(", ") })));
+    if (a.verified && a.reviewed) { const v = el("div", "cw-hint"); v.appendChild(reviewedMark(doc, t, { ...a.reviewed, repo: a.repo })); v.dataset.extAvailReviewed = a.reviewed.by; row.appendChild(v); }
     const acts = el("div", "cw-row ext-acts");
     if (!a.installed || a.update)
       acts.append(btn(t(a.update ? "ext.repoUpdateBtn" : "ext.install"), a.update ? "repo-update" : "repo-install",
@@ -610,6 +640,9 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     host.toast(msg);
     host.log(msg);
     for (const x of r.j.sync.repositories) for (const p of x.problems) host.log(`${x.name}: ${problemText(p, lang)}`);
+    // MICRO-PL24 · a review arrived or withdrawn for what is installed
+    for (const p of reviewsChangeProblems(r.j.sync.reviews)) host.log(problemText(p, lang));
+    if (r.j.sync.reviews && (r.j.sync.reviews.verified.length || r.j.sync.reviews.withdrawn.length)) await state.refresh?.();
     repaint();
   }
 
@@ -744,12 +777,14 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
     const box = el("div", "ext-panel ext-panel-code");
     box.dataset.extPanel = "code";
     const h = el("div", "ext-panel-h", t("ext.panelCode", { m: c.module ?? "", v: c.version ?? "" }));
-    h.append(" ", el("span", "ext-unverified", isRepoSource(pv.source) ? t("ext.unverifiedRepo", { r: pv.source! }) : t("ext.unverifiedDisk")));
+    h.append(" ", c.verified ? reviewedMark(doc, t, c.reviewed)
+      : el("span", "ext-unverified", isRepoSource(pv.source) ? t("ext.unverifiedRepo", { r: pv.source! }) : t("ext.unverifiedDisk")));
     box.appendChild(h);
     // MICRO-PL18 (W15a) · asked only when it must be: the first time, or when
     // permissions, capabilities or source changed since the last trust
     const asks = c.trust_needed !== false;
-    box.dataset.extTrust = asks ? "asked" : "kept";
+    // MICRO-PL24 (X4) · a reviewed code: no question, and who read it said
+    box.dataset.extTrust = c.verified ? "reviewed" : asks ? "asked" : "kept";
     if (c.updated) { const u = el("div", "ext-updated", problemText(c.updated, lang)); u.dataset.extUpdated = "1"; box.appendChild(u); }
     const perms = Object.entries(c.permissions ?? {});
     box.appendChild(el("div", "", perms.length ? t("ext.permissions") : t("ext.noPermissions")));
@@ -765,7 +800,12 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
     if (c.module_collision) box.appendChild(el("p", "cw-warn", problemText(c.module_collision, lang)));
     for (const e of c.errors ?? []) { const p = el("p", "cw-warn", problemText(e, lang)); p.dataset.extCodeError = e.code; box.appendChild(p); }
     if (c.update === "unchanged") box.appendChild(el("div", "cw-hint", t("ext.unchanged")));
-    if (asks) box.appendChild(el("div", "ext-panel-f ext-powers", t("ext.powers")));
+    if (c.verified) {
+      const rv = c.reviewed;
+      const k = el("div", "ext-panel-f ext-trust-reviewed", t("ext.trustReviewed", { by: rv?.by ?? "?", on: rv?.on ?? "?", r: rv?.repo ?? "—" }));
+      k.dataset.extTrustReviewed = rv?.by ?? "1";
+      box.appendChild(k);
+    } else if (asks) box.appendChild(el("div", "ext-panel-f ext-powers", t("ext.powers")));
     else { const k = el("div", "ext-panel-f ext-trust-kept", t("ext.trustKept")); k.dataset.extTrustKept = "1"; box.appendChild(k); }
     body.appendChild(box);
   }
@@ -824,7 +864,8 @@ export async function installArchive(doc: Document, host: ExtWindowHost, state: 
   const parts: "all" | "data" = ans.choice === "data" ? "data" : "all";
   // the answer to the trust question is the button pressed: «Installa tutto»
   // (or «Installa» of a plugin) after seeing the code's panel
-  const trust = parts === "all" && !!p.code?.present;
+  // MICRO-PL24 (X4) · a reviewed code was not asked about: no answer is sent for it (its trust is the review's)
+  const trust = parts === "all" && !!p.code?.present && !p.code.verified;
   const r = await state.install(a, parts, trust);
   if (!r.ok) { host.toast(t("ext.installFailed", { why: failText(r, lang) })); return null; }
   const row = r.j.installed;
@@ -925,6 +966,7 @@ export function updateAllBody(doc: Document, host: Pick<ExtWindowHost, "t" | "la
     for (const u of quiet) {
       const li = el("div", "ext-version", t(u.code_left_out ? "ext.updateLineData" : "ext.updateLine", { id: u.id, old: u.installed, v: u.version, r: u.repo }));
       li.dataset.extUpdateQuiet = u.id;
+      if (u.verified && u.reviewed && !u.code_left_out) li.append(" · ", reviewedMark(doc, t, u.reviewed));
       body.appendChild(li);
     }
   }
@@ -1092,7 +1134,8 @@ export async function installFromRepo(doc: Document, host: ExtWindowHost, state:
   const parts: "all" | "data" = ans.choice === "data" ? "data" : "all";
   // the answer to the trust question is the button pressed after seeing the
   // code's panel and the requirements listed with their code marked
-  const trust = parts === "all" && !!p.code?.present;
+  // MICRO-PL24 (X4) · a reviewed code was not asked about: no answer is sent for it (its trust is the review's)
+  const trust = parts === "all" && !!p.code?.present && !p.code.verified;
   const r = await state.installFrom(repo, id, { version: p.version, parts, trust, withRequires: true, trustRequires: parts === "all" });
   if (!r.ok) { host.toast(t("ext.installFailed", { why: failText(r, lang) })); return null; }
   const res = r.j.result;
@@ -1113,7 +1156,7 @@ export async function installFromRepo(doc: Document, host: ExtWindowHost, state:
 
 /** the form of «+ Aggiungi repository…» (exported for the checks) */
 export function addRepoBody(doc: Document, host: Pick<ExtWindowHost, "t" | "pickRepoFolder">, officialUrl: string):
-    { body: HTMLElement; values: () => { url: string; name: string; token: string; check_on_startup: boolean } } {
+    { body: HTMLElement; values: () => { url: string; name: string; token: string; check_on_startup: boolean; trust_reviews?: boolean } } {
   const t = host.t;
   const el = maker(doc);
   const body = el("div", "ext-repo-form");
@@ -1152,7 +1195,19 @@ export function addRepoBody(doc: Document, host: Pick<ExtWindowHost, "t" | "pick
   l.append(start, ` ${t("ext.repoStartup")}`);
   body.appendChild(l);
   body.appendChild(el("p", "cw-hint", t("ext.repoStartupHint")));
-  return { body, values: () => ({ url: url.value.trim(), name: name.value.trim(), token: token.value, check_on_startup: start.checked }) };
+  // MICRO-PL24 (X4) · its reviews: unticked (the official index's count anyway, unless unticked after choosing it)
+  const rev = el("input"); rev.type = "checkbox"; rev.checked = false; rev.dataset.extRepoReviewsNew = "1";
+  let revTouched = false;
+  rev.onchange = () => { revTouched = true; };
+  const lr = el("label", "ext-startup");
+  lr.append(rev, ` ${t("ext.repoTrustReviews")}`);
+  body.appendChild(lr);
+  body.appendChild(el("p", "cw-hint", t("ext.repoTrustReviewsHint")));
+  const off = body.querySelector<HTMLButtonElement>("[data-ext='repo-official']");
+  if (off) { const was = off.onclick; off.onclick = (e) => { (was as ((e: MouseEvent) => void) | null)?.(e); if (!revTouched) rev.checked = true; }; }
+  return { body, values: () => ({ url: url.value.trim(), name: name.value.trim(), token: token.value, check_on_startup: start.checked,
+    // ticked: yes; unticked by hand: no; never touched: the library's default (the official index only)
+    trust_reviews: rev.checked ? true : revTouched ? false : undefined }) };
 }
 
 async function addRepoFlow(doc: Document, host: ExtWindowHost, state: ExtensionsState, repaint: () => void): Promise<void> {
@@ -1162,7 +1217,8 @@ async function addRepoFlow(doc: Document, host: ExtWindowHost, state: Extensions
   if (!ans.ok) return;
   const v = values();
   if (!v.url) { host.toast(t("ext.repoUrlEmpty")); return; }
-  const r = await state.addRepo({ url: v.url, name: v.name || undefined, token: v.token || undefined, check_on_startup: v.check_on_startup });
+  const r = await state.addRepo({ url: v.url, name: v.name || undefined, token: v.token || undefined, check_on_startup: v.check_on_startup,
+    ...(v.trust_reviews !== undefined && !host.reviewsWhy?.() ? { trust_reviews: v.trust_reviews } : {}) });
   if (!r.ok) { host.toast(failText(r, lang)); return; }
   const msg = t("ext.repoAdded", { r: r.j.repository.name, u: r.j.repository.url });
   host.toast(msg);

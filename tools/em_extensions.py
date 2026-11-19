@@ -29,9 +29,11 @@ MICRO-PL22 (X2) · the REPOSITORIES of this machine (s3dgraphy.extensions.remote
 GET  /extensions/repos                   → {ok, repositories (never a token), online {on, setting, env}, official_url}
 GET  /extensions/available?repo=         → {ok, available, blocked, updates, online}
 POST /extensions/online   {on}           → {ok, online}         («Consenti l'accesso in rete», one switch)
-POST /extensions/repos/add {url, name?, token?, check_on_startup?}
+POST /extensions/repos/add {url, name?, token?, check_on_startup?, trust_reviews?}
                                           → {ok, repository}
-POST /extensions/repos/update {name, url?, token?, enabled?, check_on_startup?}
+POST /extensions/repos/update {name, url?, token?, enabled?, check_on_startup?, trust_reviews?}
+                                                                 (MICRO-PL24 · trust_reviews: its reviews count here;
+                                                                  answers reviews: what is installed, looked at again)
 POST /extensions/repos/remove {name}     → {ok, removed}        (what came from it stays installed)
 POST /extensions/repos/sync {name?, startup?}
                                           → {ok, sync}           (http(s) only with online access)
@@ -420,10 +422,10 @@ def _repos(E, route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
     if route == "/extensions/repos/add":
         return 200, {"ok": True, "repository": _plain(E.add_repository(
             str(body.get("url") or ""), name=body.get("name") or None, token=body.get("token") or None,
-            check_on_startup=bool(body.get("check_on_startup"))))}
+            check_on_startup=bool(body.get("check_on_startup")), trust_reviews=flag("trust_reviews")))}
     if route == "/extensions/repos/update":
         changes = {k: body[k] for k in ("url", "token") if k in body}
-        changes.update({k: flag(k) for k in ("enabled", "check_on_startup") if k in body})
+        changes.update({k: flag(k) for k in ("enabled", "check_on_startup", "trust_reviews") if k in body})
         return 200, {"ok": True, "repository": _plain(E.update_repository(str(body.get("name") or ""), **changes))}
     if route == "/extensions/repos/remove":
         return 200, {"ok": True, "removed": bool(E.remove_repository(str(body.get("name") or "")))}
