@@ -163,7 +163,7 @@ try {
   };
   const s = new M.PySession(page);
   const opened = await s.open();
-  eq([opened.ok, opened.host, opened.em_api, opened.caller.name, opened.revision], [true, "emstudio", "1.1.0", "emstudio.console", st.rev],
+  eq([opened.ok, opened.host, opened.em_api, opened.caller.name, opened.revision], [true, "emstudio", "1.2.0", "emstudio.console", st.rev],
      "a session on the page's document and revision");
 
   // the environment: the secrets gone from it
