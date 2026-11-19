@@ -36,6 +36,8 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
   scene: '<path d="M8 1.8 13.5 5v6L8 14.2 2.5 11V5z"/><path d="M2.5 5 8 8.2 13.5 5M8 8.2v6"/>',
   // MICRO-G-SCHEDE · the scheda: a sheet with its boxes
   sheet: '<rect x="3" y="2.5" width="10" height="11" rx="1"/><path d="M3 6h10M3 9.5h10M7.5 6v7.5"/>',
+  // MICRO-PL25 · a plugin's declarative panel: a card with fields and a button
+  "plugin-panel": '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 5.5h6M5 8h6"/><rect x="5" y="10" width="3.5" height="1.6" rx=".6"/>',
   study: '<path d="M8 13.8s4.5-3.9 4.5-7.3a4.5 4.5 0 0 0-9 0c0 3.4 4.5 7.3 4.5 7.3z"/><circle cx="8" cy="6.4" r="1.6"/>',
   // RIFINITURE · not a window: the ✦ of «ask the AI», in the same stroke, so
   // the glyph is the same on every platform (the text ✦ is not)

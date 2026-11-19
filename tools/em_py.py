@@ -47,6 +47,15 @@ POST /py/plugins/dev    {dir: str|null, dev: true, lang?} → as /py/plugins, th
                   without ``dev`` (the switch is the page's), 400 not a folder
 POST /py/plugins/reload {plugin, dev: true, lang?} → as /py/plugins, a plugin of
                   the development folder read again (its modules forgotten)
+POST /py/compute  {session, revision, ack?, doc?, items: [{key, plugin, command,
+                  slot, slots}]} → the run's answer + ``result.values``: the
+                  values of phase 2 (level 88, MICRO-PL25 / X5 — an Inspector
+                  section, a column of the Tabular, the status bar, a panel's
+                  value), each a READ-ONLY command through the contract, in the
+                  shape its slot draws (``em.plugins.compute``); a command that
+                  writes is refused before it runs. The answers to
+                  /py/plugins carry the declarative panels (``panels``) and,
+                  per command, ``primitive``, ``icon``, ``buttons``, ``view``
 
 A run's answer: ``{ok, run, status: done|waiting|running|error|refused|cancelled,
 output, value?, error?, messages?, steps: [{label, delta, process, dtc, ids,
@@ -96,7 +105,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: the bridge's level these routes came with (``BRIDGE_LEVEL`` in em_bridge.py)
-LEVEL = 87  # 87: the level moved with the list of the reviewed (MICRO-PL24); 86: the level moved with the updates (MICRO-PL23); 85: with the repositories (MICRO-PL22); the /py/* routes unchanged
+LEVEL = 88  # 88: /py/compute, the values of phase 2 (MICRO-PL25); 87: the level moved with the list of the reviewed (MICRO-PL24); 86: the level moved with the updates (MICRO-PL23); 85: with the repositories (MICRO-PL22); the /py/* routes unchanged
 TOKEN_ENV = "EM_BRIDGE_TOKEN"
 #: D-8 · the code of an act kept in its DTC node up to this many bytes
 CODE_MAX = 4096
@@ -110,7 +119,8 @@ MAX_SESSIONS = 8
 OUTPUT_MAX = 256 * 1024
 
 ROUTES = ("/py/session", "/py/run", "/py/resume", "/py/complete", "/py/events", "/py/close",
-          "/py/history", "/py/plugins", "/py/invoke", "/py/checks", "/py/plugins/dev", "/py/plugins/reload")
+          "/py/history", "/py/plugins", "/py/invoke", "/py/checks", "/py/plugins/dev", "/py/plugins/reload",
+          "/py/compute")
 #: MICRO-PL17 · the host name the plugins declare (``hosts = ["emstudio"]``)
 HOST = "emstudio"
 #: MICRO-PL16 · the console's history kept on this machine (entries; the oldest go)
@@ -141,6 +151,10 @@ WORDS: Dict[str, Dict[str, str]] = {
     "no_em": {
         "en": "this s3Dgraphy has no em (MICRO-PL14): update s3Dgraphy ({why})",
         "it": "questo s3Dgraphy non ha em (MICRO-PL14): aggiorna s3Dgraphy ({why})",
+    },
+    "no_compute": {
+        "en": "this s3Dgraphy computes no plugin values (MICRO-PL25): update s3Dgraphy",
+        "it": "questo s3Dgraphy non calcola i valori dei plugin (MICRO-PL25): aggiorna s3Dgraphy",
     },
     "no_session": {
         "en": "no Python session {sid}: open one again",
@@ -661,7 +675,8 @@ class Run:
 
     def __init__(self, session: Session, *, code: Optional[str] = None,
                  event: Optional[Tuple[str, Dict[str, Any]]] = None, dry_run: bool = False,
-                 invoke: Optional[Tuple[str, str, Dict[str, Any]]] = None, checks: bool = False):
+                 invoke: Optional[Tuple[str, str, Dict[str, Any]]] = None, checks: bool = False,
+                 compute: Optional[List[Dict[str, Any]]] = None):
         self.id = f"r{next(_run_ids)}-{uuid.uuid4().hex[:6]}"
         self.session = session
         self.code = code
@@ -669,6 +684,8 @@ class Run:
         #: MICRO-PL17 · a plugin's command (plugin, command, slots), or the checks
         self.invoke = invoke
         self.checks = checks
+        #: MICRO-PL25 · the values of phase 2 (read-only commands)
+        self.compute = compute
         self.result: Optional[Dict[str, Any]] = None
         self.dry_run = dry_run
         self.status = "running"
@@ -785,6 +802,8 @@ class Run:
                         self._write(f"{res.data['error']}\n")
             elif self.checks:
                 self.result = {"issues": em.plugins.run_checks(lang=s.lang)}
+            elif self.compute is not None:
+                self.result = {"values": em.plugins.compute(self.compute, lang=s.lang, author=s.author)}
             elif self.event is not None:
                 failures = em.events.emit(self.event[0], self.event[1])
                 for f in failures:
@@ -1071,7 +1090,7 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
             if "answer" in body:
                 run.answer(body.get("answer"))
             return 200, run.answer_now()
-        if route in ("/py/invoke", "/py/checks"):
+        if route in ("/py/invoke", "/py/checks", "/py/compute"):
             s, refused = _session(body)
             if refused:
                 return refused
@@ -1081,6 +1100,12 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
             plugins_now(s.lang)
             if route == "/py/checks":
                 return _start(s, Run(s, checks=True))
+            if route == "/py/compute":
+                em = _em()
+                if not hasattr(em.plugins, "compute"):
+                    return 501, _err("no_compute", s.lang)
+                items = [i for i in (body.get("items") or []) if isinstance(i, dict)]
+                return _start(s, Run(s, compute=items))
             slots = body.get("slots") if isinstance(body.get("slots"), dict) else {}
             return _start(s, Run(s, invoke=(str(body.get("plugin") or ""), str(body.get("command") or ""), slots)))
         if route in ("/py/run", "/py/events"):

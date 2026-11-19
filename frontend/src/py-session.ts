@@ -33,6 +33,8 @@ export const PY_LEVEL = 81;
 export const PY_PLUGINS_LEVEL = 83;
 /** MICRO-PL18 (W15a) · /py/plugins {dev}, /py/plugins/dev, /py/plugins/reload — the development folder */
 export const PY_DEV_LEVEL = 84;
+/** MICRO-PL25 (X5) · /py/compute, the values of the slots of phase 2 */
+export const PY_COMPUTE_LEVEL = 88;
 
 export type PyEvent = "selection-changed" | "graph-changed" | "document-opened" | "document-saved" | "document-closed" | "locale-changed";
 
@@ -80,6 +82,17 @@ export interface PyResult {
   value?: unknown;
   file?: { name: string; mime: string; text?: string; b64?: string };
   issues?: PyIssueWire[];
+  /** level 88 (MICRO-PL25): the values of phase 2, one per item asked */
+  values?: PyValueWire[];
+}
+/** One value of phase 2 (`em.plugins.compute`): rows of a section or a panel,
+ *  `{id: text}` of a column, one line of the status bar — or why not. */
+export interface PyValueWire {
+  key: string;
+  ok: boolean;
+  value?: unknown;
+  messages?: Record<string, string>;
+  reason?: string;
 }
 export interface PyIssueWire {
   plugin: string; command: string; verified: boolean;
@@ -245,6 +258,13 @@ export class PySession {
   async checks(): Promise<PyIssueWire[]> {
     const out = await this.drive(() => this.onDocument("/py/checks", {}));
     return out.result?.issues ?? [];
+  }
+
+  /** MICRO-PL25 · many read-only commands at once (sections, columns, the
+   *  status bar, panels' values): no step, never a write. */
+  async compute(items: Array<{ key: string; plugin: string; command: string; slot: string; slots: Record<string, unknown> }>): Promise<PyValueWire[]> {
+    const out = await this.drive(() => this.onDocument("/py/compute", { items }));
+    return out.result?.values ?? [];
   }
 
   /** MICRO-PL17 · the plugins active for EMStudio, as the bridge loaded them (no session needed). */

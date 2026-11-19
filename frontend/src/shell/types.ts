@@ -90,6 +90,8 @@ export interface SurfaceDeps {
   mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): void };
   /** MICRO-G-SCHEDE · the Scheda of the selected unit, into any body. */
   renderSheetInto(body: HTMLElement, win: Win): void;
+  /** MICRO-PL25 · a plugin's declarative panel (the one in the window's state). */
+  renderPluginPanelInto(body: HTMLElement, win: Win): void;
   /** Which of its tabs this hosted window is showing (per WINDOW, never per
    *  type — two Inspector windows can sit on different tabs, and that is what
    *  makes the second one a view of its own instead of a duplicate). */
@@ -398,6 +400,37 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
           const el = body;
           const ww = win;
           paintSurface(ww, el, () => deps.renderSheetInto(el, ww));
+        },
+        select() { this.refresh(); },
+        setFocused(on) { markFocus(body, on); },
+        destroy() { body?.remove(); body = null; win = null; },
+      };
+    },
+  });
+
+  // ── MICRO-PL25 · A PLUGIN'S DECLARATIVE PANEL (panel@1) ─────────────────
+  //
+  // Born converted, the shape of the sheet: one body, a repaint through
+  // `paintSurface`; the selection moving repaints it (a node field offers
+  // the selection, a value is of it).
+  registerSurfaceType({
+    id: "plugin-panel",
+    create(): Surface {
+      let body: HTMLElement | null = null;
+      let win: Win | null = null;
+      return {
+        mount(area, w) {
+          win = w;
+          body = document.createElement("div");
+          body.className = "tile-pluginpanelbody";
+          area.appendChild(body);
+          this.refresh();
+        },
+        refresh() {
+          if (!body || !win || !body.isConnected) return;
+          const el = body;
+          const ww = win;
+          paintSurface(ww, el, () => deps.renderPluginPanelInto(el, ww));
         },
         select() { this.refresh(); },
         setFocused(on) { markFocus(body, on); },

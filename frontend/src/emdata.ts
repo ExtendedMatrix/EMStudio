@@ -78,6 +78,24 @@ export function setVolatileProvider(fn: VolatileProvider): void {
   volatileProvider = fn;
 }
 
+/** MICRO-PL25 (X5) · a computed column of a plugin (`tabular.column@1`): read
+ *  only, after the sheet's own columns; its header says whose it is. The page
+ *  computes the values (`/py/compute`) and hands them here as text. */
+export interface PluginColumn {
+  key: string;
+  label: string;
+  title: string;
+  cell: (rowId: string) => string;
+}
+let pluginColumns: (sheet: SheetKey) => PluginColumn[] = () => [];
+export function setPluginColumnsProvider(fn: (sheet: SheetKey) => PluginColumn[]): void {
+  pluginColumns = fn;
+}
+/** MICRO-PL25 · the ids of the rows of an editable sheet (what a column is computed OF). */
+export function sheetRowIds(store: DocumentStore, sheet: SheetKey): string[] {
+  return buildTable(store, sheet, volatileProvider).rows.map((r) => r.id);
+}
+
 // CURRENT-ELEMENT · the row this window is working on. The table VIEW does not
 // own it — the window does (workspace.ts).
 let currentRowOf: () => string | null = () => null;
@@ -707,10 +725,13 @@ function emdbTableHtml(store: DocumentStore, sheet: SheetKey,
   const files = sheet === "Documents"
     ? (id: string): string => `<td class="emdata-ro fs-files-cell">${docFilesHtml(filesOfDocument(g, id), (x) => describeFile(g, x))}</td>`
     : null;
+  // MICRO-PL25 · the plugins' computed columns, read only, as text
+  const plugCols = pluginColumns(sheet);
   const head = `<tr><th class="emdata-gutter-head" title="${escapeAttr(t("table.pickHint"))}"></th>` +
     // MICRO-PANNELLI-OVERLAY-TABULAR p.3 · in the interface's language (the key
     // is the column's, the English label the fallback)
     table.columns.map((c) => `<th data-col="${escapeAttr(c.key)}">${escapeHtml(t(`emdb.col.${c.key}`, undefined, c.label))}</th>`).join("") +
+    plugCols.map((c) => `<th class="plg-col" data-plg-col="${escapeAttr(c.key)}" title="${escapeAttr(c.title)}">${escapeHtml(c.label)}</th>`).join("") +
     (files ? `<th>${escapeHtml(t("dcard.files"))}</th>` : "") + `<th></th></tr>`;
   const rowsHtml = rows.map((row) => {
     const cells = table.columns.map((col, ci) =>
@@ -722,7 +743,9 @@ function emdbTableHtml(store: DocumentStore, sheet: SheetKey,
     const gutter = `<td class="emdata-gutter"><button class="emdata-pick" data-pick="${escapeAttr(
       row.id)}" title="${escapeAttr(t("table.pickRow"))}" tabindex="-1">▸</button></td>`;
     return `<tr class="${row.volatile ? "emdata-vol" : ""}${row.readonly ? " emdata-ro-row" : ""}${cur}" ` +
-      `data-row="${escapeAttr(row.id)}">${gutter}${cells}${files ? files(row.id) : ""}${del}</tr>`;
+      `data-row="${escapeAttr(row.id)}">${gutter}${cells}` +
+      plugCols.map((c) => `<td class="emdata-ro plg-col" data-plg-col="${escapeAttr(c.key)}">${escapeHtml(c.cell(row.id))}</td>`).join("") +
+      `${files ? files(row.id) : ""}${del}</tr>`;
   }).join("");
   return {
     count: rows.length,

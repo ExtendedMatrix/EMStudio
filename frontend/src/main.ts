@@ -474,7 +474,7 @@ import {
   printHtml,
   bridgeToken,
 } from "./tauri";
-import { PySession, pyToken, PY_DEV_LEVEL, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep } from "./py-session";
+import { PySession, pyToken, PY_COMPUTE_LEVEL, PY_DEV_LEVEL, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep, type PyValueWire } from "./py-session";
 // MICRO-PL16 (W13) · the Python console, behind «Funzioni sperimentali»
 import { consoleContent, newConsoleState, CONSOLE_LEVEL, type ConsoleHost } from "./console-window";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): the horizons as
@@ -635,6 +635,8 @@ import {
   setSheet,
   setTableView,
   setVolatileProvider,
+  setPluginColumnsProvider,
+  sheetRowIds,
   sheetsHolding,
   tableViewOf,
   emDataFilter,
@@ -843,7 +845,11 @@ import { currentPlatform, setSlotRuns, type RunRow } from "./menu-table";
 import {
   PluginState, badgeOf, byPlugin, fillSlots, labelOf, parseRunId, provenance, runId, whenHolds,
   type PluginCommand, type PluginsAnswer,
+  // MICRO-PL25 (X5) · the slots of phase 2
+  clicksOf, columnsFor, computeKey, panelNamed, panelsOf, sectionsFor, statusLine, toolId, toolsOf,
+  type PanelField, type PluginPanel, type SpaceGeometry,
 } from "./plugin-commands";
+import { renderPanelInto, renderSectionInto, type ValueState } from "./plugin-surfaces";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
 import nodeDatamodel from "./assets/s3Dgraphy_node_datamodel.json";
 import { onFirstVisible } from "./lazy";
@@ -4593,6 +4599,7 @@ function renderInspectorInto(host: HTMLElement): void {
     renderAltLabels(host, owning, selectedId);           // A1 · its other labels
     renderChainSection(host, chainUi(owning), selectedId); // CATENA
     renderPoseSection(host, owning, selectedId);         // MICRO-PL10 · a landmark pose: placed, missing
+    renderPluginSections(host, owning, selectedId);      // MICRO-PL25 · inspector.section@1
     const chip = aiChipFor(selectedId);
     if (chip) host.querySelector(".insp-head .insp-chip")?.after(chip);
     renderReviewLine(host, selectedId);   // TRADUZIONI · waits for / verified by
@@ -18182,7 +18189,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 87;   // 87 = /extensions/repos/add|update take trust_reviews («Fidati delle revisioni di questo repository»), the answers carry verified and reviewed — the list of the reviewed (MICRO-PL24); 86 = /extensions/versions, /extensions/updates, /extensions/update-all, /extensions/use, /extensions/prune, /extensions/leftovers, /extensions/clean, /profiles/redeclare, /profiles/overlay's newer — the updates in «Estensioni» (MICRO-PL23); 85 = /extensions/repos*, /extensions/available, /extensions/online — the repositories of this machine in «Estensioni» (MICRO-PL22); 84 = /py/plugins {dev}, /py/plugins/dev, /py/plugins/reload — the plugins' development folder behind «Funzioni sperimentali» (MICRO-PL18); 83 = /py/plugins, /py/invoke, /py/checks — the plugins loaded from disk and their commands (MICRO-PL17); 82 = /py/history, the console's history of this machine, and a run's proofs (MICRO-PL16); 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 88;   // 88 = /py/compute, the values of the slots of phase 2 — an Inspector section, a column of the Tabular, the status bar, a declarative panel; /py/plugins carries the panels and the tools (MICRO-PL25); 87 = /extensions/repos/add|update take trust_reviews («Fidati delle revisioni di questo repository»), the answers carry verified and reviewed — the list of the reviewed (MICRO-PL24); 86 = /extensions/versions, /extensions/updates, /extensions/update-all, /extensions/use, /extensions/prune, /extensions/leftovers, /extensions/clean, /profiles/redeclare, /profiles/overlay's newer — the updates in «Estensioni» (MICRO-PL23); 85 = /extensions/repos*, /extensions/available, /extensions/online — the repositories of this machine in «Estensioni» (MICRO-PL22); 84 = /py/plugins {dev}, /py/plugins/dev, /py/plugins/reload — the plugins' development folder behind «Funzioni sperimentali» (MICRO-PL18); 83 = /py/plugins, /py/invoke, /py/checks — the plugins loaded from disk and their commands (MICRO-PL17); 82 = /py/history, the console's history of this machine, and a run's proofs (MICRO-PL16); 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -23704,6 +23711,7 @@ function refreshIssues(): void {
   // store, and a new one asked when the document moved
   currentIssues.push(...pluginIssuesFor(s));
   schedulePluginChecks(s);
+  schedulePluginCompute();                           // MICRO-PL25 · the values of phase 2
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
   warnedNodes = new Set(currentIssues.filter((i) => i.sev === "warn" && i.node).map((i) => i.node));
   renderWarningsPill();
@@ -58035,6 +58043,8 @@ function vwFinishAny(win: Win, s: VwScene, spec: SpaceToolSpec, normal: V3 | nul
   if (spec.origin === "core") { vwFinishTrace(win, s, normal); return; }
   const vs = s.trace.vertices.slice();
   s.trace.vertices = [];
+  // MICRO-PL25 · a plugin's tool: its command with the geometry placed
+  if (spec.origin.startsWith("plugin:")) { void vwFinishPlugin(win, s, spec, vs); return; }
   const pt = packageToolInfo.get(spec.id);
   if (!pt) { refreshViewerBar(win); return; }
   if (pt.kind === "landmarks") void vwPlaceLandmark(win, s, vs[0]);
@@ -58672,7 +58682,7 @@ function clicksWords(c: { min: number; max: number | null }): string {
 
 /** The tools of the overlay's packages into the register (the old ones out). */
 function syncPackageTools(ov: OverlayDoc | null): void {
-  unregisterOrigin((o) => o !== "core");
+  unregisterOrigin((o) => o !== "core" && !o.startsWith("plugin:"));   // MICRO-PL25 · a plugin's tools are its own
   packageToolInfo.clear();
   for (const pt of packageToolsOf(ov as never, getLocale())) {
     packageToolInfo.set(pt.id, pt);
@@ -60823,6 +60833,11 @@ function openCorpusDag(): void {
  *  trasformazione (DTC)» (MICRO-CONTENTS-3 F1, MICRO-CONTENTS-4 §1), every
  *  other window the name of its type. */
 function winTypeLabel(win: Win): string {
+  // MICRO-PL25 · a plugin's panel says its own name
+  if (win.type === "plugin-panel") {
+    const panel = pluginState ? panelNamed(plugins(), panelOfWin(win)) : null;
+    if (panel) return labelOf({ label: panel.label, id: panel.id }, getLocale());
+  }
   return isChainWin(win) ? t("win.chain") : t(WINDOW_TYPE_META[win.type].labelKey);
 }
 
@@ -61633,6 +61648,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   chronology: [],
   scene: [],
   sheet: [],
+  "plugin-panel": [],   // MICRO-PL25 · a plugin's panel: its buttons are its own
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -65429,6 +65445,7 @@ registerBuiltinSurfaces({
   renderChronologyInto,
   mountScene,
   renderSheetInto,
+  renderPluginPanelInto: (body: HTMLElement, win: Win) => renderPluginPanelInto(body, win),   // MICRO-PL25
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
   // that a panel can be repainted, told the selection moved, and taken down.
@@ -65639,6 +65656,7 @@ function pySessionFor(st: DocumentStore): PySession {
 /** An event of the page to the Python listeners — only when one waits for it. */
 const pyPending = new Set<PyEvent>();
 function pyNudge(ev: PyEvent, extra: Record<string, unknown> = {}): void {
+  if (ev === "selection-changed") schedulePluginCompute();   // MICRO-PL25 · a section, a panel's value are OF the selection
   // MICRO-PL17 · a plugin's listener hears every document: with one waiting,
   // the session is opened for the event (the console's opens it otherwise)
   const fromPlugins = pluginState?.listeners[ev] ?? 0;
@@ -65774,7 +65792,9 @@ function registerPluginRows(): void {
   setSlotRuns("menu.file.export@1", ps.commandsIn("menu.file.export").map(row));
   redrawSlots();
   renderToolsPlugins();
+  syncPluginTools();                                 // MICRO-PL25 · space.tool@1
   if (store) refreshIssues();
+  pluginPhase2Changed();                             // MICRO-PL25 · sections, columns, status, panels
 }
 onLocaleChange(() => { if (pluginState) registerPluginRows(); });
 
@@ -65818,6 +65838,12 @@ function renderToolsPlugins(): void {
   flyout.textContent = "";
   const lang = getLocale();
   const groups = byPlugin(ps, "menu.tools");
+  // MICRO-PL25 · a plugin with panels (panel@1) is listed too: «Apri «pannello»»
+  for (const p of ps.plugins) {
+    if (p.state !== "loaded" || !(p.panels ?? []).length || groups.some((g) => g.plugin.id === p.id)) continue;
+    groups.push({ plugin: p, commands: [] });
+  }
+  groups.sort((a, b) => ps.plugins.indexOf(a.plugin) - ps.plugins.indexOf(b.plugin));
   for (const { plugin, commands } of groups) {
     const head = document.createElement("div");
     head.className = "dd-head";
@@ -65828,6 +65854,16 @@ function renderToolsPlugins(): void {
     const mark = badgeOf(plugin, t);
     if (mark) head.appendChild(Object.assign(document.createElement("span"), { className: "dd-badge plg-badge", textContent: mark }));
     flyout.appendChild(head);
+    for (const panel of plugin.panels ?? []) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dd-run dd-panel";
+      b.dataset.panel = panel.name;
+      b.textContent = t("plg.openPanel", { panel: labelOf({ label: panel.label, id: panel.id }, lang) });
+      b.title = provenance(plugin, t);
+      b.addEventListener("click", () => { closeAllSubmenus(); openPluginPanel(panel); });
+      flyout.appendChild(b);
+    }
     for (const c of commands) {
       const b = document.createElement("button");
       b.type = "button";
@@ -65886,7 +65922,8 @@ function withSep<T>(entries: T[]): Array<T | "sep"> {
 /** Run a plugin's command on the document: its slots filled from the page
  *  (never invented), a file asked when it needs one, its steps applied as
  *  every Python step (one undo each), a file it returns saved. */
-async function runPluginCommand(c: PluginCommand, ctx: { selection?: string[]; path?: string | null } = {}): Promise<void> {
+async function runPluginCommand(c: PluginCommand, ctx: { selection?: string[]; path?: string | null;
+  geometry?: SpaceGeometry | null; fields?: Record<string, unknown> } = {}): Promise<void> {
   const st = store;
   const label = labelOf(c, getLocale());
   if (!st) { toast(t("toast.openADocument")); return; }
@@ -65897,7 +65934,7 @@ async function runPluginCommand(c: PluginCommand, ctx: { selection?: string[]; p
     path = await pickSourceFile(c.accept.map((a) => a.replace(/^\./, "")));
     if (!path) return;
   }
-  const slots = fillSlots(c, { selection: ctx.selection ?? [...selectedIds], path });
+  const slots = fillSlots(c, { selection: ctx.selection ?? [...selectedIds], path, geometry: ctx.geometry, fields: ctx.fields });
   try {
     const out = await pySessionFor(st).invoke(c.plugin, c.id, slots);
     if (out.output.trim()) logInfo(`${c.plugin} · ${out.output.trim()}`);
@@ -65965,3 +66002,317 @@ function schedulePluginChecks(s: DocumentStore): void {
 
 // the plugins asked once the bridge is up, then after each change in «Estensioni»
 setTimeout(() => void refreshPlugins(), 1500);
+
+// ── MICRO-PL25-SLOT-DELLA-FASE-2 (X5) · what a plugin shows, and its tools ───
+//
+// The slots of phase 2 (SPEC-plugin §13): an Inspector section for a type of
+// node (inspector.section@1), a computed column of a sheet of the Tabular
+// (tabular.column@1), a zone of text in the status bar (statusbar@1) — the
+// three only read, their values asked of the bridge AT ONCE (/py/compute,
+// level 88) a moment after the document or the selection moved, never while
+// a script runs —, a tool of the Space's bar (space.tool@1: the primitive
+// placed, then the command with the geometry, its writes one undo step as
+// every plugin's), and the declarative panels (panel@1): ONE window type,
+// `plugin-panel`, the panel in its state, opened from Strumenti ▸ Plugin ▸ in
+// the place the plugin proposes — after, the person's. Everything a plugin
+// says is drawn as TEXT (plugin-surfaces.ts): no HTML, no JavaScript (§14.8).
+
+// `var`, as `pluginState`: a saved plugin-panel window is drawn at boot,
+// before the module's body reaches these lines (no TDZ)
+/** the values computed, by key (computeKey): the last answer */
+// eslint-disable-next-line no-var
+var pluginValues = new Map<string, PyValueWire>();
+/** what the person wrote in each panel's fields, by panel name */
+// eslint-disable-next-line no-var
+var pluginPanelFields = new Map<string, Record<string, unknown>>();
+// eslint-disable-next-line no-var
+var pluginComputeTimer: number | undefined;
+// eslint-disable-next-line no-var
+var pluginComputeSig = "";
+// eslint-disable-next-line no-var
+var pluginComputeTries = 0;
+
+/** The slots of phase 2 have something to draw (any plugin with a section, a column, a status, a panel). */
+function pluginPhase2Any(): boolean {
+  if (!pluginState) return false;
+  const ps = plugins();
+  return ps.commandsIn("inspector.section").length + ps.commandsIn("tabular.column").length
+    + ps.commandsIn("statusbar").length + panelsOf(ps).length > 0;
+}
+
+/** The plugins changed: the values of before may be of commands gone. */
+function pluginPhase2Changed(): void {
+  pluginComputeSig = "";
+  if (!pluginPhase2Any()) {
+    if (pluginValues.size) pluginValues.clear();
+    renderPluginStatus();
+  }
+  schedulePluginCompute();
+  // a panel's window says the panel's name in its head: drawn again with the plugins
+  if (windowsOf().some((w) => w.type === "plugin-panel")) { refreshSurfaces("plugin-panel"); renderAreaHeaders(); }
+}
+
+function panelOfWin(win: Win): string | null {
+  const v = win.state["plugin.panel"];
+  return typeof v === "string" ? v : null;
+}
+
+/** What to ask: every value the page would draw now. */
+function pluginComputeItems(st: DocumentStore): Array<{ key: string; plugin: string; command: string; slot: string; slots: Record<string, unknown> }> {
+  const ps = plugins();
+  const items: Array<{ key: string; plugin: string; command: string; slot: string; slots: Record<string, unknown> }> = [];
+  const seen = new Set<string>();
+  const add = (slot: string, c: PluginCommand, of: string, slots: Record<string, unknown>) => {
+    const key = computeKey(slot, c, of);
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({ key, plugin: c.plugin, command: c.id, slot, slots });
+  };
+  for (const c of ps.commandsIn("statusbar")) add("statusbar@1", c, "", fillSlots(c, { selection: [...selectedIds] }));
+  const sel = selectedId && st.node(selectedId) ? selectedId : null;
+  if (sel) for (const c of sectionsFor(ps, String(st.node(sel)?.node_type ?? "")))
+    add("inspector.section@1", c, sel, fillSlots(c, { selection: [sel] }));
+  const views = new Set(ps.commandsIn("tabular.column").map((c) => c.view || "Units"));
+  for (const view of views) {
+    const ids = sheetRowIds(st, view as never);
+    for (const c of columnsFor(ps, view)) add("tabular.column@1", c, view, fillSlots(c, { selection: ids }));
+  }
+  for (const w of windowsOf()) {
+    if (w.type !== "plugin-panel") continue;
+    const panel = panelNamed(ps, panelOfWin(w));
+    if (!panel) continue;
+    const fields = pluginPanelFields.get(panel.name) ?? {};
+    for (const f of panel.fields) {
+      if (f.kind !== "value" || !f.command) continue;
+      const c = ps.plugin(panel.plugin)?.commands.find((x) => x.id === f.command);
+      if (c) add("panel@1", c, panel.name, fillSlots(c, { selection: [...selectedIds], fields }));
+    }
+  }
+  return items;
+}
+
+/** Ask the values again a moment after things settle (once per state). */
+function schedulePluginCompute(): void {
+  if (!pluginPhase2Any()) return;
+  window.clearTimeout(pluginComputeTimer);
+  pluginComputeTimer = window.setTimeout(() => void runPluginCompute(), 700);
+}
+
+async function runPluginCompute(): Promise<void> {
+  const st = store;
+  if (!st || !pluginPhase2Any()) return;
+  if (!(await bridgeLevelAtLeast(PY_COMPUTE_LEVEL))) return;
+  const items = pluginComputeItems(st);
+  const sig = `${st.rev}|${getLocale()}|${JSON.stringify(items)}`;
+  if (sig === pluginComputeSig) return;
+  if (!items.length) { pluginComputeSig = sig; return; }
+  try {
+    const values = await pySessionFor(st).compute(items);
+    if (store !== st) return;
+    pluginComputeSig = sig;
+    pluginComputeTries = 0;
+    for (const it of items) pluginValues.delete(it.key);
+    for (const v of values) pluginValues.set(v.key, v);
+  } catch (e) {
+    // a script (or the checks) running: asked again in a moment, a few times
+    if (pluginComputeTries++ < 5) { window.setTimeout(() => void runPluginCompute(), 900); return; }
+    pluginComputeTries = 0;
+    logWarn(t("plg.computeFailed", { why: String((e as Error)?.message ?? e) }));
+    return;
+  }
+  renderPluginStatus();
+  if (selectedId && sectionsFor(plugins(), String(st.node(selectedId)?.node_type ?? "")).length) refreshInspector();
+  if (plugins().commandsIn("tabular.column").length) renderEmData();
+  if (windowsOf().some((w) => w.type === "plugin-panel")) refreshSurfaces("plugin-panel");
+}
+
+/** A value as the drawers want it: computing, its rows, or why not (in the page's language). */
+function pluginValueState(key: string): ValueState {
+  const v = pluginValues.get(key);
+  if (!v) return {};
+  if (v.ok) return { ok: true, value: v.value };
+  const m = v.messages ?? {};
+  return { ok: false, why: m[getLocale().startsWith("it") ? "it" : "en"] ?? m.en ?? t("plg.noValue") };
+}
+
+/** inspector.section@1 · the sections of the plugins for the inspected node. */
+function renderPluginSections(host: HTMLElement, st: DocumentStore, id: string): void {
+  if (!pluginState) return;
+  const ps = plugins();
+  const cs = sectionsFor(ps, String(st.node(id)?.node_type ?? ""));
+  const lang = getLocale();
+  for (const c of cs) {
+    const p = ps.plugin(c.plugin);
+    const buttons = (c.buttons ?? []).map((b) => p?.commands.find((x) => x.id === b)).filter((x): x is PluginCommand => !!x);
+    renderSectionInto(host, c, {
+      lang, t: (k, v) => t(k, v), value: pluginValueState(computeKey("inspector.section@1", c, id)),
+      buttons, onButton: (b) => void runPluginCommand(b, { selection: [id] }),
+      pluginName: p?.name ?? c.plugin, mark: badgeOf(p, t), provenance: p ? provenance(p, t) : "",
+      readOnly: !!sync.room && hubReadOnly() });
+  }
+  if (cs.length && !pluginValues.size) schedulePluginCompute();
+}
+
+/** tabular.column@1 · the computed columns of a sheet, read only. */
+setPluginColumnsProvider((sheet) => {
+  if (!pluginState) return [];
+  const ps = plugins();
+  const lang = getLocale();
+  return columnsFor(ps, sheet).map((c) => {
+    const p = ps.plugin(c.plugin);
+    const key = computeKey("tabular.column@1", c, sheet);
+    const mark = badgeOf(p, t);
+    return {
+      key: `${c.plugin}/${c.id}`,
+      label: labelOf(c, lang),
+      title: `${p?.name ?? c.plugin}${mark ? ` · ${mark}` : ""} — ${t("plg.columnTitle")}`,
+      cell: (rowId: string) => {
+        const v = pluginValues.get(key);
+        if (!v) return "…";
+        if (!v.ok) return "—";
+        return String((v.value as Record<string, unknown> | undefined)?.[rowId] ?? "");
+      },
+    };
+  });
+});
+
+/** statusbar@1 · a zone of text: one line per plugin's status command, joined. */
+function renderPluginStatus(): void {
+  const zone = document.getElementById("sb-plugins");
+  if (!zone) return;
+  zone.textContent = "";
+  const cs = pluginState ? plugins().commandsIn("statusbar") : [];
+  let any = false;
+  for (const c of cs) {
+    const v = pluginValues.get(computeKey("statusbar@1", c, ""));
+    if (!v?.ok) continue;
+    const text = statusLine(v.value);
+    if (!text) continue;
+    const p = plugins().plugin(c.plugin);
+    const span = document.createElement("span");
+    span.className = "sb-plg";
+    span.dataset.plg = `${c.plugin}/${c.id}`;
+    span.textContent = text;
+    const mark = badgeOf(p, t);
+    span.title = `${labelOf(c, getLocale())} · ${p?.name ?? c.plugin}${mark ? ` · ${mark}` : ""}`;
+    if (any) zone.appendChild(document.createTextNode(" · "));
+    zone.appendChild(span);
+    any = true;
+  }
+  zone.classList.toggle("hidden", !any);
+}
+onLocaleChange(() => { pluginComputeSig = ""; schedulePluginCompute(); });
+
+/** space.tool@1 · the plugins' tools in the Space's register, after the core's and the packages'. */
+function syncPluginTools(): void {
+  const ps = plugins();
+  unregisterOrigin((o) => o.startsWith("plugin:"));
+  for (const c of toolsOf(ps)) {
+    const p = ps.plugin(c.plugin);
+    registerSpaceTool({
+      id: toolId(c), origin: `plugin:${c.plugin}`, snap: "surface",
+      primitive: c.primitive as SpaceToolSpec["primitive"], clicks: clicksOf(c.primitive ?? "")!,
+      glyph: c.icon || "◆",
+      label: () => {
+        const mark = badgeOf(p, t);
+        return t("plg.toolTitle", { label: labelOf(c, getLocale()), plugin: p?.name ?? c.plugin,
+          prim: t(`pose.prim.${c.primitive}`) }) + (mark ? ` · ${mark}` : "");
+      },
+      hint: () => t("plg.toolHint", { prim: t(`pose.prim.${c.primitive}`) }),
+      disabled: () => (!!sync.room && hubReadOnly() && c.writes ? readOnlyWhy() : null),
+    });
+  }
+  if (windowsOf().some((w) => w.type === "viewer")) renderViewer();
+}
+
+/** A plugin's tool finished its trace: the command, with what was placed. */
+async function vwFinishPlugin(win: Win, s: VwScene, spec: SpaceToolSpec, vs: V3[]): Promise<void> {
+  const m = /^plugin:([^/]+)\/(.+)$/.exec(spec.id);
+  const c = m ? plugins().plugin(m[1])?.commands.find((x) => x.id === m[2]) : null;
+  if (!c || !vs.length) { refreshViewerBar(win); return; }
+  s.posing = true;
+  try {
+    await runPluginCommand(c, { selection: [...selectedIds],
+      geometry: { primitive: c.primitive ?? spec.primitive, vertices: vs.map((p) => [p[0], p[1], p[2]] as [number, number, number]),
+        on: s.docId, frame: "model" } });
+  } finally {
+    s.posing = false;
+  }
+  if (viewerScenes.get(win.id) === s) renderViewer();
+}
+
+/** panel@1 · open a plugin's panel where it proposes (the first time; a
+ *  window already showing it takes the focus instead). */
+function openPluginPanel(panel: PluginPanel): void {
+  const open = windowsOf().find((w) => w.type === "plugin-panel" && panelOfWin(w) === panel.name);
+  if (open) {
+    setActiveWin(open.id);
+    renderTiles();
+    const area = winAreas.get(open.id);
+    area?.classList.add("flash");
+    setTimeout(() => area?.classList.remove("flash"), 900);
+    return;
+  }
+  const state = { "plugin.panel": panel.name };
+  if (panel.place === "window") {
+    if (detachWindow({ id: `plugin-panel:${panel.name}`, type: "plugin-panel", state }, null)) { schedulePluginCompute(); return; }
+  }
+  const anchor = activeWin();
+  if (maximizedWin()) toggleMaximize(maximizedWin()!);
+  setActiveWin(anchor.id);
+  const made = panel.place === "below" ? splitWindow(anchor.id, "col", activeWorkspace(), 0.66, "b")
+    : panel.place === "left" ? splitWindow(anchor.id, "row", activeWorkspace(), 0.3, "a")
+      : splitWindow(anchor.id, "row", activeWorkspace(), 0.7, "b");
+  if (!made) return;
+  for (const k of Object.keys(made.state)) delete made.state[k];
+  setWinType(made, "plugin-panel");
+  Object.assign(made.state, state);
+  renderTiles();
+  pluginComputeSig = "";
+  schedulePluginCompute();
+}
+
+/** The panel of a `plugin-panel` window, drawn from its fields. */
+function renderPluginPanelInto(body: HTMLElement, win: Win): void {
+  const name = panelOfWin(win);
+  const ps = plugins();
+  const panel = panelNamed(ps, name);
+  const lang = getLocale();
+  const p = panel ? ps.plugin(panel.plugin) : null;
+  pluginPanelFields ??= new Map();
+  pluginValues ??= new Map();
+  const fields = panel ? (pluginPanelFields.get(panel.name) ?? {}) : {};
+  const st = store;
+  const types = st ? [...selectedIds].map((id) => String(st.node(id)?.node_type ?? "")) : [];
+  const holds = !!st && !!panel && whenHolds(panel.when, { document: true, types });
+  const commandOf = (id: string): PluginCommand | null => p?.commands.find((x) => x.id === id) ?? null;
+  renderPanelInto(body, panel, {
+    lang, t: (k, v) => t(k, v), fields,
+    onField: (field, value) => {
+      if (!panel) return;
+      const now = { ...(pluginPanelFields.get(panel.name) ?? {}) };
+      if (value === undefined) delete now[field]; else now[field] = value;
+      pluginPanelFields.set(panel.name, now);
+      refreshSurfaces("plugin-panel");
+      schedulePluginCompute();
+    },
+    valueOf: (f: PanelField) => {
+      const c = f.command ? commandOf(f.command) : null;
+      return c && panel ? pluginValueState(computeKey("panel@1", c, panel.name)) : { ok: false, why: t("plg.noValue") };
+    },
+    onButton: (f: PanelField) => {
+      const c = f.command ? commandOf(f.command) : null;
+      if (c && panel) void runPluginCommand(c, { selection: [...selectedIds], fields: pluginPanelFields.get(panel.name) ?? {} });
+    },
+    command: commandOf,
+    selection: () => {
+      const id = selectedId && st?.node(selectedId) ? selectedId : null;
+      return id ? { id, name: String(st?.node(id)?.name ?? id) } : null;
+    },
+    nodeName: (id) => String(st?.node(id)?.name ?? id),
+    mark: badgeOf(p, t), provenance: p ? provenance(p, t) : "",
+    enabled: holds,
+    disabledWhy: !st ? t("toast.openADocument") : !holds ? t("plg.panelWhen") : undefined,
+  }, name ?? undefined);
+}
+

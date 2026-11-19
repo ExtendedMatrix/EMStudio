@@ -81,6 +81,8 @@ const CONVERTED = {
   scene: ["scene-view"],
   // 17 Nov 2026 (MICRO-G-SCHEDE) · the Scheda, born converted like the Study
   sheet: ["sheet-view"],
+  // 19 Nov 2026 (MICRO-PL25) · a plugin's declarative panel, born converted
+  "plugin-panel": ["plugin-panel-view"],
   // 13 set 2026 · the two HOSTED types. Their singletons were of two kinds and
   // both are listed: the surface they were mounted into (`#panel-view`) and the
   // four PANELS themselves, which were elements taken from the document at boot

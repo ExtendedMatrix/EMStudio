@@ -12436,3 +12436,30 @@ button.uo-col { cursor: pointer; }
   color: var(--text-faint);
   white-space: nowrap;
 }
+
+/* MICRO-PL25 (X5) · the slots of phase 2: a plugin's panel, its Inspector
+   section, its column, its zone of the status bar — drawn by the page as text */
+.tile-pluginpanelbody { height: 100%; overflow: auto; }
+.plg-panel { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.plg-panel-head { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.plg-field { display: flex; flex-direction: column; gap: 3px; }
+.plg-field-check .plg-label { flex-direction: row; display: flex; align-items: center; gap: 6px; }
+.plg-label { color: var(--muted, #888); font-size: 11px; }
+.plg-input { font: inherit; max-width: 100%; }
+.plg-unit { color: var(--muted, #888); font-size: 11px; }
+.plg-node { display: flex; align-items: center; gap: 8px; }
+.plg-node-name { font-weight: 600; }
+.plg-btn { align-self: flex-start; }
+.plg-rows { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 2px 0; }
+.plg-rows-k { color: var(--muted, #888); margin: 0; }
+.plg-rows-k.empty { display: none; }
+.plg-rows-k.empty + .plg-rows-v { grid-column: 1 / -1; }
+.plg-rows-v { margin: 0; overflow-wrap: anywhere; }
+.plg-pending, .plg-empty { color: var(--muted, #888); }
+.plg-why { color: var(--warn, #b26b00); }
+.plg-sect .plg-by { font-weight: 400; color: var(--muted, #888); }
+.plg-sect-body { padding: 2px 0 6px; }
+.plg-acts { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; }
+th.plg-col { font-style: italic; }
+td.plg-col { color: var(--muted, #888); }
+.sb-plugins { margin-left: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted, #888); }

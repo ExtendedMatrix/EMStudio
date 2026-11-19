@@ -210,7 +210,7 @@ hosts = ["emstudio"]
   id = "lonely"
   label = { it = "Solo dichiarato", en = "Only declared" }
   writes = false
-  in = ["menu.tools@1", "panel@1"]
+  in = ["menu.tools@1", "palette@1"]
   [[code.commands]]
   id = "nodesc"
   label = "Units without a description"
@@ -262,7 +262,7 @@ try {
   eq(byId["plug-check"].verified, false, "…from disk, not verified");
   eq(byId["plug-future"].state, "refused", "a plugin for another em: refused");
   ok(/chiede em/.test(byId["plug-future"].problems[0].it), "…said in Italian");
-  eq(byId["plug-check"].commands.find((c) => c.id === "lonely").off, [{ slot: "panel@1", why: "phase2" }], "a phase-2 entry turned off, the command kept");
+  eq(byId["plug-check"].commands.find((c) => c.id === "lonely").off, [{ slot: "palette@1", why: "phase2" }], "a phase-2 entry turned off, the command kept");
   eq(pl.listeners["selection-changed"], 2, "the plugins' listeners counted (two plugins listen)");
 
   const state2 = new M.PluginState();

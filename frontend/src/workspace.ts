@@ -80,7 +80,12 @@ export type WindowType =
   | "scene"
   // MICRO-G-SCHEDE · THE SCHEDA: the unit as its recording sheet, drawn from a
   // definition of stratigraph-templates (sheet.ts), its boxes the graph's
-  | "sheet";
+  | "sheet"
+  // MICRO-PL25 (X5) · A PLUGIN'S DECLARATIVE PANEL (`panel@1`): ONE type for
+  // every panel of every plugin, the panel in its state (`plugin.panel` =
+  // `<plugin>/<panel>`) — the union stays closed (SPEC-plugin §3.3). Drawn by
+  // the page from the plugin's fields; a plugin brings no HTML.
+  | "plugin-panel";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -599,6 +604,7 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   chronology: { icon: windowIcon("chronology"), labelKey: "win.chronology" },
   scene: { icon: windowIcon("scene"), labelKey: "win.scene" },
   sheet: { icon: windowIcon("sheet"), labelKey: "win.sheet" },
+  "plugin-panel": { icon: windowIcon("plugin-panel"), labelKey: "win.pluginPanel" },
 };
 
 /** The window type the active workspace currently shows — the ACTIVE window's
