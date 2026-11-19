@@ -75,7 +75,13 @@ export interface ExtRow {
   requires_optional?: ExtProblem[];
   data?: ExtDataSection;
   code?: ExtCodeSection;
+  /** MICRO-PL28 (X8) · the archive came with a signature of a key a repository here names */
+  signed?: ExtSigned | null;
 }
+/** MICRO-PL28 (X8) · who published these bytes: a minisign key, and the repositories that name it */
+export interface ExtSigned { key_id: string; repos: string[] }
+/** MICRO-PL28 · the .minisig beside an archive, as the installer read it */
+export interface ExtSignature { status: "signed" | "unknown_key" | "bad"; key_id?: string; repos?: string[]; problem?: ExtProblem; note?: ExtProblem }
 
 /** the two panels of the confirmation (`extensions.preview`) */
 export interface ExtPreview {
@@ -105,6 +111,8 @@ export interface ExtPreview {
     reviewed?: ExtReview | null; review_note?: ExtProblem | null; digest?: string | null;
   };
   requires?: { missing?: ExtProblem[]; optional?: ExtProblem[]; cycle?: string[] | null };
+  /** MICRO-PL28 (X8) · the archive's signature (null: none beside it) */
+  signature?: ExtSignature | null;
 }
 
 // ── MICRO-PL22 (X2) · the repositories of this machine ──────────────────────
@@ -118,6 +126,8 @@ export interface ExtRepo {
   added_at?: string; synced_at?: string | null; entries?: number | null; error?: ExtProblem | null;
   /** MICRO-PL24 (X4) · its reviews count here (default: the official index's only) */
   trust_reviews?: boolean; official?: boolean;
+  /** MICRO-PL28 (X8) · its minisign public keys: with them, index and archives signed or refused */
+  keys?: Array<{ key_id: string; key: string }>; signed?: boolean; signed_by?: string | null;
 }
 /** «Consenti l'accesso in rete»: the machine's switch, and the environment that wins over it */
 export interface ExtOnline { on: boolean; setting: boolean; env: string | null }
@@ -127,6 +137,8 @@ export interface ExtAvailable {
   tagline?: string; type?: string; license?: string[] | string; maintainer?: string; archive_size?: number;
   permissions?: Record<string, string>; reviewed?: ExtReview | null; verified?: boolean; requires?: { extensions?: Array<{ id: string; version?: string; part?: string; optional?: boolean }> };
   sections?: Record<string, unknown>; installed: string | null; update: boolean; same_source: boolean;
+  /** MICRO-PL28 (X8) · offered by a signed repository (its index verified with the key) */
+  signed?: boolean; signed_by?: string | null;
 }
 export interface ExtBlocked { repo: string; id: string; reason?: string; reason_it?: string; problem: ExtProblem }
 export interface ExtUpdate { id: string; repo: string; installed: string; version: string;
@@ -604,15 +616,17 @@ export class ExtensionsState {
     return r;
   }
   setOnline(on: boolean) { return this.call<{ online: ExtOnline }>("/extensions/online", { on }); }
-  addRepo(o: { url: string; name?: string; token?: string; check_on_startup?: boolean; trust_reviews?: boolean }) {
+  addRepo(o: { url: string; name?: string; token?: string; check_on_startup?: boolean; trust_reviews?: boolean; keys?: string[] }) {
     return this.call<{ repository: ExtRepo }>("/extensions/repos/add", o);
   }
-  updateRepo(name: string, changes: { url?: string; token?: string | null; enabled?: boolean; check_on_startup?: boolean; trust_reviews?: boolean }) {
+  updateRepo(name: string, changes: { url?: string; token?: string | null; enabled?: boolean; check_on_startup?: boolean; trust_reviews?: boolean; keys?: string[] }) {
     return this.call<{ repository: ExtRepo & { reviews?: ExtReviewsChange } }>("/extensions/repos/update", { name, ...changes });
   }
   removeRepo(name: string) { return this.call<{ removed: boolean }>("/extensions/repos/remove", { name }); }
   previewFrom(repo: string, id: string, version?: string) {
-    return this.call<{ preview: ExtPreview & { repository?: { name: string; url?: string; archive_hash?: string; reviewed?: ExtReview | null; cached?: boolean; trust_reviews?: boolean }; plan?: ExtPlan } }>(
+    return this.call<{ preview: ExtPreview & { repository?: { name: string; url?: string; archive_hash?: string; reviewed?: ExtReview | null; cached?: boolean; trust_reviews?: boolean;
+      /** MICRO-PL28 · the archive's signature checked against the repository's keys (null: an unsigned repository) */
+      signed?: { key_id: string } | null; signed_repository?: boolean }; plan?: ExtPlan } }>(
       "/extensions/repos/preview", { repo, id, version });
   }
   installFrom(repo: string, id: string, o: { version?: string; parts: "all" | "data"; trust: boolean; withRequires: boolean; trustRequires: boolean }) {

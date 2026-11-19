@@ -124,7 +124,7 @@ const form = W.addRepoBody(document, { t: words, pickRepoFolder: async () => "/V
 ok(form.body.querySelector("[data-ext-repo-token]").type === "password", "the token in a password field");
 form.body.querySelector("[data-ext='repo-official']").onclick();
 // MICRO-PL24: the official address ticks «Fidati delle revisioni…» (check-reviews.mjs)
-eq(form.values(), { url: st.officialUrl, name: "extendedmatrix", token: "", check_on_startup: false, trust_reviews: true }, "«ExtendedMatrix (ufficiale)» fills the address; at start-up off");
+eq(form.values(), { url: st.officialUrl, name: "extendedmatrix", token: "", check_on_startup: false, trust_reviews: true, keys: [] }, "«ExtendedMatrix (ufficiale)» fills the address; at start-up off");
 form.body.querySelector("[data-ext='repo-folder']").onclick();
 await new Promise((r) => setTimeout(r, 0));
 eq(form.values().url, "/Volumes/NAS/estensioni", "«Scegli una cartella…» on the desktop");

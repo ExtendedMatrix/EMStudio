@@ -34,6 +34,8 @@ POST /extensions/repos/add {url, name?, token?, check_on_startup?, trust_reviews
 POST /extensions/repos/update {name, url?, token?, enabled?, check_on_startup?, trust_reviews?}
                                                                  (MICRO-PL24 · trust_reviews: its reviews count here;
                                                                   answers reviews: what is installed, looked at again)
+                                                                 (MICRO-PL28 · keys: the repository's minisign public
+                                                                  keys, on add and update — [] = no longer signed)
 POST /extensions/repos/remove {name}     → {ok, removed}        (what came from it stays installed)
 POST /extensions/repos/sync {name?, startup?}
                                           → {ok, sync}           (http(s) only with online access)
@@ -408,6 +410,13 @@ def _package_json(path: Any, roots: List[Any]) -> Any:
         return None
 
 
+def _keys(v: Any):
+    """MICRO-PL28 · the keys a page sends: a list of strings (one key each), or one string."""
+    if v is None:
+        return None
+    return [str(k) for k in (v if isinstance(v, list) else [v]) if str(k or "").strip()]
+
+
 def _repos(E, route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
     """MICRO-PL22 (X2) · the repositories: added, read, installed from. The
     archive of an entry is downloaded and checked against the index's
@@ -422,10 +431,13 @@ def _repos(E, route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
     if route == "/extensions/repos/add":
         return 200, {"ok": True, "repository": _plain(E.add_repository(
             str(body.get("url") or ""), name=body.get("name") or None, token=body.get("token") or None,
-            check_on_startup=bool(body.get("check_on_startup")), trust_reviews=flag("trust_reviews")))}
+            check_on_startup=bool(body.get("check_on_startup")), trust_reviews=flag("trust_reviews"),
+            keys=_keys(body.get("keys"))))}
     if route == "/extensions/repos/update":
         changes = {k: body[k] for k in ("url", "token") if k in body}
         changes.update({k: flag(k) for k in ("enabled", "check_on_startup", "trust_reviews") if k in body})
+        if "keys" in body:
+            changes["keys"] = _keys(body.get("keys")) or []
         return 200, {"ok": True, "repository": _plain(E.update_repository(str(body.get("name") or ""), **changes))}
     if route == "/extensions/repos/remove":
         return 200, {"ok": True, "removed": bool(E.remove_repository(str(body.get("name") or "")))}

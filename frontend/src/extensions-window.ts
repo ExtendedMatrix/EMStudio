@@ -68,7 +68,7 @@ import type { DevInfo } from "./plugin-commands";
 import {
   availableRows, formsOf, labelIn, licenceText, nameOfIri, passesFilter, problemText, rowKind, rowState, schemesOf, sizeText,
   type ExtArchive, type ExtAvailable, type ExtFilter, type ExtPlan, type ExtPreview, type ExtProblem, type ExtRemovalPlan,
-  type ExtRepo, type ExtRow, type ExtensionsState, type ExtNewer, type ExtVersions, type ExtUpdate, type ExtReview,
+  type ExtRepo, type ExtRow, type ExtSigned, type ExtensionsState, type ExtNewer, type ExtVersions, type ExtUpdate, type ExtReview,
   reviewsChangeProblems, updatesNeedingTrust,
 } from "./extensions-state";
 
@@ -106,6 +106,8 @@ export interface ExtWindowHost {
   updatesWhy?(): string | null;
   /** MICRO-PL24 · the bridge takes «Fidati delle revisioni» per repository (level 87): null when it does, else why not */
   reviewsWhy?(): string | null;
+  /** MICRO-PL28 · the bridge takes a repository's signing keys (level 89): null when it does, else why not */
+  signWhy?(): string | null;
   /** MICRO-PL27 (X7) · on the web: the section «Plugin del nodo» (null: none to draw) */
   nodePlugins?(doc: Document): HTMLElement | null;
 }
@@ -118,6 +120,23 @@ export function reviewedMark(doc: Document, t: ExtWindowHost["t"], rv: ExtReview
   m.dataset.extReviewed = rv?.by ?? "1";
   if (rv?.as) m.title = rv.as === "editor" ? t("ext.reviewAsEditor") : rv.as.startsWith("curator:") ? t("ext.reviewAsCurator", { p: rv.as.slice(8) }) : rv.as;
   return m;
+}
+
+/** MICRO-PL28 (X8) · «firmato dalla chiave K di R»: who published these bytes (not who read the code) */
+export function signedMark(doc: Document, t: ExtWindowHost["t"], s: Partial<ExtSigned> & { key_id: string }): HTMLElement {
+  const el = maker(doc);
+  const m = el("span", "ext-signed", s.repos?.length ? t("ext.signedBy", { k: s.key_id, r: s.repos.join(", ") }) : t("ext.signedKey", { k: s.key_id }));
+  m.dataset.extSigned = s.key_id;
+  m.title = t("ext.signedHint");
+  return m;
+}
+
+/** MICRO-PL28 · the keys a person pasted: one per line starting with «RW» (a .pub file's comment line skipped);
+ *  text with no such line is sent whole, so the library says why it is not a key */
+export function keysOf(text: string): string[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const keys = lines.filter((l) => l.startsWith("RW"));
+  return keys.length ? keys : lines.length ? [text.trim()] : [];
 }
 
 /** MICRO-PL18 · what the section «Cartella di sviluppo» needs from the page */
@@ -259,6 +278,8 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     const facts = [r.id, r.version ? `v${r.version}` : "", sourceWord(t, r.source),
       licenceText(r.license)].filter(Boolean).join(" · ");
     row.appendChild(el("div", "ext-facts", facts));
+    // MICRO-PL28 (X8) · the archive came signed by a key a repository here names
+    if (r.signed?.key_id) { const sg = el("div", "cw-hint"); sg.appendChild(signedMark(doc, t, r.signed)); row.appendChild(sg); }
     // the state in words
     const st = rowState(r);
     // the library's sentence when there is one («codice non installato: scelta
@@ -573,6 +594,13 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     head.append(el("b", "ext-name", r.name), " ", el("span", "ext-kind", t(r.local ? "ext.repoLocal" : "ext.repoRemote")));
     if (r.has_token) head.append(" ", el("span", "ext-kind", t("ext.repoToken")));
     if (r.official) { const o = el("span", "ext-kind ext-official", t("ext.repoOfficialMark")); o.dataset.extRepoOfficial = "1"; head.append(" ", o); }
+    // MICRO-PL28 (X8) · a signed repository: its index taken only signed, its archives opened only signed
+    if (r.signed && r.keys?.length) {
+      const sg = el("span", "ext-kind ext-signed", t("ext.repoSigned", { k: r.keys.map((k) => k.key_id).join(", ") }));
+      sg.dataset.extRepoSigned = r.signed_by ?? "keys";
+      sg.title = t("ext.repoSignedHint");
+      head.append(" ", sg);
+    }
     if (!r.enabled) head.append(" ", el("span", "cw-hint", t("ext.repoDisabled")));
     row.appendChild(head);
     const facts = el("div", "ext-facts", r.url);
@@ -613,6 +641,9 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     acts.append(lab, " ");
     acts.append(btn(t(r.has_token ? "ext.repoTokenChange" : "ext.repoTokenSet"), "repo-token",
       () => void tokenFlow(doc, host, state, r, repaint)), " ");
+    if (!host.signWhy?.())
+      acts.append(btn(t(r.keys?.length ? "ext.repoKeysChange" : "ext.repoKeysSet"), "repo-keys",
+        () => void keysFlow(doc, host, state, r, repaint), t("ext.repoKeysHint")), " ");
     acts.append(btn(t("ext.repoRemove"), "repo-remove", () => void removeRepoFlow(doc, host, state, r, repaint), t("ext.repoRemoveHint"), "danger"));
     row.appendChild(acts);
     return row;
@@ -636,6 +667,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     const perms = Object.entries(a.permissions ?? {});
     if (perms.length) row.appendChild(el("div", "cw-hint", t("ext.availPerms", { p: perms.map(([k]) => k).join(", ") })));
     if (a.verified && a.reviewed) { const v = el("div", "cw-hint"); v.appendChild(reviewedMark(doc, t, { ...a.reviewed, repo: a.repo })); v.dataset.extAvailReviewed = a.reviewed.by; row.appendChild(v); }
+    if (a.signed && a.signed_by) { const v = el("div", "cw-hint"); v.appendChild(signedMark(doc, t, { key_id: a.signed_by, repos: [a.repo] })); row.appendChild(v); }
     const acts = el("div", "cw-row ext-acts");
     if (!a.installed || a.update)
       acts.append(btn(t(a.update ? "ext.repoUpdateBtn" : "ext.install"), a.update ? "repo-update" : "repo-install",
@@ -746,7 +778,16 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
   const sub = [pv.tagline, pv.maintainer ? t("ext.maintainer", { m: pv.maintainer }) : "", licenceText(pv.license)].filter(Boolean).join(" · ");
   if (sub) body.appendChild(el("div", "cw-hint", sub));
   for (const e of pv.errors ?? []) { const p = el("p", "cw-warn", problemText(e, lang)); p.dataset.extError = e.code; body.appendChild(p); }
-  for (const w of pv.warnings ?? []) body.appendChild(el("p", "cw-hint", problemText(w, lang)));
+  // MICRO-PL28 (X8) · signed: who published these bytes; the library's sentence says it is not a review
+  const sig = pv.signature;
+  if (sig?.status === "signed" && sig.key_id) {
+    const sg = el("div", "ext-signed-line");
+    sg.dataset.extSignature = "signed";
+    sg.appendChild(signedMark(doc, t, { key_id: sig.key_id, repos: sig.repos }));
+    sg.append(" — ", t("ext.signedNotReview"));
+    body.appendChild(sg);
+  }
+  for (const w of pv.warnings ?? []) if (w.code !== "sign_signed") body.appendChild(el("p", "cw-hint", problemText(w, lang)));
   // ── Dati ──
   const d = pv.data;
   if (d?.present) {
@@ -1090,7 +1131,7 @@ async function removeFlow(doc: Document, host: ExtWindowHost, state: ExtensionsS
 
 /** what comes with an entry of a repository: said under the two panels */
 export function planBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang">, plan: ExtPlan,
-                         repo: { name: string; archive_hash?: string; cached?: boolean } | undefined): HTMLElement {
+                         repo: { name: string; archive_hash?: string; cached?: boolean; signed?: { key_id: string } | null } | undefined): HTMLElement {
   const t = host.t, lang = host.lang();
   const el = maker(doc);
   const box = el("div", "ext-plan");
@@ -1099,6 +1140,12 @@ export function planBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang">,
     const v = el("div", "cw-hint ext-verified", t("ext.repoVerified", { r: repo.name, h: String(repo.archive_hash ?? "").slice(7, 19) }));
     v.dataset.extArchiveVerified = "1";
     box.appendChild(v);
+    // MICRO-PL28 (X8) · and signed by the repository's key, over that archive_hash
+    if (repo.signed?.key_id) {
+      const s = el("div", "cw-hint ext-signed", t("ext.repoSignedVerified", { r: repo.name, k: repo.signed.key_id }));
+      s.dataset.extArchiveSigned = repo.signed.key_id;
+      box.appendChild(s);
+    }
   }
   const deps = plan.steps.filter((s) => !s.requested);
   if (deps.length) {
@@ -1168,8 +1215,8 @@ export async function installFromRepo(doc: Document, host: ExtWindowHost, state:
 }
 
 /** the form of «+ Aggiungi repository…» (exported for the checks) */
-export function addRepoBody(doc: Document, host: Pick<ExtWindowHost, "t" | "pickRepoFolder">, officialUrl: string):
-    { body: HTMLElement; values: () => { url: string; name: string; token: string; check_on_startup: boolean; trust_reviews?: boolean } } {
+export function addRepoBody(doc: Document, host: Pick<ExtWindowHost, "t" | "pickRepoFolder" | "signWhy">, officialUrl: string):
+    { body: HTMLElement; values: () => { url: string; name: string; token: string; check_on_startup: boolean; trust_reviews?: boolean; keys: string[] } } {
   const t = host.t;
   const el = maker(doc);
   const body = el("div", "ext-repo-form");
@@ -1216,9 +1263,22 @@ export function addRepoBody(doc: Document, host: Pick<ExtWindowHost, "t" | "pick
   lr.append(rev, ` ${t("ext.repoTrustReviews")}`);
   body.appendChild(lr);
   body.appendChild(el("p", "cw-hint", t("ext.repoTrustReviewsHint")));
+  // MICRO-PL28 (X8) · its minisign public key, given by whoever runs it (as the URL): with it, signed or refused
+  const key = el("textarea");
+  key.rows = 2;
+  key.placeholder = "RW…";
+  key.spellcheck = false;
+  key.dataset.extRepoKeyNew = "1";
+  if (!host.signWhy?.()) {
+    const lk = el("label", "ext-field");
+    lk.append(el("span", "", t("ext.repoKeyLabel")), key);
+    body.appendChild(lk);
+    body.appendChild(el("p", "cw-hint", t("ext.repoKeyHint")));
+  }
   const off = body.querySelector<HTMLButtonElement>("[data-ext='repo-official']");
   if (off) { const was = off.onclick; off.onclick = (e) => { (was as ((e: MouseEvent) => void) | null)?.(e); if (!revTouched) rev.checked = true; }; }
   return { body, values: () => ({ url: url.value.trim(), name: name.value.trim(), token: token.value, check_on_startup: start.checked,
+    keys: keysOf(key.value),
     // ticked: yes; unticked by hand: no; never touched: the library's default (the official index only)
     trust_reviews: rev.checked ? true : revTouched ? false : undefined }) };
 }
@@ -1231,7 +1291,8 @@ async function addRepoFlow(doc: Document, host: ExtWindowHost, state: Extensions
   const v = values();
   if (!v.url) { host.toast(t("ext.repoUrlEmpty")); return; }
   const r = await state.addRepo({ url: v.url, name: v.name || undefined, token: v.token || undefined, check_on_startup: v.check_on_startup,
-    ...(v.trust_reviews !== undefined && !host.reviewsWhy?.() ? { trust_reviews: v.trust_reviews } : {}) });
+    ...(v.trust_reviews !== undefined && !host.reviewsWhy?.() ? { trust_reviews: v.trust_reviews } : {}),
+    ...(v.keys.length && !host.signWhy?.() ? { keys: v.keys } : {}) });
   if (!r.ok) { host.toast(failText(r, lang)); return; }
   const msg = t("ext.repoAdded", { r: r.j.repository.name, u: r.j.repository.url });
   host.toast(msg);
@@ -1261,6 +1322,36 @@ async function tokenFlow(doc: Document, host: ExtWindowHost, state: ExtensionsSt
   const res = await state.updateRepo(r.name, { token: input.value || null });
   if (!res.ok) { host.toast(failText(res, lang)); return; }
   const msg = t(input.value ? "ext.repoTokenSaved" : "ext.repoTokenCleared", { r: r.name });
+  host.toast(msg);
+  host.log(msg);
+  await state.refreshRepos();
+  repaint();
+}
+
+/** MICRO-PL28 (X8) · «Chiavi di firma…»: the repository's public keys, replaced (none: no longer signed) */
+async function keysFlow(doc: Document, host: ExtWindowHost, state: ExtensionsState, r: ExtRepo, repaint: () => void): Promise<void> {
+  const t = host.t, lang = host.lang();
+  const body = doc.createElement("div");
+  const p = doc.createElement("p");
+  p.textContent = t("ext.repoKeysAsk", { r: r.name });
+  const input = doc.createElement("textarea");
+  input.rows = 3;
+  input.spellcheck = false;
+  input.placeholder = "RW…";
+  input.value = (r.keys ?? []).map((k) => k.key).join("\n");
+  input.dataset.extRepoKeys = r.name;
+  const hint = doc.createElement("p");
+  hint.className = "cw-hint";
+  hint.textContent = t("ext.repoKeysEmpty");
+  body.append(p, input, hint);
+  const ans = await host.dialog({ title: t("ext.repoKeysTitle"), body, ok: t("ext.repoKeysOk"), kind: "ext-repo-keys" });
+  if (!ans.ok) return;
+  const keys = keysOf(input.value);
+  const res = await state.updateRepo(r.name, { keys });
+  if (!res.ok) { host.toast(failText(res, lang)); return; }
+  const got = res.j.repository;
+  const msg = got.keys?.length ? t("ext.repoKeysSaved", { r: r.name, k: got.keys.map((k) => k.key_id).join(", ") })
+    : t("ext.repoKeysCleared", { r: r.name });
   host.toast(msg);
   host.log(msg);
   await state.refreshRepos();
