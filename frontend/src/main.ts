@@ -42298,7 +42298,10 @@ function showCollectWindow(emjson: string, root: string, items: OutsideFile[]): 
   card.className = "modal-card relocate collect";
   const head = document.createElement("div");
   head.className = "modal-head";
-  head.textContent = t("collect.title", { root: paths.toNative(root) });
+  // MICRO-COR03 · the study's folder by its name; the whole path (with the
+  // user's name in it) only on hover
+  head.textContent = t("collect.title", { root: paths.basename(root) || paths.toNative(root) });
+  head.title = paths.toNative(root);
   const body = document.createElement("div");
   body.className = "modal-body";
   const intro = document.createElement("p");

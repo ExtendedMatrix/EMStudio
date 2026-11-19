@@ -266,12 +266,11 @@ export const AI_PROVIDERS: { value: string; label: string }[] = [
 
 /** Sync targets. `enabled:false` entries render disabled — the host role is a
  *  role (ADR-002 §1); more hosts (EMStudio-desktop, StratiGraph Service) land
- *  later without a protocol change. */
+ *  later without a protocol change. MICRO-COR03: only what can be chosen is
+ *  listed — the two «(soon)» rows are gone until they work. */
 export const SYNC_TOOLS: { value: string; label: string; enabled: boolean }[] =
   [
     { value: "blender", label: "Blender · EMtools", enabled: true },
-    { value: "desktop", label: "EMStudio Desktop (soon)", enabled: false },
-    { value: "server", label: "StratiGraph Service (soon)", enabled: false },
   ];
 
 function clone(s: Settings): Settings {

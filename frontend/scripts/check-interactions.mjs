@@ -8564,9 +8564,9 @@ test("WM5.collect", "WINDOWS-MODELLI p.5 · File ▸ «Raccogli le risorse…» 
   });
   await p.screenshot({ path: SHOT("wm5-collect") }).catch(() => {});
   await ctx.close();
-  const pass = inMenu && /^Raccogli le risorse — in /.test(w.title) && /^46 fuori · 0 scelti · 0 file, 0 B da copiare/.test(w.tally ?? "") && w.go === null
+  const pass = inMenu && /^Raccogli le risorse — nella cartella dello studio, [^/\\]+$/.test(w.title) && /^46 fuori · 0 scelti · 0 file, 0 B da copiare/.test(w.tally ?? "") && w.go === null
     && w.hint === "Niente scelto: spunta i file da raccogliere." && JSON.stringify(w.kinds) === JSON.stringify([["onedrive", 44], ["smb", 2]]) && w.disabled
-    && w.why.length === 2 && w.why.some((x) => /imposta prima la cartella di OneDrive/.test(x)) && w.why.some((x) => /condivisione di rete/.test(x))
+    && w.why.length === 2 && w.why.some((x) => /non sa dov'è la sua cartella di OneDrive\. Indicala in Impostazioni ▸ Generale ▸ File su questo computer/.test(x)) && w.why.some((x) => /condivisione di rete/.test(x))
     && w.roots.length === 2 && !errors.length;
   return { pass, detail: { inMenu, ...w, errors } };
 });
