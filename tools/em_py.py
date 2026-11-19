@@ -56,6 +56,15 @@ POST /py/compute  {session, revision, ack?, doc?, items: [{key, plugin, command,
                   writes is refused before it runs. The answers to
                   /py/plugins carry the declarative panels (``panels``) and,
                   per command, ``primitive``, ``icon``, ``buttons``, ``view``
+GET  /py/layer-image?plugin=&path=           → the bytes of a picture of a plugin's
+                  layer of the Space (level 90, MICRO-GEO11 / row G10 of the
+                  geophysics plan — ``space.layer@1``: the ``image`` and
+                  ``stamp`` of its planes): ONLY a file under the plugin's own
+                  data folder (``plugins-data/<id>/``, the real path checked: a
+                  link out of it refused), a PNG, a JPEG, a WebP or a
+                  ``.stamp.json`` beside one (served, never made); the secret
+                  as for every /py route. ``/py/plugins`` carries a layer's
+                  ``layer`` kind
 
 A run's answer: ``{ok, run, status: done|waiting|running|error|refused|cancelled,
 output, value?, error?, messages?, steps: [{label, delta, process, dtc, ids,
@@ -105,7 +114,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: the bridge's level these routes came with (``BRIDGE_LEVEL`` in em_bridge.py)
-LEVEL = 89  # 89: the level moved with the signature of a repository (MICRO-PL28); 88: /py/compute, the values of phase 2 (MICRO-PL25); 87: the level moved with the list of the reviewed (MICRO-PL24); 86: the level moved with the updates (MICRO-PL23); 85: with the repositories (MICRO-PL22); the /py/* routes unchanged
+LEVEL = 90  # 90: GET /py/layer-image, the pictures of a plugin's layer of the Space (MICRO-GEO11); 89: the level moved with the signature of a repository (MICRO-PL28); 88: /py/compute, the values of phase 2 (MICRO-PL25); 87: the level moved with the list of the reviewed (MICRO-PL24); 86: the level moved with the updates (MICRO-PL23); 85: with the repositories (MICRO-PL22); the /py/* routes unchanged
 TOKEN_ENV = "EM_BRIDGE_TOKEN"
 #: D-8 · the code of an act kept in its DTC node up to this many bytes
 CODE_MAX = 4096
@@ -205,6 +214,18 @@ WORDS: Dict[str, Dict[str, str]] = {
     "dev_dir_bad": {
         "en": "{why}",
         "it": "{why_it}",
+    },
+    "layer_plugin": {
+        "en": "no plugin «{plugin}» with a data folder on this machine",
+        "it": "nessun plugin «{plugin}» con una cartella di dati su questa macchina",
+    },
+    "layer_path": {
+        "en": "«{path}» is not a picture of the plugin's own folder: a layer's pictures are served only from there",
+        "it": "«{path}» non è un'immagine della cartella del plugin: le immagini di uno strato si servono solo da lì",
+    },
+    "layer_missing": {
+        "en": "«{path}» is not on this machine (the plugin's cache was made elsewhere, or cleaned)",
+        "it": "«{path}» non è su questa macchina (la cache del plugin è stata fatta altrove, o pulita)",
     },
     "unknown_view": {
         "en": "no view «{name}» in EMStudio (the views: {known})",
@@ -1131,6 +1152,51 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
     except ValueError as exc:
         return 400, {"ok": False, "error": str(exc)}
     return 404, {"ok": False, "error": "unknown /py route"}
+
+
+# ── the pictures of a layer of the Space (MICRO-GEO11) ──────────────────────
+
+#: what /py/layer-image serves: a picture, or the stamp beside one (never made here)
+LAYER_MEDIA = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+               ".stamp.json": "application/json"}
+#: the largest picture served (a slice of 1000 × 1000 RGBA is ~4 MB uncompressed)
+LAYER_IMAGE_MAX = 64 * 1024 * 1024
+_PLUGIN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
+
+
+def _plugins_data() -> pathlib.Path:
+    em = _em()
+    return pathlib.Path(em.plugins.plugins_data_dir())
+
+
+def layer_image(plugin: str, path: str, lang: Optional[str] = None) -> Tuple[int, Any, Optional[str]]:
+    """``(status, bytes | error dict, media)``: a file of ``plugins-data/<plugin>/``
+    named by ``path`` (relative, ``/``-separated, no ``..``), its real path
+    inside the plugin's real folder, of a kind in :data:`LAYER_MEDIA`."""
+    pid = str(plugin or "")
+    if not _PLUGIN_ID.match(pid) or pid in (".", ".."):
+        return 404, _err("layer_plugin", lang, plugin=pid or "—"), None
+    base = _plugins_data() / pid
+    if not base.is_dir():
+        return 404, _err("layer_plugin", lang, plugin=pid), None
+    rel = str(path or "").strip()
+    parts = rel.split("/")
+    low = rel.lower()
+    media = next((m for ext, m in sorted(LAYER_MEDIA.items(), key=lambda kv: -len(kv[0])) if low.endswith(ext)), None)
+    if (not rel or "\\" in rel or "\x00" in rel or ":" in rel or rel.startswith("/")
+            or any(p in ("", ".", "..") for p in parts) or media is None
+            or (low.endswith(".json") and not low.endswith(".stamp.json"))):
+        return 403, _err("layer_path", lang, path=rel or "—"), None
+    real_base = os.path.realpath(base)
+    full = os.path.realpath(os.path.join(real_base, *parts))
+    if os.path.commonpath([real_base, full]) != real_base:
+        return 403, _err("layer_path", lang, path=rel), None
+    if not os.path.isfile(full):
+        return 404, _err("layer_missing", lang, path=rel), None
+    if os.path.getsize(full) > LAYER_IMAGE_MAX:
+        return 413, _err("layer_path", lang, path=rel), None
+    with open(full, "rb") as fh:
+        return 200, fh.read(), media
 
 
 # ── completion ──────────────────────────────────────────────────────────────

@@ -15,6 +15,12 @@
 //     pick through /py/resume); a listener of selection-changed; a refusal of
 //     the seam in EN and IT, nothing applied; a proof (dry run); code over 4 kB
 //     kept by its sha256 and a pointer; completion; busy; the levels 81.
+//   · MICRO-GEO11 (row G10 of the geophysics plan) · GET /py/layer-image: the
+//     pictures of a plugin's layer of the Space (space.layer@1) served ONLY
+//     from plugins-data/<id>/ — the secret first; a PNG and the stamp beside
+//     it served (ETag → 304); a path out of the folder (.., absolute, a link
+//     out, a drive), another kind of file, a plugin without a folder refused,
+//     a picture not on this machine said in EN and IT.
 //
 //   node scripts/check-py-bridge.mjs
 import * as esbuild from "esbuild";
@@ -83,6 +89,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "py-bridge-"));
 const TOKEN = "check-py-bridge-secret-0123456789";
 const machine = { S3DGRAPHY_CONSOLE_DIR: path.join(dir, "console"), S3DGRAPHY_PROFILES_DIR: path.join(dir, "profiles"),
   S3DGRAPHY_EXTENSIONS_DIR: path.join(dir, "extensions"), S3DGRAPHY_PLUGINS_DIR: path.join(dir, "plugins"),
+  S3DGRAPHY_PLUGINS_DATA_DIR: path.join(dir, "plugins-data"),
   EM_VOCABULARIES_DIR: path.join(dir, "vocab"), EM_BRIDGE_STATE_DIR: path.join(dir, "state"), EM_PY_ANSWER_S: "10" };
 const start = async (env) => {
   const port = await freePort();
@@ -132,6 +139,40 @@ try {
   ok(/Authorization/.test(pre.headers.get("access-control-allow-headers") ?? ""), "the preflight allows Authorization");
   const old = await post(B, "/chronology", { doc: docOf() });
   ok(old.status !== 401 && old.status !== 503, "a route of before answers without the secret, as it did");
+
+  // MICRO-GEO11 · the pictures of a layer of the Space, only from the plugin's own folder
+  {
+    const cache = path.join(dir, "plugins-data", "geofisica", "cache", "k");
+    fs.mkdirSync(cache, { recursive: true });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    fs.writeFileSync(path.join(cache, "slice_000.png"), png);
+    fs.writeFileSync(path.join(cache, "slice_000.png.stamp.json"), JSON.stringify({ stamp: "dtcstamp" }));
+    fs.writeFileSync(path.join(cache, "notes.txt"), "no");
+    fs.writeFileSync(path.join(cache, "manifest.json"), "{}");
+    fs.writeFileSync(path.join(dir, "outside.png"), png);
+    fs.symlinkSync(path.join(dir, "outside.png"), path.join(cache, "link.png"));
+    const AUTH = { Authorization: `Bearer ${TOKEN}` };
+    const img = (plugin, p, headers = AUTH) => fetch(`${B}/py/layer-image?plugin=${encodeURIComponent(plugin)}&path=${encodeURIComponent(p)}&lang=it`, { headers });
+    eq((await img("geofisica", "cache/k/slice_000.png", {})).status, 401, "layer-image: behind the secret");
+    const r = await img("geofisica", "cache/k/slice_000.png");
+    eq([r.status, r.headers.get("content-type"), Buffer.from(await r.arrayBuffer()).equals(png)], [200, "image/png", true],
+       "a picture of the plugin's folder served, its bytes");
+    const etag = r.headers.get("etag");
+    eq((await img("geofisica", "cache/k/slice_000.png", { ...AUTH, "If-None-Match": etag })).status, 304, "…the same again: 304");
+    const st = await img("geofisica", "cache/k/slice_000.png.stamp.json");
+    eq([st.status, st.headers.get("content-type"), (await st.json()).stamp], [200, "application/json", "dtcstamp"], "…and the stamp beside it");
+    for (const bad of ["../../outside.png", "cache/../../../outside.png", path.join(dir, "outside.png"), "cache/k/link.png",
+                       "C:/x.png", "cache\\k\\slice_000.png", "cache/k/notes.txt", "cache/k/manifest.json", ""]) {
+      const x = await img("geofisica", bad);
+      eq(x.status, 403, `refused, never served: ${JSON.stringify(bad)}`);
+    }
+    const miss = await img("geofisica", "cache/k/slice_999.png");
+    const mj = await miss.json();
+    ok(miss.status === 404 && mj.code === "layer_missing" && /non è su questa macchina/.test(mj.messages.it) && /not on this machine/.test(mj.messages.en),
+       "a picture not on this machine: 404, said in EN and IT");
+    eq([(await img("nobody", "a.png")).status, (await img("..", "a.png")).status, (await img("../geofisica", "cache/k/slice_000.png")).status],
+       [404, 404, 404], "a plugin without a folder here (or not a plugin's name): 404");
+  }
 
   // the page's module on a real DocumentStore
   const st = new M.DocumentStore(docOf());

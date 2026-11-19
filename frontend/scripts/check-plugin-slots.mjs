@@ -19,6 +19,11 @@
 //     runs and one that tries refused by the seam, nothing reaching the page;
 //     a tool's command with the geometry: one step, one undo; a panel's
 //     button with the fields' values.
+//   · MICRO-GEO11 (row G10 of the geophysics plan) · space.layer@1: a layer's
+//     kind in /py/plugins, the slot drawn and read only; ONE /py/compute gives
+//     the layer in the one shape (frame in doubles, planes, display, a
+//     picture outside the plugin's folder dropped), its picture then served by
+//     /py/layer-image.
 //
 // Run: node frontend/scripts/check-plugin-slots.mjs (S3D=… for another s3Dgraphy).
 import * as esbuild from "esbuild";
@@ -252,8 +257,22 @@ def axis(slots):
         tx.update(slots["id"], "description", f"asse {d:.1f} su {slots['g']['on']}")
     return round(d, 2)
 
+def stacks(slots):
+    import os
+    from s3dgraphy.em import plugins as PL
+    folder = os.path.join(str(PL.plugins_data_dir()), "plug-slots", "cache", "k")
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "s0.png"), "wb") as fh:
+        fh.write(b"\\x89PNG\\r\\n\\x1a\\nlayer")
+    return {"kind": "raster_stack", "id": "ert:b", "name": {"en": "ERT stack b", "it": "Pila ERT b"},
+            "frame": {"epsg": 25830, "origin": [701806.741, 4234824.081], "rotation": 0},
+            "items": [{"id": "d1", "label": {"en": "slice 1", "it": "fetta 1"}, "image": "cache/k/s0.png",
+                       "extent": [0, 0, 92, 50], "depth_top": 1.0, "depth_bottom": 1.5},
+                      {"id": "bad", "image": "/etc/passwd", "extent": [0, 0, 1, 1]}]}
+
 def setup(ctx):
-    for name, fn in (("summary", summary), ("length", length), ("status", status), ("sneaky", sneaky), ("mark", mark), ("axis", axis)):
+    for name, fn in (("summary", summary), ("length", length), ("status", status), ("sneaky", sneaky), ("mark", mark), ("axis", axis),
+                     ("stacks", stacks)):
         ctx.command(name, fn)
 
 plugin = type("Plugin", (), {"setup": staticmethod(setup)})
@@ -313,6 +332,11 @@ hosts = ["emstudio"]
   icon = "⟂"
   slots = [{ name = "g", kind = "geometry" }, { name = "id", kind = "id" }]
   [[code.commands]]
+  id = "stacks"
+  label = { it = "Pile", en = "Stacks" }
+  in = ["space.layer@1"]
+  layer = "raster_stack"
+  [[code.commands]]
   id = "stack"
   label = { it = "Pila", en = "Stack" }
   in = ["door.reader@2"]
@@ -357,7 +381,7 @@ try {
   eq([inst.status, inst.j.ok !== false], [200, true], "the plugin of the five slots installed from disk");
   const pl = (await post("/py/plugins", { lang: "it" })).j;
   const me = pl.plugins.find((p) => p.id === "plug-slots");
-  eq(me?.state, "loaded", "loaded in the bridge");
+  eq(me?.state, "loaded", `loaded in the bridge ${JSON.stringify(me?.problems)}`);
   eq(me.panels.map((x) => [x.name, x.place, x.fields.map((f) => f.kind)]), [["plug-slots/fit", "right", ["number", "value", "button"]]], "/py/plugins carries the panel");
   const c = Object.fromEntries(me.commands.map((x) => [x.id, x]));
   eq([c.axis.primitive, c.axis.icon, c.summary.buttons, c.length.view, c.summary.writes, c.status.writes, c.axis.writes],
@@ -365,7 +389,10 @@ try {
   eq([c.stack.in, c.stack.folders, c.stack.claims, c.stack.panel, c.stack.accept], [["door.reader@2"], true, [".tif"], "plug-slots/fit", []],
     "MICRO-GEO09 · a reader of door.reader@2: its folders, claims and panel in /py/plugins");
   eq(pl.slots?.phase1?.["door.reader"], 2, "…the slot at version 2");
-  eq(pl.slots?.drawn2, { "inspector.section": 1, "tabular.column": 1, statusbar: 1, "space.tool": 1, panel: 1 }, "the slots of phase 2 drawn");
+  eq(pl.slots?.drawn2, { "inspector.section": 1, "tabular.column": 1, statusbar: 1, "space.tool": 1, panel: 1, "space.layer": 1 },
+     "the slots of phase 2 drawn (MICRO-GEO11: space.layer too)");
+  eq([c.stacks.in, c.stacks.layer, c.stacks.writes, "layer" in c.summary], [["space.layer@1"], "raster_stack", false, false],
+     "MICRO-GEO11 · a layer of the Space: its kind in /py/plugins, read only; the other commands say no layer");
 
   const state2 = new M.PluginState();
   state2.set(pl);
@@ -395,6 +422,19 @@ try {
   ok(!vals["statusbar@1|plug-slots/sneaky|"].ok, "a value that tries to write: refused by the seam");
   ok(!vals.w.ok && /scrive/.test(vals.w.messages.it), "a command that writes: refused before it runs, said in Italian");
   eq([st.rev, st.node("us1")?.description], [rev0, "una"], "nothing reached the page");
+
+  // MICRO-GEO11 · space.layer@1: ONE /py/compute, the layer in its shape; its picture by /py/layer-image
+  const lay = (await s.compute([{ key: "L", plugin: "plug-slots", command: "stacks", slot: "space.layer@1", slots: {} }]))[0];
+  ok(lay.ok, `a layer computed: ${JSON.stringify(lay)}`);
+  const L = lay.value[0];
+  eq([L.kind, L.id, L.name, L.frame, L.ground, L.display, L.opacity],
+     ["raster_stack", "ert:b", "Pila ERT b", { epsg: 25830, origin: [701806.741, 4234824.081], rotation: 0, local: true },
+      { mode: "flat", z: 0, surface: null }, { mode: "all", index: 0 }, 1],
+     "…in the one shape, in Italian, the origin in doubles to the millimetre");
+  eq(L.items.map((i) => [i.id, i.label, i.image, i.extent, i.orientation, i.depth_top, i.depth_bottom]),
+     [["d1", "fetta 1", "cache/k/s0.png", [0, 0, 92, 50], "horizontal", 1, 1.5]], "…a plane naming a picture outside the plugin's folder dropped");
+  const pic = await fetch(`${B}/py/layer-image?plugin=plug-slots&path=${encodeURIComponent(L.items[0].image)}`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+  eq([pic.status, Buffer.from(await pic.arrayBuffer()).toString("latin1").slice(-5)], [200, "layer"], "…its picture served by /py/layer-image");
 
   // space.tool@1: the geometry placed → the command, one step, one undo
   const depth0 = st.undoStack.length;
