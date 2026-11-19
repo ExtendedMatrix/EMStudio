@@ -848,6 +848,8 @@ import {
   type PluginCommand, type PluginsAnswer,
   // MICRO-PL25 (X5) · the slots of phase 2
   clicksOf, columnsFor, computeKey, panelNamed, panelsOf, sectionsFor, statusLine, toolId, toolsOf,
+  // MICRO-GEO09 · door.reader@2
+  pathSlotOf,
   type PanelField, type PluginPanel, type SpaceGeometry,
 } from "./plugin-commands";
 import { renderPanelInto, renderSectionInto, type ValueState } from "./plugin-surfaces";
@@ -18111,6 +18113,8 @@ document.getElementById("btn-close-project")?.addEventListener("click", () => { 
 document.getElementById("btn-reveal-doc")?.addEventListener("click", () => { void revealActiveDoc(); });
 // MICRO-E p.1 · File ▸ Porta dentro… (the system's selector, several files)
 document.getElementById("btn-porta-dentro")?.addEventListener("click", () => { void doorFromMenu(); });
+// MICRO-GEO09 · File ▸ Porta dentro una cartella… (a stack of slices: read by a plugin's reader of folders)
+document.getElementById("btn-porta-dentro-cartella")?.addEventListener("click", () => { void doorFolderFromMenu(); });
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");
@@ -40153,6 +40157,46 @@ async function doorFromMenu(opts: { epoch?: string | null } = {}): Promise<void>
   const f = await pickForDoor();
   if (f?.length) await portaDentro(f, opts);
 }
+/** MICRO-GEO09 · «Porta dentro una cartella…»: a folder (a stack of slices) goes
+ *  to a plugin's reader of folders (door.reader@2) — the page itself reads no folder */
+async function doorFolderFromMenu(): Promise<void> {
+  if (!store) { toast(t("toast.openADocument")); return; }
+  if (!plugins().readersFor("", true).length) { toast(t("door.noFolderReader")); return; }
+  const start = currentFilePath ? paths.dirname(currentFilePath) : undefined;
+  const dir = isTauri() ? await pickFolder(start)
+    : await pickPathInApp({ mode: "folder", title: t("door.folderPickTitle"), start: start ?? null });
+  if (dir) await portaDentro([{ path: dir, name: paths.leafName(dir), dir: true }]);
+}
+
+/** MICRO-GEO09 · which of several readers reads this (one: itself; none: null) */
+async function chooseReader(cs: PluginCommand[], name: string): Promise<PluginCommand | null> {
+  if (cs.length <= 1) return cs[0] ?? null;
+  const lang = getLocale();
+  const a = await openDialog({ kind: "door-reader", title: t("door.pickReader", { name }),
+    choices: cs.slice(1).map((c) => ({ key: runId(c), label: `${plugins().plugin(c.plugin)?.name ?? c.plugin} · ${labelOf(c, lang)}` })),
+    ok: `${plugins().plugin(cs[0].plugin)?.name ?? cs[0].plugin} · ${labelOf(cs[0], lang)}` });
+  if (!a.ok) return null;
+  return a.choice ? cs.find((c) => runId(c) === a.choice) ?? null : cs[0];
+}
+
+/** MICRO-GEO09 · a plugin's reader with this file or folder: a reader with a
+ *  PANEL (door.reader@2) opens it with the path in its field — the person says
+ *  there what the files do not and the panel's button reads —, else it reads
+ *  straight away (a proposal, one undo step, as door.reader@1). */
+async function readWithPlugin(c: PluginCommand, path: string): Promise<void> {
+  const panel = c.panel ? panelNamed(plugins(), c.panel) : null;
+  if (panel) {
+    pluginPanelFields ??= new Map();
+    pluginPanelFields.set(panel.name, { ...(pluginPanelFields.get(panel.name) ?? {}), [pathSlotOf(c)]: path });
+    openPluginPanel(panel);
+    refreshSurfaces("plugin-panel");
+    schedulePluginCompute();
+    toast(t("door.readerPanel", { name: paths.leafName(path), panel: labelOf({ label: panel.label, id: panel.id }, getLocale()) }));
+    return;
+  }
+  await runPluginCommand(c, { path });
+}
+
 /** the epoch the Space shows: what «Che epoca rappresenta?» proposes from there */
 function doorEpochHere(): string | null { const sp = currentSpace(); return sp ? spaceEpochOf(sp) : null; }
 /** a file for the door straight away (not a graph; not a tileset: a tileset dropped is
@@ -40185,10 +40229,20 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
       if (k === "tropy" || looksLikeTropy(json)) { await openTropyDoor(json, f.name); return; }
     }
   }
+  // MICRO-GEO09 · door.reader@2: a FOLDER goes to a reader of folders (the
+  // page reads none itself); several readers: the person chooses
+  const folders = files.filter((f) => f.dir && f.path);
+  for (const f of folders) {
+    const c = await chooseReader(plugins().readersFor(f.path!, true), f.name);
+    if (c) await readWithPlugin(c, f.path!);
+    else if (!plugins().readersFor(f.path!, true).length) toast(t("door.noFolderReader"));
+  }
+  files = files.filter((f) => !folders.includes(f));
+  if (folders.length && !files.length) return;
   // MICRO-PL17 · door.reader@1: a file no reader of EMStudio knows, that a
   // plugin's reader accepts, is read by it (a proposal, one undo step)
   const readByPlugin = files.filter((f) => f.path && doorKindOf(where(f)) === "other" && plugins().readersFor(f.path).length);
-  for (const f of readByPlugin) await runPluginCommand(plugins().readersFor(f.path!)[0], { path: f.path! });
+  for (const f of readByPlugin) await readWithPlugin(plugins().readersFor(f.path!)[0], f.path!);
   files = files.filter((f) => !readByPlugin.includes(f));
   if (readByPlugin.length && !files.length) return;
   const bridge = await bridgeUrl().catch(() => "");
@@ -40213,6 +40267,11 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   const list = document.createElement("div");
   list.className = "door-files";
   const roles = new Map<DoorFile, HTMLSelectElement>();
+  const readAs = new Map<DoorFile, { sel: HTMLSelectElement; claims: PluginCommand[] }>();
+  const byPluginOf = (f: DoorFile): PluginCommand | null => {
+    const x = readAs.get(f);
+    return x && x.sel.value ? x.claims.find((c) => runId(c) === x.sel.value) ?? null : null;
+  };
   const crsIn = new Map<string, { crs: HTMLInputElement; sh: HTMLInputElement[] }>();
   const frame = doorFrame(st);
   for (const r of rows) {
@@ -40253,6 +40312,31 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
       roles.set(r.f, sel);
     } else if (isGisKind(r.kind)) row.append(` · ${t("door.role.rmdocGis")}`);
     else if (r.kind === "image" || r.kind === "other") row.append(` · ${t("door.role.file")}`);
+    // MICRO-GEO09 · door.reader@2: a plugin that CLAIMS this file is offered
+    // beside the page's own reading (the default), never taking it
+    const claims = r.f.path ? plugins().claimsFor(r.f.path) : [];
+    if (claims.length) {
+      const lab = document.createElement("label");
+      lab.className = "door-read-as";
+      const sel = document.createElement("select");
+      sel.dataset.doorReadAs = r.f.name;
+      const o0 = document.createElement("option"); o0.value = ""; o0.textContent = t("door.readAsHost"); sel.appendChild(o0);
+      for (const c of claims) {
+        const o = document.createElement("option");
+        o.value = runId(c);
+        o.textContent = `${plugins().plugin(c.plugin)?.name ?? c.plugin} · ${labelOf(c, getLocale())}`;
+        sel.appendChild(o);
+      }
+      sel.addEventListener("change", () => {
+        row.classList.toggle("door-by-plugin", !!sel.value);
+        body.classList.toggle("door-all-plugin", rows.every((x) => byPluginOf(x.f)));
+        const date = document.querySelector<HTMLElement>('[data-app-dialog="door"] [data-dialog-input]')?.closest("label, .app-dialog-field, div");
+        date?.classList.toggle("hidden", body.classList.contains("door-all-plugin"));
+      });
+      lab.append(` · ${t("door.readAs")} `, sel);
+      row.appendChild(lab);
+      readAs.set(r.f, { sel, claims });
+    }
     // CRS + shift only when the file says none (a DXF)
     if (isGisKind(r.kind) && r.f.path && !r.ins?.crs) {
       const fs = document.createElement("fieldset");
@@ -40321,7 +40405,7 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   const dateOf = (id: string) => String(((st.node(id)?.data ?? {}) as Record<string, unknown>).absolute_time_start ?? "");
   const dlg = openDialog({ kind: "door", title: t("door.title"), body, ok: t("door.go"),
     input: { value: "", label: t("door.dateAsk"), placeholder: t("door.datePh") },
-    validate: (v) => (v.trim() ? null : t("door.dateWanted")) });
+    validate: (v) => (v.trim() || rows.every((r) => byPluginOf(r.f)) ? null : t("door.dateWanted")) });
   // an existing document says its date (to confirm) and its licence (proposed)
   dsel.addEventListener("change", () => {
     title.classList.toggle("hidden", !!dsel.value);
@@ -40331,6 +40415,13 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   });
   const a = await dlg;
   if (!a.ok) return;
+  // MICRO-GEO09 · the files read by a plugin leave the door's own reading
+  const plugged = rows.filter((r) => byPluginOf(r.f));
+  for (const r of plugged) await readWithPlugin(byPluginOf(r.f)!, r.f.path!);
+  if (plugged.length) {
+    rows.splice(0, rows.length, ...rows.filter((r) => !plugged.includes(r)));
+    if (!rows.length || store !== st) return;
+  }
   const acqV = models ? parseAcquired(acq.value) : null;
   const untilV = models ? parseAcquired(until.value) : null;
   if (acqV === undefined || untilV === undefined) { toast(t("insp.acquiredBad")); return; }
@@ -65954,7 +66045,9 @@ async function runPluginCommand(c: PluginCommand, ctx: { selection?: string[]; p
   if (!st) { toast(t("toast.openADocument")); return; }
   if (c.writes && refuseReadOnly()) return;
   let path = ctx.path ?? null;
-  if (!path && c.slots.some((x) => x.kind === "path" && x.required !== false)) {
+  // a panel's field may already say the path (MICRO-GEO09: the door filled it)
+  const typedPath = (name: string) => { const v = ctx.fields?.[name]; return typeof v === "string" && v.trim() !== ""; };
+  if (!path && c.slots.some((x) => x.kind === "path" && x.required !== false && !typedPath(x.name))) {
     if (!isTauri()) { toast(t("plg.needsDesktop", { label })); return; }
     path = await pickSourceFile(c.accept.map((a) => a.replace(/^\./, "")));
     if (!path) return;

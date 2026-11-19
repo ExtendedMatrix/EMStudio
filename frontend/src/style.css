@@ -12201,6 +12201,9 @@ button.uo-col { cursor: pointer; }
 .door-kind { opacity: 0.8; }
 .door-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .door-row input[type="text"] { flex: 1; min-width: 180px; }
+/* MICRO-GEO09 · every file read by an add-on («Leggi come»): no document, date nor licence to ask */
+.door-body.door-all-plugin > .door-row { display: none; }
+.door-file.door-by-plugin .door-kind { text-decoration: line-through; opacity: 0.6; }
 .door-table { border-collapse: collapse; width: 100%; }
 .door-table th, .door-table td { border-bottom: 1px solid var(--border); padding: 2px 4px; text-align: left; }
 .door-table tr.door-nodate td { background: var(--warn-bg, rgba(255, 196, 0, 0.18)); }

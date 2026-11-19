@@ -93,6 +93,30 @@ eq([M.fieldStart(panel.fields[0]), M.fieldStart(panel.fields[1]), M.fieldStart(p
 eq(M.rowsOf([{ label: "a", value: "1" }, "x"]), [{ label: "a", value: "1" }, { label: "", value: "x" }], "rows");
 eq([M.statusLine("a\n  b"), M.statusLine("x".repeat(100)).length], ["a b", 80], "one line of the status bar");
 
+// MICRO-GEO09 (row G8 of the geophysics plan) · door.reader@2: a folder, a claim, a panel
+{
+  const rs = new M.PluginState();
+  rs.set({ plugins: [
+    P("g", "loaded", [
+      cmd({ plugin: "g", id: "read", in: ["door.reader@2"], accept: [".asc"], claims: [".tif", ".jpg"], folders: true, panel: "g/imp",
+            writes: true, slots: [{ name: "folder", kind: "path" }, { name: "method", kind: "string", required: false }] }),
+      cmd({ plugin: "g", id: "old", in: ["door.reader@1"], accept: [".units"] }),
+    ]),
+    P("h", "refused", [cmd({ plugin: "h", id: "read", in: ["door.reader@2"], folders: true, claims: [".tif"] })]),
+  ] });
+  eq(rs.readersFor("/data/Sector 1", true).map((c) => c.name), ["g/read"], "a folder: the readers of folders of the loaded plugins");
+  eq(rs.readersFor("/data/Sector 1").map((c) => c.name), [], "…not as a file");
+  eq(rs.readersFor("/x/100-150cm.ASC").map((c) => c.name), ["g/read"], "an accepted file is taken");
+  eq(rs.readersFor("/x/mean_v2.TIF").map((c) => c.name), [], "a claimed file is NOT taken (the page reads it)…");
+  eq(rs.claimsFor("C:\\x\\mean_v2.TIF").map((c) => c.name), ["g/read"], "…it is offered as «Leggi come» (a Windows path too)");
+  eq([rs.claimsFor("/x/a.asc"), rs.claimsFor("/x/list.units")], [[], []], "an accepted file is no claim; a reader of @1 claims nothing");
+  eq(rs.readersFor("/x/list.UNITS").map((c) => c.id), ["old"], "door.reader@1 unchanged");
+  eq([M.pathSlotOf(rs.readersFor("/d", true)[0]), M.pathSlotOf(cmd())], ["folder", "path"], "the slot a reader's path fills");
+  eq(M.fillSlots(rs.readersFor("/d", true)[0], { selection: [], path: "/d" }), { folder: "/d" }, "…filled with the folder");
+  eq(M.fillSlots(cmd({ slots: [{ name: "folder", kind: "path" }] }), { selection: [], fields: { folder: "/from/the/door" } }),
+    { folder: "/from/the/door" }, "a panel's field filled by the door fills the reader's path slot");
+}
+
 // ── the drawers (linkedom) ──────────────────────────────────────────────────
 const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
 const host = document.createElement("div");
@@ -149,6 +173,21 @@ ok(/id="sb-plugins"/.test(html) && /renderPluginStatus/.test(main), "statusbar@1
 ok(/syncPluginTools\(\)/.test(main) && /vwFinishPlugin/.test(main) && /o !== "core" && !o\.startsWith\("plugin:"\)/.test(main), "space.tool@1 in the Space's register (a package's sync keeps them)");
 ok(/openPluginPanel\(panel\)/.test(main) && /plg\.openPanel/.test(main), "panel@1 opened from Tools ▸ Plugins");
 ok(!/\.(innerHTML|outerHTML)\s*=|insertAdjacentHTML/.test(surfaces), "the drawers never write markup");
+// MICRO-GEO09 · door.reader@2 in «Porta dentro…»
+{
+  const menuT = read("frontend/src/menu-table.ts");
+  ok(/cmd\("doorFolder", "door\.folderMenu", "btn-porta-dentro-cartella"/.test(menuT) && /btn-porta-dentro-cartella"\)\?\.addEventListener\("click", \(\) => \{ void doorFolderFromMenu\(\)/.test(main),
+    "File ▸ Porta dentro una cartella…");
+  ok(/plugins\(\)\.readersFor\(f\.path!, true\)/.test(main) && /chooseReader\(/.test(main), "a folder goes to a reader of folders (several: the person chooses)");
+  ok(/plugins\(\)\.claimsFor\(r\.f\.path\)/.test(main) && /dataset\.doorReadAs = r\.f\.name/.test(main) && /t\("door\.readAsHost"\)/.test(main),
+    "a claimed file: «Leggi come», the page's own reading first");
+  ok(/rows\.every\(\(r\) => byPluginOf\(r\.f\)\)/.test(main), "files all read by plugins: no date asked");
+  ok(/const panel = c\.panel \? panelNamed\(plugins\(\), c\.panel\) : null;/.test(main) && /\[pathSlotOf\(c\)\]: path/.test(main) && /openPluginPanel\(panel\);/.test(main),
+    "a reader with a panel: the panel opens with the path in its field");
+  ok(/!typedPath\(x\.name\)/.test(main), "a path already in a panel's field asks no file picker");
+  for (const k of ["door.folderMenu", "door.folderMenuHint", "door.folderPickTitle", "door.noFolderReader", "door.pickReader", "door.readerPanel", "door.readAs", "door.readAsHost"])
+    ok((i18n.match(new RegExp(`"${k.replace(".", "\\.")}":`, "g")) ?? []).length === 2, `${k}: EN + IT`);
+}
 const keys = [...new Set([...main.matchAll(/t\("(plg\.[A-Za-z]+)"/g), ...surfaces.matchAll(/t\("(plg\.[A-Za-z]+)"/g)].map((m) => m[1]))];
 for (const k of ["plg.openPanel", "plg.panelGone", "plg.toolTitle", "plg.useSelection", "plg.columnTitle"]) ok(keys.includes(k), `${k} used`);
 for (const k of [...keys, "win.pluginPanel"]) ok((i18n.match(new RegExp(`"${k.replace(".", "\\.")}":`, "g")) ?? []).length >= 2, `${k}: EN + IT`);
@@ -261,6 +300,15 @@ hosts = ["emstudio"]
   primitive = "line"
   icon = "⟂"
   slots = [{ name = "g", kind = "geometry" }, { name = "id", kind = "id" }]
+  [[code.commands]]
+  id = "stack"
+  label = { it = "Pila", en = "Stack" }
+  in = ["door.reader@2"]
+  claims = [".tif"]
+  folders = true
+  panel = "fit"
+  writes = true
+  slots = [{ name = "folder", kind = "path" }]
   [[code.panels]]
   id = "fit"
   label = { it = "Adattamento", en = "Fit" }
@@ -302,6 +350,9 @@ try {
   const c = Object.fromEntries(me.commands.map((x) => [x.id, x]));
   eq([c.axis.primitive, c.axis.icon, c.summary.buttons, c.length.view, c.summary.writes, c.status.writes, c.axis.writes],
      ["line", "⟂", ["mark"], "Units", false, false, true], "…and each command's keys; a section, a column, a status only read");
+  eq([c.stack.in, c.stack.folders, c.stack.claims, c.stack.panel, c.stack.accept], [["door.reader@2"], true, [".tif"], "plug-slots/fit", []],
+    "MICRO-GEO09 · a reader of door.reader@2: its folders, claims and panel in /py/plugins");
+  eq(pl.slots?.phase1?.["door.reader"], 2, "…the slot at version 2");
   eq(pl.slots?.drawn2, { "inspector.section": 1, "tabular.column": 1, statusbar: 1, "space.tool": 1, panel: 1 }, "the slots of phase 2 drawn");
 
   const state2 = new M.PluginState();

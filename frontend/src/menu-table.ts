@@ -157,6 +157,8 @@ export const MENUS: MenuDef[] = [
       sep,
       // MICRO-E p.1 · «Porta dentro…»: the one door (files into a document)
       cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint" }),
+      // MICRO-GEO09 · a folder (a stack of slices): read by a plugin's reader of folders (door.reader@2)
+      cmd("doorFolder", "door.folderMenu", "btn-porta-dentro-cartella", { title: "door.folderMenuHint" }),
       // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione»: each graph its system
       cmd("georef", "gr.menu", "btn-georef", { title: "gr.menuTitle" }),
       { kind: "sub", id: "import", label: "toolbar.import", slot: "menu.file.import@1", rows: [

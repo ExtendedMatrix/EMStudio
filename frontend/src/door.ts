@@ -75,6 +75,8 @@ export interface DoorTileset {
 }
 export interface DoorFile {
   path?: string; address?: string; name: string;
+  /** MICRO-GEO09 · a FOLDER (a stack of slices): read by a plugin's reader of folders (door.reader@2) */
+  dir?: boolean;
   /** the kind when the name does not say it (a tileset's .zip) */
   kind?: DoorKind;
   /** the locator written (a dropped tileset with no path: its name) */

@@ -27,6 +27,13 @@
  * values computed, buttons that invoke commands. A plugin brings no HTML nor
  * JavaScript (SPEC-plugin §14.8): everything here is data the page draws as
  * text (`scripts/check-plugin-slots.mjs`).
+ *
+ * MICRO-GEO09 (row G8 of the geophysics plan) · `door.reader@2`: a reader may
+ * read a FOLDER (`folders`: a stack of slices), CLAIM extensions the page
+ * already reads (`claims`: never taken, offered as «Leggi come: …» beside the
+ * page's own reading) and name a PANEL of its plugin that the door opens with
+ * the path instead of reading straight away (`panel`). `door.reader@1` is
+ * unchanged: `accept` takes the files the page does not know.
  */
 
 export type SlotName = "menu.tools" | "menu.file.import" | "menu.file.export" | "export.narrative"
@@ -55,6 +62,12 @@ export interface PluginCommand {
   buttons?: string[];
   /** a column's sheet of the Tabular */
   view?: string;
+  /** MICRO-GEO09 · door.reader@2: extensions offered as «Leggi come» (lower case, never taken) */
+  claims?: string[];
+  /** it reads a folder */
+  folders?: boolean;
+  /** `<plugin>/<panel>` the door opens with the path, instead of reading */
+  panel?: string;
 }
 
 /** MICRO-PL25 · a field of a declarative panel (`[[code.panels.fields]]`) */
@@ -170,16 +183,34 @@ export class PluginState {
     return this.plugins.find((p) => p.id === id) ?? null;
   }
 
-  /** the readers (`door.reader@1`) that accept this file, by its name */
-  readersFor(path: string): PluginCommand[] {
-    const name = (path.split(/[\\/]/).pop() ?? "").toLowerCase();
+  /** the readers (`door.reader`) that take this file, by its name — or, for a
+   *  FOLDER (MICRO-GEO09, `door.reader@2`), those that read folders */
+  readersFor(path: string, isDir = false): PluginCommand[] {
+    if (isDir) return this.commandsIn("door.reader").filter((c) => !!c.folders);
+    const name = leafOf(path);
     return this.commandsIn("door.reader").filter((c) => c.accept.some((a) => name.endsWith(a.toLowerCase())));
   }
+
+  /** MICRO-GEO09 · the readers that only CLAIM this file (the page reads it
+   *  too): offered as «Leggi come: …», the page's own reading the default */
+  claimsFor(path: string): PluginCommand[] {
+    const name = leafOf(path);
+    const has = (xs: string[] | undefined) => (xs ?? []).some((a) => name.endsWith(a.toLowerCase()));
+    return this.commandsIn("door.reader").filter((c) => has(c.claims) && !has(c.accept));
+  }
+}
+
+const leafOf = (path: string): string => (path.split(/[\\/]/).pop() ?? "").toLowerCase();
+
+/** MICRO-GEO09 · the slot a reader's file or folder fills (its first `path`) */
+export function pathSlotOf(c: Pick<PluginCommand, "slots">): string {
+  return c.slots.find((s) => s.kind === "path")?.name ?? "path";
 }
 
 const signature = (ps: PluginInfo[]): string =>
   JSON.stringify(ps.map((p) => [p.id, p.version, p.state, p.source, p.wired,
-    p.commands.map((c) => [c.id, c.in, c.when, c.label, c.primitive ?? "", c.icon ?? "", c.buttons ?? [], c.view ?? ""]),
+    p.commands.map((c) => [c.id, c.in, c.when, c.label, c.primitive ?? "", c.icon ?? "", c.buttons ?? [], c.view ?? "",
+      c.claims ?? [], !!c.folders, c.panel ?? ""]),
     (p.panels ?? []).map((x) => [x.id, x.label, x.place, x.when, x.fields])]));
 
 /** `plugin:<id>/<command>` — the row id of a command, the native item's id */
