@@ -39,7 +39,9 @@
 export type SlotName = "menu.tools" | "menu.file.import" | "menu.file.export" | "export.narrative"
   | "context.node" | "door.reader" | "check"
   // MICRO-PL25 (X5) · phase 2
-  | "inspector.section" | "tabular.column" | "statusbar" | "space.tool";
+  | "inspector.section" | "tabular.column" | "statusbar" | "space.tool"
+  // MICRO-GEO12 · a layer of the Space a plugin describes
+  | "space.layer";
 
 export interface PluginCommand {
   plugin: string;

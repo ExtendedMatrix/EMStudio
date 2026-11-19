@@ -313,6 +313,7 @@ import { chooseForHardware, chooseVersion, HARDWARE, SCENE_USES, USES, type Hard
 import { ERROR_MANUAL_MIN, ERROR_PROFILES, normaliseErrorChoice, type ErrorChoice } from "./tiles-error";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { mountGisSpace, type GisDocumentAsk, type GisSpace, type GisSpaceDeps } from "./gis-space";
+import { layersOfValues, mountLayerSpace, type LayerSpace, type PluginLayer } from "./plugin-layers";
 import { STUDY_ONLY, studyOnlyNodes } from "./study-only";
 import { dataToThree, epsgOf, frameOffset, georefSummary, gridToScene, isIdentity4, mul4, parseShiftTxt, translation } from "./georef";
 import {
@@ -32155,6 +32156,9 @@ const HAS3D_BADGE = "has3d:";
 const RMDOC_BADGE = "rmdoc:";
 /** MICRO-OUTLINER-UNICO · each Space's GIS (its layers' eyes, for the Outliner) */
 const gisSpaces = new Map<string, GisSpace>();
+/** MICRO-GEO12 · the plugins' layers of each Space window (space.layer@1) */
+// eslint-disable-next-line no-var
+var layerSpaces = new Map<string, LayerSpace>();
 
 /**
  * MICRO-SPAZIO-3D p.5 · a click on «ha 3D»: the Space (this workspace's, else
@@ -36751,6 +36755,17 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     surface: (dem, image) => gisSurface(dem, image),
     contours: (dem, interval) => gisContours(dem, interval),
   });
+  // MICRO-GEO12 · the layers the plugins describe (space.layer@1): stacks of pictures on planes
+  const layerSpace: LayerSpace = mountLayerSpace({
+    host, handle, t: (k, v) => t(k, v), person: () => overlayPerson(),
+    doc: () => (store?.doc ?? null) as ReturnType<GisSpaceDeps["doc"]>,
+    docPath: () => emtree.activeFile()?.path ?? currentFilePath,
+    bridge: () => bridgeUrl(), token: () => pyToken(bridgeToken),
+    layers: () => pluginLayersNow(),
+    ask: () => { pluginComputeSig = ""; schedulePluginCompute(); },
+    log: (m) => logWarn(m),
+  });
+  layerSpaces.set(win.id, layerSpace);
   // MICRO-RIFINITURE p.6 · the «Livelli» of the scene at the head of the data panel:
   // Models, Proxies (each shown or hidden, and its opacity), the Territory (and
   // the globe's «Livelli» inside it), the GIS layers as documents of the graph
@@ -36887,6 +36902,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // switched in the Outliner (their «⋯»: opacity, a DEM's surface and contours),
     // a file comes in through File and the Space's «+»
     box.appendChild(geoSpace.section());
+    // MICRO-GEO12 · the layers the plugins describe (space.layer@1): each stack shown,
+    // its mode, its depth cursor, its sections, its opacity
+    if (pluginLayersNow().length) box.appendChild(layerSpace.section());
     const gr = document.createElement("button");
     gr.type = "button";
     gr.className = "link vis-georef";
@@ -37545,6 +37563,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     geoB.addEventListener("click", (e) => { e.stopPropagation(); if (grCardEl) closeGeorefCard(); else openGeorefCard(); });
     tail.replaceChildren(plus, geoB, colPair, vis, sceneSearch(win), more);
     gisSpace.refresh();
+    layerSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
     // than one row) or run past its edge → the menu, for this drawing
@@ -37592,6 +37611,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       empty.classList.add("hidden");
       noLegend();
       push([previewItem]);
+      return;
+    }
+    if (store && (!sp || !sum) && pluginLayersNow().length) {
+      // MICRO-GEO12 · a graph without epochs whose plugins describe layers (a stack of
+      // slices): the scene is drawn, the absence of epochs said on its line
+      overlay.textContent = t("space.noEpochs");
+      overlay.classList.remove("hidden");
+      empty.classList.add("hidden");
+      noLegend();
+      push([]);
       return;
     }
     if (!store || !sp || !sum) {
@@ -37868,7 +37897,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     }, 12000);
   };
   refresh();
-  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); layerSpace.destroy(); if (layerSpaces.get(win.id) === layerSpace) layerSpaces.delete(win.id); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
 }
 
 /** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
@@ -66150,13 +66179,18 @@ var pluginComputeTimer: number | undefined;
 var pluginComputeSig = "";
 // eslint-disable-next-line no-var
 var pluginComputeTries = 0;
+/** MICRO-GEO12 · a serial per document store (the compute's signature) */
+// eslint-disable-next-line no-var
+var pluginStoreSerials = new WeakMap<DocumentStore, number>();
+// eslint-disable-next-line no-var
+var pluginStoreSerial = 0;
 
 /** The slots of phase 2 have something to draw (any plugin with a section, a column, a status, a panel). */
 function pluginPhase2Any(): boolean {
   if (!pluginState) return false;
   const ps = plugins();
   return ps.commandsIn("inspector.section").length + ps.commandsIn("tabular.column").length
-    + ps.commandsIn("statusbar").length + panelsOf(ps).length > 0;
+    + ps.commandsIn("statusbar").length + panelsOf(ps).length + ps.commandsIn("space.layer").length > 0;
 }
 
 /** The plugins changed: the values of before may be of commands gone. */
@@ -66188,6 +66222,8 @@ function pluginComputeItems(st: DocumentStore): Array<{ key: string; plugin: str
     items.push({ key, plugin: c.plugin, command: c.id, slot, slots });
   };
   for (const c of ps.commandsIn("statusbar")) add("statusbar@1", c, "", fillSlots(c, { selection: [...selectedIds] }));
+  // MICRO-GEO12 · space.layer@1: the layers of the document, asked while a Space is open
+  if (layerSpaces.size) for (const c of ps.commandsIn("space.layer")) add("space.layer@1", c, "", fillSlots(c, { selection: [] }));
   const sel = selectedId && st.node(selectedId) ? selectedId : null;
   if (sel) for (const c of sectionsFor(ps, String(st.node(sel)?.node_type ?? "")))
     add("inspector.section@1", c, sel, fillSlots(c, { selection: [sel] }));
@@ -66222,7 +66258,10 @@ async function runPluginCompute(): Promise<void> {
   if (!st || !pluginPhase2Any()) return;
   if (!(await bridgeLevelAtLeast(PY_COMPUTE_LEVEL))) return;
   const items = pluginComputeItems(st);
-  const sig = `${st.rev}|${getLocale()}|${JSON.stringify(items)}`;
+  // MICRO-GEO12 · the store's own serial: another document at the same revision is another state
+  let serial = pluginStoreSerials.get(st);
+  if (serial === undefined) { serial = ++pluginStoreSerial; pluginStoreSerials.set(st, serial); }
+  const sig = `${serial}|${st.rev}|${getLocale()}|${JSON.stringify(items)}`;
   if (sig === pluginComputeSig) return;
   if (!items.length) { pluginComputeSig = sig; return; }
   try {
@@ -66240,9 +66279,19 @@ async function runPluginCompute(): Promise<void> {
     return;
   }
   renderPluginStatus();
+  if (layerSpaces.size && plugins().commandsIn("space.layer").length) refreshSurfaces("scene");   // MICRO-GEO12 · the layers of the Space
   if (selectedId && sectionsFor(plugins(), String(st.node(selectedId)?.node_type ?? "")).length) refreshInspector();
   if (plugins().commandsIn("tabular.column").length) renderEmData();
   if (windowsOf().some((w) => w.type === "plugin-panel")) refreshSurfaces("plugin-panel");
+}
+
+/** MICRO-GEO12 · space.layer@1 · the layers the plugins described, from the last answers. */
+function pluginLayersNow(): PluginLayer[] {
+  if (!pluginState) return [];
+  return layersOfValues(plugins().commandsIn("space.layer").map((c) => {
+    const v = pluginValues.get(computeKey("space.layer@1", c, ""));
+    return { plugin: c.plugin, command: c.id, value: v?.ok ? v.value : null };
+  }));
 }
 
 /** A value as the drawers want it: computing, its rows, or why not (in the page's language). */

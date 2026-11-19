@@ -315,6 +315,9 @@ export interface SpaceSceneHandle {
   /** MICRO-GIS-BASE · the GIS layers of the graph (`gis-scene.ts`): a second
    *  driver beside the globe, drawn with or without the territory */
   setGis(g: GeoDriver | null): void;
+  /** MICRO-GEO12 · the layers a plugin describes (`space.layer@1`, `plugin-layers.ts`):
+   *  a third driver, drawn with or without a georeference */
+  setLayers(g: GeoDriver | null): void;
   /** MICRO-GEOREF-GRAFO p.3 · the box of the models drawn (three's axes), null while none has come */
   contentBox(): [V3, V3] | null;
 }
@@ -556,6 +559,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   /** MICRO-GEOGLOBO · the globe, and the scene's parts once the engine is up */
   let geo: GeoDriver | null = null;
   let gis: GeoDriver | null = null;
+  let plgLayers: GeoDriver | null = null;
   let geoCtx: GeoCtx | null = null;
   let cursorAt: V3 = [0, 0, 0];
   let cursorSet = false;
@@ -1346,7 +1350,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const { near, far: f0 } = clipPlanes(camera.position.distanceTo(controls.target), span());
         // MICRO-GEOGLOBO · with the globe, as far as the horizon
         // MICRO-D-GIS-DOCUMENTI · …and as far as the GIS layers drawn (a cadastre of a km)
-        const far = Math.max(f0, geo?.far() ?? 0, gis?.far() ?? 0);
+        const far = Math.max(f0, geo?.far() ?? 0, gis?.far() ?? 0, plgLayers?.far() ?? 0);
         if (Math.abs(camera.near - near) / near > 0.05 || camera.far !== far) {
           camera.near = near;
           camera.far = far;
@@ -3086,6 +3090,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // MICRO-GEOGLOBO · the globe moves the camera in its mode (its hands, a flight)
         if (geo) geo.update();
         if (gis) gis.update();
+        if (plgLayers) plgLayers.update();
         if (!geo?.ownsPointer()) { level(); controls.update(); }
         const live = liveLayers();
         // MICRO-TILESET-CONTENITORE p.3 · the container's side at every frame, BEFORE the tiles
@@ -3986,6 +3991,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         geo = null;
         gis?.detach();
         gis = null;
+        plgLayers?.detach();
+        plgLayers = null;
         dropPendingPick();
         for (const l of layers.values()) l.layer.dispose();
         layers.clear();
@@ -4144,6 +4151,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       if (geo) geo.attach(geoCtx);
       if (gis) gis.attach(geoCtx);
+      if (plgLayers) plgLayers.attach(geoCtx);
       rebuild();
       syncSketches();
       tick();
@@ -4200,6 +4208,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       if (g === gis) return;
       gis?.detach();
       gis = g;
+      if (g && geoCtx) g.attach(geoCtx);
+    },
+    setLayers: (g) => {
+      if (g === plgLayers) return;
+      plgLayers?.detach();
+      plgLayers = g;
       if (g && geoCtx) g.attach(geoCtx);
     },
   };

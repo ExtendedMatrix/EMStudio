@@ -8867,6 +8867,23 @@ const EN: Dict = {
   "insp.eg": "e.g.",
   "insp.temporalParadata": "Temporal paradata",
   "insp.temporalParadataHelp": "The properties of the two bounds live in the epoch's paradata group: double-click its box in the lane to open it and attach a provenance chain to either bound.",
+  // MICRO-GEO12 · the layers a plugin describes in the Space (space.layer@1)
+  "plyr.title": "Plugin layers",
+  "plyr.none": "No layer described by a plugin",
+  "plyr.up": "Shallower plane (↑)",
+  "plyr.down": "Deeper plane (↓)",
+  "plyr.keys": "Depth cursor: ↑ shallower, ↓ deeper",
+  "plyr.mode.all": "All",
+  "plyr.mode.one": "One at a time",
+  "plyr.mode.up_to": "Down to",
+  "plyr.allOver": "Over {n} planes they are shown one at a time",
+  "plyr.sections": "sections ({n})",
+  "plyr.planes": "{h} slices, {v} sections",
+  "plyr.local.no_origin": "in its own frame (not placed in the world)",
+  "plyr.local.no_scene_frame": "in its own frame (the study has no georeference)",
+  "plyr.local.other_crs": "in its own frame (another EPSG than the study's)",
+  "plyr.draped": "draped on the ground",
+  "plyr.noPicture": "{n} without a picture on this machine",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -17602,6 +17619,23 @@ const IT: Dict = {
   "insp.eg": "es.",
   "insp.temporalParadata": "Paradati temporali",
   "insp.temporalParadataHelp": "Le proprietà dei due limiti stanno nel gruppo di paradati dell'epoca: doppio clic sul suo riquadro nella corsia per aprirlo e attaccare una catena di provenienza a ciascun limite.",
+  // MICRO-GEO12 · gli strati che un plugin descrive nello Spazio (space.layer@1)
+  "plyr.title": "Strati dei plugin",
+  "plyr.none": "Nessuno strato descritto da un plugin",
+  "plyr.up": "Piano meno profondo (↑)",
+  "plyr.down": "Piano più profondo (↓)",
+  "plyr.keys": "Cursore di profondità: ↑ meno profondo, ↓ più profondo",
+  "plyr.mode.all": "Tutte",
+  "plyr.mode.one": "Una alla volta",
+  "plyr.mode.up_to": "Fino a",
+  "plyr.allOver": "Oltre {n} piani si mostrano uno alla volta",
+  "plyr.sections": "sezioni ({n})",
+  "plyr.planes": "{h} fette, {v} sezioni",
+  "plyr.local.no_origin": "nel suo riferimento (non collocata nel mondo)",
+  "plyr.local.no_scene_frame": "nel suo riferimento (lo studio non è georiferito)",
+  "plyr.local.other_crs": "nel suo riferimento (un EPSG diverso da quello dello studio)",
+  "plyr.draped": "drappeggiata sul terreno",
+  "plyr.noPicture": "{n} senza immagine su questa macchina",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
