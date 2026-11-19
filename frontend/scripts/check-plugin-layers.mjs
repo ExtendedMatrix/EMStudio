@@ -12,6 +12,9 @@
 //   · the depth cursor: all / one / down to, «all» over 60 horizontal planes
 //     is «one», «down to» at most 60, ↑/↓ kept inside the stack, the sections
 //     on or off;
+//   · MICRO-GEO13 (row G12): the tools offered on the planes (the plugin
+//     that drew the layer), the geometry «layer» (each vertex its slice and
+//     uv), the slices «down to» the cursor, the plane's uv (east, north);
 //   · the wiring: the scene's third driver (setLayers), main.ts asking
 //     space.layer@1 while a Space is open and drawing after each answer, the
 //     pictures fetched behind the secret, the words EN + IT.
@@ -123,6 +126,30 @@ const ls = L.layersOfValues([{ plugin: "geofisica", command: "layer", value: [ba
   { plugin: "x", command: "y", value: null }, { plugin: "x", command: "z", value: [bas] }]);
 eq(ls.map(L.layerKey), ["geofisica/acq1", "x/acq1"], "one layer per plugin and id; a wrong shape or a failure: none");
 
+// ── MICRO-GEO13 (row G12) · tracing on the planes ────────────────────────────
+const tool = (id, plugin, primitive, min, max) => ({ id: `plugin:${plugin}/${id}`, plugin, command: id, primitive, clicks: { min, max }, glyph: "◆", label: () => id });
+const tools = [tool("geofisica.trace.point", "geofisica", "point", 1, 1), tool("geofisica.trace.line", "geofisica", "polyline", 2, null),
+  tool("other.tool", "other", "point", 1, 1)];
+const gl = [{ plugin: "geofisica", command: "geofisica.layer", layer: bas }];
+eq(L.layerToolsFor(gl, tools).map((x) => x.command), ["geofisica.trace.point", "geofisica.trace.line"], "only the tools of the plugin that drew a layer");
+eq(L.layerToolsFor(gl, tools, () => ({ hidden: true })), [], "a layer hidden: no tool offered");
+eq([L.traceVerdict(tools[0], 1), L.traceVerdict(tools[1], 1), L.traceVerdict(tools[1], 2), L.traceVerdict(tools[1], 7)],
+  ["done", "more", "may_close", "may_close"], "a point is done at one click, a line may close from two");
+eq(L.throughOf(gl, "D.03"), [], "all: the trace is read where it was clicked");
+eq(L.throughOf(gl, "D.03", () => ({ mode: "up_to", cursor: 2 })), ["D.01", "D.02", "D.03"], "down to: the slices shown, from the top");
+eq(L.throughOf(gl, "V1", () => ({ mode: "up_to", cursor: 2 })), [], "a section: never through slices");
+eq(L.throughOf(gl, "nobody", () => ({ mode: "up_to" })), [], "an item of no layer: nothing");
+const geom = L.traceGeometry("polyline", [{ point: [1, 2, 3], item: "D.03", uv: [0.25, 0.5] }, { point: [4, 5, 6], item: "D.02", uv: [0.7500000001, 0.5] }], ["D.01", "D.01"]);
+eq(geom, { primitive: "polyline", frame: "layer", on: "D.03", vertices: [[1, 2, 3], [4, 5, 6]],
+  at: [{ on: "D.03", uv: [0.25, 0.5] }, { on: "D.02", uv: [0.75, 0.5] }], through: ["D.01"] }, "the geometry slot: frame layer, each vertex its slice and place");
+{ // the uv the plugin reads back: u along x from the extent's west, v = 1 north (the plane's own uv)
+  const g = L.planeGeometry(bas, bas.items[0], L.placementOf(bas, null), 0);
+  const corner = (u, v) => { for (let i = 0; i < g.uv.length / 2; i++) if (g.uv[2 * i] === u && g.uv[2 * i + 1] === v) return [g.pos[3 * i], g.pos[3 * i + 2]]; return null; };
+  const ne = corner(1, 1), sw = corner(0, 0);
+  ok(ne && sw && ne[0] > sw[0], "u grows to the east");
+  ok(ne && sw && ne[1] < sw[1], "v grows to the north (three's z = −north)");
+}
+
 // ── the wiring ───────────────────────────────────────────────────────────────
 const main = fs.readFileSync(`${SRC}main.ts`, "utf8");
 const scene3d = fs.readFileSync(`${SRC}scene3d.ts`, "utf8");
@@ -139,6 +166,12 @@ ok(/if \(pluginLayersNow\(\)\.length\) box\.appendChild\(layerSpace\.section\(\)
 ok(/layerSpace\.destroy\(\)/.test(main), "freed with the window");
 ok(/\/py\/layer-image\?plugin=/.test(pls) && /Authorization: `Bearer \$\{token\}`/.test(pls), "the pictures behind the secret");
 ok(/texture\?\.dispose\?\.\(\)/.test(pls) && /if \(!keep\.has\(mk\)\) free\(mk\)/.test(pls), "a hidden plane's texture freed");
+ok(/const layerHitAt = /.test(scene3d) && /scene\.getObjectByName\("plugin-layers"\)/.test(scene3d)
+  && /if \(lh && \(!hh \|\| lh\.distance <= hh\.distance\)\)/.test(scene3d), "a tool's click on a plane nearer than the models is the plane's");
+ok(/onTool: \(hit, dbl\) => layerSpaces\.get\(win\.id\)\?\.toolClick\(hit, dbl\) \?\? false/.test(main), "the Space's clicks go to its layers' bar");
+ok(/tools: \(\) => layerToolsNow\(\)/.test(main) && /run: \(tool, geometry\) => runLayerTool\(tool, geometry\)/.test(main), "the plugins' tools and their command");
+ok(/for \(const l of layerSpaces\.values\(\)\) l\.refresh\(\);/.test(main), "the bar follows the plugins' tools");
+ok(/frame: "model" \| "layer";/.test(pcs), "the geometry's frame «layer»");
 const i18n = fs.readFileSync(`${SRC}i18n.ts`, "utf8");
 const keys = [...new Set([...pls.matchAll(/t\("(plyr\.[a-z_.]+)"/g)].map((m) => m[1]))];
 for (const k of ["plyr.mode.all", "plyr.mode.one", "plyr.mode.up_to", "plyr.local.no_origin", "plyr.local.no_scene_frame", "plyr.local.other_crs"]) keys.push(k);

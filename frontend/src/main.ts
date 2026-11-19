@@ -313,7 +313,7 @@ import { chooseForHardware, chooseVersion, HARDWARE, SCENE_USES, USES, type Hard
 import { ERROR_MANUAL_MIN, ERROR_PROFILES, normaliseErrorChoice, type ErrorChoice } from "./tiles-error";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { mountGisSpace, type GisDocumentAsk, type GisSpace, type GisSpaceDeps } from "./gis-space";
-import { layersOfValues, mountLayerSpace, type LayerSpace, type PluginLayer } from "./plugin-layers";
+import { layersOfValues, mountLayerSpace, type LayerSpace, type LayerTool, type PluginLayer } from "./plugin-layers";
 import { STUDY_ONLY, studyOnlyNodes } from "./study-only";
 import { dataToThree, epsgOf, frameOffset, georefSummary, gridToScene, isIdentity4, mul4, parseShiftTxt, translation } from "./georef";
 import {
@@ -36555,6 +36555,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   let whyTimer = 0;
   let viewTimer = 0;
   const handle = mountSpaceScene(host, {
+    // MICRO-GEO13 · a layer's tool armed: the click on a plane of the stack is its
+    onTool: (hit, dbl) => layerSpaces.get(win.id)?.toolClick(hit, dbl) ?? false,
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
       referenceOnly: (name, rid) => refOnlyWords(name, rid),
@@ -36764,6 +36766,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     layers: () => pluginLayersNow(),
     ask: () => { pluginComputeSig = ""; schedulePluginCompute(); },
     log: (m) => logWarn(m),
+    // MICRO-GEO13 · the plugins' tools of the Space, drawn on their own planes
+    tools: () => layerToolsNow(),
+    run: (tool, geometry) => runLayerTool(tool, geometry),
+    toast,
   });
   layerSpaces.set(win.id, layerSpace);
   // MICRO-RIFINITURE p.6 · the «Livelli» of the scene at the head of the data panel:
@@ -58846,6 +58852,7 @@ function syncPackageTools(ov: OverlayDoc | null): void {
     });
   }
   if (windowsOf().some((w) => w.type === "viewer")) renderViewer();
+  for (const l of layerSpaces.values()) l.refresh();         // MICRO-GEO13 · the layers' tracing bar
 }
 
 /** The guided pose of a landmark set in one Viewer. */
@@ -66394,6 +66401,24 @@ function syncPluginTools(): void {
 }
 
 /** A plugin's tool finished its trace: the command, with what was placed. */
+/** MICRO-GEO13 · the plugins' tools as the layers' bar of a Space offers them. */
+function layerToolsNow(): LayerTool[] {
+  const ps = plugins();
+  return toolsOf(ps).map((c) => ({
+    id: toolId(c), plugin: c.plugin, command: c.id, primitive: (c.primitive ?? "point") as LayerTool["primitive"],
+    clicks: clicksOf(c.primitive ?? "")!, glyph: c.icon || "◆",
+    label: () => labelOf(c, getLocale()),
+    disabled: () => (!!sync.room && hubReadOnly() && c.writes ? readOnlyWhy() : null),
+  }));
+}
+
+/** MICRO-GEO13 · a trace on the planes of a layer is complete: the tool's command. */
+async function runLayerTool(tool: LayerTool, geometry: Record<string, unknown>): Promise<void> {
+  const c = plugins().plugin(tool.plugin)?.commands.find((x) => x.id === tool.command);
+  if (!c) return;
+  await runPluginCommand(c, { selection: [...selectedIds], geometry: geometry as unknown as SpaceGeometry });
+}
+
 async function vwFinishPlugin(win: Win, s: VwScene, spec: SpaceToolSpec, vs: V3[]): Promise<void> {
   const m = /^plugin:([^/]+)\/(.+)$/.exec(spec.id);
   const c = m ? plugins().plugin(m[1])?.commands.find((x) => x.id === m[2]) : null;

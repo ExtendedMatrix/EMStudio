@@ -8884,6 +8884,12 @@ const EN: Dict = {
   "plyr.local.other_crs": "in its own frame (another EPSG than the study's)",
   "plyr.draped": "draped on the ground",
   "plyr.noPicture": "{n} without a picture on this machine",
+  "plyr.trace.how": "click on the slices; a double click or ✓ closes a line or an area, Esc stops",
+  "plyr.trace.state": "{tool}: {n} points",
+  "plyr.trace.busy": "Writing the trace…",
+  "plyr.trace.finish": "Finish the trace (Enter)",
+  "plyr.trace.cancel": "Stop tracing (Esc)",
+  "plyr.trace.onSlice": "Click on a slice of the stack",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -17636,6 +17642,12 @@ const IT: Dict = {
   "plyr.local.other_crs": "nel suo riferimento (un EPSG diverso da quello dello studio)",
   "plyr.draped": "drappeggiata sul terreno",
   "plyr.noPicture": "{n} senza immagine su questa macchina",
+  "plyr.trace.how": "clic sulle fette; un doppio clic o ✓ chiude una linea o un'area, Esc smette",
+  "plyr.trace.state": "{tool}: {n} punti",
+  "plyr.trace.busy": "Scrivo la traccia…",
+  "plyr.trace.finish": "Chiudi la traccia (Invio)",
+  "plyr.trace.cancel": "Smetti di tracciare (Esc)",
+  "plyr.trace.onSlice": "Fai clic su una fetta della pila",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

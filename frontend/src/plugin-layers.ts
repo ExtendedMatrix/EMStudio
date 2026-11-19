@@ -31,9 +31,20 @@
  *
  * What a person changes (shown, cursor, mode, opacity, sections) lives in
  * this machine's preferences per person and document, never in the em.json.
+ *
+ * MICRO-GEO13 (row G12) · TRACING on the planes. The tools of the Space
+ * (`space.tool@1`) of a plugin that drew a layer are offered on a small bar
+ * over the scene (`.plg-trace`); armed, a click on a plane of that plugin is
+ * a vertex: the plane's item (the slice's document) and where on its picture
+ * (three's uv, [0, 1], v = 1 north or the surface — the plane's own uv). When
+ * the tool has its clicks (a double click or ✓ for a line or an area) its
+ * command runs with `geometry = {primitive, vertices, on, frame: "layer",
+ * at: [{on, uv}…], through}` — `through` the slices shown «down to» the
+ * cursor of that stack: the plugin reads the anomaly on each of them.
  */
 import { fileOf, frameOf, gisLayersOf, surfacesOf, toThree, type SceneFrame } from "./gis-scene";
-import type { GeoCtx, GeoDriver, SpaceSceneHandle } from "./scene3d";
+import type { GeoCtx, GeoDriver, SpaceSceneHandle, ToolHit } from "./scene3d";
+import type { V3 } from "./space-tools";
 
 type T = (k: string, v?: Record<string, string>) => string;
 type Doc = Parameters<typeof gisLayersOf>[0];
@@ -262,6 +273,65 @@ export function planeGeometry(l: LayerWire, it: LayerItem, pl: Placement, ground
   return { pos, uv, index };
 }
 
+// ── tracing on the planes (MICRO-GEO13, row G12) ─────────────────────────────
+
+/** a plugin's tool of the Space (`space.tool@1`) as the layers' bar offers it */
+export interface LayerTool {
+  /** the register's id, `plugin:<plugin>/<command>` */
+  id: string;
+  plugin: string;
+  command: string;
+  primitive: "point" | "line" | "polyline" | "surface";
+  clicks: { min: number; max: number | null };
+  glyph: string;
+  label: () => string;
+  disabled?: () => string | null;
+}
+
+/** one click of a trace: the plane's item and the place on its picture */
+export interface TraceClick { point: V3; item: string; uv: [number, number] }
+
+/** The tools offered over the layers: those of a plugin that drew a layer
+ *  shown (a plugin's tool draws on its own planes). */
+export function layerToolsFor(layers: PluginLayer[], tools: LayerTool[], pref: (k: string) => LayerPref = () => ({})): LayerTool[] {
+  const by = new Set(layers.filter((p) => !pref(layerKey(p)).hidden && p.layer.items.length).map((p) => p.plugin));
+  return tools.filter((t) => by.has(t.plugin));
+}
+
+/** The stack an item belongs to (its layer), or null. */
+export function layerOfItem(layers: PluginLayer[], item: string): PluginLayer | null {
+  return layers.find((p) => p.layer.items.some((it) => it.id === item)) ?? null;
+}
+
+/** The slices shown «down to» the cursor of the stack of `item` (horizontal
+ *  ones; none in «all» or «one»: there the trace is read where it was clicked). */
+export function throughOf(layers: PluginLayer[], item: string, pref: (k: string) => LayerPref = () => ({})): string[] {
+  const p = layerOfItem(layers, item);
+  if (!p) return [];
+  const pf = pref(layerKey(p));
+  if (modeOf(p.layer, pf) !== "up_to") return [];
+  const it = p.layer.items.find((x) => x.id === item);
+  if (!it || it.orientation !== "horizontal") return [];
+  return shownPlanes(p.layer, { ...pf, sections: false }).map((i) => p.layer.items[i].id);
+}
+
+/** What a click with `n` vertices placed means: more needed, may close, done. */
+export function traceVerdict(t: Pick<LayerTool, "clicks">, n: number): "more" | "may_close" | "done" {
+  if (t.clicks.max != null && n >= t.clicks.max) return "done";
+  return n >= t.clicks.min ? "may_close" : "more";
+}
+
+/** The geometry slot of the tool's command (SPEC-plugin §13, frame «layer»). */
+export function traceGeometry(primitive: LayerTool["primitive"], clicks: TraceClick[], through: string[] = []): Record<string, unknown> {
+  const r6 = (x: number) => Math.round(x * 1e6) / 1e6;
+  return {
+    primitive, frame: "layer", on: clicks[0]?.item ?? null,
+    vertices: clicks.map((c) => [c.point[0], c.point[1], c.point[2]]),
+    at: clicks.map((c) => ({ on: c.item, uv: [r6(c.uv[0]), r6(c.uv[1])] })),
+    through: [...new Set(through)],
+  };
+}
+
 // ── the drawing ──────────────────────────────────────────────────────────────
 
 export interface LayerDriverOptions {
@@ -462,6 +532,11 @@ export interface LayerSpaceDeps {
   /** ask the plugins again (a Space opened) */
   ask: () => void;
   log?: (s: string) => void;
+  /** MICRO-GEO13 · the plugins' tools of the Space (`space.tool@1`) */
+  tools?: () => LayerTool[];
+  /** …a trace complete: its command with the geometry */
+  run?: (tool: LayerTool, geometry: Record<string, unknown>) => Promise<void>;
+  toast?: (s: string) => void;
 }
 
 export interface LayerSpace {
@@ -474,6 +549,10 @@ export interface LayerSpace {
   /** the probes' and the keys' seam: the cursor of a stack moved (↑ −1, ↓ +1) or set */
   move(key: string, delta: number): void;
   setPref(key: string, p: LayerPref): void;
+  /** MICRO-GEO13 · a click of the scene with a layer's tool armed: true = it was the tool's */
+  toolClick(hit: ToolHit | null, dbl: boolean): boolean;
+  /** arm a tool (its id) or none; the probes' seam */
+  arm(id: string | null): void;
 }
 
 export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
@@ -543,10 +622,100 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     if (b && hud.dataset.plgKey) move(hud.dataset.plgKey, Number(b.dataset.plgStep));
   });
 
+  // MICRO-GEO13 · the tracing bar: the tools of the plugins that drew a layer shown
+  const bar = document.createElement("div");
+  bar.className = "plg-trace hidden";
+  bar.dataset.plgTrace = "";
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) bar.addEventListener(ev, (e) => e.stopPropagation());
+  d.host.appendChild(bar);
+  let armed: LayerTool | null = null;
+  let clicks: TraceClick[] = [];
+  let busy = false;
+  const offered = () => layerToolsFor(d.layers(), d.tools?.() ?? [], pref);
+  const drawBar = () => {
+    const ts = offered();
+    if (armed && !ts.some((x) => x.id === armed!.id)) { armed = null; clicks = []; }
+    bar.classList.toggle("hidden", !ts.length);
+    bar.textContent = "";
+    if (!ts.length) return;
+    for (const tool of ts) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = tool.glyph || "◆"; b.dataset.plgTool = tool.id;
+      const off = tool.disabled?.() ?? null;
+      b.disabled = !!off;
+      b.title = off ?? `${tool.label()} — ${t("plyr.trace.how")}`;
+      b.classList.toggle("on", armed?.id === tool.id);
+      bar.appendChild(b);
+    }
+    if (armed) {
+      const s = document.createElement("span");
+      s.className = "plg-trace-state";
+      s.textContent = busy ? t("plyr.trace.busy") : t("plyr.trace.state", { n: String(clicks.length), tool: armed.label() });
+      bar.appendChild(s);
+      if (traceVerdict(armed, clicks.length) === "may_close") {
+        const ok = document.createElement("button");
+        ok.type = "button"; ok.textContent = "✓"; ok.title = t("plyr.trace.finish"); ok.dataset.plgFinish = "1";
+        bar.appendChild(ok);
+      }
+      const no = document.createElement("button");
+      no.type = "button"; no.textContent = "✕"; no.title = t("plyr.trace.cancel"); no.dataset.plgCancel = "1";
+      bar.appendChild(no);
+    }
+  };
+  const arm = (id: string | null) => {
+    armed = id ? offered().find((x) => x.id === id) ?? null : null;
+    clicks = [];
+    drawBar();
+  };
+  const finish = async () => {
+    const tool = armed;
+    if (!tool || !clicks.length || busy) return;
+    const done = clicks.slice();
+    clicks = [];
+    busy = true;
+    drawBar();
+    try {
+      await d.run?.(tool, traceGeometry(tool.primitive, done, throughOf(d.layers(), done[0].item, pref)));
+    } finally {
+      busy = false;
+      drawBar();
+    }
+  };
+  bar.addEventListener("click", (e) => {
+    const el = e.target as HTMLElement;
+    const b = el.closest<HTMLElement>("[data-plg-tool]");
+    if (b) { arm(armed?.id === b.dataset.plgTool ? null : b.dataset.plgTool ?? null); return; }
+    if (el.closest("[data-plg-finish]")) { void finish(); return; }
+    if (el.closest("[data-plg-cancel]")) arm(null);
+  });
+  bar.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && armed) { e.preventDefault(); e.stopPropagation(); arm(null); }
+    else if (e.key === "Enter" && armed && traceVerdict(armed, clicks.length) === "may_close") { e.preventDefault(); e.stopPropagation(); void finish(); }
+  });
+  const toolClick = (hit: ToolHit | null, dbl: boolean): boolean => {
+    if (!armed) return false;
+    if (dbl) {
+      if (traceVerdict(armed, clicks.length) === "may_close") void finish();
+      return true;                                   // a double click while tracing: not a zoom
+    }
+    if (busy) { d.toast?.(t("plyr.trace.busy")); return true; }
+    const off = armed.disabled?.() ?? null;
+    if (off) { d.toast?.(off); return true; }
+    const lay = hit?.layer;
+    if (!hit || !lay || lay.plugin !== armed.plugin) { d.toast?.(t("plyr.trace.onSlice")); return true; }
+    const last = clicks[clicks.length - 1];
+    if (last && last.item === lay.item && Math.hypot(last.uv[0] - lay.uv[0], last.uv[1] - lay.uv[1]) < 1e-9) return true;
+    clicks.push({ point: hit.point, item: lay.item, uv: lay.uv });
+    if (traceVerdict(armed, clicks.length) === "done") void finish();
+    else drawBar();
+    return true;
+  };
+
   const sync = async () => {
     if (key() !== loadedFor) { prefs = load(); loadedFor = key(); }
     const ls = d.layers();
     drawHud();
+    drawBar();
     if (!ls.length) {
       if (driver) { d.handle.setLayers(null); driver = null; driverSig = ""; }
       return;
@@ -691,10 +860,14 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
       d.handle.setLayers(null);
       driver = null;
       hud.remove();
+      bar.remove();
       sections.clear();
     },
-    state: () => ({ prefs, driver: driver?.state() ?? null, hud: hud.classList.contains("hidden") ? null : hud.dataset.plgKey }),
+    state: () => ({ prefs, driver: driver?.state() ?? null, hud: hud.classList.contains("hidden") ? null : hud.dataset.plgKey,
+      trace: { tools: offered().map((x) => x.id), armed: armed?.id ?? null, clicks: clicks.map((c) => ({ item: c.item, uv: c.uv })), busy } }),
     move,
     setPref,
+    toolClick,
+    arm,
   };
 }

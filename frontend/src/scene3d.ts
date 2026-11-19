@@ -379,6 +379,13 @@ export interface SceneMark {
 /** MICRO-VIEWER-SPAZIO-EMTREE p.4 · what the renderer drew in its last frame */
 export interface SceneStats { triangles: number; vertices: number; objects: number; calls: number; points: number; fps: number }
 
+/** MICRO-GEO13 · a tool's click: the surface hit and, on a plane of a plugin's
+ *  layer (space.layer@1), the plane's item and where on its picture ([0, 1]) */
+export interface ToolHit {
+  point: V3; normal: V3 | null; key: string; vertex?: V3 | null;
+  layer?: { item: string; plugin: string; layer: string; uv: [number, number] } | null;
+}
+
 export interface SpaceSceneOptions {
   texts: SceneTexts;
   /** MICRO-NARRATIVE-MODULI p.12 · true while nobody can see the scene (a
@@ -387,7 +394,7 @@ export interface SpaceSceneOptions {
   /** MICRO-VIEWER-UNICO p.4 · a plain left click (or a double click) with a
    *  tool armed: the surface under it — or null — goes to the caller FIRST;
    *  true = the click was the tool's (nothing is picked, no zoom) */
-  onTool?: (hit: { point: V3; normal: V3 | null; key: string; vertex?: V3 | null } | null, dbl: boolean) => boolean;
+  onTool?: (hit: ToolHit | null, dbl: boolean) => boolean;
   /** …the marks to draw, read at every frame (cheap: a few points), and a click on one */
   marks?: () => SceneMark[];
   onMark?: (id: string) => void;
@@ -590,6 +597,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     /** MICRO-SPAZIO-3D · the surface under a page point, what it belongs to */
     __spaceDown?: (x: number, z: number, only?: string) => { y: number; key: string } | null;
     __spaceHit?: (x: number, y: number) => { point: number[]; kind: string; id: string; distance: number; normal: number[] } | null;
+    __layerHit?: (x: number, y: number) => { point: V3; distance: number; layer: NonNullable<ToolHit["layer"]> } | null;
     /** a world point on the page */
     __spaceProject?: (p: number[]) => { x: number; y: number } | null;
     __spaceCursor?: () => number[];
@@ -1511,6 +1519,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         return out.sort((a, b) => a.distance - b.distance);
       };
+      /** MICRO-GEO13 · the nearest shown plane of a plugin's layer under a page point
+       *  (the group `plugin-layers`, row G11): its item and the place on its picture */
+      const layerHitAt = (x: number, y: number): { point: V3; distance: number; layer: NonNullable<ToolHit["layer"]> } | null => {
+        const g = scene.getObjectByName("plugin-layers");
+        if (!g || g.visible === false) return null;
+        ray.setFromCamera(ndcOf(x, y), camera);
+        for (const hh of ray.intersectObject(g, true)) {
+          const u = hh.object.userData ?? {};
+          if (!u.layerItem || !hh.uv || hh.object.visible === false) continue;
+          return { point: arr(hh.point), distance: hh.distance,
+            layer: { item: String(u.layerItem), plugin: String(u.plugin ?? ""), layer: String(u.pluginLayer ?? ""), uv: [hh.uv.x, hh.uv.y] } };
+        }
+        return null;
+      };
       /** the surface point under a page point, else the point of its ray at the pivot's depth */
       const pointAt = (x: number, y: number): { p: V3; hit: Hit | null } => {
         const hits = hitsAt(x, y);
@@ -1540,6 +1562,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         return best;
       };
+      probe.__layerHit = (x: number, y: number) => layerHitAt(x, y);
       probe.__spaceHit = (x: number, y: number) => {
         const hh = hitsAt(x, y)[0];
         return hh ? { point: arr(hh.point).map((q) => Math.round(q * 10000) / 10000), kind: hh.kind, id: hh.id,
@@ -3733,7 +3756,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // MICRO-VIEWER-UNICO p.4 · a tool armed: a plain left click is its
         if (opts.onTool && button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
           const hh = hitsAt(e.clientX, e.clientY).find((q) => q.kind !== "sketch") ?? null;
-          if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh) } : null, false)) return;
+          // MICRO-GEO13 · a plane of a plugin's layer nearer than the models: the click is on it
+          const lh = layerHitAt(e.clientX, e.clientY);
+          if (lh && (!hh || lh.distance <= hh.distance)) {
+            if (opts.onTool({ point: lh.point, normal: null, key: `layer:${lh.layer.item}`, vertex: null, layer: lh.layer }, false)) return;
+          } else if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh) } : null, false)) return;
         }
         // MICRO-3DTILES · «Più dettaglio qui» armed on a tileset: the click is its
         // (MICRO-SPAZIO-COMPATTO · the bar in the popover or its twin in the Inspector)

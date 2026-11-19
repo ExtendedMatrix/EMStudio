@@ -321,7 +321,12 @@ export interface SpaceGeometry {
   primitive: string;
   vertices: Array<[number, number, number]>;
   on: string | null;
-  frame: "model";
+  /** «model»: the Viewer's scene; «layer» (MICRO-GEO13): the planes of a
+   *  plugin's layer, each vertex with its plane's item and place (`at`) */
+  frame: "model" | "layer";
+  at?: Array<{ on: string; uv: [number, number] }>;
+  /** the slices shown «down to» the cursor of the stack (frame «layer») */
+  through?: string[];
 }
 
 /** the clicks of a primitive (the library's TOOL_PRIMITIVES) */
