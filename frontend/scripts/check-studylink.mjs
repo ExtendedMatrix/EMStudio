@@ -72,6 +72,33 @@ ok(S.readStudyLink(`?study=${A}`)?.url === `/catalog/study/${A}/emjson`,
 ok(S.readStudyLink("?nothing=here") === null,
    "a URL that names no study is not a study link");
 
+console.log("\n1b · MICRO-COR04 E6 · the live reader's link, from where the study came from");
+{
+  const node = "https://em.example.org";
+  const DESK = "tauri://localhost/index.html";
+  const WEB = `${node}/em/studio/`;
+  // the desktop: a handoff from the Catalog gives an absolute container URL
+  const o = S.publishedOrigin({ url: `${node}${urlOf(A)}`, study: null }, DESK);
+  ok(o.study === decodeURIComponent(A), "the study id is read off a Catalog container", o.study);
+  const desk = S.readerLink(o, "N1", DESK);
+  ok(desk === `${node}/em/read/?study=${A}&narrative=N1`,
+     "on the DESKTOP the link is the node's /em/read/, not a tauri:// page", desk);
+  // the web: opened with a root-relative ?emjson=, the address bar cleaned since
+  const w = S.publishedOrigin({ url: urlOf(B), study: decodeURIComponent(B) }, WEB);
+  ok(w.url === `${node}${urlOf(B)}`, "a relative container is kept absolute on the file", w.url);
+  ok(S.readerLink(w, "N2", WEB) === `${node}/em/read/?study=${B}&narrative=N2`,
+     "on the WEB the same link — no `location.search` needed", S.readerLink(w, "N2", WEB));
+  // a Catalog under a prefix travels as ?catalog=, which the reader resolves
+  const pre = S.readerLink({ url: `${node}/cat${urlOf(A)}`, study: null }, "N", DESK);
+  ok(S.readStudyLink(new URL(pre).search)?.url === `${node}/cat${urlOf(A)}`,
+     "…and the reader reads that link back to the very container", pre);
+  // a container that is not a Catalog study: the page's own reader, on the web only
+  const free = { url: `${node}/files/x.em.json`, study: null };
+  ok(S.readerLink(free, "N", WEB) === `${node}/em/studio/reader.html?emjson=%2Ffiles%2Fx.em.json&narrative=N`,
+     "a free container on the web: the editor's reader, relative emjson", S.readerLink(free, "N", WEB));
+  ok(S.readerLink(free, "N", DESK) === null, "…and on the desktop no address to give: said, not invented");
+}
+
 console.log("\n2 · a RELATIVE emjson is the good case, not a bug to fix");
 ok(S.readStudyLink(`?emjson=${encodeURIComponent(urlOf(A))}`)?.url.startsWith("/"),
    "a root-relative container URL is passed through untouched: the fetch "

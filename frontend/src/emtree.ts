@@ -264,6 +264,9 @@ export interface OpenFile {
    * in: what a copy's provenance names.
    */
   nodeRead?: { node: string; room: string; title: string; cursor: string | null; takenAt: string | null } | null;
+  /** MICRO-COR04 E6 · the Catalog study this file was opened from (its
+   *  container's address, the study id): what the live reader's link is made of */
+  published?: { url: string; study: string | null } | null;
   /** MICRO-T · the file's presentation (its colour schemes, and the one each
    *  graph uses): read with it, written back with it (presentation.ts) */
   presentation?: Presentation | null;

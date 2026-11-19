@@ -35,6 +35,7 @@
 
 import { addResource } from "./resources";
 import { basename } from "./paths";
+import { EMJSON_FORMAT_VERSION } from "./container";
 
 export type ShelfScope = "own-study" | "own-HDT" | "other-HDT";
 export type ShelfResidency = "reference" | "resident";
@@ -304,7 +305,7 @@ export function shelfToDocument(): {
     return { ...node, description: "" } as ShelfNode;
   });
   return {
-    header: { format: "em.json", version: "1.0" },
+    header: { format: "em.json", version: EMJSON_FORMAT_VERSION },
     graph: {
       graph_id: shelfId,
       name: shelfName,

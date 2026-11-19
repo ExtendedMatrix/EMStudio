@@ -1043,6 +1043,150 @@ async fn print_html(app: tauri::AppHandle, html: String, title: String) -> Resul
     Ok(())
 }
 
+/// MICRO-COR04 E5 · the window «One PDF per sheet» writes from (one sheet at a
+/// time, then destroyed).
+const PRINT_PDF_LABEL: &str = "print-pdf";
+
+/// MICRO-COR04 E5 · «One PDF per sheet» on the desktop: the SAME print as
+/// `print_html` (a window of its own, the HTML as a `data:` URL, WebKit's
+/// `printOperationWithPrintInfo:` with margins 0 on an A4), but the job SAVED
+/// to `path` instead of the panel (`NSPrintJobDisposition` = save,
+/// `NSPrintJobSavingURL`), panel and progress hidden — so a batch writes one
+/// file per sheet without asking each time. The sidecar has no WeasyPrint and
+/// keeps having none: measured 19 Nov 2026, WeasyPrint 66 would add ≈ 35 MB of
+/// Python (fontTools, Pillow, Pyphen) and 17 native dylibs (≈ 9.6 MB: pango,
+/// glib/gobject/gio, harfbuzz, fontconfig, freetype…, Homebrew's, for this one
+/// system), to a sidecar of 33 MB; this path adds nothing and wrote the
+/// ICCD-US A4 of RSF008 in 1.1 s (2 pages, 21 KB) — the reproduction is
+/// `wkprint.swift` of MICRO-PL002. Answers once the file is written (its size
+/// stable), or an error after 30 s. macOS only: elsewhere the page keeps
+/// saying «choose One PDF» (WebView2's PrintToPdf and WebKitGTK's export are
+/// not wired yet).
+#[tauri::command]
+async fn print_html_pdf(app: tauri::AppHandle, html: String, path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+        if let Some(old) = app.get_webview_window(PRINT_PDF_LABEL) {
+            let _ = old.destroy();
+        }
+        let _ = std::fs::remove_file(&path);
+        let url = format!("data:text/html;charset=utf-8,{}", percent_encode(&html))
+            .parse()
+            .map_err(|e| format!("{e}"))?;
+        let once = Arc::new(AtomicBool::new(false));
+        let out = path.clone();
+        let win = tauri::WebviewWindowBuilder::new(&app, PRINT_PDF_LABEL, tauri::WebviewUrl::External(url))
+            .title("PDF")
+            .inner_size(860.0, 1000.0)
+            .focused(false)
+            .on_page_load(move |window, payload| {
+                if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                    || once.swap(true, Ordering::SeqCst)
+                {
+                    return;
+                }
+                let out = out.clone();
+                std::thread::spawn(move || {
+                    // the layout settles (wkprint.swift waits the same 0.5 s)
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    let _ = window.with_webview(move |wv| {
+                        // SAFETY: the live WKWebView of this window, on the main thread
+                        unsafe { save_pdf_of(wv.inner() as *mut objc2::runtime::AnyObject, &out) }
+                    });
+                });
+            })
+            .build()
+            .map_err(|e| e.to_string())?;
+        let target = path.clone();
+        let written = tauri::async_runtime::spawn_blocking(move || {
+            let start = std::time::Instant::now();
+            let mut last = 0u64;
+            while start.elapsed() < std::time::Duration::from_secs(30) {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                let size = std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
+                if size > 0 && size == last {
+                    return true;
+                }
+                last = size;
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        let _ = win.destroy();
+        if written { Ok(()) } else { Err(format!("no PDF written at {path} in 30 s")) }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, html, path);
+        Err("not on this system yet".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CgSize { w: f64, h: f64 }
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CgRect { x: f64, y: f64, size: CgSize }
+#[cfg(target_os = "macos")]
+unsafe impl objc2::encode::Encode for CgSize {
+    const ENCODING: objc2::encode::Encoding =
+        objc2::encode::Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+}
+#[cfg(target_os = "macos")]
+unsafe impl objc2::encode::Encode for CgRect {
+    const ENCODING: objc2::encode::Encoding = objc2::encode::Encoding::Struct(
+        "CGRect",
+        &[
+            objc2::encode::Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]),
+            CgSize::ENCODING,
+        ],
+    );
+}
+
+/// The print operation of `print_html_pdf`, saved to `path` (main thread).
+#[cfg(target_os = "macos")]
+unsafe fn save_pdf_of(wk: *mut objc2::runtime::AnyObject, path: &str) {
+    use objc2::runtime::{AnyClass, AnyObject, Bool, Sel};
+    use objc2::msg_send;
+    let ns = |s: &str| -> *mut AnyObject {
+        let c = std::ffi::CString::new(s).unwrap_or_default();
+        let cls = AnyClass::get(c"NSString").expect("NSString");
+        msg_send![cls, stringWithUTF8String: c.as_ptr()]
+    };
+    let Some(info_cls) = AnyClass::get(c"NSPrintInfo") else { return };
+    let Some(url_cls) = AnyClass::get(c"NSURL") else { return };
+    let shared: *mut AnyObject = msg_send![info_cls, sharedPrintInfo];
+    let pi: *mut AnyObject = msg_send![shared, copy];
+    let _: () = msg_send![pi, setPaperSize: CgSize { w: 595.28, h: 841.89 }];
+    let _: () = msg_send![pi, setTopMargin: 0.0f64];
+    let _: () = msg_send![pi, setRightMargin: 0.0f64];
+    let _: () = msg_send![pi, setBottomMargin: 0.0f64];
+    let _: () = msg_send![pi, setLeftMargin: 0.0f64];
+    // NSPrintSaveJob / NSPrintJobSavingURL, by their string values
+    let _: () = msg_send![pi, setJobDisposition: ns("NSPrintSaveJob")];
+    let dict: *mut AnyObject = msg_send![pi, dictionary];
+    let url: *mut AnyObject = msg_send![url_cls, fileURLWithPath: ns(path)];
+    let _: () = msg_send![dict, setObject: url, forKey: ns("NSJobSavingURL")];
+    let op: *mut AnyObject = msg_send![wk, printOperationWithPrintInfo: pi];
+    let _: () = msg_send![op, setShowsPrintPanel: Bool::NO];
+    let _: () = msg_send![op, setShowsProgressPanel: Bool::NO];
+    let view: *mut AnyObject = msg_send![op, view];
+    let bounds: CgRect = msg_send![wk, bounds];
+    if !view.is_null() {
+        let _: () = msg_send![view, setFrame: bounds];
+    }
+    let window: *mut AnyObject = msg_send![wk, window];
+    let none: *mut AnyObject = std::ptr::null_mut();
+    let _: () = msg_send![op, runOperationModalForWindow: window, delegate: none,
+                          didRunSelector: None::<Sel>, contextInfo: std::ptr::null_mut::<std::ffi::c_void>()];
+}
+
 /// MICRO-OVERLAY-PER-FINESTRA p.0 · where the main and the detached windows
 /// are, in logical points of the desktop (top-left origin): WKWebView's
 /// `window.screenX/screenY` are not the window's (measured 24 Oct: 0 and the
@@ -1298,7 +1442,8 @@ fn main() {
             window_frames,
             detached_keep_above,
             detached_front,
-            print_html
+            print_html,
+            print_html_pdf
         ])
         .setup(|app| {
             if let Some(port) = app.config().build.dev_url.as_ref().and_then(|u| u.port()) {

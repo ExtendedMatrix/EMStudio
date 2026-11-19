@@ -214,6 +214,13 @@ export async function printHtml(html: string, title: string): Promise<void> {
   await invoke("print_html", { html, title });
 }
 
+/** MICRO-COR04 E5 · «One PDF per sheet» on the desktop: the A4's HTML printed
+ *  by WebKit straight to `path` (main.rs `print_html_pdf`, macOS), no panel;
+ *  answers once the file is written. */
+export async function printHtmlPdf(html: string, path: string): Promise<void> {
+  await invoke("print_html_pdf", { html, path: toNative(path) });
+}
+
 /** Set the OS window title (dirty-state indicator lives here on desktop). */
 export async function setWindowTitle(title: string): Promise<void> {
   try {

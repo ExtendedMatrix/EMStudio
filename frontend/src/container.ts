@@ -55,6 +55,11 @@ export { applyOp, applyOps, isRemoved, liveNodes, liveEdges, makeOp } from "./cr
 export type { CrdtOp, OpResult, FieldOutcome } from "./crdt";
 
 export const GRAPHS_KEY = "graphs";
+/** The version of the FORM written in `header.version` (schemas/em.v1.1.schema.json,
+ *  s3Dgraphy `emjson_exporter.FORMAT_VERSION`): "1.1" = the container as the
+ *  specification says. Every em.json EMStudio writes says it; "1.0" (the flat
+ *  form and the container from before the specification) is only READ. */
+export const EMJSON_FORMAT_VERSION = "1.1";
 export const SHELF_COLLECTION = "ShelfGraph";
 export const SHELF_MEMBER_ID = "shelf";
 /** The DOCUMENTATION member: acquisitions, transformations and the resources
@@ -412,13 +417,15 @@ export function buildContainer(input: {
   // "not an em.json document (format=None)". The file looked fine in EMStudio
   // (which does not check) and was unreadable by the library that defines the
   // format. Whoever wrote a header still wins; this only fills a blank.
+  // The VERSION is the exception (MICRO-COR04 E1): it says the form of THIS
+  // file, and the file written here is the container of the specification —
+  // a member read from a "1.0" file does not make the new file a "1.0" one
+  // (s3Dgraphy's exporter writes FORMAT_VERSION the same way).
   const memberHeader =
     (input.graphs[0]?.doc.header as Record<string, unknown> | undefined) ?? {};
-  const header: Record<string, unknown> = {
-    format: "em.json", version: "1.0", ...memberHeader,
-  };
+  const header: Record<string, unknown> = { format: "em.json", ...memberHeader };
   if (!header.format) header.format = "em.json";
-  if (!header.version) header.version = "1.0";
+  header.version = EMJSON_FORMAT_VERSION;
   // MICRO-PL09 (W6) · the packages the file uses, as the library writes them
   // (`container._declare_profiles`): nothing written when there is none
   if (input.profiles !== undefined) {

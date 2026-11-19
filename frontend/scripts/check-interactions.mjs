@@ -10910,6 +10910,68 @@ test("TD1.viewer", "tileset trascinato · uno zip dal sistema sul Viewer: si ved
     detail: { prevented, bar, door, tiles, before, after, undone, errors } };
 });
 
+test("COR4.acquired", "MICRO-COR04 E4 · Porta dentro con una data «acquired» che non è una data: la finestra RESTA aperta, il campo è segnato e il motivo gli sta accanto; nulla entra nel grafo; corretta la data, la porta scrive", async () => {
+  const { dir } = await tsdBench("cor4");
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
+  const win = await winOf(p, "viewer");
+  await tsdDropFiles(p, win, [{ name: "disco.zip", b64: readFileSync(`${dir}/disco.zip`).toString("base64") }]);
+  const door = await tsdWait(p, () => tsdDoor(p), 10000);
+  const before = await p.evaluate(() => window.__EM_DRAG__.idsOfType("representation_model").length);
+  const fill = (sel, v) => p.evaluate(([s, x]) => { const f = document.querySelector(`[data-app-dialog="door"] ${s}`); if (!f) return false;
+    f.value = x; f.dispatchEvent(new Event("input", { bubbles: true })); return true; }, [sel, v]);
+  await fill("[data-door-acquired]", "ieri l'altro");
+  await tsdDoorPass(p, "2015");
+  await p.waitForTimeout(600);
+  const refused = await p.evaluate(() => {
+    const d = document.querySelector('[data-app-dialog="door"]');
+    const f = d?.querySelector("[data-door-acquired]");
+    const say = f?.nextElementSibling;
+    return { open: !!d, marked: !!f?.classList.contains("app-dialog-invalid") && f.getAttribute("aria-invalid") === "true",
+      beside: say?.classList.contains("app-dialog-field-err") ? say.textContent : null, focused: document.activeElement === f,
+      bottom: d?.querySelector(".app-dialog-err")?.textContent ?? "" };
+  });
+  await p.screenshot({ path: SHOT("cor4-acquired-segnato") }).catch(() => {});
+  const still = await p.evaluate(() => window.__EM_DRAG__.idsOfType("representation_model").length);
+  await fill("[data-door-acquired]", "2014");
+  const unmarked = await p.evaluate(() => { const f = document.querySelector('[data-app-dialog="door"] [data-door-acquired]');
+    return !f?.classList.contains("app-dialog-invalid") && !document.querySelector('[data-app-dialog="door"] .app-dialog-field-err'); });
+  await tsdDoorPass(p, "2015");
+  const rm = await tsdWait(p, () => p.evaluate(() => { const D = window.__EM_DRAG__; const n = D.idsOfType("representation_model").map((id) => D.node(id)).find((x) => x?.data?.is_tileset); return n ? n.data : null; }), 10000);
+  await ctx.close();
+  return { pass: !!door && refused.open && refused.marked && /data|date/i.test(refused.beside ?? "") && refused.bottom === ""
+      && still === before && unmarked && String(rm?.acquired ?? "") === "2014" && !errors.length,
+    detail: { door: !!door, refused, before, still, unmarked, rm, errors } };
+});
+
+test("COR6.reader", "MICRO-COR04 E6 · uno studio aperto dal Catalog (?study=): dopo l'apertura la barra degli indirizzi è pulita e «Lettore vivo · link» dà comunque il link — il /em/read/ del nodo con lo studio e la narrativa, come sul desktop; un file aperto da disco dice che serve uno studio pubblicato", async () => {
+  const study = "study:cor6";
+  const asked = [];
+  const { p, ctx, errors } = await open({ doc: null, query: `&study=${encodeURIComponent(study)}`, route: { pattern: "**/catalog/study/**", handler: (route) => {
+    asked.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fixture("PortaMarina-lite")) });
+  } } });
+  await p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 30000 });
+  await p.waitForTimeout(500);
+  const search = await p.evaluate(() => location.search);
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => {});
+  const narr = await p.evaluate(() => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const gs = d.graphs ? Object.values(d.graphs) : [d.graph];
+    return gs.flatMap((g) => (g.nodes ?? []).filter((n) => n.node_type === "narrative" || n.node_type === "NarrativeNode").map((n) => n.id))[0] ?? null; });
+  await p.evaluate(() => window.__EM_DRAG__.copyReaderLink());
+  await p.waitForTimeout(300);
+  const toast = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  const url = (/(https?:\/\/\S+)/.exec(toast) ?? [])[1] ?? "";
+  // the same document from disk: no study behind it
+  await p.evaluate((d) => window.__EM_DRAG__.openAt(d, "/tmp/cor6/PortaMarina.em.json"), fixture("PortaMarina-lite"));
+  await p.waitForTimeout(800);
+  await p.evaluate(() => window.__EM_DRAG__.copyReaderLink());
+  await p.waitForTimeout(300);
+  const toastDisk = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  await ctx.close();
+  const want = `http://localhost:${PORT}/em/read/?study=${encodeURIComponent(study)}&narrative=${encodeURIComponent(narr ?? "")}`;
+  return { pass: asked.length >= 1 && !/study=/.test(search) && !!narr && url === want && /Catalog/.test(toastDisk) && !errors.length,
+    detail: { asked, search, narr, toast, url, want, toastDisk, errors } };
+});
+
 test("TD2.pair", "tileset trascinato · la forma RealityScan (X/ dallo Storage, X.json accanto) sul Viewer: riconosciuta e detta, la posizione avvisa «geocentriche», centrata solo per la vista, le tile si vedono", async () => {
   const { dir } = await tsdBench("td2");
   const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
@@ -12132,7 +12194,9 @@ test("SR2.ritocchi", "MICRO-SPAZIO-RITOCCHI-2 · il nome dell'em.json nella barr
   out.toast1 = await toastNow();
   await p.evaluate(() => document.getElementById("btn-reveal-doc")?.click());
   await p.waitForTimeout(500);
+  out.toastRoot = await toastNow();
   out.reveals = reveals.map((r) => r.path);
+  out.roots = reveals.map((r) => r.project_root === true);
   bridgeUp = false;
   await p.click("#info-file");
   await p.waitForTimeout(700);
@@ -12191,6 +12255,8 @@ test("SR2.ritocchi", "MICRO-SPAZIO-RITOCCHI-2 · il nome dell'em.json nella barr
   const conds = {
     p1file: out.file?.text === "TempluMare.em.json" && /emfs-sr2/.test(out.file?.title ?? ""),
     p1reveal: out.reveals.length === 2 && out.reveals.every((r) => r === at) && /Finder|gestore|Esplora/.test(out.toast1),
+    // MICRO-COR04 E2 · the menu asks for the PROJECT'S ROOT, the name in the bar for the file
+    p1root: out.roots[0] === false && out.roots[1] === true && /\/tmp\/emfs-sr2(?!\/TempluMare)/.test(out.toastRoot),
     p1noDesktop: /copiato/.test(out.toastNoDesktop) && (out.clip === at || out.clip === ""),
     p2: !!out.head?.oneRow && !!out.head200?.oneRow && out.head200.inside && out.head200.titles.includes("Isola") && out.head200.titles.includes("Inquadra"),
     p3: !out.bar3.menu && out.bar3.buttons === 3 && out.menu?.options === 7 && out.menu.prevDisabled === true

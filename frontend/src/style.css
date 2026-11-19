@@ -10527,6 +10527,9 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .app-dialog-field input { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); font: inherit; }
 .app-dialog-err { color: var(--danger, #b3261e); font-size: 12px; min-height: 0; margin-top: 6px; }
 .app-dialog-err:empty { display: none; }
+/* MICRO-COR04 E4 · a field of the dialog's own body refused: marked, the reason beside it */
+.app-dialog .app-dialog-invalid { outline: 2px solid var(--danger, #b3261e); outline-offset: 1px; }
+.app-dialog-field-err { color: var(--danger, #b3261e); font-size: 12px; margin-left: 6px; }
 .modal-foot button.primary.danger { background: var(--danger, #b3261e); border-color: var(--danger, #b3261e); color: #fff; }
 /* «Delete the graph…» (graph-removal.ts): the report, its lists and choices */
 .gdel-report p { margin: 0 0 8px; }

@@ -1934,6 +1934,21 @@ def _files_route(route, body):
         if not os.path.exists(path):
             raise ValueError(f"not here any more: {path}")
         import em_optimize as _O   # spawned, never forked (MICRO-BLENDER-SIDECAR)
+        if body.get("project_root"):
+            # MICRO-COR04 E2 · «Open the project folder» opens the PROJECT'S
+            # ROOT (the folder that holds EM/, s3Dgraphy `find_project_root`),
+            # not the em.json's own folder (EM/). An em.json outside any
+            # project tree: its folder, and the answer says there was no root.
+            from s3dgraphy.project_tree import find_project_root
+            root = find_project_root(path)
+            folder = root or (path if os.path.isdir(path) else os.path.dirname(path))
+            if sys.platform == "darwin":
+                subprocess.Popen(["/usr/bin/open", folder], **_O.popen_kw())
+            elif os.name == "nt":
+                subprocess.Popen(["explorer", folder], **_O.popen_kw())
+            else:
+                subprocess.Popen(_O.child_argv(["xdg-open", folder]), **_O.popen_kw())
+            return {"ok": True, "path": folder, "project_root": bool(root)}
         if sys.platform == "darwin":
             subprocess.Popen(["/usr/bin/open", "-R", path], **_O.popen_kw())
         elif os.name == "nt":
@@ -6516,7 +6531,8 @@ def make_handler(api):
                 # Quindi non lo si crea, e l'operatore esce col solo `id`.
                 nodes.append({"id": f"author:{orcid}", "node_type": "author",
                               "name": label, "data": {"orcid": orcid}})
-            doc = {"header": {"format": "em.json", "version": "1.0"},
+            from s3dgraphy.exporter.emjson_exporter import FORMAT_VERSION
+            doc = {"header": {"format": "em.json", "version": FORMAT_VERSION},
                    "graph": {"graph_id": str((body.get("registry") or {})
                                              .get("graph_id") or "compose"),
                              "nodes": nodes, "edges": edges}}

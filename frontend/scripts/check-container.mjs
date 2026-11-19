@@ -56,6 +56,25 @@ const shelfSection = (resourceId = "res0") => ({
   ok(notADoc.warnings.length === 1, "…and says why");
 }
 
+// ── MICRO-COR04 E1 · every em.json written says the version of the specification ──
+{
+  eq(C.EMJSON_FORMAT_VERSION, "1.1", "E1 · the form written is the specification's 1.1");
+  // File → New: a header of {last_editor} alone
+  const fresh = { header: { last_editor: "EMStudio test" },
+                  graph: { graph_id: "nuovo", name: "nuovo", nodes: [], edges: [] } };
+  const built = C.buildContainer({ graphs: [{ id: "nuovo", doc: fresh }] });
+  eq(built.header.format, "em.json", "E1 · a new em.json says what it is");
+  eq(built.header.version, "1.1", "E1 · …and is born «1.1», not «1.0»");
+  eq(built.header.last_editor, "EMStudio test", "E1 · the rest of the member's header is kept");
+  // a project read from a 1.0 file is written back as the form it now has
+  const old = C.parseContainer(legacyDoc());
+  const again = C.buildContainer({ graphs: old.members, activeGraphId: old.activeGraphId });
+  eq(again.header.version, "1.1", "E1 · a 1.0 file saved again is a 1.1 container");
+  // a header-less container is still READ as written before the specification
+  const read = C.parseContainer({ graphs: { g: { graph_id: "g", nodes: [], edges: [] } } });
+  eq(read.members.length, 1, "E1 · a container with no header is still read");
+}
+
 // ── writing the container ───────────────────────────────────────────────────
 {
   const built = C.buildContainer({

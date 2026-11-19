@@ -159,6 +159,19 @@ export async function freeLocal(bridge: string, plan: FreeItem[], opts: {
 
 /** «Open where it is» */
 export const revealFile = (bridge: string, path: string) => post(bridge, "/file-reveal", { path });
+/** MICRO-COR04 E2 · the PROJECT'S ROOT the file belongs to (the folder holding
+ *  EM/), opened as a folder; `project_root` false: no project tree around the
+ *  file, its own folder was opened */
+export const revealProjectRoot = (bridge: string, path: string) =>
+  post(bridge, "/file-reveal", { path, project_root: true }) as Promise<{ path?: string; project_root?: boolean }>;
+/** the same root guessed without a bridge, from the path alone: an em.json in a
+ *  folder named EM belongs to the folder above it (s3Dgraphy's standard tree) */
+export function guessProjectRoot(path: string): string {
+  const parts = path.split(/[\\/]/);
+  parts.pop();
+  if (parts.length > 1 && parts[parts.length - 1] === "EM") parts.pop();
+  return parts.join(path.includes("\\") && !path.includes("/") ? "\\" : "/") || path;
+}
 /** «Keep on the disk too» (R3): the node's bytes into the project's cache,
  *  named by their sha256 — the first place the resolver looks */
 export const keepOnDisk = (bridge: string, room: RoomRef, sha256: string, projectRoot: string, name: string) =>

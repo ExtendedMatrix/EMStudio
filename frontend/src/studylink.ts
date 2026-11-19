@@ -134,6 +134,57 @@ export function studyIdInContainerUrl(url: string): string | null {
   }
 }
 
+/** Where a file came from when it was opened from a Catalog (MICRO-COR04 E6):
+ *  the container's ABSOLUTE address and the study id it names. Kept on the open
+ *  file, because the address bar is cleaned right after the opening and the
+ *  desktop never had one to read. */
+export interface PublishedOrigin {
+  url: string;
+  study: string | null;
+}
+
+/** The origin to keep for a link just opened, `page` being the address the
+ *  relative forms are resolved against (`location.href`). */
+export function publishedOrigin(link: { url: string; study: string | null }, page: string): PublishedOrigin {
+  const url = new URL(link.url, page).href;
+  return { url, study: link.study ?? studyIdInContainerUrl(url) };
+}
+
+/**
+ * The LIVE READER's address for a narrative of a published study — the same on
+ * the web and on the desktop (MICRO-COR04 E6).
+ *
+ * It used to be built from the page's own `location.search`, which is empty on
+ * the desktop (`tauri://…`) and is cleaned on the web right after the opening:
+ * the link «in practice never came». Now it is built from where the study came
+ * from. A Catalog study (`<catalog>/catalog/study/<id>/emjson`) is read at its
+ * node's `/em/read/`, the dissemination page on the same origin as the Catalog
+ * (Caddy: `/em/read/*` beside `/catalog/*`), with `?study=` — and `?catalog=`
+ * only when the Catalog is not at the origin's root, so the reader resolves it
+ * exactly as the Catalog's own links do. Any other container is read by the
+ * page's own reader (`reader.html` beside the editor) when the page is a web
+ * page; on the desktop that page is nobody's address, so: `null`.
+ */
+export function readerLink(origin: PublishedOrigin, narrative: string, page: string): string | null {
+  const container = new URL(origin.url);
+  const at = container.pathname.search(/\/catalog\/study\/[^/]+\/emjson\/?$/);
+  const study = origin.study ?? studyIdInContainerUrl(origin.url);
+  if (at >= 0 && study) {
+    const q = new URLSearchParams();
+    q.set("study", study);
+    const base = container.pathname.slice(0, at);
+    if (base) q.set("catalog", `${container.origin}${base}`);
+    q.set("narrative", narrative);
+    return `${container.origin}/em/read/?${q}`;
+  }
+  const here = new URL(page);
+  if (here.protocol !== "http:" && here.protocol !== "https:") return null;
+  const q = new URLSearchParams();
+  q.set("emjson", container.origin === here.origin ? container.pathname + container.search : container.href);
+  q.set("narrative", narrative);
+  return new URL(`reader.html?${q}`, page).href;
+}
+
 /** Take the study parameters off the address bar once they have been read.
  *
  *  Same reasoning as the handoff's own cleaner: none of this is secret except

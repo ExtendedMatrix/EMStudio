@@ -19,6 +19,7 @@ import { renderHorizonsPanel } from "./horizons-ui";
 import type { PlacedScene } from "./geo";
 import {
   buildContainer,
+  EMJSON_FORMAT_VERSION,
   corpusAcceptsNodeType,
   isCorpusSection,
   isShelfSection,
@@ -249,7 +250,7 @@ import { datamodelPhraseBook, linkedPhrase, phraseDirFor } from "./phrases";
 import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json";
 import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
-import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
+import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile, revealProjectRoot, guessProjectRoot,
          fileProjectRoot, describeFile, filesOfDocument, fileStateOf, fileStates, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
          freePlanOf, freeLocal, freeUi, fileRows, listFilter, bucketRows,
          type FileState, type MovedFile } from "./file-states";
@@ -473,6 +474,7 @@ import {
   pathIsDir,
   savePdf,
   printHtml,
+  printHtmlPdf,
   bridgeToken,
 } from "./tauri";
 import { PySession, pyToken, wordsOf, PY_COMPUTE_LEVEL, PY_DEV_LEVEL, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep, type PyValueWire } from "./py-session";
@@ -761,7 +763,7 @@ import {
   clearHandoffFromLocation, handoffFromLocation, parseHandoff, roomPlan, type Handoff,
 } from "./handoff";
 import {
-  clearStudyLinkFromLocation, readStudyLink, type StudyLink,
+  clearStudyLinkFromLocation, publishedOrigin, readStudyLink, readerLink, type StudyLink,
 } from "./studylink";
 import {
   doorTo, fallbackPage, otherSurface, roomHandoff, RoundTripError,
@@ -3177,6 +3179,8 @@ window.__EM_SCENE__ = () => {
   coloursDraft: () => { const w = coloursSpaceWin(); const d = w && store ? colourDraftOf(w.id) : null; return d ? { dirty: d.dirty, base: d.base, now: d.now } : null; },
   /** MICRO-NARRATIVE-MODULI · an export of the story, as the Export menu makes it */
   exportNarrative: (format: string, force = false) => exportNarrative(format, { force }),
+  /** MICRO-COR04 E6 · «Live reader · link», as the Export menu runs it */
+  copyReaderLink: () => copyReaderLink(),
   /** …the figures this process renders for it, by key */
   narrativeFigureKeys: async (id: string) => Object.keys(await narrativeFigures(id)),
   /** MICRO-NARRATIVE-MODULI · what a story's 3D scene of this node draws */
@@ -8475,6 +8479,11 @@ async function openStudyFromLink(link: StudyLink): Promise<void> {
     return;
   }
   loadContainerDocument(doc, link.study ?? link.url);
+  // MICRO-COR04 E6 · the file remembers the study it came from: the address bar
+  // is cleaned just below (and the desktop never had one), so the live reader's
+  // link is made from this, not from `location.search`
+  const opened = emtree.activeFile();
+  if (opened) opened.published = publishedOrigin(link, location.href);
   // …and the parameters come off the address bar, the token first: a reload must
   // not re-fetch the study over whatever has been done since, and a credential
   // in an address bar outlives the tab it was useful in.
@@ -9005,7 +9014,7 @@ function documentationCorpus(opts: { create?: boolean } = {}): DocumentStore | n
   if (corpusStore) return corpusStore;
   if (opts.create === false) return null;
   corpusStore = new DocumentStore({
-    header: { format: "em.json", version: "1.0" },
+    header: { format: "em.json", version: EMJSON_FORMAT_VERSION },
     graph: newCorpusSection() as unknown as EmDocument["graph"],
   } as EmDocument);
   wireCorpusStore(corpusStore);
@@ -9079,7 +9088,7 @@ let corpusAdoptedJson: string | null = null;
 function adoptProjectCorpus(section: Record<string, unknown>): void {
   corpusAdoptedJson = JSON.stringify(section);
   corpusStore = new DocumentStore({
-    header: { format: "em.json", version: "1.0" },
+    header: { format: "em.json", version: EMJSON_FORMAT_VERSION },
     graph: section as unknown as EmDocument["graph"],
   } as EmDocument);
   wireCorpusStore(corpusStore);
@@ -9108,7 +9117,7 @@ function periodizations(opts: { create?: boolean } = {}): DocumentStore | null {
 
 function adoptProjectPeriodizations(section: Record<string, unknown>): void {
   periodizationStore = new DocumentStore({
-    header: { format: "em.json", version: "1.0" },
+    header: { format: "em.json", version: EMJSON_FORMAT_VERSION },
     graph: section as unknown as EmDocument["graph"],
   } as EmDocument);
   horizonView.hidden = initialHidden(chosenPeriodization(
@@ -9324,7 +9333,7 @@ function hzSceneOfWin(winId: string): HzScene {
   }
   if (lay === undefined || lay === "pending") { out.note = t("bands.layingOut"); return out; }
   if (lay === "failed") { out.note = t("bands.failed"); return out; }
-  const hdoc: EmDocument = { header: { format: "em.json", version: "1.0" },
+  const hdoc: EmDocument = { header: { format: "em.json", version: EMJSON_FORMAT_VERSION },
                              graph: proj.graph as EmDocument["graph"],
                              layout: { ...lay, folded_groups: proj.folded } as EmDocument["layout"] };
   const sc = buildMatrixScene(hdoc, undefined, undefined, new Set(), undefined);
@@ -9653,7 +9662,7 @@ function adoptProjectShelf(section: Record<string, unknown>): void {
   let res: ReturnType<typeof loadShelfDocument> = { ok: false, reason: "unreadable" };
   shelfQuietly(() => {
     res = loadShelfDocument({
-      header: { format: "em.json", version: "1.0" },
+      header: { format: "em.json", version: EMJSON_FORMAT_VERSION },
       graph: section,
     });
   });
@@ -18145,7 +18154,7 @@ document.getElementById("btn-open-project")?.addEventListener("click", () => { v
 document.getElementById("btn-reorder-project")?.addEventListener("click", () => { void reorderGesture(); });
 document.getElementById("btn-close-project")?.addEventListener("click", () => { void closeProjectGesture(); });
 // MICRO-SPAZIO-RITOCCHI-2 p.1 · File ▸ «Apri la cartella del progetto» (and a click on the file's name in the bar)
-document.getElementById("btn-reveal-doc")?.addEventListener("click", () => { void revealActiveDoc(); });
+document.getElementById("btn-reveal-doc")?.addEventListener("click", () => { void revealActiveDoc({ projectRoot: true }); });
 // MICRO-E p.1 · File ▸ Porta dentro… (the system's selector, several files)
 document.getElementById("btn-porta-dentro")?.addEventListener("click", () => { void doorFromMenu(); });
 // MICRO-GEO09 · File ▸ Porta dentro una cartella… (a stack of slices: read by a plugin's reader of folders)
@@ -23215,7 +23224,7 @@ function reopenClosedGraph(fileId: string, gid: string): void {
   if (!file || !section || isShelfSection(section) || isCorpusSection(section)) return;
   const { layout, ...graph } = JSON.parse(JSON.stringify(section)) as Record<string, unknown>;
   delete file.retained[gid];
-  const doc = { header: { format: "em.json", version: "1.0" },
+  const doc = { header: { format: "em.json", version: EMJSON_FORMAT_VERSION },
                 graph: { ...graph, graph_id: graph.graph_id ?? gid },
                 ...(layout ? { layout } : {}) } as unknown as EmDocument;
   const before = emtree.activeId;
@@ -28196,20 +28205,17 @@ function openPublishMenu(anchor: HTMLElement): void {
   for (const b of menu.querySelectorAll("button")) b.addEventListener("click", done);
 }
 
+/** MICRO-COR04 E6 · the live reader's link, made from the study the active
+ *  file was opened from (`OpenFile.published`, `studylink.readerLink`) — on the
+ *  desktop too, and on the web after the address bar has been cleaned. */
 function copyReaderLink(): void {
   const narr = activeNarrative();
-  const here = new URLSearchParams(location.search);
-  const study = here.get("study");
-  const emjson = here.get("emjson");
-  if (!narr || (!study && !emjson)) {
+  const pub = emtree.activeFile()?.published ?? null;
+  const url = narr && pub ? readerLink(pub, narr.id, location.href) : null;
+  if (!url) {
     toast(t("nv.pub.liveNeedsStudy"));
     return;
   }
-  const q = new URLSearchParams();
-  if (study) q.set("study", study);
-  if (emjson) q.set("emjson", emjson);
-  q.set("narrative", narr.id);
-  const url = new URL(`reader.html?${q}`, location.href).href;
   void navigator.clipboard?.writeText(url);
   toast(t("nv.pub.liveCopied", { url }));
 }
@@ -38618,6 +38624,8 @@ function openSheetPrintWindow(from: SheetPrintScope | "menu"): void {
   const std = `${def.header.standard.authority} ${def.header.standard.code} ${def.header.standard.version}`;
   const graphName = (() => { const sl = emtree.active(); return sl ? slotName(sl) : ""; })();
   let pdfWhy: string | null | undefined;   // undefined = not asked yet; null = the bridge makes PDFs
+  // MICRO-COR04 E5 · the macOS desktop writes «One PDF per sheet» itself (WebKit)
+  const desktopPdfs = isTauri() && /Mac/i.test(navigator.platform);
 
   document.getElementById("skp")?.remove();
   const ov = skpEl("div", "sk-print-ov");
@@ -38822,16 +38830,20 @@ function openSheetPrintWindow(from: SheetPrintScope | "menu"): void {
 
   /** does this bridge make PDFs (WeasyPrint)? asked once, with nothing to draw */
   const askPdf = async () => {
+    let drawn = false;
     try {
       const res = await fetch(`${await bridgeUrl()}/sheet/render`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ definition: def, records: [], lang, pdf: true }),
       });
       const a = await res.json() as { why?: string; error?: string; htmls?: unknown };
-      pdfWhy = res.ok && Array.isArray(a.htmls) ? (a.why ?? null) : (a.error ?? `HTTP ${res.status}`);
+      drawn = res.ok && Array.isArray(a.htmls);
+      pdfWhy = drawn ? (a.why ?? null) : (a.error ?? `HTTP ${res.status}`);
     } catch (e) { pdfWhy = String((e as Error).message ?? e); }
-    // the desktop's sidecar has no WeasyPrint on purpose (MICRO-I): said so
-    if (pdfWhy && isTauri()) pdfWhy = t("skp.desktopNoPdf");
+    // the desktop's sidecar has no WeasyPrint on purpose (MICRO-I). MICRO-COR04
+    // E5 · on macOS the desktop writes each PDF itself (main.rs
+    // `print_html_pdf`) from the HTML the bridge draws; elsewhere it is said
+    if (pdfWhy && isTauri()) pdfWhy = drawn && desktopPdfs ? null : t("skp.desktopNoPdf");
     box.dataset.skpPdf = pdfWhy ? "no" : "yes";
     if (pdfWhy && c.output === "each") outSel.title = pdfWhy;
     refresh();
@@ -38850,6 +38862,8 @@ function openSheetPrintWindow(from: SheetPrintScope | "menu"): void {
     stop.hidden = false; go.disabled = true;
     const now = new Date();
     const htmls: string[] = [], pdfs: Array<{ name: string; b64: string }> = [];
+    // MICRO-COR04 E5 · the bridge's PDFs (WeasyPrint), or the desktop's own
+    const bridgePdf = c.output === "each" && !desktopPdfs;
     try {
       const parts = SP.batches(list, SKP_BATCH);
       let done = 0;
@@ -38858,11 +38872,11 @@ function openSheetPrintWindow(from: SheetPrintScope | "menu"): void {
         const records = part.map((u) => sheetRecordOf(def, readSheetUnit(def, g, u.id, lang)));
         const res = await fetch(`${await bridgeUrl()}/sheet/render`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ definition: def, records, lang, pdf: c.output === "each" }),
+          body: JSON.stringify({ definition: def, records, lang, pdf: bridgePdf }),
         });
         const a = await res.json() as { htmls?: string[]; pdfs?: string[]; error?: string; why?: string };
         if (!res.ok || !Array.isArray(a.htmls)) throw new Error(a.error ?? `HTTP ${res.status}`);
-        if (c.output === "each" && !a.pdfs) throw new Error(a.why ?? t("skp.desktopNoPdf"));
+        if (bridgePdf && !a.pdfs) throw new Error(a.why ?? t("skp.desktopNoPdf"));
         htmls.push(...a.htmls);
         if (a.pdfs) a.pdfs.forEach((b64, i) => pdfs.push({ name: SP.printFileName(std, graphName, now, part[i].name), b64 }));
         done += part.length;
@@ -38883,6 +38897,31 @@ function openSheetPrintWindow(from: SheetPrintScope | "menu"): void {
       ov.remove();
       openSheetPrint(list.length === 1 ? list[0].name : t("skp.previewMany", { n: list.length }), def,
                      { html, pages: SP.pageCount(list.length, c.sides, sidesPerSheet) });
+      return;
+    }
+    if (!bridgePdf) {
+      // MICRO-COR04 E5 · the desktop: one folder asked, then each sheet's HTML
+      // printed to its PDF there by WebKit, one at a time (Stop stops)
+      const dir = await pickFolder();
+      if (!dir) return;
+      const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+      stop.hidden = false; go.disabled = true;
+      let written = 0;
+      try {
+        for (let i = 0; i < htmls.length; i++) {
+          progress(t("skp.writingPdf", { i, n: htmls.length }), i, htmls.length);
+          await printHtmlPdf(htmls[i], `${dir.replace(/[\\/]+$/, "")}${sep}${SP.printFileName(std, graphName, now, list[i].name)}`);
+          written = i + 1;
+          if (run.cancelled) break;
+        }
+      } catch (e) {
+        toast(t("sheet.printFailed", { why: String((e as Error).message ?? e) }));
+        return;
+      } finally {
+        endProgress();
+        refresh();
+      }
+      toast(t("skp.savedEach", { n: written, dir }));
       return;
     }
     await saveSheetPdfs(pdfs);
@@ -40475,7 +40514,14 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   const dateOf = (id: string) => String(((st.node(id)?.data ?? {}) as Record<string, unknown>).absolute_time_start ?? "");
   const dlg = openDialog({ kind: "door", title: t("door.title"), body, ok: t("door.go"),
     input: { value: "", label: t("door.dateAsk"), placeholder: t("door.datePh") },
-    validate: (v) => (v.trim() || rows.every((r) => byPluginOf(r.f)) ? null : t("door.dateWanted")) });
+    validate: (v) => {
+      // MICRO-COR04 E4 · a date «acquired» / «valid until» that is not one keeps
+      // the door open with the field marked — checked BEFORE anything is read
+      if (models) for (const f of [acq, until]) {
+        if (parseAcquired(f.value) === undefined) return { message: t("insp.acquiredBad"), at: f };
+      }
+      return v.trim() || rows.every((r) => byPluginOf(r.f)) ? null : t("door.dateWanted");
+    } });
   // an existing document says its date (to confirm) and its licence (proposed)
   dsel.addEventListener("change", () => {
     title.classList.toggle("hidden", !!dsel.value);
@@ -40492,9 +40538,10 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
     rows.splice(0, rows.length, ...rows.filter((r) => !plugged.includes(r)));
     if (!rows.length || store !== st) return;
   }
+  // refused by `validate` while the door was open: here both are dates or empty
   const acqV = models ? parseAcquired(acq.value) : null;
   const untilV = models ? parseAcquired(until.value) : null;
-  if (acqV === undefined || untilV === undefined) { toast(t("insp.acquiredBad")); return; }
+  if (acqV === undefined || untilV === undefined) return;
   // MICRO-F p.2 · a dropped tileset's digest, taken now (as «aggancia» did: a
   // resource without one is never resident — 6.58 GB: 3.9 s through the bridge)
   const sums = new Map<DoorFile, string | null>();
@@ -42695,12 +42742,14 @@ async function closeProjectGesture(): Promise<void> {
   forgetProjectTrees();
 }
 
-/** MICRO-SPAZIO-RITOCCHI-2 p.1 · «Apri la cartella del progetto»: the folder of
- *  the ACTIVE em.json in the Finder / Explorer / file manager, the file selected
- *  where the system can (`/file-reveal`: `open -R`, `explorer /select,`; Linux's
- *  `xdg-open` opens the folder only). With no bridge to ask — a browser alone —
- *  nothing can open a folder: the path is said, and copied. */
-async function revealActiveDoc(): Promise<void> {
+/** MICRO-SPAZIO-RITOCCHI-2 p.1 · the ACTIVE em.json in the Finder / Explorer /
+ *  file manager, the file selected where the system can (`/file-reveal`:
+ *  `open -R`, `explorer /select,`; Linux's `xdg-open` opens the folder only) —
+ *  the click on the file's name in the info bar. With no bridge to ask — a
+ *  browser alone — nothing can open a folder: the path is said, and copied.
+ *  MICRO-COR04 E2 · `projectRoot`: «Open the project folder» opens the
+ *  PROJECT'S ROOT (the folder holding EM/), not the em.json's own folder. */
+async function revealActiveDoc(opts: { projectRoot?: boolean } = {}): Promise<void> {
   const file = emtree.activeFile();
   if (!file) { toast(t("fs.revealNoFile")); return; }
   if (!file.path) {
@@ -42713,12 +42762,20 @@ async function revealActiveDoc(): Promise<void> {
     : /Mac/.test(navigator.platform) ? "fs.revealFinder" : "fs.revealFileManager");
   try {
     const bridge = await bridgeUrl();
+    if (opts.projectRoot) {
+      const r = await revealProjectRoot(bridge, file.path);
+      const shown = paths.toNative(String(r.path ?? guessProjectRoot(file.path)));
+      toast(r.project_root === false ? t("fs.revealNoTree", { name: file.name, path: shown })
+        : t("fs.revealDone", { where, path: shown }));
+      return;
+    }
     await revealFile(bridge, file.path);
     toast(t("fs.revealDone", { where, path: native }));
   } catch {
     // no desktop answering (or the file moved): the path, said and copied
-    const copied = await navigator.clipboard?.writeText(native).then(() => true, () => false) ?? false;
-    toast(t(copied ? "fs.revealCopied" : "fs.revealSaid", { path: native }));
+    const said = opts.projectRoot ? paths.toNative(guessProjectRoot(file.path)) : native;
+    const copied = await navigator.clipboard?.writeText(said).then(() => true, () => false) ?? false;
+    toast(t(copied ? "fs.revealCopied" : opts.projectRoot ? "fs.revealRootSaid" : "fs.revealSaid", { path: said }));
   }
 }
 

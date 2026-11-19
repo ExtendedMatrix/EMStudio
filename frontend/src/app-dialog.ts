@@ -41,8 +41,10 @@ export interface DialogOptions {
   danger?: boolean;
   /** `data-app-dialog` — what a test looks for */
   kind?: string;
-  /** refuse OK while this says why (the field's value given) */
-  validate?: (value: string) => string | null;
+  /** refuse OK while this says why (the field's value given). MICRO-COR04 E4 ·
+   *  `{ message, at }`: the reason belongs to a field of the caller's own body —
+   *  that field is marked and the message written beside it, the dialog open */
+  validate?: (value: string) => string | { message: string; at: HTMLElement } | null;
   /** MICRO-GIA-FATTI · more answers than yes / no: each a button between
    *  Cancel and OK (`data-dialog-choice`), answering `ok` with its key; OK
    *  stays the default (Enter), its `choice` undefined */
@@ -140,12 +142,37 @@ export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
     back.appendChild(card);
 
     let done = false;
+    const unmark = (): void => {
+      for (const m of card.querySelectorAll(".app-dialog-field-err")) m.remove();
+      for (const m of card.querySelectorAll(".app-dialog-invalid")) {
+        m.classList.remove("app-dialog-invalid");
+        m.removeAttribute("aria-invalid");
+      }
+    };
     const close = (ok: boolean, choice?: string): void => {
       if (done) return;
       const value = field?.value ?? "";
       if (ok && o.validate) {
+        unmark();
+        err.textContent = "";
         const why = o.validate(value);
-        if (why) { err.textContent = why; field?.focus(); return; }
+        if (typeof why === "string" && why) { err.textContent = why; field?.focus(); return; }
+        if (why && typeof why === "object") {
+          const say = document.createElement("span");
+          say.className = "app-dialog-field-err";
+          say.setAttribute("role", "alert");
+          say.textContent = why.message;
+          why.at.classList.add("app-dialog-invalid");
+          why.at.setAttribute("aria-invalid", "true");
+          why.at.after(say);
+          why.at.addEventListener("input", () => {
+            why.at.classList.remove("app-dialog-invalid");
+            why.at.removeAttribute("aria-invalid");
+            say.remove();
+          }, { once: true });
+          why.at.focus();
+          return;
+        }
       }
       done = true;
       document.removeEventListener("keydown", onKey, true);
