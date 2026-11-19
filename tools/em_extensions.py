@@ -25,6 +25,20 @@ POST /extensions/enable   {id, version?}  → {ok, enabled}
 POST /extensions/disable  {id}            → {ok, disabled}
 POST /extensions/remove   {id, part: all|code|data, version?, confirm?, purge_vocabularies?}
                                           → {ok, removed}
+MICRO-PL22 (X2) · the REPOSITORIES of this machine (s3dgraphy.extensions.remote):
+GET  /extensions/repos                   → {ok, repositories (never a token), online {on, setting, env}, official_url}
+GET  /extensions/available?repo=         → {ok, available, blocked, updates, online}
+POST /extensions/online   {on}           → {ok, online}         («Consenti l'accesso in rete», one switch)
+POST /extensions/repos/add {url, name?, token?, check_on_startup?}
+                                          → {ok, repository}
+POST /extensions/repos/update {name, url?, token?, enabled?, check_on_startup?}
+POST /extensions/repos/remove {name}     → {ok, removed}        (what came from it stays installed)
+POST /extensions/repos/sync {name?, startup?}
+                                          → {ok, sync}           (http(s) only with online access)
+POST /extensions/repos/preview {repo, id, version?}
+                                          → {ok, preview}       (downloaded, checked against archive_hash, + plan)
+POST /extensions/repos/install {repo, id, version?, parts, trust, with_requires, trust_requires}
+                                          → {ok, result}
 GET  /profiles/installed                 → {ok, profiles: [...]}  (every version, the index's rows)
 POST /profiles/overlay {declared: header.profiles, lang, installed?: bool}
                                           → {ok, overlay, missing, problems, declared_active}
@@ -149,6 +163,12 @@ def get(route: str, q: Dict[str, List[str]]) -> Tuple[int, Dict[str, Any]]:
                                   "profiles": str(P.profiles_dir())}}
         if route == "/extensions/removal-plan":
             return 200, {"ok": True, "plan": _plain(E.removal_plan(one("id")))}
+        if route == "/extensions/repos":
+            return 200, {"ok": True, "repositories": _plain(E.repositories()),
+                         "online": _plain(E.online_access_setting()), "official_url": E.OFFICIAL_URL}
+        if route == "/extensions/available":
+            got = E.available(one("repo") or None)
+            return 200, {"ok": True, **_plain(got), "updates": _plain(E.updates())}
         if route == "/profiles/installed":
             return 200, {"ok": True, "profiles": _plain(_P().installed())}
     except ImportError as exc:
@@ -361,6 +381,62 @@ def _package_json(path: Any, roots: List[Any]) -> Any:
         return None
 
 
+def _repos(E, route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    """MICRO-PL22 (X2) · the repositories: added, read, installed from. The
+    archive of an entry is downloaded and checked against the index's
+    ``archive_hash`` by the library before anything opens it; the compiled
+    sheets are checked here as for an archive from disk (MICRO-PL11)."""
+    def flag(k: str):
+        return bool(body[k]) if k in body and body[k] is not None else None
+
+    if route == "/extensions/online":
+        E.set_online_access(bool(body.get("on")))
+        return 200, {"ok": True, "online": _plain(E.online_access_setting())}
+    if route == "/extensions/repos/add":
+        return 200, {"ok": True, "repository": _plain(E.add_repository(
+            str(body.get("url") or ""), name=body.get("name") or None, token=body.get("token") or None,
+            check_on_startup=bool(body.get("check_on_startup"))))}
+    if route == "/extensions/repos/update":
+        changes = {k: body[k] for k in ("url", "token") if k in body}
+        changes.update({k: flag(k) for k in ("enabled", "check_on_startup") if k in body})
+        return 200, {"ok": True, "repository": _plain(E.update_repository(str(body.get("name") or ""), **changes))}
+    if route == "/extensions/repos/remove":
+        return 200, {"ok": True, "removed": bool(E.remove_repository(str(body.get("name") or "")))}
+    if route == "/extensions/repos/sync":
+        return 200, {"ok": True, "sync": _plain(E.sync(body.get("name") or None, startup=bool(body.get("startup"))))}
+    repo, eid, version = str(body.get("repo") or ""), str(body.get("id") or ""), body.get("version") or None
+    if route == "/extensions/repos/preview":
+        pv = _plain(E.preview_from(repo, eid, version))
+        got = E.download(repo, eid, pv.get("version") or version)
+        errors, warnings = _archive_form_checks(got["path"])
+        if errors and isinstance(pv.get("data"), dict):
+            pv["data"]["errors"] = list(pv["data"].get("errors") or []) + errors
+            pv["data"]["installable"] = False
+        if warnings:
+            pv["warnings"] = list(pv.get("warnings") or []) + warnings
+        pv["forms_checked"] = True
+        return 200, {"ok": True, "preview": pv}
+    if route == "/extensions/repos/install":
+        parts = str(body.get("parts") or "all")
+        if parts not in ("all", "data"):
+            return 400, {"ok": False, "error": "parts: all | data"}
+        plan = E.plan_install(repo, eid, version)
+        for st in plan["steps"]:
+            if not st["requested"] and body.get("with_requires") is False:
+                continue
+            got = E.download(st["repo"], st["id"], st["version"])
+            errors, _w = _archive_form_checks(got["path"])
+            if errors:
+                return 422, {"ok": False, "problems": errors,
+                             "error": f"{st['id']}: a compiled sheet of the package is not what it was compiled to: "
+                                      "nothing installed"}
+        out = E.install_from(repo, eid, version, parts=parts, trust=bool(body.get("trust")),
+                             with_requires=body.get("with_requires") is not False,
+                             trust_requires=bool(body.get("trust_requires")))
+        return 200, {"ok": True, "result": _plain(out)}
+    return 404, {"ok": False, "error": "unknown extensions route"}
+
+
 def post(route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
     src = None
     try:
@@ -402,6 +478,8 @@ def post(route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
                                                                       trust=bool(body.get("trust"))))}
             ref = src.ref if src.ref is not None else str(body.get("id") or "")
             return 200, {"ok": True, "installed": _plain(E.install_code(ref, trust=bool(body.get("trust"))))}
+        if route.startswith("/extensions/repos/") or route == "/extensions/online":
+            return _repos(E, route, body)
         if route == "/extensions/enable":
             return 200, {"ok": True, "enabled": _plain(E.enable(str(body.get("id") or ""),
                                                                body.get("version") or None))}

@@ -113,8 +113,10 @@ ok(box.querySelector("[data-ext-dev-why]")?.textContent === "bridge vecchio", "w
 const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const main = read("frontend/src/main.ts"), bridge = read("tools/em_bridge.py"), emPy = read("tools/em_py.py");
 const i18n = read("frontend/src/i18n.ts"), menuUi = read("frontend/src/menu-ui.ts");
-eq([Number(/const BRIDGE_LEVEL_WANTED = (\d+)/.exec(main)?.[1]), Number(/^BRIDGE_LEVEL = (\d+)/m.exec(bridge)?.[1]), Number(/^LEVEL = (\d+)/m.exec(emPy)?.[1])],
-   [84, 84, 84], "level 84 in the page, the bridge, em_py");
+{ // 84 or later, the same in the three (MICRO-PL22 raised it to 85 without touching what this checks)
+  const lv = [Number(/const BRIDGE_LEVEL_WANTED = (\d+)/.exec(main)?.[1]), Number(/^BRIDGE_LEVEL = (\d+)/m.exec(bridge)?.[1]), Number(/^LEVEL = (\d+)/m.exec(emPy)?.[1])];
+  ok(lv[0] >= 84 && lv.every((x) => x === lv[0]), "level 84 or later, the same in the page, the bridge, em_py");
+}
 ok(/"\/py\/plugins\/dev", "\/py\/plugins\/reload"/.test(bridge), "the two routes in the table of routes");
 ok(/dev: \(\) => EXPERIMENTAL \? devHost\(\) : null/.test(main), "the section only with «Funzioni sperimentali»");
 ok(/\{ dev: EXPERIMENTAL \}/.test(main), "/py/plugins says the switch (the folder counts only with it)");

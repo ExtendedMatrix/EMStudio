@@ -33,13 +33,26 @@
  * are — never installed, never asked, marked «sviluppo, non verificato» — and
  * «Ricarica» for one whose files changed.
  *
+ * MICRO-PL22 (X2, REPOSITORY-NELLA-FINESTRA) · a section «Repository», as
+ * Blender's: the repositories of this machine (an `index.json` by https, a
+ * `file://` URL or a folder — the lab's NAS, D-13), each with its optional access
+ * token (never shown back: «token impostato») and «controlla gli aggiornamenti
+ * all'avvio»; «+ Aggiungi repository…»; one switch for the machine, «Consenti
+ * l'accesso in rete» (off by default; off, a `file://` repository still works);
+ * what the repositories offer, with «Installa» / «Aggiorna» — the archive
+ * downloaded and checked against the index's `archive_hash` by the library, the
+ * same two panels plus what comes with it (the requirements installed first,
+ * the offers said, a tier C vocabulary fetched or not, and why); the ids an
+ * index withdrew said beside what is installed.
+ *
  * Nothing here knows `main.ts`: the host gives the dialogs, the file pickers, the
  * words. Every installation is the library's (W21); the window has none of its own.
  */
 import type { DevInfo } from "./plugin-commands";
 import {
-  formsOf, labelIn, licenceText, nameOfIri, passesFilter, problemText, rowKind, rowState, schemesOf,
-  type ExtArchive, type ExtFilter, type ExtPreview, type ExtProblem, type ExtRemovalPlan, type ExtRow, type ExtensionsState,
+  availableRows, formsOf, labelIn, licenceText, nameOfIri, passesFilter, problemText, rowKind, rowState, schemesOf, sizeText,
+  type ExtArchive, type ExtAvailable, type ExtFilter, type ExtPlan, type ExtPreview, type ExtProblem, type ExtRemovalPlan,
+  type ExtRepo, type ExtRow, type ExtensionsState,
 } from "./extensions-state";
 
 export interface ExtWindowHost {
@@ -66,6 +79,10 @@ export interface ExtWindowHost {
   formsAdded?(): ReadonlySet<string>;
   /** MICRO-PL18 (W15a) · the plugins' development folder; absent or null with «Funzioni sperimentali» off */
   dev?(): ExtDevHost | null;
+  /** MICRO-PL22 · a folder chosen on the desktop (a repository on a NAS); absent on the web */
+  pickRepoFolder?(): Promise<string | null>;
+  /** MICRO-PL22 · the bridge answers the repositories' routes (level 85): null when it does, else why not */
+  reposWhy?(): string | null;
 }
 
 /** MICRO-PL18 · what the section «Cartella di sviluppo» needs from the page */
@@ -170,6 +187,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
   const used = new Set((state.overlay?.profiles ?? []).filter((p) => p.declared).map((p) => p.name));
   for (const r of rows) list.appendChild(rowEl(r, used.has(r.data?.name ?? r.id)));
   box.appendChild(list);
+  if (!fromNode) box.appendChild(repoSection());
   const dev = host.dev?.() ?? null;
   if (dev && !fromNode) box.appendChild(devSection(dev));
   if (state.dirs.extensions) {
@@ -189,7 +207,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     head.append(el("b", "ext-name", name), " ", el("span", `ext-kind ext-kind-${kind}`, t(`ext.kind.${kind}`)));
     if (usedHere) { const u = el("span", "ext-used", t("ext.usedHere")); u.dataset.extUsed = "1"; head.append(" ", u); }
     row.appendChild(head);
-    const facts = [r.id, r.version ? `v${r.version}` : "", t(`ext.source.${r.source === "profiles" ? "profiles" : "disk"}`),
+    const facts = [r.id, r.version ? `v${r.version}` : "", sourceWord(t, r.source),
       licenceText(r.license)].filter(Boolean).join(" · ");
     row.appendChild(el("div", "ext-facts", facts));
     // the state in words
@@ -200,6 +218,18 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     stEl.dataset.extState = st.key.split(".").pop()!;
     row.appendChild(stEl);
     for (const p of r.requires_optional ?? []) row.appendChild(el("div", "cw-hint", problemText(p, lang)));
+    // MICRO-PL22 · an index withdrew it: said beside it, never removed on its own
+    for (const b of (state.blocked ?? []).filter((x) => x.id === r.id)) {
+      const w = el("div", "cw-warn ext-blocked", problemText(b.problem, lang));
+      w.dataset.extBlocked = b.repo;
+      row.appendChild(w);
+    }
+    const upd = (state.updates ?? []).find((u) => u.id === r.id);
+    if (upd) {
+      const u = el("div", "ext-updated", t("ext.repoUpdate", { old: upd.installed, v: upd.version, r: upd.repo }));
+      u.dataset.extUpdate = upd.version;
+      row.appendChild(u);
+    }
     // the data
     if (r.data && r.data.status === "installed") {
       const d = el("div", "ext-part ext-data");
@@ -246,7 +276,8 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
       c.append(el("span", "ext-part-h", t("ext.code")), " ");
       if (code.status === "installed") {
         c.append(`${t("ext.versions", { v: (code.versions ?? [code.version]).filter(Boolean).join(" · ") })} · `,
-          el("span", "ext-unverified", t("ext.unverified")), ` · ${t(code.active ? "ext.active" : "ext.inactive")}`);
+          el("span", "ext-unverified", isRepoSource(r.source) ? t("ext.unverifiedFrom", { r: r.source! }) : t("ext.unverified")),
+          ` · ${t(code.active ? "ext.active" : "ext.inactive")}`);
       } else c.append(el("span", "cw-hint", t("ext.codeNotHere")));
       const perms = Object.entries(code.permissions ?? {});
       if (perms.length) {
@@ -287,6 +318,123 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
   }
 
   function tn(key: string, n: number): string { return t(`${key}.${n === 1 ? "one" : "other"}`, { n: String(n) }); }
+
+  /** MICRO-PL22 (X2) · «Repository»: the switch, the repositories, what they offer */
+  function repoSection(): HTMLElement {
+    const sec = el("div", "ext-repos");
+    sec.dataset.extRepos = String(state.repos?.length ?? -1);
+    sec.appendChild(el("div", "ext-missing-h", t("ext.reposHead")));
+    const why = host.reposWhy?.() ?? null;
+    if (why || state.repos == null) {
+      const w = el("p", "cw-hint", why ?? t("ext.reposLoading"));
+      w.dataset.extReposWhy = "1";
+      sec.appendChild(w);
+      return sec;
+    }
+    // the switch, one for the machine
+    const on = state.online?.on ?? false;
+    const lab = el("label", "ext-online");
+    const cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = on;
+    cb.dataset.extOnline = "1";
+    cb.disabled = state.online?.env != null;
+    cb.onchange = () => void act(state.setOnline(cb.checked).then(async (r) => { await state.refreshRepos(); return r; }),
+      t(cb.checked ? "ext.onlineOn" : "ext.onlineOff"));
+    lab.append(cb, ` ${t("ext.online")}`);
+    sec.appendChild(lab);
+    sec.appendChild(el("p", "cw-hint", state.online?.env != null ? t("ext.onlineEnv", { v: state.online.env }) : t("ext.onlineHint")));
+    // the repositories
+    const tools = el("div", "cw-row ext-repo-tools");
+    tools.append(btn(t("ext.repoAdd"), "repo-add", () => void addRepoFlow(doc, host, state, repaint), t("ext.repoAddHint")));
+    if (state.repos.length)
+      tools.append(" ", btn(t("ext.repoSyncAll"), "repo-sync-all", () => void syncFlow(), t("ext.repoSyncHint")));
+    sec.appendChild(tools);
+    if (!state.repos.length) sec.appendChild(el("p", "cw-hint", t("ext.reposNone")));
+    for (const r of state.repos) sec.appendChild(repoRow(r));
+    // what they offer
+    const offered = availableRows(state.available ?? [], filter);
+    if (state.repos.length) {
+      const h = el("div", "ext-part-h ext-avail-h", t("ext.availHead", { n: String(offered.length) }));
+      sec.appendChild(h);
+      if (!offered.length) sec.appendChild(el("p", "cw-hint", t((state.available ?? []).length ? "ext.noneOfKind" : "ext.availNone")));
+    }
+    for (const a of offered) sec.appendChild(availRow(a));
+    return sec;
+  }
+
+  function repoRow(r: ExtRepo): HTMLElement {
+    const row = el("div", "ext-row ext-repo");
+    row.dataset.extRepo = r.name;
+    const head = el("div", "ext-row-h");
+    head.append(el("b", "ext-name", r.name), " ", el("span", "ext-kind", t(r.local ? "ext.repoLocal" : "ext.repoRemote")));
+    if (r.has_token) head.append(" ", el("span", "ext-kind", t("ext.repoToken")));
+    if (!r.enabled) head.append(" ", el("span", "cw-hint", t("ext.repoDisabled")));
+    row.appendChild(head);
+    const facts = el("div", "ext-facts", r.url);
+    facts.title = r.url;
+    row.appendChild(facts);
+    const st = r.synced_at ? t("ext.repoSynced", { n: String(r.entries ?? 0), at: r.synced_at.replace("T", " ").replace("Z", " UTC") })
+      : t("ext.repoNever");
+    const s = el("div", "cw-hint ext-repo-state", st);
+    s.dataset.extRepoSynced = r.synced_at ? "1" : "0";
+    row.appendChild(s);
+    const probs = state.syncProblems?.[r.name] ?? (r.error ? [r.error] : []);
+    for (const p of probs) { const w = el("p", "cw-warn", problemText(p, lang)); w.dataset.extRepoProblem = p.code; row.appendChild(w); }
+    const acts = el("div", "cw-row ext-acts");
+    acts.append(btn(t("ext.repoSync"), "repo-sync", () => void syncFlow(r.name), t("ext.repoSyncHint")), " ");
+    const lab = el("label", "ext-startup");
+    const cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = r.check_on_startup;
+    cb.dataset.extRepoStartup = r.name;
+    cb.onchange = () => void act(state.updateRepo(r.name, { check_on_startup: cb.checked }).then(async (x) => { await state.refreshRepos(); return x; }),
+      t(cb.checked ? "ext.repoStartupOn" : "ext.repoStartupOff", { r: r.name }));
+    lab.append(cb, ` ${t("ext.repoStartup")}`);
+    acts.append(lab, " ");
+    acts.append(btn(t(r.has_token ? "ext.repoTokenChange" : "ext.repoTokenSet"), "repo-token",
+      () => void tokenFlow(doc, host, state, r, repaint)), " ");
+    acts.append(btn(t("ext.repoRemove"), "repo-remove", () => void removeRepoFlow(doc, host, state, r, repaint), t("ext.repoRemoveHint"), "danger"));
+    row.appendChild(acts);
+    return row;
+  }
+
+  function availRow(a: ExtAvailable): HTMLElement {
+    const kinds = Object.keys(a.sections ?? {});
+    const kind = kinds.includes("code") && kinds.includes("data") ? "mixed" : kinds.includes("code") ? "plugin" : "community-package";
+    const row = el("div", "ext-row ext-avail");
+    row.dataset.extAvail = `${a.repo}/${a.id}`;
+    row.dataset.extKind = kind;
+    const head = el("div", "ext-row-h");
+    head.append(el("b", "ext-name", labelIn(a.name as never, lang) || a.id), " ", el("span", `ext-kind ext-kind-${kind}`, t(`ext.kind.${kind}`)));
+    row.appendChild(head);
+    if (a.tagline) row.appendChild(el("div", "cw-hint", a.tagline));
+    row.appendChild(el("div", "ext-facts", [a.id, `v${a.version}`, t("ext.source.repo", { r: a.repo }), licenceText(a.license),
+      sizeText(a.archive_size)].filter(Boolean).join(" · ")));
+    const st = a.update ? t("ext.availUpdate", { old: a.installed ?? "", v: a.version })
+      : a.installed ? t("ext.availInstalled", { v: a.installed }) : "";
+    if (st) { const x = el("div", a.update ? "ext-updated" : "cw-hint", st); x.dataset.extAvailState = a.update ? "update" : "installed"; row.appendChild(x); }
+    const perms = Object.entries(a.permissions ?? {});
+    if (perms.length) row.appendChild(el("div", "cw-hint", t("ext.availPerms", { p: perms.map(([k]) => k).join(", ") })));
+    const acts = el("div", "cw-row ext-acts");
+    if (!a.installed || a.update)
+      acts.append(btn(t(a.update ? "ext.repoUpdateBtn" : "ext.install"), a.update ? "repo-update" : "repo-install",
+        () => void installFromRepo(doc, host, state, a.repo, a.id, a.version, repaint)));
+    row.appendChild(acts);
+    return row;
+  }
+
+  async function syncFlow(name?: string): Promise<void> {
+    host.toast(t("ext.repoSyncing"));
+    const r = await state.syncRepos(name ? { name } : {});
+    if (!r.ok) { host.toast(failText(r, lang)); return; }
+    const okN = r.j.sync.repositories.filter((x) => x.ok).length, all = r.j.sync.repositories.length;
+    const msg = t("ext.repoSyncedMsg", { ok: String(okN), n: String(all), u: String(r.j.sync.updates.length) });
+    host.toast(msg);
+    host.log(msg);
+    for (const x of r.j.sync.repositories) for (const p of x.problems) host.log(`${x.name}: ${problemText(p, lang)}`);
+    repaint();
+  }
 
   /** MICRO-PL18 (W15a) · «Cartella di sviluppo» — only with «Funzioni sperimentali» */
   function devSection(dev: ExtDevHost): HTMLElement {
@@ -370,7 +518,7 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
   const body = el("div", "ext-confirm");
   body.dataset.extConfirm = pv.kind ?? "";
   const head = el("div", "ext-confirm-h");
-  head.append(el("b", "", `${pv.name ?? pv.id} ${pv.version ?? ""}`), ` — ${t("ext.fromDisk")}`);
+  head.append(el("b", "", `${pv.name ?? pv.id} ${pv.version ?? ""}`), ` — ${isRepoSource(pv.source) ? t("ext.fromRepo", { r: pv.source! }) : t("ext.fromDisk")}`);
   body.appendChild(head);
   const sub = [pv.tagline, pv.maintainer ? t("ext.maintainer", { m: pv.maintainer }) : "", licenceText(pv.license)].filter(Boolean).join(" · ");
   if (sub) body.appendChild(el("div", "cw-hint", sub));
@@ -419,7 +567,7 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
     const box = el("div", "ext-panel ext-panel-code");
     box.dataset.extPanel = "code";
     const h = el("div", "ext-panel-h", t("ext.panelCode", { m: c.module ?? "", v: c.version ?? "" }));
-    h.append(" ", el("span", "ext-unverified", t("ext.unverifiedDisk")));
+    h.append(" ", el("span", "ext-unverified", isRepoSource(pv.source) ? t("ext.unverifiedRepo", { r: pv.source! }) : t("ext.unverifiedDisk")));
     box.appendChild(h);
     // MICRO-PL18 (W15a) · asked only when it must be: the first time, or when
     // permissions, capabilities or source changed since the last trust
@@ -447,6 +595,15 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
   for (const m of pv.requires?.missing ?? []) body.appendChild(el("p", "cw-warn", problemText(m, lang)));
   for (const o of pv.requires?.optional ?? []) body.appendChild(el("p", "cw-hint", problemText(o, lang)));
   return body;
+}
+/** MICRO-PL22 · a source that is a repository's name (not the disk, the profiles library, the node, dev) */
+export function isRepoSource(source: string | undefined): boolean {
+  return !!source && !["disk", "profiles", "node", "dev"].includes(source);
+}
+function sourceWord(t: ExtWindowHost["t"], source: string | undefined): string {
+  if (source === "profiles") return t("ext.source.profiles");
+  if (isRepoSource(source)) return t("ext.source.repo", { r: source! });
+  return t("ext.source.disk");
 }
 function capWord(t: ExtWindowHost["t"], cap: string): string {
   const k = `ext.cap.${cap}`;
@@ -572,5 +729,188 @@ async function removeFlow(doc: Document, host: ExtWindowHost, state: ExtensionsS
   host.log(msg);
   await state.refresh();
   host.afterChange();
+  repaint();
+}
+
+// ── MICRO-PL22 (X2) · the repositories' flows ──────────────────────────────
+
+/** what comes with an entry of a repository: said under the two panels */
+export function planBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang">, plan: ExtPlan,
+                         repo: { name: string; archive_hash?: string; cached?: boolean } | undefined): HTMLElement {
+  const t = host.t, lang = host.lang();
+  const el = maker(doc);
+  const box = el("div", "ext-plan");
+  box.dataset.extPlan = String(plan.steps.length);
+  if (repo) {
+    const v = el("div", "cw-hint ext-verified", t("ext.repoVerified", { r: repo.name, h: String(repo.archive_hash ?? "").slice(7, 19) }));
+    v.dataset.extArchiveVerified = "1";
+    box.appendChild(v);
+  }
+  const deps = plan.steps.filter((s) => !s.requested);
+  if (deps.length) {
+    box.appendChild(el("div", "ext-panel-h", t("ext.planDeps")));
+    const ul = el("ul", "ext-deps");
+    for (const s of deps) {
+      const li = el("li", "", t("ext.planDep", { id: s.id, v: s.version, r: s.repo }));
+      li.dataset.extDep = s.id;
+      if (s.sections.includes("code")) li.append(" · ", el("span", "ext-unverified", t("ext.planDepCode")));
+      ul.appendChild(li);
+    }
+    box.appendChild(ul);
+  }
+  for (const u of plan.unresolved) { const p = el("p", "cw-warn", problemText(u.problem, lang)); p.dataset.extUnresolved = u.id; box.appendChild(p); }
+  for (const o of plan.offers) {
+    const p = el("p", "cw-hint", o.repo ? t("ext.planOffer", { id: o.id, v: o.version ?? "", r: o.repo }) : t("ext.planOfferNone", { id: o.id }));
+    p.dataset.extOffer = o.id;
+    box.appendChild(p);
+  }
+  for (const c of plan.tier_c) {
+    const p = el("p", c.will_fetch ? "cw-hint" : "cw-warn",
+      t(c.will_fetch ? "ext.planTierC" : "ext.planTierCOff", { s: nameOfIri(c.scheme), v: c.version, u: c.url }));
+    p.dataset.extTierC = c.will_fetch ? "fetch" : "stub";
+    if (c.terms) p.title = c.terms;
+    box.appendChild(p);
+  }
+  if (plan.cycle) box.appendChild(el("p", "cw-warn", t("ext.planCycle", { c: plan.cycle.join(" → ") })));
+  return box;
+}
+
+/** preview from a repository → the two panels + what comes with it → install */
+export async function installFromRepo(doc: Document, host: ExtWindowHost, state: ExtensionsState, repo: string, id: string,
+                                      version: string | undefined, repaint: () => void): Promise<InstallAnswer> {
+  const t = host.t, lang = host.lang();
+  host.toast(t("ext.repoDownloading", { id, r: repo }));
+  const pv = await state.previewFrom(repo, id, version);
+  if (!pv.ok) { host.toast(t("ext.previewFailed", { why: failText(pv, lang) })); host.log(t("ext.previewFailed", { why: failText(pv, lang) })); return null; }
+  const p = pv.j.preview;
+  const body = confirmBody(doc, host, p);
+  if (p.plan) body.appendChild(planBody(doc, host, p.plan, p.repository));
+  const b = confirmButtons(p, t);
+  const ok = p.plan?.cycle ? null : b.ok;
+  const ans = await host.dialog({ title: t("ext.confirmTitleRepo", { r: repo }), body, ok, choices: ok ? b.choices : [],
+    kind: "ext-install", cancel: ok ? undefined : t("ext.close") });
+  if (!ans.ok) return null;
+  const parts: "all" | "data" = ans.choice === "data" ? "data" : "all";
+  // the answer to the trust question is the button pressed after seeing the
+  // code's panel and the requirements listed with their code marked
+  const trust = parts === "all" && !!p.code?.present;
+  const r = await state.installFrom(repo, id, { version: p.version, parts, trust, withRequires: true, trustRequires: parts === "all" });
+  if (!r.ok) { host.toast(t("ext.installFailed", { why: failText(r, lang) })); return null; }
+  const res = r.j.result;
+  const name = labelIn((res.installed?.name ?? id) as never, lang) || id;
+  const msg = parts === "data" && p.code?.present ? t("ext.installedData", { n: name, v: res.installed?.version ?? "" })
+    : t("ext.installedRepo", { n: name, v: res.installed?.version ?? "", r: repo });
+  host.toast(msg);
+  host.log(msg);
+  for (const d of res.requires) host.log(t("ext.installedDep", { id: d.id, v: d.version, r: d.repo }));
+  for (const c of res.tier_c) host.log(c.fetched ? t("ext.tierCFetched", { id: c.id, u: c.url ?? "" }) : problemText(c.problem ?? null, lang));
+  for (const w of res.warnings ?? []) host.log(problemText(w, lang));
+  await state.refresh();
+  await state.refreshRepos();
+  host.afterChange();
+  repaint();
+  return parts;
+}
+
+/** the form of «+ Aggiungi repository…» (exported for the checks) */
+export function addRepoBody(doc: Document, host: Pick<ExtWindowHost, "t" | "pickRepoFolder">, officialUrl: string):
+    { body: HTMLElement; values: () => { url: string; name: string; token: string; check_on_startup: boolean } } {
+  const t = host.t;
+  const el = maker(doc);
+  const body = el("div", "ext-repo-form");
+  body.dataset.extRepoForm = "1";
+  const field = (label: string, input: HTMLInputElement, hint?: string) => {
+    const l = el("label", "ext-field");
+    l.append(el("span", "", label), input);
+    body.appendChild(l);
+    if (hint) body.appendChild(el("p", "cw-hint", hint));
+  };
+  const url = el("input"); url.type = "text"; url.placeholder = t("ext.repoUrlPh"); url.dataset.extRepoUrl = "1";
+  const name = el("input"); name.type = "text"; name.placeholder = t("ext.repoNamePh"); name.dataset.extRepoName = "1";
+  const token = el("input"); token.type = "password"; token.autocomplete = "off"; token.dataset.extRepoToken = "1";
+  const start = el("input"); start.type = "checkbox"; start.checked = false; start.dataset.extRepoStartupNew = "1";
+  field(t("ext.repoUrl"), url, t("ext.repoUrlHint"));
+  const presets = el("div", "cw-row");
+  if (officialUrl) {
+    const o = el("button", "cw-mini", t("ext.repoOfficial"));
+    o.type = "button";
+    o.dataset.ext = "repo-official";
+    o.title = officialUrl;
+    o.onclick = () => { url.value = officialUrl; if (!name.value) name.value = "extendedmatrix"; };
+    presets.appendChild(o);
+  }
+  if (host.pickRepoFolder) {
+    const f = el("button", "cw-mini", t("ext.repoFolder"));
+    f.type = "button";
+    f.dataset.ext = "repo-folder";
+    f.onclick = () => void host.pickRepoFolder!().then((p) => { if (p) url.value = p; });
+    presets.append(" ", f);
+  }
+  body.appendChild(presets);
+  field(t("ext.repoName"), name);
+  field(t("ext.repoTokenLabel"), token, t("ext.repoTokenHint"));
+  const l = el("label", "ext-startup");
+  l.append(start, ` ${t("ext.repoStartup")}`);
+  body.appendChild(l);
+  body.appendChild(el("p", "cw-hint", t("ext.repoStartupHint")));
+  return { body, values: () => ({ url: url.value.trim(), name: name.value.trim(), token: token.value, check_on_startup: start.checked }) };
+}
+
+async function addRepoFlow(doc: Document, host: ExtWindowHost, state: ExtensionsState, repaint: () => void): Promise<void> {
+  const t = host.t, lang = host.lang();
+  const { body, values } = addRepoBody(doc, host, state.officialUrl);
+  const ans = await host.dialog({ title: t("ext.repoAddTitle"), body, ok: t("ext.repoAddOk"), kind: "ext-repo-add" });
+  if (!ans.ok) return;
+  const v = values();
+  if (!v.url) { host.toast(t("ext.repoUrlEmpty")); return; }
+  const r = await state.addRepo({ url: v.url, name: v.name || undefined, token: v.token || undefined, check_on_startup: v.check_on_startup });
+  if (!r.ok) { host.toast(failText(r, lang)); return; }
+  const msg = t("ext.repoAdded", { r: r.j.repository.name, u: r.j.repository.url });
+  host.toast(msg);
+  host.log(msg);
+  // read it once now: a file:// one always, an https one only with the switch on (said otherwise)
+  const s = await state.syncRepos({ name: r.j.repository.name });
+  if (s.ok) for (const x of s.j.sync.repositories) for (const p of x.problems) host.log(`${x.name}: ${problemText(p, lang)}`);
+  repaint();
+}
+
+async function tokenFlow(doc: Document, host: ExtWindowHost, state: ExtensionsState, r: ExtRepo, repaint: () => void): Promise<void> {
+  const t = host.t, lang = host.lang();
+  const body = doc.createElement("div");
+  const p = doc.createElement("p");
+  p.textContent = t("ext.repoTokenAsk", { r: r.name });
+  const input = doc.createElement("input");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.dataset.extRepoToken = "1";
+  body.append(p, input);
+  const hint = doc.createElement("p");
+  hint.className = "cw-hint";
+  hint.textContent = t("ext.repoTokenEmpty");
+  body.appendChild(hint);
+  const ans = await host.dialog({ title: t("ext.repoTokenTitle"), body, ok: t("ext.repoTokenOk"), kind: "ext-repo-token" });
+  if (!ans.ok) return;
+  const res = await state.updateRepo(r.name, { token: input.value || null });
+  if (!res.ok) { host.toast(failText(res, lang)); return; }
+  const msg = t(input.value ? "ext.repoTokenSaved" : "ext.repoTokenCleared", { r: r.name });
+  host.toast(msg);
+  host.log(msg);
+  await state.refreshRepos();
+  repaint();
+}
+
+async function removeRepoFlow(doc: Document, host: ExtWindowHost, state: ExtensionsState, r: ExtRepo, repaint: () => void): Promise<void> {
+  const t = host.t, lang = host.lang();
+  const body = doc.createElement("p");
+  body.textContent = t("ext.repoRemoveWhat", { r: r.name });
+  const ans = await host.dialog({ title: t("ext.repoRemoveTitle"), body, ok: t("ext.repoRemove"), kind: "ext-repo-remove", danger: true });
+  if (!ans.ok) return;
+  const res = await state.removeRepo(r.name);
+  if (!res.ok) { host.toast(failText(res, lang)); return; }
+  const msg = t("ext.repoRemoved", { r: r.name });
+  host.toast(msg);
+  host.log(msg);
+  delete state.syncProblems[r.name];
+  await state.refreshRepos();
   repaint();
 }

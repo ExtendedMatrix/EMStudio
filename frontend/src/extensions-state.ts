@@ -99,6 +99,59 @@ export interface ExtPreview {
   requires?: { missing?: ExtProblem[]; optional?: ExtProblem[]; cycle?: string[] | null };
 }
 
+// ── MICRO-PL22 (X2) · the repositories of this machine ──────────────────────
+
+/** a repository as the bridge gives it: never the token, only whether there is one */
+export interface ExtRepo {
+  name: string; url: string; enabled: boolean; check_on_startup: boolean; has_token: boolean; local: boolean;
+  added_at?: string; synced_at?: string | null; entries?: number | null; error?: ExtProblem | null;
+}
+/** «Consenti l'accesso in rete»: the machine's switch, and the environment that wins over it */
+export interface ExtOnline { on: boolean; setting: boolean; env: string | null }
+/** one id offered by one repository (its newest version), with what this machine has */
+export interface ExtAvailable {
+  repo: string; id: string; version: string; versions: string[]; name?: string | Record<string, string>;
+  tagline?: string; type?: string; license?: string[] | string; maintainer?: string; archive_size?: number;
+  permissions?: Record<string, string>; reviewed?: unknown; requires?: { extensions?: Array<{ id: string; version?: string; part?: string; optional?: boolean }> };
+  sections?: Record<string, unknown>; installed: string | null; update: boolean; same_source: boolean;
+}
+export interface ExtBlocked { repo: string; id: string; reason?: string; reason_it?: string; problem: ExtProblem }
+export interface ExtUpdate { id: string; repo: string; installed: string; version: string }
+/** what installing from a repository brings: the requirements first, the offers said, tier C */
+export interface ExtPlan {
+  repo: string; id: string; version: string; ok: boolean; online_access: boolean; cycle: string[] | null;
+  steps: Array<{ repo: string; id: string; version: string; type?: string; name?: unknown; requested: boolean; archive_size?: number; sections: string[] }>;
+  unresolved: Array<{ id: string; range: string; part: string; for: string; problem: ExtProblem }>;
+  offers: Array<{ id: string; range: string; part: string; repo: string | null; version: string | null }>;
+  tier_c: Array<{ id: string; scheme: string; version: string; url: string; terms?: string; will_fetch: boolean }>;
+}
+export interface ExtSyncAnswer {
+  repositories: Array<{ name: string; ok: boolean; entries: number | null; problems: ExtProblem[] }>;
+  updates: ExtUpdate[]; online_access: boolean;
+}
+export interface ExtRepoResult {
+  installed: (ExtRow & { status?: string; warnings?: ExtProblem[] }) | null;
+  requires: Array<{ id: string; version: string; repo: string; status: string; code?: string }>;
+  tier_c: Array<{ id: string; version: string; fetched: boolean; url?: string; problem?: ExtProblem }>;
+  unresolved: ExtPlan["unresolved"]; offers: ExtPlan["offers"]; warnings: ExtProblem[]; repo: string;
+}
+/** the size of an archive in words a person reads */
+export function sizeText(n: number | undefined | null): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} kB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+/** what the window shows of a repository's list: the updates first, then by name */
+export function availableRows(av: ExtAvailable[], only: "all" | "packages" | "plugins"): ExtAvailable[] {
+  const kindOf = (a: ExtAvailable) => {
+    const s = Object.keys(a.sections ?? {});
+    return s.includes("code") && s.includes("data") ? "mixed" : s.includes("code") ? "plugin" : "community-package";
+  };
+  return av.filter((a) => only === "all" || (only === "plugins" ? kindOf(a) !== "community-package" : kindOf(a) !== "plugin"))
+    .sort((a, b) => Number(b.update) - Number(a.update) || a.id.localeCompare(b.id) || a.repo.localeCompare(b.repo));
+}
+
 /** what a removal would do, said before (`extensions.removal_plan`) */
 export interface ExtRemovalPlan {
   id: string;
@@ -402,6 +455,15 @@ export class ExtensionsState {
   /** the declaration the overlay was asked for (the same → not asked again) */
   private overlayKey = "";
   rev = 0;
+  /** MICRO-PL22 · the repositories (null: not asked yet, or a bridge before 85) */
+  repos: ExtRepo[] | null = null;
+  online: ExtOnline | null = null;
+  officialUrl = "";
+  available: ExtAvailable[] = [];
+  blocked: ExtBlocked[] = [];
+  updates: ExtUpdate[] = [];
+  /** the last sync's problems, by repository (said in the window until the next) */
+  syncProblems: Record<string, ExtProblem[]> = {};
   constructor(private host: ExtStateHost) {}
 
   private async call<T>(path: string, body?: unknown): Promise<{ ok: true; j: T } | { ok: false; error: string; problems: ExtProblem[]; status: number }> {
@@ -449,6 +511,40 @@ export class ExtensionsState {
     this.host.overlayChanged(this.overlay);
   }
 
+  /** MICRO-PL22 · the repositories and what they offer (cached indexes: no network) */
+  async refreshRepos(): Promise<void> {
+    const r = await this.call<{ repositories: ExtRepo[]; online: ExtOnline; official_url: string }>("/extensions/repos");
+    if (!r.ok) { this.repos = null; this.rev++; this.host.changed(); return; }
+    this.repos = r.j.repositories;
+    this.online = r.j.online;
+    this.officialUrl = r.j.official_url;
+    const a = await this.call<{ available: ExtAvailable[]; blocked: ExtBlocked[]; updates: ExtUpdate[] }>("/extensions/available");
+    if (a.ok) { this.available = a.j.available; this.blocked = a.j.blocked; this.updates = a.j.updates; }
+    this.rev++;
+    this.host.changed();
+  }
+  async syncRepos(o: { name?: string; startup?: boolean } = {}) {
+    const r = await this.call<{ sync: ExtSyncAnswer }>("/extensions/repos/sync", o);
+    if (r.ok) for (const x of r.j.sync.repositories) this.syncProblems[x.name] = x.problems;
+    await this.refreshRepos();
+    return r;
+  }
+  setOnline(on: boolean) { return this.call<{ online: ExtOnline }>("/extensions/online", { on }); }
+  addRepo(o: { url: string; name?: string; token?: string; check_on_startup?: boolean }) {
+    return this.call<{ repository: ExtRepo }>("/extensions/repos/add", o);
+  }
+  updateRepo(name: string, changes: { url?: string; token?: string | null; enabled?: boolean; check_on_startup?: boolean }) {
+    return this.call<{ repository: ExtRepo }>("/extensions/repos/update", { name, ...changes });
+  }
+  removeRepo(name: string) { return this.call<{ removed: boolean }>("/extensions/repos/remove", { name }); }
+  previewFrom(repo: string, id: string, version?: string) {
+    return this.call<{ preview: ExtPreview & { repository?: { name: string; url?: string; archive_hash?: string; reviewed?: unknown; cached?: boolean }; plan?: ExtPlan } }>(
+      "/extensions/repos/preview", { repo, id, version });
+  }
+  installFrom(repo: string, id: string, o: { version?: string; parts: "all" | "data"; trust: boolean; withRequires: boolean; trustRequires: boolean }) {
+    return this.call<{ result: ExtRepoResult }>("/extensions/repos/install", { repo, id, version: o.version, parts: o.parts,
+      trust: o.trust, with_requires: o.withRequires, trust_requires: o.trustRequires });
+  }
   preview(a: ExtArchive) { return this.call<{ preview: ExtPreview }>("/extensions/preview", a); }
   install(a: ExtArchive, parts: "all" | "data", trust: boolean) {
     return this.call<{ installed: ExtRow & { status?: Record<string, string>; warnings?: ExtProblem[] } }>("/extensions/install", { ...a, parts, trust });
