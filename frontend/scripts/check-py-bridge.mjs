@@ -55,7 +55,7 @@ const rs = read("apps/desktop/src-tauri/src/main.rs"), cargo = read("apps/deskto
 const tauri = read("frontend/src/tauri.ts"), i18n = read("frontend/src/i18n.ts"), llm = read("tools/llm_provider.py");
 const wanted = Number(/const BRIDGE_LEVEL_WANTED = (\d+)/.exec(main)?.[1]);
 const level = Number(/^BRIDGE_LEVEL = (\d+)/m.exec(bridge)?.[1]);
-eq([wanted, level, Number(/^LEVEL = (\d+)/m.exec(emPy)?.[1])], [81, 81, 81], "level 81 in main.ts, the bridge and em_py");
+eq([wanted, level, Number(/^LEVEL = (\d+)/m.exec(emPy)?.[1])], [82, 82, 82], "level 82 in main.ts, the bridge and em_py (81: /py/*, 82: the console's history and proofs, MICRO-PL16)");
 ok(/env\.insert\("EM_BRIDGE_TOKEN"\.to_string\(\), bridge_token_value\(\)/.test(rs), "main.rs: the secret into the sidecar's environment");
 ok(/fn bridge_token\(\) -> String/.test(rs) && /\n\s+bridge_token,\n/.test(rs), "main.rs: the command bridge_token, registered");
 ok(/getrandom::fill/.test(rs) && /^getrandom = "0\.3"/m.test(cargo), "main.rs: 32 bytes of the OS's randomness");
@@ -111,7 +111,7 @@ const docOf = () => ({ header: { format: "em.json", schema_version: 2, version: 
 const closed = await start({ EM_BRIDGE_TOKEN: "" });
 try {
   const h = await (await fetch(`${closed.base}/health`)).json();
-  eq([h.bridge_level, h.py], [81, { secret: false }], "no secret: /health says so");
+  eq([h.bridge_level, h.py], [82, { secret: false }], "no secret: /health says so");
   const r = await post(closed.base, "/py/session", { doc: docOf() }, { Authorization: "Bearer anything" });
   eq([r.status, r.j.code], [503, "no_secret"], "no secret: /py/* closed (503), whatever is sent");
   ok(/EM_BRIDGE_TOKEN/.test(r.j.messages.it) && /segreto/.test(r.j.messages.it), "…said in Italian too");

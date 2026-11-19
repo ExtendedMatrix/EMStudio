@@ -24,10 +24,15 @@ POST /py/complete {session, text}            → {ok, matches}
 POST /py/events   {session, revision, ack?, doc?, event, payload}
                   → the run's answer, or {status: "none"} with no listener
 POST /py/close    {session}
+POST /py/history  {limit?}                   → {ok, entries: [{code, at, dry_run}], path}
+                  (level 82, MICRO-PL16: the console's history of this machine)
 
 A run's answer: ``{ok, run, status: done|waiting|running|error|refused|cancelled,
 output, value?, error?, messages?, steps: [{label, delta, process, dtc, ids,
-volatile}], app_requests: [...], waiting?, listeners}``. Each step is ONE
+volatile}], proofs: [{label, message, nodes, edges, ops, volatile}],
+app_requests: [...], waiting?, listeners}``. ``proofs`` (level 82) are the
+``em.write`` that ended as a proof (``dry_run``, or the console's «try»): what
+they would have written, nothing applied. Each step is ONE
 ``em.write``: the page applies its ``delta`` (the same shape as
 /property-source's) in ONE ``store.batch`` = one undo step, writes a Log line
 with its label, and next time sends ``ack: {run, revision}`` — the revision its
@@ -57,6 +62,7 @@ import hashlib
 import hmac
 import io
 import itertools
+import json
 import os
 import pathlib
 import queue
@@ -69,7 +75,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: the bridge's level these routes came with (``BRIDGE_LEVEL`` in em_bridge.py)
-LEVEL = 81
+LEVEL = 82
 TOKEN_ENV = "EM_BRIDGE_TOKEN"
 #: D-8 · the code of an act kept in its DTC node up to this many bytes
 CODE_MAX = 4096
@@ -82,7 +88,12 @@ MAX_SESSIONS = 8
 #: what a run keeps of its output (a print in a loop must not fill the memory)
 OUTPUT_MAX = 256 * 1024
 
-ROUTES = ("/py/session", "/py/run", "/py/resume", "/py/complete", "/py/events", "/py/close")
+ROUTES = ("/py/session", "/py/run", "/py/resume", "/py/complete", "/py/events", "/py/close",
+          "/py/history")
+#: MICRO-PL16 · the console's history kept on this machine (entries; the oldest go)
+HISTORY_MAX = 1000
+#: what a proof says of its nodes, edges and ops (the counts are always whole)
+PROOF_ROWS = 50
 
 #: the views ``em.app.view`` may ask for: EMStudio's window types (``WindowType``,
 #: frontend/src/workspace.ts; ``scene`` is the Space)
@@ -292,6 +303,114 @@ def code_record(code: Optional[str]) -> Dict[str, Any]:
     return out
 
 
+# ── the console's history (MICRO-PL16, W13) ─────────────────────────────────
+
+_history_lock = threading.Lock()
+
+
+def history_path() -> pathlib.Path:
+    """``~/.s3dgraphy/console_history`` (SPEC-plugin §9); with
+    ``S3DGRAPHY_CONSOLE_DIR`` (the checks) inside that folder."""
+    env = os.environ.get("S3DGRAPHY_CONSOLE_DIR")
+    if env:
+        return pathlib.Path(env).expanduser() / "console_history"
+    return pathlib.Path.home() / ".s3dgraphy" / "console_history"
+
+
+def read_history(limit: int = HISTORY_MAX) -> List[Dict[str, Any]]:
+    """The entries, the oldest first. One JSON object per line (a code of
+    several lines stays one entry); a line that does not read is skipped."""
+    path = history_path()
+    try:
+        lines = path.read_text("utf-8").splitlines()
+    except OSError:
+        return []
+    out: List[Dict[str, Any]] = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict) and isinstance(e.get("code"), str) and e["code"].strip():
+            out.append({"code": e["code"], "at": e.get("at"), "dry_run": bool(e.get("dry_run"))})
+    return out[-max(0, int(limit)):] if limit else out
+
+
+def add_history(code: str, dry_run: bool = False) -> bool:
+    """One run of the console, appended — not when it is the same code as the
+    last entry. Past :data:`HISTORY_MAX` the oldest go. Never raises: a
+    history that cannot be written loses an entry, not the run."""
+    code = (code or "").rstrip()
+    if not code.strip():
+        return False
+    with _history_lock:
+        try:
+            have = read_history(0)
+            if have and have[-1]["code"] == code:
+                return False
+            path = history_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            entry = json.dumps({"code": code, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                "dry_run": bool(dry_run)}, ensure_ascii=False)
+            if len(have) + 1 > HISTORY_MAX:
+                keep = have[-(HISTORY_MAX - 1):]
+                text = "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in keep)
+                path.write_text(text + entry + "\n", "utf-8")
+            else:
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(entry + "\n")
+            return True
+        except OSError:
+            return False
+
+
+# ── the proofs (MICRO-PL16: the console's «try») ────────────────────────────
+
+def proof_of(result: Any) -> Dict[str, Any]:
+    """What a proof would have written, for the console: the counts, and the
+    first :data:`PROOF_ROWS` nodes (id, type, name), edges and ops."""
+    d = result.delta
+    nodes = [{"id": str(n.get("id") or ""), "type": str(n.get("node_type") or n.get("type") or ""),
+              "name": str(n.get("name") or "")} for n in d.nodes[:PROOF_ROWS]]
+    edges = [{"source": str(e.get("source") or ""), "type": str(e.get("edge_type") or ""),
+              "target": str(e.get("target") or "")} for e in d.edges[:PROOF_ROWS]]
+    return {"label": result.label, "message": result.message, "volatile": bool(d.volatile),
+            "counts": {"nodes": len(d.nodes), "edges": len(d.edges), "ops": len(d.ops)},
+            "nodes": nodes, "edges": edges, "ops": [dict(o) for o in d.ops[:PROOF_ROWS]]}
+
+
+_proofs_hooked = False
+
+
+def _hook_proofs() -> None:
+    """``em.write`` hands a proof back to the script and to nobody else
+    (``write.submit`` returns before the host). The console wants to show it:
+    ``submit`` is wrapped ONCE so that a proof is also given to a host with a
+    ``proved`` method — any other host sees nothing new. To bring into
+    s3Dgraphy as a hook of its own when the row names it (see the report)."""
+    global _proofs_hooked
+    if _proofs_hooked:
+        return
+    import importlib
+    # the module, not the function ``em.write`` the package exports by that name
+    W = importlib.import_module("s3dgraphy.em.write")
+    original = W.submit
+
+    def submit(host: Any, label: str, delta: Any, *, dry_run: bool = False) -> Any:
+        out = original(host, label, delta, dry_run=dry_run)
+        proved = getattr(host, "proved", None)
+        if dry_run and callable(proved):
+            try:
+                proved(out)
+            except Exception:                        # noqa: BLE001 — a proof never breaks the run
+                pass
+        return out
+
+    submit.__wrapped__ = original                    # type: ignore[attr-defined]
+    W.submit = submit
+    _proofs_hooked = True
+
+
 # ── the session ─────────────────────────────────────────────────────────────
 
 class Session:
@@ -424,6 +543,10 @@ class EMStudioHost:
     def commands(self) -> List[str]:
         return []                                    # the plugins' commands: W14
 
+    def proved(self, result: Any) -> None:
+        """A proof of this run (MICRO-PL16): said to the console, applied nowhere."""
+        self.run.proofs.append(proof_of(result))
+
     def apply(self, delta: Any, *, descriptor: Any, capability: str, label: str) -> Any:
         """ONE step: the act's DTC process with its code, the delta through
         the seam on the session's graph, the page's delta for one batch."""
@@ -500,6 +623,8 @@ class Run:
         self.messages: Optional[Dict[str, str]] = None
         self.steps: List[Dict[str, Any]] = []
         self._steps_sent = 0
+        self.proofs: List[Dict[str, Any]] = []
+        self._proofs_sent = 0
         self.requests: List[Dict[str, Any]] = []
         self._sent = 0
         self.waiting: Optional[Dict[str, Any]] = None
@@ -573,6 +698,10 @@ class Run:
     def _main(self) -> None:
         global _active
         em = _em()
+        try:
+            _hook_proofs()
+        except Exception:                            # noqa: BLE001 — without it a proof is only the script's
+            pass
         s = self.session
         previous_listeners = em.events._listeners
         host = EMStudioHost(self)
@@ -632,6 +761,8 @@ class Run:
         self._sent = len(self.requests)
         new_steps = self.steps[self._steps_sent:]
         self._steps_sent = len(self.steps)
+        new_proofs = self.proofs[self._proofs_sent:]
+        self._proofs_sent = len(self.proofs)
         out = "".join(self.output)
         self.output = []
         if new_steps:
@@ -640,7 +771,7 @@ class Run:
         payload: Dict[str, Any] = {
             "ok": self.status not in ("error", "refused", "cancelled"),
             "run": self.id, "status": self.status, "output": out, "steps": new_steps,
-            "app_requests": new_requests, "listeners": self.session.listener_counts(),
+            "proofs": new_proofs, "app_requests": new_requests, "listeners": self.session.listener_counts(),
             "revision": self.session.revision}
         if self.value is not None and self.status == "done":
             payload["value"] = self.value
@@ -672,10 +803,20 @@ def execute(code: str, ns: Dict[str, Any], em: Any) -> Optional[str]:
     exec(compile(tree, "<console>", "exec"), ns)    # noqa: S102 — the console's purpose
     if last is not None:
         value = eval(compile(last, "<console>", "eval"), ns)  # noqa: S307
+        if _prints_itself(last.body):
+            return None                              # its text is already in the output
         if value is not None:
             ns["_"] = value
             return repr(value)
     return None
+
+
+def _prints_itself(expr: ast.AST) -> bool:
+    """``em.help()`` prints its text and returns it: the console shows it
+    once (MICRO-PL16), as Python's prompt shows ``help()``."""
+    return (isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute)
+            and expr.func.attr == "help" and isinstance(expr.func.value, ast.Name)
+            and expr.func.value.id == "em")
 
 
 def _user_traceback(exc: BaseException) -> str:
@@ -759,6 +900,9 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
     try:
         if route == "/py/session":
             return open_session(body, maps, changes)
+        if route == "/py/history":
+            limit = int(body.get("limit") or HISTORY_MAX)
+            return 200, {"ok": True, "entries": read_history(limit), "path": str(history_path())}
         if route == "/py/close":
             with _lock:
                 s = _sessions.pop(str(body.get("session") or ""), None)
@@ -789,7 +933,10 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
             if busy:
                 return busy
             if route == "/py/run":
-                return _start(s, Run(s, code=str(body.get("code") or ""), dry_run=bool(body.get("dry_run"))))
+                code = str(body.get("code") or "")
+                if body.get("history", True):
+                    add_history(code, bool(body.get("dry_run")))
+                return _start(s, Run(s, code=code, dry_run=bool(body.get("dry_run"))))
             event = str(body.get("event") or "")
             if event not in s.listeners:
                 return 400, _err("unknown_event", s.lang, event=event)
@@ -852,6 +999,6 @@ def complete(s: Session, text: str, limit: int = 100) -> List[str]:
     return out
 
 
-__all__ = ["LEVEL", "ROUTES", "TOKEN_ENV", "take_token", "has_token", "gate", "post",
+__all__ = ["LEVEL", "ROUTES", "history_path", "read_history", "add_history", "proof_of", "TOKEN_ENV", "take_token", "has_token", "gate", "post",
            "complete", "code_record", "console_caller", "Session", "Run", "EMStudioHost",
            "EMStudioApp", "WORDS"]

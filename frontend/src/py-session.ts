@@ -60,11 +60,24 @@ export interface PyAnswer {
   code?: string;
   messages?: Record<string, string>;
   steps?: PyStep[];
+  /** level 82 (MICRO-PL16): the em.write that ended as a proof — what they would write */
+  proofs?: PyProofWire[];
   app_requests?: PyRequest[];
   waiting?: PyRequest;
   listeners?: Record<string, number>;
   revision?: number;
   stale?: boolean;
+}
+
+/** A proof as the bridge says it (`em_py.proof_of`); the console draws it. */
+export interface PyProofWire {
+  label: string;
+  message: string;
+  volatile: boolean;
+  counts: { nodes: number; edges: number; ops: number };
+  nodes: Array<{ id: string; type: string; name: string }>;
+  edges: Array<{ source: string; type: string; target: string }>;
+  ops: Array<Record<string, unknown>>;
 }
 
 /** What a whole run did, once it is over. */
@@ -76,6 +89,8 @@ export interface PyOutcome {
   /** the bridge's words in the page's language */
   error?: string;
   steps: PyStep[];
+  /** the proofs of the run (a «try», or `em.write(dry_run=True)`) */
+  proofs: PyProofWire[];
   requests: PyRequest[];
 }
 
@@ -187,9 +202,18 @@ export class PySession {
     throw new PyError(this.page.t("py.stale"), 409, null);
   }
 
-  /** Run code (the console's; `dryRun`: every em.write a proof). */
-  async run(code: string, opts: { dryRun?: boolean } = {}): Promise<PyOutcome> {
-    return this.drive(() => this.onDocument("/py/run", { code, dry_run: !!opts.dryRun }));
+  /** Run code (the console's; `dryRun`: every em.write a proof; `history`
+   *  false: not kept in this machine's history — the console's «Aiuto»). */
+  async run(code: string, opts: { dryRun?: boolean; history?: boolean } = {}): Promise<PyOutcome> {
+    return this.drive(() => this.onDocument("/py/run", { code, dry_run: !!opts.dryRun,
+      ...(opts.history === false ? { history: false } : {}) }));
+  }
+
+  /** This machine's console history, the oldest first (bridge level 82; an
+   *  older bridge: none). Needs no session. */
+  async history(limit = 1000): Promise<Array<{ code: string; at?: string | null; dry_run?: boolean }>> {
+    const { status, answer } = await this.post("/py/history", { limit });
+    return status === 200 ? ((answer as { entries?: Array<{ code: string }> }).entries ?? []) : [];
   }
 
   /** An event of the page, forwarded only when a Python listener waits for it. */
@@ -216,13 +240,14 @@ export class PySession {
   private async drive(first: () => Promise<PyAnswer>): Promise<PyOutcome> {
     if (this.busy) throw new PyError(this.page.t("py.busy"), 409, null);
     this.busy = true;
-    const out: PyOutcome = { ok: true, status: "running", output: "", steps: [], requests: [] };
+    const out: PyOutcome = { ok: true, status: "running", output: "", steps: [], proofs: [], requests: [] };
     try {
       let a = await first();
       for (;;) {
         out.output += a.output ?? "";
         if (a.listeners) this.listeners = a.listeners;
         for (const step of a.steps ?? []) this.applyStep(a.run!, step, out);
+        out.proofs.push(...(a.proofs ?? []));
         let answer: unknown = undefined;
         let hasAnswer = false;
         for (const req of a.app_requests ?? []) {

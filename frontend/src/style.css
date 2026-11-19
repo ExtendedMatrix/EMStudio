@@ -12390,3 +12390,32 @@ button.uo-col { cursor: pointer; }
 .ext-voc { margin: 0 0 3px 0; padding-left: 16px; }
 .ext-remove { max-width: 520px; font-size: 0.82rem; }
 .ext-purge { display: block; margin-top: 4px; }
+
+/* MICRO-PL16 (W13) · the Python console (console-window.ts) */
+.pyc { display: flex; flex-direction: column; gap: 6px; min-height: 320px; height: 100%; font-size: 0.82rem; }
+.pyc-head { display: flex; align-items: baseline; gap: 8px; color: var(--text-muted); }
+.pyc-where { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pyc-note { font-size: 0.72rem; padding: 0 6px; border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--warn); }
+.pyc-out { flex: 1 1 200px; min-height: 160px; overflow: auto; padding: 6px 8px; background: var(--bg-sunken); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.4; user-select: text; }
+.pyc-line { white-space: pre-wrap; word-break: break-word; margin: 0 0 2px 0; }
+.pyc-line.pyc-k-in { color: var(--text); font-weight: 600; }
+.pyc-line.pyc-k-out { color: var(--text); }
+.pyc-line.pyc-k-value { color: var(--brand); }
+.pyc-line.pyc-k-error { color: var(--danger); }
+.pyc-line.pyc-k-step { color: var(--ok); }
+.pyc-line.pyc-k-proof { color: var(--warn); }
+.pyc-line.pyc-k-info { color: var(--text-faint); font-style: italic; }
+.pyc-tag { display: inline-block; margin-right: 6px; padding: 0 4px; border-radius: var(--radius-sm); font-weight: 400;
+  background: var(--warn); color: var(--bg-panel); font-size: 0.7rem; }
+.pyc-detail { margin: 2px 0 4px 14px; color: var(--text-muted); }
+.pyc-complete { display: flex; flex-wrap: wrap; gap: 3px; max-height: 96px; overflow: auto; }
+.pyc-complete[hidden], .pyc-search[hidden] { display: none; }
+.pyc-match { font-family: var(--font-mono); font-size: 0.74rem; padding: 0 5px; }
+.pyc-more { color: var(--text-faint); font-size: 0.74rem; }
+.pyc-search { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.76rem; }
+.pyc-search-in { flex: 1 1 auto; font-family: var(--font-mono); }
+.pyc-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 54px; font-family: var(--font-mono); font-size: 0.8rem; tab-size: 4; }
+.pyc-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pyc-status { color: var(--text-muted); font-size: 0.76rem; }
+.pyc-status.pyc-why { color: var(--warn); }
