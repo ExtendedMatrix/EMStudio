@@ -45,6 +45,18 @@
  * the offers said, a tier C vocabulary fetched or not, and why); the ids an
  * index withdrew said beside what is installed.
  *
+ * MICRO-PL23 (X3, AGGIORNAMENTI) · «Versioni» on an installed row: the data
+ * versions side by side (each file keeps the one it declares, W-4) and the code
+ * versions on disk under every source, «Usa questa» (an older code active again,
+ * no download, loaded at the next start), «Rimuovi questa versione», «Rimuovi le
+ * versioni vecchie del codice»; «Aggiorna tutto» over the updates the
+ * repositories offer — one that would ask the trust again is listed first and
+ * waits unless the person says yes to it too; «questo file usa stat 1.0.0, c'è
+ * la 1.1.0: aggiorna la dichiarazione» (a major: «Che cosa cambia…», the
+ * CHANGELOG); what a repository has only for other machines, said; «Pulisci…»
+ * (what nothing in the register owns); the removal's second unticked box, the
+ * plugin's own saved state.
+ *
  * Nothing here knows `main.ts`: the host gives the dialogs, the file pickers, the
  * words. Every installation is the library's (W21); the window has none of its own.
  */
@@ -52,7 +64,8 @@ import type { DevInfo } from "./plugin-commands";
 import {
   availableRows, formsOf, labelIn, licenceText, nameOfIri, passesFilter, problemText, rowKind, rowState, schemesOf, sizeText,
   type ExtArchive, type ExtAvailable, type ExtFilter, type ExtPlan, type ExtPreview, type ExtProblem, type ExtRemovalPlan,
-  type ExtRepo, type ExtRow, type ExtensionsState,
+  type ExtRepo, type ExtRow, type ExtensionsState, type ExtNewer, type ExtVersions, type ExtUpdate,
+  updatesNeedingTrust,
 } from "./extensions-state";
 
 export interface ExtWindowHost {
@@ -83,6 +96,10 @@ export interface ExtWindowHost {
   pickRepoFolder?(): Promise<string | null>;
   /** MICRO-PL22 · the bridge answers the repositories' routes (level 85): null when it does, else why not */
   reposWhy?(): string | null;
+  /** MICRO-PL23 · the answer «aggiorna la dichiarazione»: the open file declares the newer version (absent: no file) */
+  redeclare?(n: ExtNewer): Promise<string | null>;
+  /** MICRO-PL23 · the bridge answers the updates' routes (level 86): null when it does, else why not */
+  updatesWhy?(): string | null;
 }
 
 /** MICRO-PL18 · what the section «Cartella di sviluppo» needs from the page */
@@ -104,6 +121,9 @@ export interface ExtDevHost {
 
 /** the filter of the list, kept while the page lives */
 let filter: ExtFilter = "all";
+/** MICRO-PL23 · the rows whose «Versioni» are open */
+const openVersions = new Set<string>();
+export function versionsOpen(id: string): boolean { return openVersions.has(id); }
 export function extensionsFilter(): ExtFilter { return filter; }
 export function setExtensionsFilter(f: ExtFilter): void { filter = f; }
 
@@ -167,6 +187,8 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     miss.appendChild(el("p", "cw-hint", t("ext.missingHint")));
     box.appendChild(miss);
   }
+  // ── MICRO-PL23 · the file's packages with a newer version here ──
+  if ((state.newer ?? []).length && host.fileName()) box.appendChild(newerBlock(doc, host, state, repaint));
   // ── the filter ──
   const seg = el("div", "col-modes cw-modes ext-filter");
   for (const f of ["all", "packages", "plugins"] as const) {
@@ -193,6 +215,8 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
   if (state.dirs.extensions) {
     const d = el("p", "cw-hint ext-dirs", t("ext.dirs", { p: state.dirs.profiles ?? "", c: state.dirs.plugins ?? "" }));
     d.title = Object.entries(state.dirs).map(([k, v]) => `${k}: ${v}`).join("\n");
+    // MICRO-PL23 · what nothing in the register owns
+    if (!fromNode && !host.updatesWhy?.()) d.append(" ", btn(t("ext.clean"), "clean", () => void cleanFlow(doc, host, state, repaint), t("ext.cleanHint"), "cw-mini"));
     box.appendChild(d);
   }
   return box;
@@ -279,6 +303,11 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
           el("span", "ext-unverified", isRepoSource(r.source) ? t("ext.unverifiedFrom", { r: r.source! }) : t("ext.unverified")),
           ` · ${t(code.active ? "ext.active" : "ext.inactive")}`);
       } else c.append(el("span", "cw-hint", t("ext.codeNotHere")));
+      if (code.status === "installed" && code.active_version && code.active_version !== code.version) {
+        const w = el("div", "cw-hint ext-active-other", t("ext.activeOther", { v: code.active_version }));
+        w.dataset.extActiveOther = code.active_version;
+        c.appendChild(w);
+      }
       const perms = Object.entries(code.permissions ?? {});
       if (perms.length) {
         const ul = el("ul", "ext-perms");
@@ -301,11 +330,150 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
       acts.append(btn(t("ext.removeCode"), "remove-code", () => void removeFlow(doc, host, state, r, "code", repaint)), " ");
     if (r.data?.status === "installed" && code?.status !== "absent" && r.registered !== false)
       acts.append(btn(t("ext.removeData"), "remove-data", () => void removeFlow(doc, host, state, r, "data", repaint)), " ");
+    // MICRO-PL23 · «Versioni»: the versions side by side, going back, one removed
+    if (r.registered !== false && !host.updatesWhy?.()) {
+      const open = openVersions.has(r.id);
+      const vb = btn(t(open ? "ext.versionsHide" : "ext.versionsShow"), "versions", () => {
+        if (openVersions.has(r.id)) { openVersions.delete(r.id); repaint(); return; }
+        openVersions.add(r.id);
+        void state.loadVersions(r.id).then(repaint);
+        repaint();
+      }, t("ext.versionsHint"));
+      vb.setAttribute("aria-expanded", String(open));
+      acts.append(vb, " ");
+    }
     if (r.registered !== false)
       acts.append(btn(t("ext.removeAll"), "remove-all", () => void removeFlow(doc, host, state, r, "all", repaint), undefined, "danger"));
     else acts.append(el("span", "cw-hint", t("ext.notRegistered")));
     row.appendChild(acts);
+    if (openVersions.has(r.id)) row.appendChild(versionsEl(r));
     return row;
+  }
+
+  /** MICRO-PL23 · the versions of a row, side by side */
+  function versionsEl(r: ExtRow): HTMLElement {
+    const box = el("div", "ext-versions");
+    box.dataset.extVersions = r.id;
+    const v = state.versions?.[r.id];
+    if (!v) { box.appendChild(el("p", "cw-hint", t("ext.loading"))); return box; }
+    if ("error" in v) { box.appendChild(el("p", "cw-warn", v.error)); return box; }
+    const vs = v as ExtVersions;
+    if (vs.data.length) {
+      box.appendChild(el("div", "ext-part-h", t("ext.versionsData")));
+      for (const d of vs.data) {
+        const line = el("div", "ext-version");
+        line.dataset.extVersion = `data/${d.version}`;
+        line.append(el("b", "", d.version), d.newest ? ` · ${t("ext.versionNewest")}` : "",
+          d.installed_at ? ` · ${d.installed_at.replace("T", " ").replace("Z", " UTC")}` : "", " ");
+        if (vs.data.length > 1)
+          line.append(btn(t("ext.versionRemove"), "version-remove-data", () => void versionRemoveFlow(r, "data", d.version), t("ext.versionRemoveDataHint"), "cw-mini"));
+        box.appendChild(line);
+      }
+      if (vs.data.length > 1) box.appendChild(el("p", "cw-hint", t("ext.versionsDataHint")));
+    }
+    if (vs.code.length) {
+      box.appendChild(el("div", "ext-part-h", t("ext.versionsCode")));
+      for (const c of vs.code) {
+        const line = el("div", "ext-version");
+        line.dataset.extVersion = `code/${c.source}/${c.version}`;
+        if (c.active) line.dataset.extVersionActive = "1";
+        line.append(el("b", "", c.version), ` · ${sourceWord(t, c.source)}`, c.active ? ` · ${t("ext.versionInUse")}` : "");
+        if (c.wheels_skipped?.length) {
+          const w = el("span", "cw-hint", ` · ${t("ext.wheelsOther", { n: String(c.wheels_skipped.length), p: c.platform ?? "" })}`);
+          w.title = c.wheels_skipped.join("\n");
+          line.append(w);
+        }
+        line.append(" ");
+        if (!c.active && !c.registered) {
+          line.append(btn(t("ext.versionUse"), "version-use", () => void useFlow(r, c.version, c.source), t("ext.versionUseHint"), "cw-mini"), " ",
+            btn(t("ext.versionRemove"), "version-remove-code", () => void versionRemoveFlow(r, "code", c.version, c.source), undefined, "cw-mini"));
+        }
+        box.appendChild(line);
+      }
+      if (vs.code.filter((c) => !c.active && !c.registered).length > 1)
+        box.appendChild(btn(t("ext.prune"), "prune", () => void pruneFlow(r), t("ext.pruneHint"), "cw-mini"));
+    }
+    return box;
+  }
+
+  async function useFlow(r: ExtRow, version: string, source: string): Promise<void> {
+    let res = await state.useCode(r.id, version, { source });
+    if (!res.ok && res.problems.some((p) => p.code === "code_trust_required_for")) {
+      const body = el("div", "ext-trust-again");
+      body.append(el("p", "cw-warn", failText(res, lang)), el("p", "", t("ext.powers")));
+      const ans = await host.dialog({ title: t("ext.versionUseTitle", { id: r.id, v: version }), body, ok: t("ext.versionUseTrust"), kind: "ext-use-trust", danger: true });
+      if (!ans.ok) return;
+      res = await state.useCode(r.id, version, { source, trust: true });
+    }
+    if (!res.ok) { host.toast(failText(res, lang)); return; }
+    const msg = res.j.used.warnings?.[0] ? problemText(res.j.used.warnings[0], lang) : t("ext.versionUsed", { id: r.id, v: version });
+    host.toast(msg);
+    host.log(msg);
+    await state.refresh();
+    await state.loadVersions(r.id);
+    host.afterChange();
+    repaint();
+  }
+
+  async function versionRemoveFlow(r: ExtRow, part: "code" | "data", version: string, source?: string): Promise<void> {
+    const body = el("p", "", t(part === "data" ? "ext.versionRemoveDataWhat" : "ext.versionRemoveCodeWhat", { id: r.id, v: version }));
+    const ans = await host.dialog({ title: t("ext.versionRemoveTitle", { id: r.id, v: version }), body, ok: t("ext.versionRemove"),
+      kind: "ext-version-remove", danger: true });
+    if (!ans.ok) return;
+    const res = await state.remove(r.id, part, { version, source });
+    if (!res.ok) { host.toast(failText(res, lang)); return; }
+    const msg = t("ext.versionRemoved", { id: r.id, v: version });
+    host.toast(msg);
+    host.log(msg);
+    await state.refresh();
+    await state.loadVersions(r.id);
+    host.afterChange();
+    repaint();
+  }
+
+  async function pruneFlow(r: ExtRow): Promise<void> {
+    const res = await state.prune(r.id);
+    if (!res.ok) { host.toast(failText(res, lang)); return; }
+    const msg = t("ext.pruned", { id: r.id, v: res.j.removed.code_removed.join(", ") || "—" });
+    host.toast(msg);
+    host.log(msg);
+    await state.refresh();
+    await state.loadVersions(r.id);
+    repaint();
+  }
+
+  /** MICRO-PL23 · «Aggiorna tutto»: the ones that ask the trust again listed first */
+  async function updateAllFlow(): Promise<void> {
+    const chk = await state.checkUpdates(false);
+    if (!chk.ok) { host.toast(failText(chk, lang)); return; }
+    const ups = chk.j.check.updates;
+    if (!ups.length) { host.toast(t("ext.updatesNone")); return; }
+    const asking = updatesNeedingTrust(ups);
+    const body = updateAllBody(doc, host, ups);
+    let trust: string[] = [];
+    if (asking.length) {
+      const ans = await host.dialog({ title: t("ext.updateAllTitle"), body, ok: t("ext.updateAllOthers"), kind: "ext-update-all",
+        choices: [{ key: "all", label: t("ext.updateAllTrust"), title: t("ext.powers") }] });
+      if (!ans.ok) return;
+      if (ans.choice === "all") trust = asking.map((u) => u.id);
+    } else {
+      const ans = await host.dialog({ title: t("ext.updateAllTitle"), body, ok: t("ext.updateAll"), kind: "ext-update-all" });
+      if (!ans.ok) return;
+    }
+    host.toast(t("ext.updating"));
+    const res = await state.updateAll(trust);
+    if (!res.ok) { host.toast(failText(res, lang)); return; }
+    const out = res.j.result;
+    const msg = t("ext.updatedAll", { n: String(out.updated.length), w: String(out.needs_trust.length), f: String(out.failed.length) });
+    host.toast(msg);
+    host.log(msg);
+    for (const u of out.updated) host.log(t("ext.updatedOne", { id: u.id, old: u.from, v: u.to }));
+    for (const u of out.needs_trust) host.log(problemText(u.problem, lang));
+    for (const f of out.failed) host.log(`${f.id}: ${f.problems.map((p) => problemText(p, lang)).join(" · ")}`);
+    await state.refresh();
+    await state.refreshRepos();
+    host.afterChange();
+    repaint();
   }
 
   async function act(p: Promise<{ ok: true } | { ok: false; error: string; problems: ExtProblem[] }>, done: string): Promise<void> {
@@ -349,6 +517,9 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     tools.append(btn(t("ext.repoAdd"), "repo-add", () => void addRepoFlow(doc, host, state, repaint), t("ext.repoAddHint")));
     if (state.repos.length)
       tools.append(" ", btn(t("ext.repoSyncAll"), "repo-sync-all", () => void syncFlow(), t("ext.repoSyncHint")));
+    // MICRO-PL23 · «Aggiorna tutto»
+    if ((state.updates ?? []).length && !host.updatesWhy?.())
+      tools.append(" ", btn(t("ext.updateAllN", { n: String(state.updates.length) }), "update-all", () => void updateAllFlow(), t("ext.updateAllHint")));
     sec.appendChild(tools);
     if (!state.repos.length) sec.appendChild(el("p", "cw-hint", t("ext.reposNone")));
     for (const r of state.repos) sec.appendChild(repoRow(r));
@@ -360,6 +531,12 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
       if (!offered.length) sec.appendChild(el("p", "cw-hint", t((state.available ?? []).length ? "ext.noneOfKind" : "ext.availNone")));
     }
     for (const a of offered) sec.appendChild(availRow(a));
+    // MICRO-PL23 · what a repository has only for other machines: said, not offered
+    for (const o of state.otherPlatforms ?? []) {
+      const w = el("p", "cw-hint ext-other-platform", problemText(o.problem, lang));
+      w.dataset.extOtherPlatform = `${o.repo}/${o.id}`;
+      sec.appendChild(w);
+    }
     return sec;
   }
 
@@ -692,7 +869,7 @@ async function installCodeFlow(doc: Document, host: ExtWindowHost, state: Extens
 }
 
 /** the removal's body: what goes, what stays, the unticked box of the vocabularies */
-export function removalBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang">, plan: ExtRemovalPlan, part: "all" | "code" | "data"): { body: HTMLElement; purge: () => boolean } {
+export function removalBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang">, plan: ExtRemovalPlan, part: "all" | "code" | "data"): { body: HTMLElement; purge: () => boolean; purgeUserData: () => boolean } {
   const t = host.t, lang = host.lang();
   const el = maker(doc);
   const body = el("div", "ext-remove");
@@ -711,18 +888,140 @@ export function removalBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
     lab.append(cb, ` ${t("ext.vocabPurge", { v: plan.vocabularies_only_here.map((v) => labelIn(v.title as never, lang) || v.id).join(", ") })}`);
     body.appendChild(lab);
   }
-  return { body, purge: () => !!cb?.checked };
+  // MICRO-PL23 · the plugin's own saved state (plugins-data/<id>): stays, unless ticked
+  let ud: HTMLInputElement | null = null;
+  const codeGoes = part === "code" || part === "all" || !!plan.data?.removes_code;
+  if (plan.code && codeGoes && (part !== "code" || !plan.data)) {
+    const lab = el("label", "ext-purge");
+    ud = el("input");
+    ud.type = "checkbox";
+    ud.checked = false;
+    ud.dataset.extPurgeUserData = "1";
+    lab.append(ud, ` ${t("ext.userDataPurge")}`);
+    body.appendChild(lab);
+  }
+  return { body, purge: () => !!cb?.checked, purgeUserData: () => !!ud?.checked };
+}
+
+/** MICRO-PL23 · what «Aggiorna tutto» will do: each update, the ones that ask the trust again first */
+export function updateAllBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang">, ups: ExtUpdate[]): HTMLElement {
+  const t = host.t;
+  const el = maker(doc);
+  const body = el("div", "ext-update-all");
+  const asking = updatesNeedingTrust(ups);
+  body.dataset.extUpdateAll = String(ups.length);
+  if (asking.length) {
+    body.appendChild(el("p", "cw-warn", t("ext.updateAllAsk")));
+    for (const u of asking) {
+      const li = el("div", "ext-version", t("ext.updateTrustLine", { id: u.id, old: u.installed, v: u.version, r: u.repo,
+        c: (u.trust_changes ?? []).map((c) => t(`ext.trustChange.${c}`)).join(", ") }));
+      li.dataset.extUpdateTrust = u.id;
+      body.appendChild(li);
+    }
+  }
+  const quiet = ups.filter((u) => !u.trust_needed);
+  if (quiet.length) {
+    body.appendChild(el("p", "", t("ext.updateAllQuiet")));
+    for (const u of quiet) {
+      const li = el("div", "ext-version", t(u.code_left_out ? "ext.updateLineData" : "ext.updateLine", { id: u.id, old: u.installed, v: u.version, r: u.repo }));
+      li.dataset.extUpdateQuiet = u.id;
+      body.appendChild(li);
+    }
+  }
+  body.appendChild(el("p", "cw-hint", t("ext.updateAllBeside")));
+  return body;
+}
+
+/** MICRO-PL23 · «questo file usa stat 1.0.0, c'è la 1.1.0» in the window */
+export function newerBlock(doc: Document, host: ExtWindowHost, state: ExtensionsState, repaint: () => void): HTMLElement {
+  const t = host.t, lang = host.lang();
+  const el = maker(doc);
+  const box = el("div", "ext-missing ext-newer");
+  box.dataset.extNewer = String(state.newer.length);
+  box.appendChild(el("div", "ext-missing-h", t("ext.newerHead", { f: host.fileName() ?? "—" })));
+  for (const n of state.newer) {
+    const r = el("div", "ext-missing-row");
+    r.dataset.extNewerIri = n.iri;
+    r.dataset.extNewerChange = n.change;
+    r.append(problemText(n.problem, lang), " ");
+    const b = (label: string, key: string, fn: () => void) => {
+      const x = el("button", "cw-mini", label);
+      x.type = "button";
+      x.dataset.ext = key;
+      x.onclick = fn;
+      return x;
+    };
+    if (n.ask_content) r.append(b(t("ext.newerWhat"), "newer-what", () => void newerFlow(doc, host, state, n, repaint, true)), " ");
+    if (host.redeclare) r.append(b(t("ext.newerRedeclare", { v: n.newest }), "redeclare", () => void newerFlow(doc, host, state, n, repaint, n.ask_content)));
+    box.appendChild(r);
+  }
+  box.appendChild(el("p", "cw-hint", t("ext.newerHint")));
+  return box;
+}
+
+/** what changes from the declared version to the newer (a major): the CHANGELOG, or that there is none */
+export function changelogBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang">, n: ExtNewer): HTMLElement {
+  const t = host.t, lang = host.lang();
+  const el = maker(doc);
+  const body = el("div", "ext-changelog");
+  body.dataset.extChangelog = n.changelog ? n.changelog.sections.join(",") || "all" : "none";
+  body.appendChild(el("p", "cw-warn", problemText(n.problem, lang)));
+  if (n.changelog) {
+    const pre = el("pre", "ext-changelog-text", n.changelog.text);
+    body.appendChild(pre);
+    if (n.changelog.truncated) body.appendChild(el("p", "cw-hint", t("ext.changelogCut")));
+  } else body.appendChild(el("p", "cw-hint", t("ext.changelogNone", { id: n.name })));
+  body.appendChild(el("p", "cw-hint", t("ext.newerKeep", { v: n.declared })));
+  return body;
+}
+
+export async function newerFlow(doc: Document, host: ExtWindowHost, _state: ExtensionsState, n: ExtNewer, repaint: () => void, show: boolean): Promise<void> {
+  const t = host.t;
+  if (show) {
+    const ans = await host.dialog({ title: t("ext.newerTitle", { id: n.name, old: n.declared, v: n.newest }), body: changelogBody(doc, host, n),
+      ok: host.redeclare ? t("ext.newerRedeclare", { v: n.newest }) : null, kind: "ext-newer", cancel: t("ext.newerKeepBtn") });
+    if (!ans.ok) return;
+  }
+  if (!host.redeclare) return;
+  const err = await host.redeclare(n);
+  if (err) { host.toast(err); return; }
+  repaint();
+}
+
+/** MICRO-PL23 · «Pulisci…»: what nothing owns, said, then removed */
+async function cleanFlow(doc: Document, host: ExtWindowHost, state: ExtensionsState, repaint: () => void): Promise<void> {
+  const t = host.t, lang = host.lang();
+  const el = maker(doc);
+  const found = await state.clean(true);
+  if (!found.ok) { host.toast(failText(found, lang)); return; }
+  const c = found.j.clean;
+  if (!c.count) { host.toast(t("ext.cleanNothing")); return; }
+  const body = el("div", "ext-clean");
+  body.dataset.extClean = String(c.count);
+  body.appendChild(el("p", "", t("ext.cleanWhat", { n: String(c.count) })));
+  const ul = el("ul", "ext-perms");
+  for (const x of [...c.code, ...c.partial, ...c.archives]) ul.appendChild(el("li", "", x.path));
+  body.appendChild(ul);
+  body.appendChild(el("p", "cw-hint", t("ext.cleanKeeps")));
+  const ans = await host.dialog({ title: t("ext.cleanTitle"), body, ok: t("ext.cleanOk"), kind: "ext-clean", danger: true });
+  if (!ans.ok) return;
+  const res = await state.clean(false);
+  if (!res.ok) { host.toast(failText(res, lang)); return; }
+  const msg = t("ext.cleaned", { n: String(res.j.clean.count) });
+  host.toast(msg);
+  host.log(msg);
+  repaint();
 }
 
 async function removeFlow(doc: Document, host: ExtWindowHost, state: ExtensionsState, r: ExtRow, part: "all" | "code" | "data", repaint: () => void): Promise<void> {
   const t = host.t, lang = host.lang();
   const plan = await state.removalPlan(r.id);
   if (!plan.ok) { host.toast(failText(plan, lang)); return; }
-  const { body, purge } = removalBody(doc, host, plan.j.plan, part);
+  const { body, purge, purgeUserData } = removalBody(doc, host, plan.j.plan, part);
   const needs = part !== "code" && !!plan.j.plan.data?.required_by.length;
   const ans = await host.dialog({ title: t(`ext.removeTitle.${part}`), body, ok: t(`ext.removeOk.${part}`), kind: `ext-remove-${part}`, danger: true });
   if (!ans.ok) return;
-  const res = await state.remove(r.id, part, { confirm: needs, purge: purge() });
+  const res = await state.remove(r.id, part, { confirm: needs, purge: purge(), purgeUserData: purgeUserData() });
   if (!res.ok) { host.toast(failText(res, lang)); return; }
   const msg = t(`ext.removed.${part}`, { id: r.id });
   host.toast(msg);

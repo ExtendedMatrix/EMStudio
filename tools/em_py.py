@@ -96,7 +96,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: the bridge's level these routes came with (``BRIDGE_LEVEL`` in em_bridge.py)
-LEVEL = 85  # 85: the level moved with the repositories (MICRO-PL22); the /py/* routes unchanged
+LEVEL = 86  # 86: the level moved with the updates (MICRO-PL23); 85: with the repositories (MICRO-PL22); the /py/* routes unchanged
 TOKEN_ENV = "EM_BRIDGE_TOKEN"
 #: D-8 · the code of an act kept in its DTC node up to this many bytes
 CODE_MAX = 4096

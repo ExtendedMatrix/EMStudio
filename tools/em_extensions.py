@@ -39,6 +39,22 @@ POST /extensions/repos/preview {repo, id, version?}
                                           → {ok, preview}       (downloaded, checked against archive_hash, + plan)
 POST /extensions/repos/install {repo, id, version?, parts, trust, with_requires, trust_requires}
                                           → {ok, result}
+MICRO-PL23 (X3) · UPDATES, versions side by side, clean removal (s3dgraphy.extensions.lifecycle):
+GET  /extensions/versions?id=            → {ok, versions}       (data and code versions on disk, the active one)
+GET  /extensions/leftovers               → {ok, leftovers}      (what nothing in the register owns)
+POST /extensions/updates  {read?}        → {ok, check}          («Controlla aggiornamenti»: http(s) only when online;
+                                                                  each with trust_needed, said BEFORE «Aggiorna tutto»)
+POST /extensions/update-all {trust: [ids], read?}
+                                          → {ok, result}         (updated, needs_trust, failed)
+POST /extensions/use      {id, version, source?, trust?}
+                                          → {ok, used}           (an older code made active again, no download)
+POST /extensions/prune    {id}           → {ok, removed}        (the old code versions; the active one stays)
+POST /extensions/clean    {dry_run?}     → {ok, clean}
+POST /extensions/remove   … part: code + version → that version only; purge_user_data
+POST /profiles/redeclare  {declared, ref, version}
+                                          → {ok, declared}       (the answer «aggiorna la dichiarazione»)
+/profiles/overlay answers also ``newer``: the declared packages with a newer
+version here («questo file usa stat 1.0.0, c'è la 1.1.0», a major with its CHANGELOG).
 GET  /profiles/installed                 → {ok, profiles: [...]}  (every version, the index's rows)
 POST /profiles/overlay {declared: header.profiles, lang, installed?: bool}
                                           → {ok, overlay, missing, problems, declared_active}
@@ -171,6 +187,10 @@ def get(route: str, q: Dict[str, List[str]]) -> Tuple[int, Dict[str, Any]]:
             return 200, {"ok": True, **_plain(got), "updates": _plain(E.updates())}
         if route == "/profiles/installed":
             return 200, {"ok": True, "profiles": _plain(_P().installed())}
+        if route == "/extensions/versions":
+            return 200, {"ok": True, "versions": _plain(E.versions(one("id")))}
+        if route == "/extensions/leftovers":
+            return 200, {"ok": True, "leftovers": _plain(E.leftovers())}
     except ImportError as exc:
         return 501, {"ok": False, "error": f"s3dgraphy without extensions: {exc}"}
     except ValueError as exc:
@@ -230,8 +250,13 @@ def _overlay(body: Dict[str, Any]) -> Dict[str, Any]:
         else:
             entry["compiled_doc"] = doc
             entry["vocabularies"] = _form_vocabularies(doc)
+    # MICRO-PL23 (X3) · «questo file usa stat 1.0.0, c'è la 1.1.0»
+    try:
+        newer = _E().document_updates(body.get("declared") or [])
+    except AttributeError:      # an s3dgraphy before X3
+        newer = []
     return {"ok": True, "overlay": _plain(out), "missing": _plain(missing),
-            "problems": [p.as_dict() for p in problems]}
+            "problems": [p.as_dict() for p in problems], "newer": _plain(newer)}
 
 
 def _st_packages():
@@ -480,6 +505,24 @@ def post(route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
             return 200, {"ok": True, "installed": _plain(E.install_code(ref, trust=bool(body.get("trust"))))}
         if route.startswith("/extensions/repos/") or route == "/extensions/online":
             return _repos(E, route, body)
+        # MICRO-PL23 (X3) · updates, versions side by side, clean removal
+        if route == "/extensions/updates":
+            return 200, {"ok": True, "check": _plain(E.check_updates(read=bool(body.get("read"))))}
+        if route == "/extensions/update-all":
+            trust = [str(x) for x in (body.get("trust") or []) if x]
+            return 200, {"ok": True, "result": _plain(E.update_all(trust=trust, read=bool(body.get("read"))))}
+        if route == "/extensions/use":
+            return 200, {"ok": True, "used": _plain(E.use_code(str(body.get("id") or ""), str(body.get("version") or ""),
+                                                                source=body.get("source") or None,
+                                                                trust=bool(body.get("trust"))))}
+        if route == "/extensions/prune":
+            return 200, {"ok": True, "removed": _plain(E.prune_code(str(body.get("id") or "")))}
+        if route == "/extensions/clean":
+            return 200, {"ok": True, "clean": _plain(E.clean(dry_run=bool(body.get("dry_run"))))}
+        if route == "/profiles/redeclare":
+            return 200, {"ok": True, "declared": _plain(E.redeclare(body.get("declared") or [],
+                                                                    str(body.get("ref") or ""),
+                                                                    str(body.get("version") or "")))}
         if route == "/extensions/enable":
             return 200, {"ok": True, "enabled": _plain(E.enable(str(body.get("id") or ""),
                                                                body.get("version") or None))}
@@ -490,13 +533,16 @@ def post(route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
             part = str(body.get("part") or "all")
             confirm = bool(body.get("confirm"))
             purge = bool(body.get("purge_vocabularies"))
-            if part == "code":
-                out = E.remove_code(eid)
+            purge_ud = bool(body.get("purge_user_data"))
+            if part == "code" and body.get("version"):
+                out = E.remove_version(eid, "code", str(body["version"]), source=body.get("source") or None)
+            elif part == "code":
+                out = E.remove_code(eid, purge_user_data=purge_ud)
             elif part == "data":
                 out = E.remove_data(eid, version=body.get("version") or None, confirm=confirm,
-                                    purge_vocabularies=purge)
+                                    purge_vocabularies=purge, purge_user_data=purge_ud)
             elif part == "all":
-                out = E.remove(eid, confirm=confirm, purge_vocabularies=purge)
+                out = E.remove(eid, confirm=confirm, purge_vocabularies=purge, purge_user_data=purge_ud)
             else:
                 return 400, {"ok": False, "error": "part: all | code | data"}
             return 200, {"ok": True, "removed": _plain(out)}

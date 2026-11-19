@@ -35,6 +35,8 @@ export interface ExtCodeSection {
   capabilities?: string[];
   commands?: Array<{ id: string; label?: Record<string, string> | string; in?: string[]; writes?: boolean }>;
   active?: boolean;
+  /** where activation lives (enabled.json): the version active now */
+  active_version?: string | null;
   verified?: boolean;
   trusted?: unknown;
   reason?: ExtProblem | null;
@@ -116,7 +118,32 @@ export interface ExtAvailable {
   sections?: Record<string, unknown>; installed: string | null; update: boolean; same_source: boolean;
 }
 export interface ExtBlocked { repo: string; id: string; reason?: string; reason_it?: string; problem: ExtProblem }
-export interface ExtUpdate { id: string; repo: string; installed: string; version: string }
+export interface ExtUpdate { id: string; repo: string; installed: string; version: string;
+  /** MICRO-PL23 · from «Controlla aggiornamenti»: «Aggiorna» would ask the trust again, and why */
+  trust_needed?: boolean; trust_changes?: string[]; code?: boolean; code_left_out?: boolean }
+/** MICRO-PL23 (X3) · what a repository has only for other machines */
+export interface ExtOtherPlatform { repo: string; id: string; platforms: string[]; platform: string; problem: ExtProblem }
+/** MICRO-PL23 · the versions of an extension side by side */
+export interface ExtVersions {
+  id: string; name?: unknown; source?: string; code_version: string | null; can_go_back: boolean;
+  data: Array<{ version: string; path: string; digest?: string; installed_at?: string; newest: boolean }>;
+  code: Array<{ version: string; source: string; path: string; active: boolean; registered: boolean; installed_at?: string;
+    platform?: string; wheels_skipped?: string[] }>;
+}
+/** MICRO-PL23 · «Aggiorna tutto»'s answer */
+export interface ExtUpdateAll {
+  updated: Array<{ id: string; repo: string; from: string; to: string; status?: string; data?: string; code?: string; warnings?: ExtProblem[] }>;
+  needs_trust: Array<ExtUpdate & { problem: ExtProblem }>;
+  failed: Array<{ id: string; repo: string; version: string; problems: ExtProblem[] }>;
+  up_to_date: boolean;
+}
+/** MICRO-PL23 · «questo file usa stat 1.0.0, c'è la 1.1.0» */
+export interface ExtNewer {
+  iri: string; name: string; declared: string; newest: string; change: "patch" | "minor" | "major" | "prerelease" | string;
+  ask_content: boolean; declared_installed?: boolean; problem: ExtProblem;
+  changelog?: { file: string; sections: string[]; text: string; truncated: boolean } | null;
+}
+export interface ExtLeftovers { code: Array<{ path: string }>; partial: Array<{ path: string }>; archives: Array<{ path: string }>; count: number }
 /** what installing from a repository brings: the requirements first, the offers said, tier C */
 export interface ExtPlan {
   repo: string; id: string; version: string; ok: boolean; online_access: boolean; cycle: string[] | null;
@@ -411,6 +438,23 @@ export function declareProfiles(declared: unknown, graphs: Array<{ nodes?: NodeL
 export function missingProfiles(missing: Array<{ iri: string; version?: string }> | null): DeclaredProfile[] {
   return missing ? declaredOf(missing) : [];
 }
+/** MICRO-PL23 · the answer «aggiorna la dichiarazione»: `header.profiles` with
+ *  `iri` declared at `version`, the rest kept in its order (the twin of
+ *  `s3dgraphy.extensions.redeclare`, which also checks the version is here) */
+export function redeclareProfiles(declared: unknown, iri: string, version: string): DeclaredProfile[] {
+  const out: DeclaredProfile[] = [];
+  let done = false;
+  for (const e of declaredOf(declared)) {
+    if (e.iri === iri) { if (!done) { out.push({ iri, version }); done = true; } continue; }
+    out.push(e);
+  }
+  if (!done) out.push({ iri, version });
+  return out;
+}
+/** MICRO-PL23 · the updates «Aggiorna tutto» would leave waiting: they ask the trust again */
+export function updatesNeedingTrust(updates: ExtUpdate[]): ExtUpdate[] {
+  return updates.filter((u) => u.trust_needed);
+}
 /** a package's short name from its IRI: «…/profile/esempio-statuaria» → «esempio-statuaria» */
 export function nameOfIri(iri: string): string {
   return iri.replace(/\/+$/, "").split("/").pop() || iri;
@@ -452,6 +496,12 @@ export class ExtensionsState {
   overlay: OverlayDoc | null = null;
   /** the packages the open document declares and this machine has not */
   missing: DeclaredProfile[] = [];
+  /** MICRO-PL23 · the declared packages with a newer version here (the bridge's `newer`, level 86) */
+  newer: ExtNewer[] = [];
+  /** MICRO-PL23 · what the repositories have only for other machines */
+  otherPlatforms: ExtOtherPlatform[] = [];
+  /** MICRO-PL23 · the versions of the rows opened in the window («Versioni»), by id */
+  versions: Record<string, ExtVersions | { error: string }> = {};
   /** the declaration the overlay was asked for (the same → not asked again) */
   private overlayKey = "";
   rev = 0;
@@ -504,10 +554,10 @@ export class ExtensionsState {
     const key = JSON.stringify([declared, this.host.lang(), this.rev]);
     if (!force && key === this.overlayKey) return;
     this.overlayKey = key;
-    const r = await this.call<{ overlay: OverlayDoc; missing: Array<{ iri: string; version?: string }>; problems: ExtProblem[] }>(
+    const r = await this.call<{ overlay: OverlayDoc; missing: Array<{ iri: string; version?: string }>; problems: ExtProblem[]; newer?: ExtNewer[] }>(
       "/profiles/overlay", { declared, lang: this.host.lang() });
-    if (r.ok) { this.overlay = r.j.overlay; this.missing = missingProfiles(r.j.missing); }
-    else { this.overlay = null; this.missing = []; }
+    if (r.ok) { this.overlay = r.j.overlay; this.missing = missingProfiles(r.j.missing); this.newer = r.j.newer ?? []; }
+    else { this.overlay = null; this.missing = []; this.newer = []; }
     this.host.overlayChanged(this.overlay);
   }
 
@@ -518,8 +568,8 @@ export class ExtensionsState {
     this.repos = r.j.repositories;
     this.online = r.j.online;
     this.officialUrl = r.j.official_url;
-    const a = await this.call<{ available: ExtAvailable[]; blocked: ExtBlocked[]; updates: ExtUpdate[] }>("/extensions/available");
-    if (a.ok) { this.available = a.j.available; this.blocked = a.j.blocked; this.updates = a.j.updates; }
+    const a = await this.call<{ available: ExtAvailable[]; blocked: ExtBlocked[]; updates: ExtUpdate[]; other_platforms?: ExtOtherPlatform[] }>("/extensions/available");
+    if (a.ok) { this.available = a.j.available; this.blocked = a.j.blocked; this.updates = a.j.updates; this.otherPlatforms = a.j.other_platforms ?? []; }
     this.rev++;
     this.host.changed();
   }
@@ -555,8 +605,30 @@ export class ExtensionsState {
   enable(id: string, version?: string) { return this.call<{ enabled: unknown }>("/extensions/enable", { id, version }); }
   disable(id: string) { return this.call<{ disabled: boolean }>("/extensions/disable", { id }); }
   removalPlan(id: string) { return this.call<{ plan: ExtRemovalPlan }>(`/extensions/removal-plan?id=${encodeURIComponent(id)}`); }
-  remove(id: string, part: "all" | "code" | "data", o: { version?: string; confirm?: boolean; purge?: boolean } = {}) {
+  remove(id: string, part: "all" | "code" | "data", o: { version?: string; source?: string; confirm?: boolean; purge?: boolean; purgeUserData?: boolean } = {}) {
     return this.call<{ removed: Record<string, unknown> }>("/extensions/remove",
-      { id, part, version: o.version, confirm: !!o.confirm, purge_vocabularies: !!o.purge });
+      { id, part, version: o.version, source: o.source, confirm: !!o.confirm, purge_vocabularies: !!o.purge,
+        purge_user_data: !!o.purgeUserData });
+  }
+  // ── MICRO-PL23 (X3) · updates, versions side by side, clean removal ──
+  async loadVersions(id: string): Promise<void> {
+    const r = await this.call<{ versions: ExtVersions }>(`/extensions/versions?id=${encodeURIComponent(id)}`);
+    this.versions[id] = r.ok ? r.j.versions : { error: r.problems.length ? r.problems.map((p) => p[this.host.lang().startsWith("it") ? "it" : "en"]).join(" · ") : r.error };
+    this.rev++;
+    this.host.changed();
+  }
+  checkUpdates(read = false) {
+    return this.call<{ check: { updates: ExtUpdate[]; repositories: ExtSyncAnswer["repositories"]; online_access: boolean } }>("/extensions/updates", { read });
+  }
+  updateAll(trust: string[]) { return this.call<{ result: ExtUpdateAll }>("/extensions/update-all", { trust }); }
+  useCode(id: string, version: string, o: { source?: string; trust?: boolean } = {}) {
+    return this.call<{ used: { version: string; previous?: string; restart?: boolean; warnings?: ExtProblem[] } }>("/extensions/use",
+      { id, version, source: o.source, trust: !!o.trust });
+  }
+  prune(id: string) { return this.call<{ removed: { code_removed: string[] } }>("/extensions/prune", { id }); }
+  leftovers() { return this.call<{ leftovers: ExtLeftovers }>("/extensions/leftovers"); }
+  clean(dryRun: boolean) { return this.call<{ clean: ExtLeftovers & { removed: boolean } }>("/extensions/clean", { dry_run: dryRun }); }
+  redeclare(declared: DeclaredProfile[], ref: string, version: string) {
+    return this.call<{ declared: DeclaredProfile[] }>("/profiles/redeclare", { declared, ref, version });
   }
 }
