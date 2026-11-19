@@ -175,6 +175,11 @@ ok(/frame: "model" \| "layer";/.test(pcs), "the geometry's frame «layer»");
 const i18n = fs.readFileSync(`${SRC}i18n.ts`, "utf8");
 const keys = [...new Set([...pls.matchAll(/t\("(plyr\.[a-z_.]+)"/g)].map((m) => m[1]))];
 for (const k of ["plyr.mode.all", "plyr.mode.one", "plyr.mode.up_to", "plyr.local.no_origin", "plyr.local.no_scene_frame", "plyr.local.other_crs"]) keys.push(k);
+// MICRO-GEO15: the cursor over the scene goes to the stack with the most slices, not the first one
+ok(/\.reduce<typeof ls\[number\] \| undefined>\(\(best, x\) => !best \|\| horizontalsOf\(x\.layer\)\.length > horizontalsOf\(best\.layer\)\.length \? x : best, undefined\)/.test(pls), "the depth cursor takes the stack with the most slices");
+// MICRO-GEO15: «1 fetta», not «1 fette» — the count picks one or other
+for (const k of ["slices", "sections"]) for (const n of ["one", "other"]) keys.push(`plyr.planes.${k}.${n}`);
+ok(/t\(`plyr\.planes\.\$\{k\}\.\$\{n === 1 \? "one" : "other"\}`/.test(pls), "the row counts slices and sections in the singular for one");
 for (const k of keys) eq(i18n.split(`"${k}":`).length - 1, 2, `${k} in EN and IT`);
 
 console.log(`check-plugin-layers: ${checks} checks ok`);

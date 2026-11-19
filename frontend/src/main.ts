@@ -18115,7 +18115,7 @@ document.getElementById("btn-reveal-doc")?.addEventListener("click", () => { voi
 // MICRO-E p.1 · File ▸ Porta dentro… (the system's selector, several files)
 document.getElementById("btn-porta-dentro")?.addEventListener("click", () => { void doorFromMenu(); });
 // MICRO-GEO09 · File ▸ Porta dentro una cartella… (a stack of slices: read by a plugin's reader of folders)
-document.getElementById("btn-porta-dentro-cartella")?.addEventListener("click", () => { void doorFolderFromMenu(); });
+document.getElementById("btn-porta-dentro-cartella")?.addEventListener("click", () => { void doorFolderFromMenu(); });  // ALLOW-IT: an element id (as btn-porta-dentro), not words on screen
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");

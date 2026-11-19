@@ -583,7 +583,8 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     return { x0: j.x0, y0: j.y0, step: j.step, nx: j.nx, ny: j.ny, heights: j.heights };
   };
 
-  // the depth cursor over the scene: the first stack drawn one at a time / down to
+  // the depth cursor over the scene: of the stacks drawn one at a time / down to, the one with the most
+  // slices (the first on a tie) — UA Ilici's sectors of two products must not take it from Alcudia's 601
   const hud = document.createElement("div");
   hud.className = "plg-depth hidden";
   hud.dataset.plgDepth = "";
@@ -599,7 +600,8 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
 
   const drawHud = () => {
     const ls = d.layers();
-    const p = ls.find((x) => !pref(layerKey(x)).hidden && modeOf(x.layer, pref(layerKey(x))) !== "all" && horizontalsOf(x.layer).length > 1);
+    const p = ls.filter((x) => !pref(layerKey(x)).hidden && modeOf(x.layer, pref(layerKey(x))) !== "all" && horizontalsOf(x.layer).length > 1)
+      .reduce<typeof ls[number] | undefined>((best, x) => !best || horizontalsOf(x.layer).length > horizontalsOf(best.layer).length ? x : best, undefined);
     if (!p) { hud.classList.add("hidden"); hud.dataset.plgKey = ""; return; }
     const k = layerKey(p);
     const hs = horizontalsOf(p.layer);
@@ -829,7 +831,8 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
       const info = document.createElement("small");
       const s = st.find((x) => x.key === k);
       const at = cursorOf(l, pf);
-      const bits = [t("plyr.planes", { h: String(hs.length), v: String(vs.length) })];
+      const many = (k: string, n: number) => t(`plyr.planes.${k}.${n === 1 ? "one" : "other"}`, { n: String(n) });
+      const bits = [`${many("slices", hs.length)}, ${many("sections", vs.length)}`];
       if (hs.length && modeOf(l, pf) !== "all") bits.push(l.items[hs[at]]?.label ?? "");
       if (s?.how === "local") bits.push(t(`plyr.local.${String(s.why ?? "no_origin")}`));
       if (s?.ground === "draped") bits.push(t("plyr.draped"));
