@@ -2607,7 +2607,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: sample by level (and the largest of each level), the rest estimated
 #: (``estimated``), ``{tiles_full: true}`` reads all; one measure per (path,
 #: size, mtime) at a time, kept on disk, stopped when no page waits for it.
-BRIDGE_LEVEL = 80   # 80 = POST /profiles/overlay verifies a package's compiled sheets (stratigraph-templates packages.verify_compiled: the file's digest against forms[].digest, header.digest against the content, id, version) and gives `compiled_doc` only to a verified one, with `verified`, `compiled_problems` and `vocabularies` (the package's own schemes the sheet names, their concepts from this machine's vocabulary manager); /extensions/preview and /extensions/install run the same check on the archive (a sheet edited after compiling: data not installable, install refused) (MICRO-PL11); 79 = POST /pose/points, /pose/extractor, /pose/landmark, /pose/compute: an extractor of a community package placed on a model and a landmark set placed point by point (s3dgraphy.annotation.extractors, W3), the declared combiners computed (annotation.combiners, W4), each a delta of the em.json sent (MICRO-PL10); 78 = the extensions of this machine behind /extensions/* (s3dgraphy.extensions, W21: installed with the code's activation, preview, install by parts with the trust answer, install-code, enable, disable, removal-plan, remove code|data|all) and /profiles/* (installed; POST /profiles/overlay: the overlay of a document's header.profiles + the packages installed here, missing, problems) (MICRO-PL09); 77 = the vocabulary MANAGER behind /vocab/* (s3dgraphy.vocabularies, MICRO-PL02): /vocab/installed with versions side by side, carriers and owner; POST /vocab/install takes {path} and a package with em-extension.toml (its [[data.vocabularies]]), answers warnings (duplicates); /vocab/remove {id, version?}; /vocab/fetch-local {file_b64|path} (tier C, the file downloaded by hand, digest checked); POST /vocab/release; GET /vocab/log, /vocab/carried-only-by, /vocab/alignments, POST /vocab/alignments/install|remove; /vocab/concepts answers `aligned` (the concepts a person VERIFIED as matching); 76 = POST /sheet/render takes `records` (a batch: `htmls`, one A4 page per record, and `pdfs` with WeasyPrint) and answers `sides` (MICRO-PL002); 75 = GET /vocab/installed, /vocab/search, /vocab/concepts, /vocab/catalog, /vocab/updates, POST /vocab/install, /vocab/remove, /vocab/fetch-local — the vocabularies installed on this machine, s3dgraphy.authorities.packages (MICRO-U-VOCABOLARI-COME-FONT); 74 = GET /geo/crs-search (a CRS by its code or the words of its name: «Stereo 70» → 3844), GET /geo/datum (the datum of a CRS, the same as another's or not, PROJ's operations to WGS 84 with their accuracy and area, the best at a point), GET /geo/datum-check (s3Dgraphy's normalise_datum_operation and PROJ), POST /geo/frame-fit (a model in its own CRS into its graph's: the affine transform and its residual) (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render (the A4 of a recording sheet: stratigraph-templates' render.sheet_html(mode="print") on the compiled definition the page vendors, the PDF when WeasyPrint is here) (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive ▸ Files ▸ Bucket: the folders and objects of the configured bucket, a page at a time, a search by name; not configured / not reachable said) and /graph/door takes a tileset dropped (its packaging, digest, size; name_only for a drop with no path) (MICRO-F-BUCKET-E-TILESET); 71 = POST /graph/door («Porta dentro…»: files into one document, its date always, the epoch it represents to the models — s3Dgraphy door.bring_in, a delta) and POST /graph/master (a model's master replaced — the DTC records it with a transformation, the old master stays with its documents, its versions «da rigenerare» — or a version promoted to master: s3Dgraphy resources.master_swap, a delta) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = POST /gis/raster-grid (a georeferenced picture — GeoTIFF, JPEG/PNG with a world file — laid in the scene's CRS: its grid of nodes converted by PROJ, «convertito da EPSG:a a EPSG:b»), /gis/features takes shift and group_key (a DXF: its frame's shift, its layers as groups), POST /graph/gis-document (files brought in as the SHEETS of one document: a new D.nn or an existing one, its RMDoc, the licence on the document — s3Dgraphy gis.add_gis_document, a delta), /gis/inspect reads a DXF and a picture with a world file, /graph/publishable (the nodes «uso di studio, non pubblicabile», own or inherited) (MICRO-D-GIS-DOCUMENTI); 69 = POST /graph/epoch-move (a selection moved or extended to an epoch: s3Dgraphy epoch_scope.plan_epoch_move, the plan for the page to write), POST /graph/model-kind (RM · RMDoc · RMSF: plan_model_kind), POST /graph/container-links (the four bonds and their suggestions), /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
+BRIDGE_LEVEL = 81   # 81 = the Python session behind /py/* (em_py: /py/session, /py/run, /py/resume, /py/complete, /py/events, /py/close — the EMStudio host of s3Dgraphy's em, each em.write a delta for ONE undo step with its DTC process and the code that ran), only with the secret the desktop shell gives the bridge (EM_BRIDGE_TOKEN → Authorization: Bearer; no secret, the routes stay closed); the routes of before untouched; a table of routes consulted before the chains of `if` (MICRO-PL15); 80 = POST /profiles/overlay verifies a package's compiled sheets (stratigraph-templates packages.verify_compiled: the file's digest against forms[].digest, header.digest against the content, id, version) and gives `compiled_doc` only to a verified one, with `verified`, `compiled_problems` and `vocabularies` (the package's own schemes the sheet names, their concepts from this machine's vocabulary manager); /extensions/preview and /extensions/install run the same check on the archive (a sheet edited after compiling: data not installable, install refused) (MICRO-PL11); 79 = POST /pose/points, /pose/extractor, /pose/landmark, /pose/compute: an extractor of a community package placed on a model and a landmark set placed point by point (s3dgraphy.annotation.extractors, W3), the declared combiners computed (annotation.combiners, W4), each a delta of the em.json sent (MICRO-PL10); 78 = the extensions of this machine behind /extensions/* (s3dgraphy.extensions, W21: installed with the code's activation, preview, install by parts with the trust answer, install-code, enable, disable, removal-plan, remove code|data|all) and /profiles/* (installed; POST /profiles/overlay: the overlay of a document's header.profiles + the packages installed here, missing, problems) (MICRO-PL09); 77 = the vocabulary MANAGER behind /vocab/* (s3dgraphy.vocabularies, MICRO-PL02): /vocab/installed with versions side by side, carriers and owner; POST /vocab/install takes {path} and a package with em-extension.toml (its [[data.vocabularies]]), answers warnings (duplicates); /vocab/remove {id, version?}; /vocab/fetch-local {file_b64|path} (tier C, the file downloaded by hand, digest checked); POST /vocab/release; GET /vocab/log, /vocab/carried-only-by, /vocab/alignments, POST /vocab/alignments/install|remove; /vocab/concepts answers `aligned` (the concepts a person VERIFIED as matching); 76 = POST /sheet/render takes `records` (a batch: `htmls`, one A4 page per record, and `pdfs` with WeasyPrint) and answers `sides` (MICRO-PL002); 75 = GET /vocab/installed, /vocab/search, /vocab/concepts, /vocab/catalog, /vocab/updates, POST /vocab/install, /vocab/remove, /vocab/fetch-local — the vocabularies installed on this machine, s3dgraphy.authorities.packages (MICRO-U-VOCABOLARI-COME-FONT); 74 = GET /geo/crs-search (a CRS by its code or the words of its name: «Stereo 70» → 3844), GET /geo/datum (the datum of a CRS, the same as another's or not, PROJ's operations to WGS 84 with their accuracy and area, the best at a point), GET /geo/datum-check (s3Dgraphy's normalise_datum_operation and PROJ), POST /geo/frame-fit (a model in its own CRS into its graph's: the affine transform and its residual) (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render (the A4 of a recording sheet: stratigraph-templates' render.sheet_html(mode="print") on the compiled definition the page vendors, the PDF when WeasyPrint is here) (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive ▸ Files ▸ Bucket: the folders and objects of the configured bucket, a page at a time, a search by name; not configured / not reachable said) and /graph/door takes a tileset dropped (its packaging, digest, size; name_only for a drop with no path) (MICRO-F-BUCKET-E-TILESET); 71 = POST /graph/door («Porta dentro…»: files into one document, its date always, the epoch it represents to the models — s3Dgraphy door.bring_in, a delta) and POST /graph/master (a model's master replaced — the DTC records it with a transformation, the old master stays with its documents, its versions «da rigenerare» — or a version promoted to master: s3Dgraphy resources.master_swap, a delta) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = POST /gis/raster-grid (a georeferenced picture — GeoTIFF, JPEG/PNG with a world file — laid in the scene's CRS: its grid of nodes converted by PROJ, «convertito da EPSG:a a EPSG:b»), /gis/features takes shift and group_key (a DXF: its frame's shift, its layers as groups), POST /graph/gis-document (files brought in as the SHEETS of one document: a new D.nn or an existing one, its RMDoc, the licence on the document — s3Dgraphy gis.add_gis_document, a delta), /gis/inspect reads a DXF and a picture with a world file, /graph/publishable (the nodes «uso di studio, non pubblicabile», own or inherited) (MICRO-D-GIS-DOCUMENTI); 69 = POST /graph/epoch-move (a selection moved or extended to an epoch: s3Dgraphy epoch_scope.plan_epoch_move, the plan for the page to write), POST /graph/model-kind (RM · RMDoc · RMSF: plan_model_kind), POST /graph/container-links (the four bonds and their suggestions), /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb?path=&sha256=: a picture's (or a PDF's first page) thumbnail from the cache shared with EM Tools (~/.em_cache/thumbs, EM_THUMBS_DIR; sha256 key, PNG fitted 256 px), made there when missing; X-EM-Thumb cached|made (MICRO-FOTO-DOCUMENTI-BBOX); 67 = POST /graph/containers takes new_document (a Document born with the container: name, what it documents, date, author, epoch), op document (a Document publishing a container already there) and op align {group, dry_run} (the members' epochs aligned to the container's); /assets/list says each container's check (its document, its epochs, the members out of step) (MICRO-SPAZIO-CONTAINER); 66 = POST /graph/containers (the containers by hand: member, alternative, create, rename, empty, remove, the active alternative — s3Dgraphy's, as a delta) and POST /assets/versions/remove (versions removed where the graph cites them, their textures shared by sha256 kept) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a tileset through one ZipFile, a deflated 3tz member inflated only up to its head; the phase «tiles» n/N with its name; over 50.000 tiles a sample by level (the largest too), «estimated», {tiles_full} reads all; one measure per tileset at a time, kept on disk, stopped when no page waits (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take datum_operation: the GeoPositionNode's declared WGS 84 operation (Metashape: EPSG:1645), said in the answer's datum {operation, declared}, refused when PROJ does not know it; no EGM2008 grid (or ±Infinity) is a refusal (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978: a TRUE ECEF root into the study's CRS, datum shift and EGM2008 geoid, orthometric heights (MICRO-RIFINITURE); 62 = GET /machine/memory: the machine's memory, in all and free — the guard of memory before a model is loaded (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours — the four base GIS formats as resources, drawn in the Space, the ground of the landscape and its contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}: a version made for a use, named by it (s3Dgraphy ≥ MICRO-VERSIONI-PER-USO), apply_use names its file <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path and name (409), POST /jobs {kind: variants, replace}, a variant named after its master — never the chain of its sources' names (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by} and a job's cancel_by: who cancelled it (MICRO-CODA-VISTA); 30 also = /validate
 
 
 def _s3dgraphy_resources_dir() -> str:
@@ -2824,6 +2824,14 @@ def reasoning_records(graph) -> list:
         return []
     from s3dgraphy.property_source import message
     return [{**r, "message": message(r)} for r in api.reasoning_diagnostics(graph)]
+def _py_secret() -> bool:
+    try:
+        import em_py
+        return em_py.has_token()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 _STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 #: MICRO-WINDOWS-MODELLI p.3 · who this bridge is, for the app that finds it on
 #: its port: a desktop's sidecar (and whose), or one started by hand (./dev.sh)
@@ -3222,6 +3230,36 @@ def room_import_get(query):
     return 200, job.view(since)
 
 
+def _py_route(handler, route, raw):
+    """MICRO-PL15 (W12) · /py/* — Python executed in this process: the
+    secret first (em_py.gate: 503 with none configured, 401 a wrong one),
+    then the session's routes."""
+    import em_py
+    refused = em_py.gate(handler.headers.get("Authorization"))
+    if refused is not None:
+        handler._json(refused[1], refused[0])
+        return
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else {}
+    except Exception as exc:
+        handler._fail(400, f"bad JSON: {exc}")
+        return
+    try:
+        status, out = em_py.post(route, body if isinstance(body, dict) else {},
+                                 _emjson_maps, _node_field_changes)
+    except Exception as exc:  # pragma: no cover — surface to the UI
+        import traceback
+        traceback.print_exc()
+        status, out = 500, {"ok": False, "error": f"python session failed: {exc}"}
+    handler._json(out, status)
+
+
+#: MICRO-PL15 · the table of POST routes: route → fn(handler, route, raw).
+#: New routes enter here; the chains of `if` below keep the routes of before.
+POST_ROUTES = {r: _py_route for r in ("/py/session", "/py/run", "/py/resume",
+                                      "/py/complete", "/py/events", "/py/close")}
+
+
 def make_handler(api):
     class Handler(BaseHTTPRequestHandler):
         def send_error(self, code, message=None, explain=None):
@@ -3369,7 +3407,7 @@ def make_handler(api):
             # MICRO-OTTIMIZZA-3 · the conditionals a page may set itself
             self.send_header("Access-Control-Allow-Headers",
                              "Content-Type, X-EM-Filename, Range, X-EM-Path, X-EM-Overwrite, "
-                             "If-None-Match, If-Modified-Since, If-Range")
+                             "If-None-Match, If-Modified-Since, If-Range, Authorization")
             # MICRO-PERCORSI-WINDOWS · `X-EM-File: cloud-only` (a placeholder)
             # MICRO-OTTIMIZZA-3 · `ETag`: the tile cache's key of an archive
             self.send_header("Access-Control-Expose-Headers",
@@ -3406,7 +3444,9 @@ def make_handler(api):
                                    "parent_pid": _SIDECAR["parent_pid"],
                                    # MICRO-BRIDGE-CERTIFICATI · where its HTTPS trust comes from
                                    "tls_ca": "certifi" if em_net.ca_file() else "system",
-                                   "s3dgraphy": _s3dgraphy_identity()}).encode()
+                                   "s3dgraphy": _s3dgraphy_identity(),
+                                   # MICRO-PL15 · the Python routes are open only with a secret
+                                   "py": {"secret": _py_secret()}}).encode()
                 self.send_response(200)
                 self._cors()
                 self.send_header("Content-Type", "application/json")
@@ -3651,6 +3691,13 @@ def make_handler(api):
             route = urllib.parse.urlparse(self.path).path.rstrip("/")
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length) if length else b""
+            # MICRO-PL15 (W12) · the TABLE of routes, consulted before the
+            # chains of `if` (the start of the migration G11/G15 ask for; the
+            # routes of before stay where they are)
+            entry = POST_ROUTES.get(route)
+            if entry is not None:
+                entry(self, route, raw)
+                return
             if route == "/graphml":
                 self._export_graphml(raw)
             elif route == "/import-graphml":
@@ -10254,6 +10301,17 @@ def main() -> int:
     # writes must never cost an answer
     sys.stdout = _SafeStream(sys.stdout)
     sys.stderr = _SafeStream(sys.stderr)
+    # MICRO-PL15 (W12) · the secrets are read ONCE and taken out of the
+    # environment, so code run in this process (the console, a plugin) does
+    # not find them by printing os.environ: the bridge's secret for /py/*,
+    # the LLM key (llm_provider keeps it in memory)
+    import em_py
+    import llm_provider
+    llm_provider.take_env_key()
+    if em_py.take_token():
+        print("  [bridge] /py/* (Python): open to the holder of the secret", file=sys.stderr)
+    else:
+        print("  [bridge] /py/* (Python): CLOSED — no secret (EM_BRIDGE_TOKEN)", file=sys.stderr)
     _SIDECAR["sidecar"] = bool(args.exit_with_parent or args.parent_pid)
     _SIDECAR["parent_pid"] = args.parent_pid
     if args.parent_pid:

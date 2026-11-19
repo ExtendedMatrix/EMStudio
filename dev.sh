@@ -142,6 +142,13 @@ free_port() {
 free_port "$BRIDGE_PORT"
 free_port 5173
 
+# MICRO-PL15 · the secret of the bridge's Python routes (/py/*): one per run,
+# to the bridge in its environment and to the page through Vite
+# (VITE_EM_BRIDGE_TOKEN, read by src/py-session.ts). Kept when already set, so
+# a desktop debug build can share it. Without it /py/* stay closed.
+export EM_BRIDGE_TOKEN="${EM_BRIDGE_TOKEN:-$("$PY" -c 'import secrets; print(secrets.token_hex(32))')}"
+export VITE_EM_BRIDGE_TOKEN="$EM_BRIDGE_TOKEN"
+
 echo "🐍  Bridge:   http://localhost:$BRIDGE_PORT  (GraphML export)"
 "$PY" "$ROOT/tools/em_bridge.py" --port "$BRIDGE_PORT" --s3dgraphy "$S3DGRAPHY_SRC" &
 pids+=("$!")

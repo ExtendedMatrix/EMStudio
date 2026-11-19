@@ -44,6 +44,9 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # "is it newer" is asked of the full version, Cargo's, not of the bundle's.
 tauri-plugin-updater = "2"
 semver = "1"
+# MICRO-PL15 · the bridge's secret: 32 bytes of the OS's randomness (main.rs
+# `new_token`). Already in the lock (tauri uses it): no new crate.
+getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

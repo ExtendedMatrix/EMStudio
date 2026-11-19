@@ -471,7 +471,9 @@ import {
   pathIsDir,
   savePdf,
   printHtml,
+  bridgeToken,
 } from "./tauri";
+import { PySession, pyToken, PY_LEVEL, type PyEvent, type PyStep } from "./py-session";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): the horizons as
 // bands, making room in the epochs, the site and its door (experimental.ts)
 import { EXPERIMENTAL, experimentalStored, setExperimental } from "./experimental";
@@ -4141,6 +4143,7 @@ function sameEdge(a: EmEdge, b: EmEdge): boolean {
 }
 
 function select(nodeId: string | null): void {
+  pyNudge("selection-changed");   // MICRO-PL15 · to a Python listener, if one waits
   scheduleSessionCopy();   // MICRO-MEMORIA-SESSIONE p.2 · the selection is part of the view kept
   // MICRO-LAB orizzonti come bande · a node of a horizon picture is a node of
   // ITS graph: that graph comes in front, the node is selected there
@@ -4334,6 +4337,7 @@ document.addEventListener("emdata:rendered", () => markTableSelection());
 
 /** Replace the selection with a set (marquee result). */
 function selectMany(ids: string[]): void {
+  pyNudge("selection-changed");   // MICRO-PL15
   // MICRO-LAB orizzonti come bande · a marquee over several graphs selects in
   // ONE: the active one if it has some of them, else the one with the most
   if (ids.some((id) => hzOwner(id))) {
@@ -18166,7 +18170,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 80;   // 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 81;   // 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -65415,3 +65419,81 @@ if (!window.__EM_TEST_DATA__ || new URLSearchParams(location.search).has("keepSe
 if (isTauri()) void onDesktopQueue(() => void drainDesktopQueue()).then(() => drainDesktopQueue());
 // MICRO-TILESET-SHIFT-E-EPOCHE p.3 · files and folders dropped from the Finder
 if (isTauri()) void wireDesktopFileDrop();
+
+// ── MICRO-PL15-BRIDGE-PYTHON (W12) · the Python session of the bridge ──────
+//
+// The bridge runs `em` (s3Dgraphy) behind its secret; the document stays here.
+// Each `em.write` comes back as ONE step: its delta (with the act's DTC process
+// and the code that ran, written by the bridge) applied in one batch = one undo
+// step, a Log line with its label. What `em.app` asks is done here in order
+// (py-session.ts). The console that uses it is W13 (behind «Funzioni
+// sperimentali»): until then the session is reached by the hook below, only
+// with the switch on and on a bridge of level 81.
+// `var`, not `let`: select() calls pyNudge and may run while the module is
+// still starting, before this line — a `let` would throw there (TDZ)
+// eslint-disable-next-line no-var
+var py: { session: PySession; st: DocumentStore } | null | undefined;
+
+function pySessionFor(st: DocumentStore): PySession {
+  if (py && py.st === st) return py.session;
+  if (py) void py.session.close();
+  const session = new PySession({
+    base: bridgeUrl,
+    token: () => pyToken(bridgeToken),
+    doc: () => JSON.parse(st.toJSON()),
+    revision: () => st.rev,
+    author: () => editorHand().orcid,
+    lang: () => getLocale(),
+    declared: () => declaredNow(),
+    selection: () => [...selectedIds],
+    applyStep: (step: PyStep) => { applyDelta(st, step.delta, { renameCopies: true }); return st.rev; },
+    log: (level, message, ids) => (level === "error" ? logError : level === "warn" ? logWarn : logInfo)(message, ids),
+    t: (key, vars) => t(key, vars),
+    host: {
+      select: (ids) => { if (ids.length === 1) select(ids[0]); else selectMany(ids); },
+      view: (name) => {
+        const win = windowsOf().find((w) => w.type === name);
+        if (!win) return false;
+        selectWindow(win.id);
+        return true;
+      },
+      notify: (message, level) => { (level === "error" ? logError : level === "warning" ? logWarn : logInfo)(`Python · ${message}`); toast(message); },
+      command: (id) => runCommand(id),
+      camera: () => [...sceneHandles.values()][0]?.camera() ?? null,
+      setCamera: (c) => { const h = [...sceneHandles.values()][0]; if (h && c) h.setCamera(c as Parameters<typeof h.setCamera>[0]); },
+      frame: (ids) => { for (const h of sceneHandles.values()) h.frameKeys(ids.flatMap((id) => [id, `rm:${id}`])); },
+      // the guided pick of the Space driven by Python is W13/W14's: here nothing is placed
+      pick: async () => null,
+    },
+  });
+  st.onChange(() => { if (py?.st === st) pyNudge("graph-changed"); });
+  py = { session, st };
+  return session;
+}
+
+/** An event of the page to the Python listeners — only when one waits for it. */
+const pyPending = new Set<PyEvent>();
+function pyNudge(ev: PyEvent): void {
+  const s = py?.session;
+  if (!s?.id || !(s.listeners[ev] > 0) || (ev === "graph-changed" && s.applying)) return;
+  if (pyPending.has(ev)) return;
+  pyPending.add(ev);
+  setTimeout(() => {
+    pyPending.delete(ev);
+    const payload: Record<string, unknown> = ev === "selection-changed" ? { ids: [...selectedIds] }
+      : ev === "locale-changed" ? { lang: getLocale() } : {};
+    void s.event(ev, payload).catch((e) => logWarn(`Python · ${String((e as Error)?.message ?? e)}`));
+  }, 60);
+}
+onLocaleChange(() => pyNudge("locale-changed"));
+
+if (EXPERIMENTAL)
+  (window as unknown as { __EM_PY__?: unknown }).__EM_PY__ = {
+    level: PY_LEVEL,
+    ready: () => bridgeLevelAtLeast(PY_LEVEL),
+    open: () => (store ? pySessionFor(store).open() : Promise.reject(new Error("no document"))),
+    run: (code: string, opts?: { dryRun?: boolean }) => (store ? pySessionFor(store).run(code, opts) : Promise.reject(new Error("no document"))),
+    complete: (text: string) => (store ? pySessionFor(store).complete(text) : Promise.resolve([])),
+    listeners: () => py?.session.listeners ?? {},
+    close: () => py?.session.close(),
+  };

@@ -111,6 +111,21 @@ def get_provider(name: Optional[str] = None, **opts) -> LLMProvider:
 # endpoint that returns a key, only one that says whether there is one.
 
 _SESSION_KEY: str = ""
+#: MICRO-PL15 · the key the shell put in the environment, taken out of it at
+#: start (`take_env_key`): Python run in this process (the console, a plugin)
+#: must not find it by printing os.environ
+_ENV_KEY: str = ""
+
+
+def take_env_key() -> bool:
+    """Move `$ANTHROPIC_API_KEY` from the environment into this module."""
+    global _ENV_KEY
+    _ENV_KEY = (os.environ.pop("ANTHROPIC_API_KEY", "") or "").strip() or _ENV_KEY
+    return bool(_ENV_KEY)
+
+
+def _env_key() -> str:
+    return _ENV_KEY or os.environ.get("ANTHROPIC_API_KEY", "").strip()
 
 
 def set_session_key(key: str) -> None:
@@ -128,7 +143,7 @@ def api_key_source() -> str:
     """`session` | `env` | `none` — never the key."""
     if _SESSION_KEY:
         return "session"
-    if os.environ.get("ANTHROPIC_API_KEY", "").strip():
+    if _env_key():
         return "env"
     return "none"
 
@@ -140,7 +155,7 @@ def resolve_api_key() -> str:
     into a bridge that is already running, and a provider built a moment
     earlier must still see it.
     """
-    return _SESSION_KEY or os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    return _SESSION_KEY or _env_key()
 
 
 # ── Claude (Anthropic) — the first adapter ────────────────────────────────────

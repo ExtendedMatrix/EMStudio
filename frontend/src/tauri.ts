@@ -227,6 +227,20 @@ export async function transformerUrl(): Promise<string | null> {
   }
 }
 
+/**
+ * MICRO-PL15 (W12) · the secret of the bridge's Python routes (`/py/*`): the
+ * shell made it at launch and gave it to the sidecar it spawned. Null in a
+ * plain browser (py-session.ts then looks for the dev one).
+ */
+export async function bridgeToken(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<string>("bridge_token");
+  } catch {
+    return null;
+  }
+}
+
 // ── the LLM API key (N8) ─────────────────────────────────────────────────────
 //
 // Three calls, and note what is missing: there is no `getLlmKey`. The webview

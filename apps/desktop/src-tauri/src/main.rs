@@ -429,6 +429,49 @@ fn bring_forward(app: &tauri::AppHandle) {
     }
 }
 
+/// MICRO-PL15 (W12) · the bridge's SECRET (REPORT G12). The bridge's `/py/*`
+/// routes execute Python; an Origin check is not enough for that. The shell
+/// makes one secret per launch (32 bytes from the OS), hands it to the sidecar
+/// in its environment (`EM_BRIDGE_TOKEN`, like `EM_BRIDGE_PARENT_PID`: never an
+/// argument a `ps` listing would show) and to the page through `bridge_token`;
+/// the page sends it as `Authorization: Bearer`. The bridge reads it once and
+/// takes it out of its environment. A DEBUG build takes `EM_BRIDGE_TOKEN` from
+/// its own environment when set (16 characters or more), so a desktop under
+/// development can talk to a `./dev.sh` bridge started with the same secret;
+/// a release build always makes its own.
+static BRIDGE_TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn bridge_token_value() -> &'static str {
+    BRIDGE_TOKEN.get_or_init(|| {
+        #[cfg(debug_assertions)]
+        let given = std::env::var("EM_BRIDGE_TOKEN").ok();
+        #[cfg(not(debug_assertions))]
+        let given: Option<String> = None;
+        token_from(given)
+    })
+}
+
+/// The secret: the one given (when long enough), else a new one.
+fn token_from(given: Option<String>) -> String {
+    match given.map(|s| s.trim().to_string()) {
+        Some(t) if t.len() >= 16 => t,
+        _ => new_token(),
+    }
+}
+
+/// 32 bytes of the OS's randomness, in hex.
+fn new_token() -> String {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).expect("the OS gives no randomness");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The page asks for the secret of ITS bridge (the sidecar this shell spawned).
+#[tauri::command]
+fn bridge_token() -> String {
+    bridge_token_value().to_string()
+}
+
 /// Spawn the bundled bridge, injecting the stored API key into its environment.
 ///
 /// The key is passed as an env var and nowhere else: it is not an argument (a
@@ -450,6 +493,8 @@ fn spawn_bridge(app: &tauri::AppHandle) {
     // updater ends the app with `std::process::exit`): an environment variable,
     // so an older sidecar binary is not refused an argument it does not know
     env.insert("EM_BRIDGE_PARENT_PID".to_string(), std::process::id().to_string());
+    // MICRO-PL15 · the secret of the Python routes (see `bridge_token_value`)
+    env.insert("EM_BRIDGE_TOKEN".to_string(), bridge_token_value().to_string());
     match cmd
         .args(["--port", &bridge_port().to_string(), "--exit-with-parent"])
         .envs(env)
@@ -1243,6 +1288,7 @@ fn main() {
         .manage(Pending(Mutex::new(DesktopQueue::default())))
         .invoke_handler(tauri::generate_handler![
             transformer_url,
+            bridge_token,
             take_desktop_queue,
             llm_key_status,
             set_llm_key,
@@ -1374,6 +1420,18 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bridge_token_is_new_each_time_and_long() {
+        let a = token_from(None);
+        let b = token_from(None);
+        assert_eq!(a.len(), 64);
+        assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+        // a short secret given is not taken: a new one is made
+        assert_eq!(token_from(Some("short".into())).len(), 64);
+        assert_eq!(token_from(Some("  a-long-enough-secret ".into())), "a-long-enough-secret");
+    }
 
     #[test]
     fn files_in_args_keeps_existing_files_and_makes_them_absolute() {
