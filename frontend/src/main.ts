@@ -475,7 +475,7 @@ import {
   printHtml,
   bridgeToken,
 } from "./tauri";
-import { PySession, pyToken, PY_COMPUTE_LEVEL, PY_DEV_LEVEL, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep, type PyValueWire } from "./py-session";
+import { PySession, pyToken, wordsOf, PY_COMPUTE_LEVEL, PY_DEV_LEVEL, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep, type PyValueWire } from "./py-session";
 // MICRO-PL16 (W13) · the Python console, behind «Funzioni sperimentali»
 import { consoleContent, newConsoleState, CONSOLE_LEVEL, type ConsoleHost } from "./console-window";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): the horizons as
@@ -66057,7 +66057,8 @@ async function runPluginCommand(c: PluginCommand, ctx: { selection?: string[]; p
     const out = await pySessionFor(st).invoke(c.plugin, c.id, slots);
     if (out.output.trim()) logInfo(`${c.plugin} · ${out.output.trim()}`);
     if (!out.ok) {
-      const msg = t("plg.refused", { label, why: out.error ?? out.status });
+      // the plugin's words in the page's language (an em.EmError carries both: T-6 of PL20)
+      const msg = t("plg.refused", { label, why: wordsOf(out, getLocale().startsWith("it") ? "it" : "en") || out.status });
       logWarn(msg);
       toast(msg);
       return;

@@ -153,12 +153,24 @@ M.renderSectionInto(insp, cmd({ plugin: "a", id: "sec", label: { en: "Face", it:
   onButton: (c) => said.buttons.push(c.id), pluginName: "A", mark: "", provenance: "", readOnly: true });
 eq([insp.querySelector("h3.insp-sect")?.firstChild?.textContent, insp.querySelector(".plg-why")?.textContent], ["Volto", "rotto"], "a section: h3.insp-sect, its reason when not computed");
 ok(insp.querySelector('[data-run="plugin:a/go"]')?.disabled, "a writing button off in a read-only room");
+{
+  const none = document.createElement("div");
+  const sctx = (value, buttons = []) => ({ lang: "en", t: tt, value, buttons, onButton: () => {}, pluginName: "A", mark: "", provenance: "", readOnly: false });
+  M.renderSectionInto(none, cmd({ plugin: "a", id: "sec" }), sctx({ ok: true, value: [] }));
+  eq(none.childNodes.length, 0, "a section with no rows and no buttons is not drawn (nothing to say of this node)");
+  M.renderSectionInto(none, cmd({ plugin: "a", id: "sec" }), sctx({}));
+  ok(none.querySelector(".plg-pending"), "…while it is computed, it is (it may have rows)");
+  const withBtn = document.createElement("div");
+  M.renderSectionInto(withBtn, cmd({ plugin: "a", id: "sec" }), sctx({ ok: true, value: [] }, [cmd({ plugin: "a", id: "go", label: { en: "Go" } })]));
+  ok(withBtn.querySelector(".plg-empty") && withBtn.querySelector('[data-run="plugin:a/go"]'), "…with a button, drawn and «nothing to show»");
+}
 
 // ── the wiring ──────────────────────────────────────────────────────────────
 const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const main = read("frontend/src/main.ts"), bridge = read("tools/em_bridge.py"), emPy = read("tools/em_py.py"), ws = read("frontend/src/workspace.ts");
 const shell = read("frontend/src/shell/types.ts"), emdata = read("frontend/src/emdata.ts"), html = read("frontend/index.html"), i18n = read("frontend/src/i18n.ts");
 const surfaces = read("frontend/src/plugin-surfaces.ts");
+ok(/wordsOf\(out, getLocale\(\)\.startsWith\("it"\) \? "it" : "en"\)/.test(main), "a plugin's refusal in the page's language (its EN and IT: T-6 of PL20)");
 {
   const lv = [Number(/const BRIDGE_LEVEL_WANTED = (\d+)/.exec(main)?.[1]), Number(/^BRIDGE_LEVEL = (\d+)/m.exec(bridge)?.[1]), Number(/^LEVEL = (\d+)/m.exec(emPy)?.[1])];
   ok(lv[0] >= 88 && lv.every((x) => x === lv[0]), "level 88 or later, the same in the page, the bridge, em_py");

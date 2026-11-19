@@ -197,6 +197,9 @@ export interface SectionCtx {
 /** An Inspector section of a plugin: `h3.insp-sect` (the Inspector's one
  *  pass makes it a section that closes), then the rows, then the buttons. */
 export function renderSectionInto(host: HTMLElement, c: PluginCommand, ctx: SectionCtx): void {
+  // a section with nothing to say of THIS node (no rows, no buttons) is not drawn:
+  // `when` says the type, only the plugin knows the node is one of its own (MICRO-GEO10)
+  if (ctx.value.ok === true && !rowsOf(ctx.value.value).length && !ctx.buttons.length) return;
   const h = el("h3", "insp-sect plg-sect", labelOf(c, ctx.lang));
   h.dataset.plgSection = `${c.plugin}/${c.id}`;
   h.title = ctx.provenance;
