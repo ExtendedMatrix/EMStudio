@@ -198,7 +198,7 @@ M.setLocale?.("it");
   stores.push(bare);
   M.chooseGraph("bare");
   paint();
-  ok(card.querySelector("[data-gr-graph='bare']").textContent.includes("Non georiferito"), "bare: listed «Non georiferito»");
+  ok(card.querySelector("[data-gr-graph='bare']").textContent.includes("Non georeferenziato"), "bare: listed «Non georeferenziato»");
   card.querySelector("[data-gr-create]").dispatchEvent(new Event("click"));
   const bg = bare.store.geoPositionNode();
   ok(!!bg && !("epsg" in bg.data), "«Georeferenzia questo grafo»: the node, no system — never 4326");
