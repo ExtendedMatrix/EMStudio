@@ -31,6 +31,8 @@ import type { LibraryDelta } from "./property-source";
 export const PY_LEVEL = 81;
 /** MICRO-PL17 (W14) · /py/plugins, /py/invoke, /py/checks */
 export const PY_PLUGINS_LEVEL = 83;
+/** MICRO-PL18 (W15a) · /py/plugins {dev}, /py/plugins/dev, /py/plugins/reload — the development folder */
+export const PY_DEV_LEVEL = 84;
 
 export type PyEvent = "selection-changed" | "graph-changed" | "document-opened" | "document-saved" | "document-closed" | "locale-changed";
 

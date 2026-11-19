@@ -36,6 +36,17 @@ POST /py/invoke   {session, revision, ack?, doc?, plugin, command, slots}
                   AS THE PLUGIN (its declared capabilities), each one step
 POST /py/checks   {session, revision, ack?, doc?} → the run's answer + ``issues``
                   (the ``check@1`` commands, read-only)
+POST /py/plugins  {lang?, dev?}              (level 84, MICRO-PL18 / W15a: ``dev`` —
+                  the page's «Funzioni sperimentali» — makes the plugins of the
+                  development folder count, loaded where they are, source ``dev``;
+                  the answer carries ``dev: {setting, exists, env, plugins}``.
+                  The bridge keeps the last ``dev`` it was told for the calls
+                  that do not say it: a session, an invoke, a check)
+POST /py/plugins/dev    {dir: str|null, dev: true, lang?} → as /py/plugins, the
+                  development folder of this machine set (null clears it); 403
+                  without ``dev`` (the switch is the page's), 400 not a folder
+POST /py/plugins/reload {plugin, dev: true, lang?} → as /py/plugins, a plugin of
+                  the development folder read again (its modules forgotten)
 
 A run's answer: ``{ok, run, status: done|waiting|running|error|refused|cancelled,
 output, value?, error?, messages?, steps: [{label, delta, process, dtc, ids,
@@ -85,7 +96,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: the bridge's level these routes came with (``BRIDGE_LEVEL`` in em_bridge.py)
-LEVEL = 83
+LEVEL = 84
 TOKEN_ENV = "EM_BRIDGE_TOKEN"
 #: D-8 · the code of an act kept in its DTC node up to this many bytes
 CODE_MAX = 4096
@@ -99,7 +110,7 @@ MAX_SESSIONS = 8
 OUTPUT_MAX = 256 * 1024
 
 ROUTES = ("/py/session", "/py/run", "/py/resume", "/py/complete", "/py/events", "/py/close",
-          "/py/history", "/py/plugins", "/py/invoke", "/py/checks")
+          "/py/history", "/py/plugins", "/py/invoke", "/py/checks", "/py/plugins/dev", "/py/plugins/reload")
 #: MICRO-PL17 · the host name the plugins declare (``hosts = ["emstudio"]``)
 HOST = "emstudio"
 #: MICRO-PL16 · the console's history kept on this machine (entries; the oldest go)
@@ -168,6 +179,18 @@ WORDS: Dict[str, Dict[str, str]] = {
     "unknown_event": {
         "en": "unknown event «{event}»",
         "it": "evento sconosciuto «{event}»",
+    },
+    "dev_off": {
+        "en": "the plugins' development folder needs «Experimental features» on",
+        "it": "la cartella di sviluppo dei plugin chiede «Funzioni sperimentali» accese",
+    },
+    "dev_not_dev": {
+        "en": "«{plugin}» is not a plugin of the development folder: an installed plugin changes by an update",
+        "it": "«{plugin}» non è un plugin della cartella di sviluppo: un plugin installato cambia con un aggiornamento",
+    },
+    "dev_dir_bad": {
+        "en": "{why}",
+        "it": "{why_it}",
     },
     "unknown_view": {
         "en": "no view «{name}» in EMStudio (the views: {known})",
@@ -928,17 +951,65 @@ def _start(s: Session, run: Run) -> Tuple[int, Dict[str, Any]]:
     return 200, run.answer_now()
 
 
-def plugins_now(lang: Optional[str] = None) -> Dict[str, Any]:
+#: MICRO-PL18 (W15a) · the page's «Funzioni sperimentali» as it last said it:
+#: the development folder counts only then (the switch is the page's, this
+#: machine's; a call that does not say it keeps the last answer)
+_dev = {"on": False}
+
+
+def _dev_supported(em: Any) -> bool:
+    import inspect
+    try:
+        return "dev" in inspect.signature(em.plugins.sync).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def plugins_now(lang: Optional[str] = None, dev: Optional[bool] = None) -> Dict[str, Any]:
     """MICRO-PL17 · the plugins active for EMStudio, loaded (or refused, said)
-    in this process. Cheap: one read of enabled.json; a plugin is imported once."""
+    in this process. Cheap: one read of enabled.json; a plugin is imported once.
+    MICRO-PL18 · ``dev``: the development folder too (kept for the next calls)."""
     em = _em()
     if not hasattr(em, "plugins"):
         return {"plugins": [], "listeners": {}, "slots": {}, "supported": False}
+    if dev is not None:
+        _dev["on"] = bool(dev)
+    can_dev = _dev_supported(em)
     with _lock:
-        em.plugins.sync(HOST)
+        if can_dev:
+            em.plugins.sync(HOST, dev=_dev["on"])
+        else:
+            em.plugins.sync(HOST)
     out = em.plugins.describe(lang or "en")
     out["supported"] = True
+    out["dev_supported"] = can_dev
+    if can_dev and _dev["on"]:
+        from s3dgraphy import extensions as X
+        out["dev"] = X.describe_dev(HOST)
     return out
+
+
+def dev_route(route: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    """MICRO-PL18 · /py/plugins/dev and /py/plugins/reload."""
+    em = _em()
+    lang = body.get("lang")
+    if not body.get("dev") or not hasattr(em, "plugins") or not _dev_supported(em):
+        return 403, _err("dev_off", lang)
+    if route == "/py/plugins/dev":
+        from s3dgraphy import extensions as X
+        try:
+            X.set_dev_dir(body.get("dir") or None)
+        except X.ExtensionError as exc:
+            pr = exc.report.problems[0]
+            return 400, {**_err("dev_dir_bad", lang, why=pr.text("en"), why_it=pr.text("it")), "code": pr.code}
+        return 200, {"ok": True, "level": LEVEL, **plugins_now(lang, True)}
+    pid = str(body.get("plugin") or "")
+    _dev["on"] = True
+    with _lock:
+        p = em.plugins.reload(pid, HOST)
+    if p is None:
+        return 404, _err("dev_not_dev", lang, plugin=pid or "—")
+    return 200, {"ok": True, "level": LEVEL, "reloaded": pid, **plugins_now(lang, True)}
 
 
 def open_session(body: Dict[str, Any], maps: Callable, changes: Callable) -> Tuple[int, Dict[str, Any]]:
@@ -971,7 +1042,10 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
         if route == "/py/session":
             return open_session(body, maps, changes)
         if route == "/py/plugins":
-            return 200, {"ok": True, "level": LEVEL, **plugins_now(body.get("lang"))}
+            dev = body.get("dev")
+            return 200, {"ok": True, "level": LEVEL, **plugins_now(body.get("lang"), None if dev is None else bool(dev))}
+        if route in ("/py/plugins/dev", "/py/plugins/reload"):
+            return dev_route(route, body)
         if route == "/py/history":
             limit = int(body.get("limit") or HISTORY_MAX)
             return 200, {"ok": True, "entries": read_history(limit), "path": str(history_path())}

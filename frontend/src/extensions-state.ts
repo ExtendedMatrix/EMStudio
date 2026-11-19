@@ -93,6 +93,8 @@ export interface ExtPreview {
     commands?: ExtCodeSection["commands"]; license?: string; source?: string; verified?: boolean;
     update?: string; trust_needed?: boolean; trust_changes?: string[]; errors?: ExtProblem[]; installable?: boolean;
     module_collision?: ExtProblem | null; trust_question?: ExtProblem | null;
+    /** MICRO-PL18 · «codice aggiornato 0.1.0 → 0.2.0» (an update of the code) */
+    updated?: ExtProblem | null;
   };
   requires?: { missing?: ExtProblem[]; optional?: ExtProblem[]; cycle?: string[] | null };
 }

@@ -103,7 +103,10 @@ const main = read("frontend/src/main.ts"), model = read("frontend/src/model.ts")
 const i18n = read("frontend/src/i18n.ts"), menuUi = read("frontend/src/menu-ui.ts");
 ok(/private opFns: Array/.test(model) && /onOp\(fn: \(op: GraphOp\) => void\): \(\) => void/.test(model) && /for \(const fn of this\.opFns\) fn\(op\)/.test(model), "G18: onOp is a list, with its way out");
 ok(/pyNudge\("document-saved"/.test(main) && /pyNudge\("document-opened"/.test(main), "G19: document-saved after a save, document-opened after an open");
-eq([Number(/const BRIDGE_LEVEL_WANTED = (\d+)/.exec(main)?.[1]), Number(/^BRIDGE_LEVEL = (\d+)/m.exec(bridge)?.[1]), Number(/^LEVEL = (\d+)/m.exec(emPy)?.[1])], [83, 83, 83], "level 83 in the page, the bridge, em_py");
+{ // MICRO-PL18 · 83 or later, the same in the three (a later MICRO raises it without touching this)
+  const lv = [Number(/const BRIDGE_LEVEL_WANTED = (\d+)/.exec(main)?.[1]), Number(/^BRIDGE_LEVEL = (\d+)/m.exec(bridge)?.[1]), Number(/^LEVEL = (\d+)/m.exec(emPy)?.[1])];
+  ok(lv[0] >= 83 && lv.every((x) => x === lv[0]), "level 83 or later, the same in the page, the bridge, em_py");
+}
 ok(/"\/py\/plugins", "\/py\/invoke", "\/py\/checks"/.test(bridge), "the three routes in the table of routes");
 ok(/invoke: \(id\) => invokePluginRow\(id\)/.test(main) && /hooks\.invoke\?\.\(id\)/.test(menuUi), "a run row invokes (page and system menu, runCommand)");
 ok(/plugins\(\)\.commandsIn\("export\.narrative"\)/.test(main), "export.narrative@1 in Narrative ▸ Export");

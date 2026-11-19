@@ -48,6 +48,23 @@ export interface PluginInfo {
   package: string | null;
   wired: string[];
   commands: PluginCommand[];
+  /** MICRO-PL18 (W15a) · loaded from the development folder, where it is (source `dev`) */
+  dev?: boolean;
+  dev_folder?: string | null;
+  /** what does not refuse it but is said (a development copy hiding an installed one, the validator's warnings) */
+  notes?: Array<{ code: string; en: string; it: string }>;
+}
+
+/** MICRO-PL18 (W15a) · the development folder, as the bridge sees it (only with «Funzioni sperimentali») */
+export interface DevInfo {
+  /** the folder as set (null: not set) */
+  setting: string | null;
+  /** set by the environment (S3DGRAPHY_PLUGINS_DEV_DIR): the window cannot change it */
+  env: boolean;
+  /** the folder is there */
+  exists: boolean;
+  plugins: Array<{ id: string; version: string; module: string; hosts: string[]; dev_folder: string;
+    problems: Array<{ code: string; en: string; it: string }>; warnings: Array<{ code: string; en: string; it: string }> }>;
 }
 
 export interface PluginsAnswer {
@@ -55,6 +72,10 @@ export interface PluginsAnswer {
   plugins?: PluginInfo[];
   listeners?: Record<string, number>;
   supported?: boolean;
+  /** MICRO-PL18 · the bridge knows the development folder (s3Dgraphy with plugins_dev_dir) */
+  dev_supported?: boolean;
+  /** MICRO-PL18 · present when the page said `dev` (its «Funzioni sperimentali») */
+  dev?: DevInfo;
 }
 
 /** what the page knows of the plugins (the bridge's last answer) */
@@ -63,6 +84,9 @@ export class PluginState {
   listeners: Record<string, number> = {};
   /** null: never asked; a string: why there are none here (no bridge, an old one) */
   why: string | null = null;
+  /** MICRO-PL18 · the development folder (null: the switch off, or a bridge that does not know it) */
+  dev: DevInfo | null = null;
+  devSupported = false;
   private subs = new Set<() => void>();
 
   set(a: PluginsAnswer | null, why: string | null = null): void {
@@ -70,6 +94,8 @@ export class PluginState {
     this.plugins = a?.plugins ?? [];
     this.listeners = a?.listeners ?? {};
     this.why = why;
+    this.dev = a?.dev ?? null;
+    this.devSupported = !!a?.dev_supported;
     if (signature(this.plugins) !== before) this.subs.forEach((f) => f());
   }
 
@@ -100,7 +126,7 @@ export class PluginState {
 }
 
 const signature = (ps: PluginInfo[]): string =>
-  JSON.stringify(ps.map((p) => [p.id, p.version, p.state, p.wired, p.commands.map((c) => [c.id, c.in, c.when, c.label])]));
+  JSON.stringify(ps.map((p) => [p.id, p.version, p.state, p.source, p.wired, p.commands.map((c) => [c.id, c.in, c.when, c.label])]));
 
 /** `plugin:<id>/<command>` — the row id of a command, the native item's id */
 export const runId = (c: Pick<PluginCommand, "plugin" | "id">): string => `plugin:${c.plugin}/${c.id}`;
@@ -180,5 +206,15 @@ export function byPlugin(state: PluginState, slot: SlotName): Array<{ plugin: Pl
 
 /** «da disco, non verificato» — what the menus say of a command, as a tooltip */
 export function provenance(p: Pick<PluginInfo, "source" | "verified" | "version" | "id">, t: (k: string, v?: Record<string, string>) => string): string {
-  return t(p.verified ? "plg.verified" : "plg.unverified", { id: p.id, version: p.version, source: p.source === "disk" ? t("plg.disk") : p.source });
+  const source = p.source === "disk" ? t("plg.disk") : p.source === "dev" ? t("plg.dev") : p.source;
+  return t(p.verified ? "plg.verified" : "plg.unverified", { id: p.id, version: p.version, source });
+}
+
+/** MICRO-PL18 (W15a) · the mark SEEN in a menu entry, not only in its tooltip:
+ *  «non verificato» for a plugin from disk, «sviluppo» for one of the
+ *  development folder (never installed, never asked); "" for a verified one
+ *  (phase 2: the reviewed list). */
+export function badgeOf(p: Pick<PluginInfo, "source" | "verified"> | null | undefined, t: (k: string) => string): string {
+  if (!p || p.verified) return "";
+  return t(p.source === "dev" ? "plg.badgeDev" : "plg.badgeDisk");
 }

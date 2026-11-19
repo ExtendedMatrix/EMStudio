@@ -24,9 +24,19 @@
  * goes with the data, who requires them, and the vocabularies nobody else
  * carries, which STAY unless the unticked box says otherwise (D-19).
  *
+ * MICRO-PL18 (W15a, FIDUCIA DA DISCO) · the question is asked for the CODE
+ * only, and again only when its permissions, capabilities or source changed
+ * since the last trust (SPEC-plugin §17.3): an update that keeps them shows
+ * «codice aggiornato 0.1.0 → 0.2.0 · nessuna nuova domanda» instead of the
+ * question. With «Funzioni sperimentali» on, a section «Cartella di sviluppo»
+ * (`plugins_dev_dir`): the folder of this machine whose plugins load where they
+ * are — never installed, never asked, marked «sviluppo, non verificato» — and
+ * «Ricarica» for one whose files changed.
+ *
  * Nothing here knows `main.ts`: the host gives the dialogs, the file pickers, the
  * words. Every installation is the library's (W21); the window has none of its own.
  */
+import type { DevInfo } from "./plugin-commands";
 import {
   formsOf, labelIn, licenceText, nameOfIri, passesFilter, problemText, rowKind, rowState, schemesOf,
   type ExtArchive, type ExtFilter, type ExtPreview, type ExtProblem, type ExtRemovalPlan, type ExtRow, type ExtensionsState,
@@ -54,6 +64,25 @@ export interface ExtWindowHost {
   importScheme?(name: string, emc: unknown): void;
   /** the forms of the packages added to the sheets (their ids) */
   formsAdded?(): ReadonlySet<string>;
+  /** MICRO-PL18 (W15a) · the plugins' development folder; absent or null with «Funzioni sperimentali» off */
+  dev?(): ExtDevHost | null;
+}
+
+/** MICRO-PL18 · what the section «Cartella di sviluppo» needs from the page */
+export interface ExtDevHost {
+  /** the bridge knows the development folder (null: not asked yet, or an old bridge) */
+  info: DevInfo | null;
+  /** why the folder cannot be used here (an old bridge, no secret): null when it can */
+  why: string | null;
+  /** the plugins of the folder as the bridge loaded them */
+  loaded: Array<{ id: string; version: string; state: string; problems: Array<{ code: string; en: string; it: string }>;
+    notes?: Array<{ code: string; en: string; it: string }> }>;
+  /** set the folder (null clears); the error's words, or null */
+  setDir(path: string | null): Promise<string | null>;
+  /** the desktop's folder picker (absent on the web: the path is typed) */
+  pickDir?(): Promise<string | null>;
+  /** read a plugin of the folder again; the error's words, or null */
+  reload(id: string): Promise<string | null>;
 }
 
 /** the filter of the list, kept while the page lives */
@@ -141,6 +170,8 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
   const used = new Set((state.overlay?.profiles ?? []).filter((p) => p.declared).map((p) => p.name));
   for (const r of rows) list.appendChild(rowEl(r, used.has(r.data?.name ?? r.id)));
   box.appendChild(list);
+  const dev = host.dev?.() ?? null;
+  if (dev && !fromNode) box.appendChild(devSection(dev));
   if (state.dirs.extensions) {
     const d = el("p", "cw-hint ext-dirs", t("ext.dirs", { p: state.dirs.profiles ?? "", c: state.dirs.plugins ?? "" }));
     d.title = Object.entries(state.dirs).map(([k, v]) => `${k}: ${v}`).join("\n");
@@ -256,6 +287,74 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
   }
 
   function tn(key: string, n: number): string { return t(`${key}.${n === 1 ? "one" : "other"}`, { n: String(n) }); }
+
+  /** MICRO-PL18 (W15a) · «Cartella di sviluppo» — only with «Funzioni sperimentali» */
+  function devSection(dev: ExtDevHost): HTMLElement {
+    const sec = el("div", "ext-dev");
+    sec.dataset.extDev = "1";
+    const h = el("div", "ext-missing-h", t("ext.devHead"));
+    h.append(" ", el("span", "ext-unverified", t("ext.devMark")));
+    sec.appendChild(h);
+    sec.appendChild(el("p", "cw-hint", t("ext.devHint")));
+    if (dev.why) { const w = el("p", "cw-warn", dev.why); w.dataset.extDevWhy = "1"; sec.appendChild(w); return sec; }
+    const info = dev.info;
+    const say = (err: string | null, ok: string): void => {
+      if (err) { host.toast(err); return; }
+      host.toast(ok);
+      host.log(ok);
+      repaint();
+    };
+    const row = el("div", "cw-row ext-dev-dir");
+    const input = el("input", "ext-dev-input");
+    input.type = "text";
+    input.value = info?.setting ?? "";
+    input.placeholder = t("ext.devPlaceholder");
+    input.dataset.extDevInput = "1";
+    input.disabled = !!info?.env;
+    row.append(input, " ");
+    if (!info?.env) {
+      row.append(btn(t("ext.devUse"), "dev-use", () => {
+        const v = input.value.trim();
+        void dev.setDir(v || null).then((e) => say(e, v ? t("ext.devSet", { p: v }) : t("ext.devCleared")));
+      }), " ");
+      if (dev.pickDir) row.append(btn(t("ext.devPick"), "dev-pick", () => {
+        void dev.pickDir!().then((p) => { if (p) void dev.setDir(p).then((e) => say(e, t("ext.devSet", { p }))); });
+      }), " ");
+      if (info?.setting) row.append(btn(t("ext.devClear"), "dev-clear", () => void dev.setDir(null).then((e) => say(e, t("ext.devCleared")))));
+    }
+    sec.appendChild(row);
+    if (info?.env) sec.appendChild(el("p", "cw-hint", t("ext.devEnv")));
+    if (info?.setting && !info.exists) {
+      const w = el("p", "cw-warn", t("ext.devMissing", { p: info.setting }));
+      w.dataset.extDevMissing = "1";
+      sec.appendChild(w);
+    }
+    const listed = info?.plugins ?? [];
+    if (info?.exists && !listed.length) sec.appendChild(el("p", "cw-hint", t("ext.devNone")));
+    for (const p of listed) {
+      const got = dev.loaded.find((x) => x.id === p.id);
+      const r = el("div", "ext-row ext-dev-row");
+      r.dataset.extDevId = p.id;
+      r.dataset.extDevState = got?.state ?? "absent";
+      const head = el("div", "ext-row-h");
+      head.append(el("b", "ext-name", p.id), ` ${p.version ? `v${p.version}` : ""} · `, el("span", "ext-unverified", t("ext.devMark")));
+      r.appendChild(head);
+      r.appendChild(el("div", "ext-facts", p.dev_folder));
+      const st = got?.state ?? "absent";
+      const stEl = el("div", `ext-state ext-${st === "loaded" ? "ready" : "incomplete"}`, t(`ext.devState.${st}`));
+      r.appendChild(stEl);
+      const lng = lang.startsWith("it") ? "it" : "en";
+      for (const pr of (got?.problems ?? p.problems ?? [])) r.appendChild(el("p", "cw-warn", pr[lng]));
+      for (const n of (got?.notes ?? p.warnings ?? [])) r.appendChild(el("p", "cw-hint", n[lng]));
+      if (got) {
+        const acts = el("div", "cw-row ext-acts");
+        acts.appendChild(btn(t("ext.devReload"), "dev-reload", () => void dev.reload(p.id).then((e) => say(e, t("ext.devReloaded", { id: p.id }))), t("ext.devReloadHint")));
+        r.appendChild(acts);
+      }
+      sec.appendChild(r);
+    }
+    return sec;
+  }
 }
 
 function failText(r: { error: string; problems: ExtProblem[] }, lang: string): string {
@@ -322,6 +421,11 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
     const h = el("div", "ext-panel-h", t("ext.panelCode", { m: c.module ?? "", v: c.version ?? "" }));
     h.append(" ", el("span", "ext-unverified", t("ext.unverifiedDisk")));
     box.appendChild(h);
+    // MICRO-PL18 (W15a) · asked only when it must be: the first time, or when
+    // permissions, capabilities or source changed since the last trust
+    const asks = c.trust_needed !== false;
+    box.dataset.extTrust = asks ? "asked" : "kept";
+    if (c.updated) { const u = el("div", "ext-updated", problemText(c.updated, lang)); u.dataset.extUpdated = "1"; box.appendChild(u); }
     const perms = Object.entries(c.permissions ?? {});
     box.appendChild(el("div", "", perms.length ? t("ext.permissions") : t("ext.noPermissions")));
     if (perms.length) {
@@ -336,7 +440,8 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
     if (c.module_collision) box.appendChild(el("p", "cw-warn", problemText(c.module_collision, lang)));
     for (const e of c.errors ?? []) { const p = el("p", "cw-warn", problemText(e, lang)); p.dataset.extCodeError = e.code; box.appendChild(p); }
     if (c.update === "unchanged") box.appendChild(el("div", "cw-hint", t("ext.unchanged")));
-    box.appendChild(el("div", "ext-panel-f ext-powers", t("ext.powers")));
+    if (asks) box.appendChild(el("div", "ext-panel-f ext-powers", t("ext.powers")));
+    else { const k = el("div", "ext-panel-f ext-trust-kept", t("ext.trustKept")); k.dataset.extTrustKept = "1"; box.appendChild(k); }
     body.appendChild(box);
   }
   for (const m of pv.requires?.missing ?? []) body.appendChild(el("p", "cw-warn", problemText(m, lang)));

@@ -93,6 +93,11 @@ function runButton(row: RunRow): HTMLButtonElement {
   const label = el("span", "dd-label-text");
   label.textContent = row.text;
   b.appendChild(label);
+  if (row.badge) {                                  // W15a: seen, not only a tooltip
+    const badge = el("span", "dd-badge plg-badge");
+    badge.textContent = row.badge;
+    b.appendChild(badge);
+  }
   b.addEventListener("click", () => hooks.invoke?.(row.id));
   return b;
 }
@@ -258,7 +263,9 @@ async function nativeRows(api: TauriMenu, rows: Row[], platform: Platform): Prom
       continue;
     }
     if (row.kind === "run") {
-      out.push(await api.MenuItem.new({ id: row.id, text: row.text, action: () => { hooks.invoke?.(row.id); } }));
+      // W15a · the system's menu has no badge: the mark goes in the words
+      const text = row.badge ? `${row.text} (${row.badge})` : row.text;
+      out.push(await api.MenuItem.new({ id: row.id, text, action: () => { hooks.invoke?.(row.id); } }));
       continue;
     }
     if (row.kind === "cmd") {

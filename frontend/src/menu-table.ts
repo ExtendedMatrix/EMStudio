@@ -57,6 +57,8 @@ export interface RunRow {
   id: string;
   text: string;
   title?: string;
+  /** MICRO-PL18 (W15a) · the plugin's mark, drawn beside the label («non verificato», «sviluppo») */
+  badge?: string;
 }
 export interface SepRow { kind: "sep" }
 export interface SubRow {
