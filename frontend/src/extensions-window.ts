@@ -57,6 +57,10 @@
  * (what nothing in the register owns); the removal's second unticked box, the
  * plugin's own saved state.
  *
+ * MICRO-PL27 (X7, PLUGIN-SUL-NODO) · on the web, under the node's packages, the
+ * section «Plugin del nodo» (node-plugins.ts, given by the host): the node's
+ * cage proved or not, its plugins, on or off in this room, their commands.
+ *
  * Nothing here knows `main.ts`: the host gives the dialogs, the file pickers, the
  * words. Every installation is the library's (W21); the window has none of its own.
  */
@@ -102,6 +106,8 @@ export interface ExtWindowHost {
   updatesWhy?(): string | null;
   /** MICRO-PL24 · the bridge takes «Fidati delle revisioni» per repository (level 87): null when it does, else why not */
   reviewsWhy?(): string | null;
+  /** MICRO-PL27 (X7) · on the web: the section «Plugin del nodo» (null: none to draw) */
+  nodePlugins?(doc: Document): HTMLElement | null;
 }
 
 /** MICRO-PL24 (X4) · «rivisto da X il Y» (with the repository when known): a code someone named has read */
@@ -177,10 +183,16 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     box.appendChild(top);
     box.appendChild(el("p", "cw-hint", t("ext.phase1")));
   }
+  // MICRO-PL27 (X7) · on the web, the plugins of the node (the host draws them: node-plugins.ts)
+  const nodePlugins = (): void => {
+    const sec = host.nodePlugins?.(doc) ?? null;
+    if (sec) box.appendChild(sec);
+  };
   if (state.unavailable) {
     const p = el("p", "cw-warn", t("ext.noBridge"));
     p.dataset.extNoBridge = "1";
     box.appendChild(p);
+    nodePlugins();
     return box;
   }
   if (state.error && !state.rows) box.appendChild(el("p", "cw-warn", state.error));
@@ -222,6 +234,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
   for (const r of rows) list.appendChild(rowEl(r, used.has(r.data?.name ?? r.id)));
   box.appendChild(list);
   if (!fromNode) box.appendChild(repoSection());
+  else nodePlugins();
   const dev = host.dev?.() ?? null;
   if (dev && !fromNode) box.appendChild(devSection(dev));
   if (state.dirs.extensions) {

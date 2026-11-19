@@ -189,6 +189,7 @@ import { declareVocabularies, isControlled, termOf, termPatch } from "./vocab-te
 import { VocabState, linkDialog, valueTermEl, vocabContent, type VocabHost } from "./vocab-ui";
 import { ExtensionsState, declareProfiles, declaredOf, formsOf, formVocabulariesOf, labelIn as extLabelIn, nameOfIri, qualiaOf, redeclareProfiles, stringsOf, typeLabel as packageTypeLabel, type ExtNewer, type OverlayDoc } from "./extensions-state";
 import { extensionsContent, extensionsFilter, newerFlow, type ExtDevHost, type ExtWindowHost } from "./extensions-window";
+import { NodePluginsState, nodePluginsSection } from "./node-plugins";
 import { VocabMarkCache, vocabMarkOf, type VocabMarkCtx } from "./vocab-marks";
 import {
   activeScheme, addScheme, clonePresentation, emcFileName, emcText, emptyPresentation, mergePresentation,
@@ -36141,7 +36142,21 @@ const extWindowHost: ExtWindowHost = {
   updatesWhy: () => extUpdatesOld ? t("ext.updatesOld", { level: String(EXT_UPDATES_LEVEL) }) : null,
   // MICRO-PL24 (X4) · «Fidati delle revisioni di questo repository»
   reviewsWhy: () => extReviewsOld ? t("ext.reviewsOld", { level: String(EXT_REVIEWS_LEVEL) }) : null,
+  // MICRO-PL27 (X7) · on the web, the plugins of the node for this room
+  nodePlugins: (d) => nodePluginsSection(d, {
+    t: (k, v) => t(k, v), lang: () => getLocale(), role: () => hostInfo.role ?? null,
+    canWrite: () => !hubReadOnly(), selection: () => [...selectedIds], log: (m) => logInfo(m),
+  }, nodePlugState, () => extWindow.repaint(true)),
 };
+/** MICRO-PL27 (X7) · what the node says of its plugins for the room this page is in
+ *  (s3dgraphy extensions.node behind the node's routes; signed with the session's token) */
+const nodePlugState = new NodePluginsState({
+  nodeBase: () => getSettings().sync.hubUrl.trim() || null,
+  room: () => (sync.connected || hubReconnecting ? sync.room : null) ?? null,
+  fetch: (url, init) => nodeAuthFetch(url, init),
+  lang: () => getLocale(),
+  changed: () => extWindow.repaint(true),
+});
 /** MICRO-PL22 · the repositories' routes came with the bridge's level 85 */
 const EXT_REPOS_LEVEL = 85;
 /** MICRO-PL23 · the updates' routes (versions, «Aggiorna tutto», clean) came with 86 */
@@ -36220,11 +36235,16 @@ const extWindow = new ColoursWindow(coloursWindowHostForVocab(), document, {
     // MICRO-PL22 · the repositories
     extReposOld, extState.repos?.length ?? -1, extState.online?.on ?? null,
     // MICRO-PL23 · the file's newer packages, the updates' level
-    extState.newer.map((n) => `${n.iri}@${n.newest}`), extUpdatesOld]),
+    extState.newer.map((n) => `${n.iri}@${n.newest}`), extUpdatesOld,
+    // MICRO-PL27 · the plugins of the node
+    nodePlugState.rev, hostInfo.role ?? null, hubReadOnly()]),
 });
 function openExtensionsWindow(): void {
   extWindow.open();
-  void extState.refresh().then(() => syncExtOverlay(true)).then(() => refreshExtRepos());
+  void extState.refresh().then(() => {
+    // MICRO-PL27 · the web (the node answered, or nothing did): the node's plugins for this room
+    if (extState.from === "node" || extState.unavailable) void nodePlugState.refresh();
+  }).then(() => syncExtOverlay(true)).then(() => refreshExtRepos());
 }
 /** what the overlay brings, added to the page's own data (and said when the
  *  file declares a package this machine has not: the file opens all the same) */
