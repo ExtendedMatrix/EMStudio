@@ -393,7 +393,8 @@ export class DocumentStore {
   private listeners: Array<() => void> = [];
   // op-log listener (ADR-002 phase 2): every mutation also emits a structured
   // operation for the live bridge. Suppressed while APPLYING a remote op.
-  private opFn: ((op: GraphOp) => void) | null = null;
+  /** MICRO-PL17 (G18) · a LIST: the room's forwarding and a plugin's ear can both listen */
+  private opFns: Array<(op: GraphOp) => void> = [];
   private suppressOp = false;
 
   /**
@@ -443,8 +444,11 @@ export class DocumentStore {
     this.listeners.push(fn);
   }
 
-  onOp(fn: (op: GraphOp) => void): void {
-    this.opFn = fn;
+  /** Listen to the ops of this store (G18: a list, in order of arrival); the
+   *  answer takes the listener away. */
+  onOp(fn: (op: GraphOp) => void): () => void {
+    this.opFns.push(fn);
+    return () => { this.opFns = this.opFns.filter((f) => f !== fn); };
   }
 
   /** MULTIGRAPH · tell the world the document changed under us.
@@ -474,7 +478,7 @@ export class DocumentStore {
     if (this.suppressOp) return;
     // the step being recorded is the one on top of the stack (TAVOLO 2)
     if (this.recording?.ops) this.recording.ops.push(op);
-    this.opFn?.(op);
+    for (const fn of this.opFns) fn(op);
   }
 
   /** P3 · conflicts produced by REMOTE operations, in arrival order. The live

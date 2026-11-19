@@ -26,6 +26,16 @@ POST /py/events   {session, revision, ack?, doc?, event, payload}
 POST /py/close    {session}
 POST /py/history  {limit?}                   → {ok, entries: [{code, at, dry_run}], path}
                   (level 82, MICRO-PL16: the console's history of this machine)
+POST /py/plugins  {lang?}                    → {ok, plugins: [...], listeners, slots}
+                  (level 83, MICRO-PL17 / W14: the plugins active for EMStudio,
+                  loaded in this process — state, problems EN + IT, commands with
+                  their slots ``in``, ``when``, ``accept``)
+POST /py/invoke   {session, revision, ack?, doc?, plugin, command, slots}
+                  → the run's answer + ``result: {value?, file?}``: a plugin's
+                  command through the contract (the four refusals), its writes
+                  AS THE PLUGIN (its declared capabilities), each one step
+POST /py/checks   {session, revision, ack?, doc?} → the run's answer + ``issues``
+                  (the ``check@1`` commands, read-only)
 
 A run's answer: ``{ok, run, status: done|waiting|running|error|refused|cancelled,
 output, value?, error?, messages?, steps: [{label, delta, process, dtc, ids,
@@ -75,7 +85,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: the bridge's level these routes came with (``BRIDGE_LEVEL`` in em_bridge.py)
-LEVEL = 82
+LEVEL = 83
 TOKEN_ENV = "EM_BRIDGE_TOKEN"
 #: D-8 · the code of an act kept in its DTC node up to this many bytes
 CODE_MAX = 4096
@@ -89,7 +99,9 @@ MAX_SESSIONS = 8
 OUTPUT_MAX = 256 * 1024
 
 ROUTES = ("/py/session", "/py/run", "/py/resume", "/py/complete", "/py/events", "/py/close",
-          "/py/history")
+          "/py/history", "/py/plugins", "/py/invoke", "/py/checks")
+#: MICRO-PL17 · the host name the plugins declare (``hosts = ["emstudio"]``)
+HOST = "emstudio"
 #: MICRO-PL16 · the console's history kept on this machine (entries; the oldest go)
 HISTORY_MAX = 1000
 #: what a proof says of its nodes, edges and ops (the counts are always whole)
@@ -394,6 +406,9 @@ def _hook_proofs() -> None:
     import importlib
     # the module, not the function ``em.write`` the package exports by that name
     W = importlib.import_module("s3dgraphy.em.write")
+    if getattr(W, "PROVES_TO_HOST", False):
+        _proofs_hooked = True                        # MICRO-PL17: s3Dgraphy gives the proof itself
+        return
     original = W.submit
 
     def submit(host: Any, label: str, delta: Any, *, dry_run: bool = False) -> Any:
@@ -458,7 +473,15 @@ class Session:
         return self._overlay
 
     def listener_counts(self) -> Dict[str, int]:
-        return {k: len(v) for k, v in self.listeners.items()}
+        """The session's listeners + the plugins' (MICRO-PL17: a plugin hears
+        every document, so the page forwards an event when one of them waits)."""
+        own = {k: len(v) for k, v in self.listeners.items()}
+        try:
+            for k, n in _em().events.owned_counts().items():
+                own[k] = own.get(k, 0) + n
+        except Exception:                            # noqa: BLE001 — an older s3Dgraphy: the session's only
+            pass
+        return own
 
 
 _sessions: Dict[str, Session] = {}
@@ -541,7 +564,12 @@ class EMStudioHost:
         return self.run.session.lang
 
     def commands(self) -> List[str]:
-        return []                                    # the plugins' commands: W14
+        """The active plugins' commands (W14): «plugin/command — label»."""
+        try:
+            lang = "it" if str(self.run.session.lang).startswith("it") else "en"
+            return [f"{c.name} — {c.label_in(lang)}" for c in _em().plugins.commands()]
+        except Exception:                            # noqa: BLE001
+            return []
 
     def proved(self, result: Any) -> None:
         """A proof of this run (MICRO-PL16): said to the console, applied nowhere."""
@@ -609,11 +637,16 @@ class Run:
     """One script (or one event's delivery) in a thread of its own."""
 
     def __init__(self, session: Session, *, code: Optional[str] = None,
-                 event: Optional[Tuple[str, Dict[str, Any]]] = None, dry_run: bool = False):
+                 event: Optional[Tuple[str, Dict[str, Any]]] = None, dry_run: bool = False,
+                 invoke: Optional[Tuple[str, str, Dict[str, Any]]] = None, checks: bool = False):
         self.id = f"r{next(_run_ids)}-{uuid.uuid4().hex[:6]}"
         self.session = session
         self.code = code
         self.event = event
+        #: MICRO-PL17 · a plugin's command (plugin, command, slots), or the checks
+        self.invoke = invoke
+        self.checks = checks
+        self.result: Optional[Dict[str, Any]] = None
         self.dry_run = dry_run
         self.status = "running"
         self.output: List[str] = []
@@ -674,6 +707,12 @@ class Run:
         nid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"emstudio:py:{gid}:{self.id}:{self._dtc_n}"))
         vendor = descriptor.vendor or {}
         params: Dict[str, Any] = {"label": label, "host": "emstudio", "touched": ids[:200]}
+        if vendor.get("plugin"):
+            # MICRO-PL17 · the act of a plugin: which one, which command, from where, unverified
+            params.update({"plugin": vendor.get("plugin"), "plugin_version": vendor.get("version"),
+                           "source": vendor.get("source"), "verified": bool(vendor.get("verified")),
+                           **({"package": vendor["package"]} if vendor.get("package") else {}),
+                           **({"command": self.invoke[1]} if self.invoke else {})})
         if self.code is not None:
             params.update(code_record(self.code))
         elif self.event is not None:
@@ -711,7 +750,19 @@ class Run:
         em.events._listeners = s.listeners
         status = "done"
         try:
-            if self.event is not None:
+            if self.invoke is not None:
+                plugin, command, slots = self.invoke
+                res = em.plugins.invoke(plugin, command, slots, author=s.author)
+                self.result = {k: res.data[k] for k in ("value", "file") if k in res.data}
+                if not res.ok:
+                    status = "refused" if res.data.get("reason") != "handler-failed" else "error"
+                    self.messages = dict(res.data.get("messages") or {"en": res.message})
+                    self.error = self.messages.get(s.lang) or self.messages.get("en") or res.message
+                    if res.data.get("error"):
+                        self._write(f"{res.data['error']}\n")
+            elif self.checks:
+                self.result = {"issues": em.plugins.run_checks(lang=s.lang)}
+            elif self.event is not None:
                 failures = em.events.emit(self.event[0], self.event[1])
                 for f in failures:
                     self._write(f"{f['listener']}: {f['error']}\n")
@@ -781,6 +832,8 @@ class Run:
             payload["error"] = self.error
         if self.messages:
             payload["messages"] = self.messages
+        if self.result is not None and self.status not in ("running", "waiting"):
+            payload["result"] = self.result
         return payload
 
 
@@ -875,8 +928,25 @@ def _start(s: Session, run: Run) -> Tuple[int, Dict[str, Any]]:
     return 200, run.answer_now()
 
 
+def plugins_now(lang: Optional[str] = None) -> Dict[str, Any]:
+    """MICRO-PL17 · the plugins active for EMStudio, loaded (or refused, said)
+    in this process. Cheap: one read of enabled.json; a plugin is imported once."""
+    em = _em()
+    if not hasattr(em, "plugins"):
+        return {"plugins": [], "listeners": {}, "slots": {}, "supported": False}
+    with _lock:
+        em.plugins.sync(HOST)
+    out = em.plugins.describe(lang or "en")
+    out["supported"] = True
+    return out
+
+
 def open_session(body: Dict[str, Any], maps: Callable, changes: Callable) -> Tuple[int, Dict[str, Any]]:
     em = _em()
+    try:
+        plugins_now()                                # their listeners hear this document too
+    except Exception:                                # noqa: BLE001 — a plugin never stops a session
+        pass
     sid = f"s-{uuid.uuid4().hex[:12]}"
     s = Session(sid, body, maps, changes)
     with _lock:
@@ -900,6 +970,8 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
     try:
         if route == "/py/session":
             return open_session(body, maps, changes)
+        if route == "/py/plugins":
+            return 200, {"ok": True, "level": LEVEL, **plugins_now(body.get("lang"))}
         if route == "/py/history":
             limit = int(body.get("limit") or HISTORY_MAX)
             return 200, {"ok": True, "entries": read_history(limit), "path": str(history_path())}
@@ -925,6 +997,18 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
             if "answer" in body:
                 run.answer(body.get("answer"))
             return 200, run.answer_now()
+        if route in ("/py/invoke", "/py/checks"):
+            s, refused = _session(body)
+            if refused:
+                return refused
+            busy = _busy(s)
+            if busy:
+                return busy
+            plugins_now(s.lang)
+            if route == "/py/checks":
+                return _start(s, Run(s, checks=True))
+            slots = body.get("slots") if isinstance(body.get("slots"), dict) else {}
+            return _start(s, Run(s, invoke=(str(body.get("plugin") or ""), str(body.get("command") or ""), slots)))
         if route in ("/py/run", "/py/events"):
             s, refused = _session(body)
             if refused:
@@ -940,7 +1024,7 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
             event = str(body.get("event") or "")
             if event not in s.listeners:
                 return 400, _err("unknown_event", s.lang, event=event)
-            if not s.listeners[event]:
+            if not s.listener_counts().get(event):
                 return 200, {"ok": True, "status": "none", "listeners": s.listener_counts(),
                              "revision": s.revision}
             payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
@@ -999,6 +1083,6 @@ def complete(s: Session, text: str, limit: int = 100) -> List[str]:
     return out
 
 
-__all__ = ["LEVEL", "ROUTES", "history_path", "read_history", "add_history", "proof_of", "TOKEN_ENV", "take_token", "has_token", "gate", "post",
+__all__ = ["LEVEL", "ROUTES", "HOST", "plugins_now", "history_path", "read_history", "add_history", "proof_of", "TOKEN_ENV", "take_token", "has_token", "gate", "post",
            "complete", "code_record", "console_caller", "Session", "Run", "EMStudioHost",
            "EMStudioApp", "WORDS"]

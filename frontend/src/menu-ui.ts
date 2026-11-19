@@ -16,13 +16,15 @@
  */
 import { applyStaticTranslations, onLocaleChange, t } from "./i18n";
 import {
-  type CommandRow, type Platform, type Row, MENUS, keysFor, menuRows, menusFor,
+  type CommandRow, type Platform, type Row, type RunRow, MENUS, findRun, keysFor, menuRows, menusFor, slotRuns,
 } from "./menu-table";
 
 /** the dynamic sub-menus' content (p.2: the recent files), asked when drawn */
 export interface DynamicItem { id: string; label: string; detail?: string; disabled?: boolean; run(): void }
 export interface MenuHooks {
   recent?(): DynamicItem[];
+  /** MICRO-PL17 · a run row (a plugin's command) chosen: the page invokes it */
+  invoke?(id: string): void;
 }
 let hooks: MenuHooks = {};
 let platformNow: Platform = "web";
@@ -82,10 +84,24 @@ function fillDynamic(host: HTMLElement, which: "recent"): void {
   }
 }
 
+/** MICRO-PL17 · a plugin's command as a menu item: no button id, an invocation */
+function runButton(row: RunRow): HTMLButtonElement {
+  const b = el("button", "dd-run");
+  b.type = "button";
+  b.dataset.run = row.id;
+  if (row.title) b.title = row.title;
+  const label = el("span", "dd-label-text");
+  label.textContent = row.text;
+  b.appendChild(label);
+  b.addEventListener("click", () => hooks.invoke?.(row.id));
+  return b;
+}
+
 function drawRows(host: HTMLElement, rows: Row[], platform: Platform, made: Set<string>): void {
   for (const row of rows) {
     if (row.kind === "sep") { host.appendChild(el("div", "dd-sep")); continue; }
     if (row.kind === "os") continue;
+    if (row.kind === "run") { host.appendChild(runButton(row)); continue; }
     if (row.kind === "cmd") {
       if (made.has(row.button)) continue;   // one button per command
       made.add(row.button);
@@ -159,6 +175,12 @@ export function buildPageMenus(platform: Platform, h: MenuHooks = {}): string[] 
 const lastRun = { button: "", at: 0 };
 /** Press the command's button — once per physical press. */
 export function runCommand(id: string): boolean {
+  // MICRO-PL17 · a plugin's command: an invocation, not a button
+  if (id.startsWith("plugin:")) {
+    if (!findRun(id) && !hooks.invoke) return false;
+    hooks.invoke?.(id);
+    return true;
+  }
   const row = findRow(id);
   if (!row) return false;
   const now = performance.now();
@@ -233,6 +255,10 @@ async function nativeRows(api: TauriMenu, rows: Row[], platform: Platform): Prom
         item: PREDEFINED[row.os] as "Quit",
         ...(row.label ? { text: t(row.label) } : {}),
       }));
+      continue;
+    }
+    if (row.kind === "run") {
+      out.push(await api.MenuItem.new({ id: row.id, text: row.text, action: () => { hooks.invoke?.(row.id); } }));
       continue;
     }
     if (row.kind === "cmd") {
@@ -330,6 +356,28 @@ export async function installNativeMenu(platform: Platform): Promise<boolean> {
   } catch {
     return false;   // an older shell keeps the menu it was built with
   }
+}
+
+/** MICRO-PL17 · the plugins' rows changed: the run rows of every sub-menu
+ *  with a slot drawn again IN PLACE (the buttons and the toggles keep their
+ *  handlers), and the system's bar built again. */
+export function redrawSlots(): void {
+  const walk = (rows: Row[]): void => {
+    for (const row of rows) {
+      if (row.kind !== "sub") continue;
+      walk(row.rows);
+      if (!row.slot) continue;
+      document.querySelectorAll<HTMLElement>(`.dd-sub[data-sub="${row.id}"] > .dd-sub-menu`).forEach((flyout) => {
+        flyout.querySelectorAll(":scope > .dd-run, :scope > .dd-sep[data-runs]").forEach((n) => n.remove());
+        const extra = slotRuns(row.slot!);
+        if (!extra.length) return;
+        if (flyout.children.length) { const sep = el("div", "dd-sep"); sep.dataset.runs = "1"; flyout.appendChild(sep); }
+        for (const r of extra) flyout.appendChild(runButton(r));
+      });
+    }
+  };
+  for (const menu of MENUS) walk(menu.rows);
+  void installNativeMenu(platformNow);
 }
 
 /** Language changed: the system's labels follow (the page's follow data-i18n). */

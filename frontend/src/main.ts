@@ -445,6 +445,7 @@ import {
   pickSaveEmJson,
   openGraphml,
   saveTtl,
+  saveExportFile,
   setWindowTitle,
   baseName,
   transformerUrl,
@@ -473,7 +474,7 @@ import {
   printHtml,
   bridgeToken,
 } from "./tauri";
-import { PySession, pyToken, PY_LEVEL, type PyEvent, type PyStep } from "./py-session";
+import { PySession, pyToken, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep } from "./py-session";
 // MICRO-PL16 (W13) · the Python console, behind «Funzioni sperimentali»
 import { consoleContent, newConsoleState, CONSOLE_LEVEL, type ConsoleHost } from "./console-window";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): the horizons as
@@ -834,10 +835,15 @@ import {
   type DropTarget,
 } from "./drag";
 import {
-  buildPageMenus, commandForKey, followLocale, installNativeMenu, refreshNativeRecent, runCommand,
+  buildPageMenus, commandForKey, followLocale, installNativeMenu, redrawSlots, refreshNativeRecent, runCommand,
   type DynamicItem,
 } from "./menu-ui";
-import { currentPlatform } from "./menu-table";
+import { currentPlatform, setSlotRuns, type RunRow } from "./menu-table";
+// MICRO-PL17 (W14) · the plugins loaded from disk: their commands in the slots of phase 1
+import {
+  PluginState, byPlugin, fillSlots, labelOf, parseRunId, provenance, runId, whenHolds,
+  type PluginCommand, type PluginsAnswer,
+} from "./plugin-commands";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
 import nodeDatamodel from "./assets/s3Dgraphy_node_datamodel.json";
 import { onFirstVisible } from "./lazy";
@@ -864,7 +870,7 @@ import type { ContainerLike, LinksAction, RemovalReport, ShelfAction } from "./g
 // MICRO-DOVE-CHI-MENU p.1 · the menus come from ONE table (`menu-table.ts`):
 // drawn here, before any handler below looks its button up by id
 const PLATFORM = currentPlatform(isTauri());
-buildPageMenus(PLATFORM, { recent: () => recentMenuItems() });
+buildPageMenus(PLATFORM, { recent: () => recentMenuItems(), invoke: (id) => invokePluginRow(id) });
 
 declare global {
   interface Window {
@@ -9650,6 +9656,8 @@ function loadDocument(
   }
   currentFilePath = path ? paths.toPosix(path) : null; // desktop: enables in-place Save; null in browser
   void storageFollowDocument(path);
+  // MICRO-PL17 (G19) · event@1: document-opened, once the store is seated
+  setTimeout(() => pyNudge("document-opened", { name: sourceName }), 0);
   // MICRO-PERCORSI-WINDOWS · the bridge serves the em.json's folders (the
   // store is seated by the end of this call: asked right after it)
   if (path) void Promise.resolve().then(() => serveDocumentFolders(paths.toPosix(path)));
@@ -10103,6 +10111,8 @@ function projectContainer(): ReturnType<typeof buildContainer> {
 
 /** F2 · after a write: the file's graphs are clean, and what is on disk is known. */
 function markFileSaved(file: OpenFile, doc: ReturnType<typeof buildContainer>): void {
+  // MICRO-PL17 (G19) · event@1: document-saved, AFTER (a listener never changes what is saved)
+  setTimeout(() => pyNudge("document-saved", { file: file.name ?? null }), 0);
   for (const slot of emtree.slotsOf(file.id)) { slot.store.dirty = false; slot.openNotes = undefined; }
   file.dirty = false;
   file.onDisk = {};
@@ -18172,7 +18182,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 82;   // 82 = /py/history, the console's history of this machine, and a run's proofs (MICRO-PL16); 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 83;   // 83 = /py/plugins, /py/invoke, /py/checks — the plugins loaded from disk and their commands (MICRO-PL17); 82 = /py/history, the console's history of this machine, and a run's proofs (MICRO-PL16); 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -23690,6 +23700,10 @@ function refreshIssues(): void {
     inheritance: inheritanceSources(s),
     t: (k, v) => t(k, v),
   });
+  // MICRO-PL17 · the plugins' checks (check@1): their last answer for this
+  // store, and a new one asked when the document moved
+  currentIssues.push(...pluginIssuesFor(s));
+  schedulePluginChecks(s);
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
   warnedNodes = new Set(currentIssues.filter((i) => i.sev === "warn" && i.node).map((i) => i.node));
   renderWarningsPill();
@@ -28093,11 +28107,16 @@ function openPublishMenu(anchor: HTMLElement): void {
     ["docx", "DOCX", () => exportWithCheck("docx")],
     ["latex", t("nv.pub.latex"), () => exportWithCheck("latex")],
     ["ipynb", "Jupyter", () => exportWithCheck("ipynb")],
+    // MICRO-PL17 · export.narrative@1: a plugin's format (its command returns the file)
+    ...plugins().commandsIn("export.narrative").map((c): [string, string, () => void] =>
+      [runId(c), labelOf(c, getLocale()), () => void runPluginCommand(c)]),
   ];
   for (const [k, label, run] of items) {
     const b = document.createElement("button");
     b.dataset.pub = k;
-    b.innerHTML = `<b>${escapeHtml(label)}</b><br><span class="nv-pub-d">${escapeHtml(t(`nv.pub.${k}Hint`))}</span>`;
+    const pc = parseRunId(k);
+    const hint = pc ? provenance(plugins().plugin(pc.plugin) ?? { id: pc.plugin, version: "", source: "disk", verified: false }, t) : t(`nv.pub.${k}Hint`);
+    b.innerHTML = `<b>${escapeHtml(label)}</b><br><span class="nv-pub-d">${escapeHtml(hint)}</span>`;
     b.addEventListener("click", () => { menu.remove(); run(); });
     menu.appendChild(b);
   }
@@ -32892,6 +32911,8 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
         const sel = spaceSel(sp).keys.filter((k) => k.startsWith("proxy:")).map((k) => k.slice(6));
         void deleteProxies(sel.includes(id) ? sel : [id]);
       } },
+      // MICRO-PL17 · context.node@1 in the Space: the unit of the proxy (the selection when it is in it)
+      ...withSep(pluginContextEntries(selectedIds.has(id) ? [...selectedIds] : [id])),
     ]);
     return;
   }
@@ -32918,6 +32939,8 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
       "sep",
       // p.10 · how they choose their version
       ...versionMenuEntries(selectedModels(id)),
+      // MICRO-PL17 · context.node@1 in the Space: the models
+      ...withSep(pluginContextEntries(selectedModels(id))),
     ]);
     return;
   }
@@ -36056,7 +36079,7 @@ const extState = new ExtensionsState({
   nodeBase: () => getSettings().sync.hubUrl.trim() || null,
   lang: () => getLocale(),
   overlayChanged: (ov) => applyExtOverlay(ov),
-  changed: () => extWindow.repaint(true),
+  changed: () => { extWindow.repaint(true); void refreshPlugins(); },
 });
 /** the files whose missing packages were said (once per file) */
 const extMissingSaid = new Set<string>();
@@ -40002,6 +40025,12 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
       if (k === "tropy" || looksLikeTropy(json)) { await openTropyDoor(json, f.name); return; }
     }
   }
+  // MICRO-PL17 · door.reader@1: a file no reader of EMStudio knows, that a
+  // plugin's reader accepts, is read by it (a proposal, one undo step)
+  const readByPlugin = files.filter((f) => f.path && doorKindOf(where(f)) === "other" && plugins().readersFor(f.path).length);
+  for (const f of readByPlugin) await runPluginCommand(plugins().readersFor(f.path!)[0], { path: f.path! });
+  files = files.filter((f) => !readByPlugin.includes(f));
+  if (readByPlugin.length && !files.length) return;
   const bridge = await bridgeUrl().catch(() => "");
   const rows: Array<{ f: DoorFile; kind: DoorKind; ins: DoorInspect | null }> = [];
   for (const f of files) {
@@ -64954,6 +64983,14 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
     d.textContent = "No legal group for this selection";
     menu.appendChild(d);
   }
+  // MICRO-PL17 · context.node@1: the plugins' commands this selection allows (`when`)
+  const plg = pluginContextEntries(ids);
+  if (plg.length) {
+    const sepP = document.createElement("div");
+    sepP.className = "ctx-sep";
+    menu.appendChild(sepP);
+    for (const e of plg) { const b = item(e.label, e.run); b.dataset.plugin = e.act; b.title = e.title; }
+  }
   const sepDel = document.createElement("div");
   sepDel.className = "ctx-sep";
   menu.appendChild(sepDel);
@@ -65474,15 +65511,20 @@ function pySessionFor(st: DocumentStore): PySession {
 
 /** An event of the page to the Python listeners — only when one waits for it. */
 const pyPending = new Set<PyEvent>();
-function pyNudge(ev: PyEvent): void {
-  const s = py?.session;
-  if (!s?.id || !(s.listeners[ev] > 0) || (ev === "graph-changed" && s.applying)) return;
+function pyNudge(ev: PyEvent, extra: Record<string, unknown> = {}): void {
+  // MICRO-PL17 · a plugin's listener hears every document: with one waiting,
+  // the session is opened for the event (the console's opens it otherwise)
+  const fromPlugins = pluginState?.listeners[ev] ?? 0;
+  const s = py?.session ?? (fromPlugins > 0 && store ? pySessionFor(store) : undefined);
+  if (!s) return;
+  if (fromPlugins > 0) s.listeners[ev] = Math.max(s.listeners[ev] ?? 0, fromPlugins);
+  if ((!s.id && !fromPlugins) || !(s.listeners[ev] > 0) || (ev === "graph-changed" && s.applying)) return;
   if (pyPending.has(ev)) return;
   pyPending.add(ev);
   setTimeout(() => {
     pyPending.delete(ev);
     const payload: Record<string, unknown> = ev === "selection-changed" ? { ids: [...selectedIds] }
-      : ev === "locale-changed" ? { lang: getLocale() } : {};
+      : ev === "locale-changed" ? { lang: getLocale() } : { ...extra };
     void s.event(ev, payload).catch((e) => logWarn(`Python · ${String((e as Error)?.message ?? e)}`));
   }, 60);
 }
@@ -65546,3 +65588,243 @@ if (EXPERIMENTAL)
     listeners: () => py?.session.listeners ?? {},
     close: () => py?.session.close(),
   };
+
+// ── MICRO-PL17-PLUGIN-DA-DISCO-E-SLOT (W14) · the plugins loaded from disk ──
+//
+// A plugin is installed from disk in «Estensioni» (W6, W21) and LOADED by the
+// bridge (s3Dgraphy's em.plugins, level 83): this page asks which are loaded
+// (/py/plugins) and draws their commands in the slots of phase 1 (SPEC-plugin
+// §13) — Strumenti ▸ Plugin ▸ …, File ▸ Importa / Esporta, the context menus of
+// the Matrix and the Space (filtered by `when`), Racconto ▸ Esporta, the
+// warnings (check@1), «Porta dentro…» (door.reader@1). A command goes to the
+// bridge through the document's Python session: each of its writes is ONE undo
+// step with its Log line, written AS THE PLUGIN (its declared capabilities),
+// the act's DTC naming it, unverified. Not behind «Funzioni sperimentali»: a
+// plugin was installed by the person, with the trust question (D-7 puts only
+// the console there).
+// eslint-disable-next-line no-var
+var pluginState: PluginState | undefined;
+function plugins(): PluginState {
+  if (!pluginState) {
+    pluginState = new PluginState();
+    pluginState.onChange(() => registerPluginRows());
+  }
+  return pluginState;
+}
+
+/** Ask the bridge which plugins are loaded (and load what became active). */
+async function refreshPlugins(): Promise<void> {
+  const ps = plugins();
+  const token = await pyToken(bridgeToken);
+  if (!token) { ps.set(null, t("py.noToken")); return; }
+  if (!(await bridgeLevelAtLeast(PY_PLUGINS_LEVEL))) { ps.set(null, t("plg.oldBridge", { level: String(PY_PLUGINS_LEVEL) })); return; }
+  try {
+    const r = await fetch(`${await bridgeUrl()}/py/plugins`, { method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ lang: getLocale() }) });
+    const a = await r.json().catch(() => null) as PluginsAnswer | null;
+    if (!r.ok || !a) { ps.set(null, `HTTP ${r.status}`); return; }
+    ps.set(a, null);
+    for (const p of a.plugins ?? []) if (p.state !== "loaded" && p.problems.length)
+      logWarn(t("plg.notLoaded", { plugin: `${p.id} ${p.version}`, why: p.problems[p.problems.length - 1][getLocale().startsWith("it") ? "it" : "en"] }));
+  } catch (e) {
+    ps.set(null, String((e as Error)?.message ?? e));
+  }
+}
+
+/** The run rows of the menus, from the plugins' commands (and the Tools ▸ Plugin sub-menu). */
+function registerPluginRows(): void {
+  const ps = plugins();
+  const lang = getLocale();
+  const row = (c: PluginCommand): RunRow => {
+    const p = ps.plugin(c.plugin);
+    return { kind: "run", id: runId(c), text: labelOf(c, lang), title: p ? provenance(p, t) : undefined };
+  };
+  setSlotRuns("menu.file.import@1", ps.commandsIn("menu.file.import").map(row));
+  setSlotRuns("menu.file.export@1", ps.commandsIn("menu.file.export").map(row));
+  redrawSlots();
+  renderToolsPlugins();
+  if (store) refreshIssues();
+}
+onLocaleChange(() => { if (pluginState) registerPluginRows(); });
+
+/** Strumenti ▸ Plugin ▸ — a section per plugin with its commands (menu.tools@1),
+ *  and the plugins that did not load, with why. Absent with no plugin. */
+function renderToolsPlugins(): void {
+  const ps = plugins();
+  const ext = document.getElementById("btn-tool-console") ?? document.getElementById("btn-tool-extensions");
+  let sub = document.getElementById("dd-sub-plugins");
+  if (!ps.plugins.length) { sub?.remove(); return; }
+  if (!sub && ext) {
+    sub = document.createElement("div");
+    sub.className = "dd-sub";
+    sub.id = "dd-sub-plugins";
+    sub.dataset.sub = "plugins";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "dd-sub-toggle";
+    const flyout = document.createElement("div");
+    flyout.className = "dd-sub-menu hidden";
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = flyout.classList.contains("hidden");
+      closeAllSubmenus();
+      if (willOpen) flyout.classList.remove("hidden");
+    });
+    sub.append(toggle, flyout);
+    ext.after(sub);
+  }
+  if (!sub) return;
+  const toggle = sub.querySelector<HTMLButtonElement>(".dd-sub-toggle")!;
+  toggle.textContent = "";
+  const lab = document.createElement("span");
+  lab.textContent = t("plg.menu");
+  const caret = document.createElement("span");
+  caret.className = "dd-sub-caret";
+  caret.textContent = "▸";
+  toggle.append(lab, caret);
+  toggle.title = t("plg.menuTitle");
+  const flyout = sub.querySelector<HTMLElement>(".dd-sub-menu")!;
+  flyout.textContent = "";
+  const lang = getLocale();
+  const groups = byPlugin(ps, "menu.tools");
+  for (const { plugin, commands } of groups) {
+    const head = document.createElement("div");
+    head.className = "dd-head";
+    head.dataset.plugin = plugin.id;
+    head.textContent = `${plugin.name} · ${plugin.version}`;
+    head.title = provenance(plugin, t);
+    flyout.appendChild(head);
+    for (const c of commands) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dd-run";
+      b.dataset.run = runId(c);
+      b.textContent = labelOf(c, lang);
+      b.title = provenance(plugin, t);
+      b.addEventListener("click", () => void runPluginCommand(c));
+      flyout.appendChild(b);
+    }
+  }
+  const down = ps.plugins.filter((p) => p.state !== "loaded");
+  if (down.length && groups.length) flyout.appendChild(Object.assign(document.createElement("div"), { className: "dd-sep" }));
+  for (const p of down) {
+    const d = document.createElement("div");
+    d.className = "dd-empty";
+    d.dataset.pluginDown = p.id;
+    const why = p.problems[p.problems.length - 1];
+    d.textContent = t("plg.notLoaded", { plugin: `${p.name} ${p.version}`, why: why ? why[lang.startsWith("it") ? "it" : "en"] : p.state });
+    flyout.appendChild(d);
+  }
+  if (!groups.length && !down.length) {
+    const d = document.createElement("div");
+    d.className = "dd-empty";
+    d.textContent = t("plg.noCommands");
+    flyout.appendChild(d);
+  }
+}
+
+/** A run row chosen (File ▸ Importa ▸ …, the system's menu, a key). */
+function invokePluginRow(id: string): void {
+  const r = parseRunId(id);
+  const c = r ? plugins().plugin(r.plugin)?.commands.find((x) => x.id === r.command) : null;
+  if (!c) { toast(t("plg.gone")); return; }
+  void runPluginCommand(c);
+}
+
+/** The plugins' commands this selection allows, as entries of a context menu (context.node@1). */
+function pluginContextEntries(ids: string[]): Array<{ label: string; act: string; title: string; run: () => void }> {
+  const st = store;
+  if (!st || !pluginState) return [];
+  const types = ids.map((id) => String(st.node(id)?.node_type ?? ""));
+  const lang = getLocale();
+  return plugins().commandsIn("context.node").filter((c) => whenHolds(c.when, { document: true, types })).map((c) => {
+    const p = plugins().plugin(c.plugin);
+    return { label: labelOf(c, lang), act: runId(c), title: p ? provenance(p, t) : "", run: () => void runPluginCommand(c, { selection: ids }) };
+  });
+}
+function withSep<T>(entries: T[]): Array<T | "sep"> {
+  return entries.length ? ["sep", ...entries] : [];
+}
+
+/** Run a plugin's command on the document: its slots filled from the page
+ *  (never invented), a file asked when it needs one, its steps applied as
+ *  every Python step (one undo each), a file it returns saved. */
+async function runPluginCommand(c: PluginCommand, ctx: { selection?: string[]; path?: string | null } = {}): Promise<void> {
+  const st = store;
+  const label = labelOf(c, getLocale());
+  if (!st) { toast(t("toast.openADocument")); return; }
+  if (c.writes && refuseReadOnly()) return;
+  let path = ctx.path ?? null;
+  if (!path && c.slots.some((x) => x.kind === "path" && x.required !== false)) {
+    if (!isTauri()) { toast(t("plg.needsDesktop", { label })); return; }
+    path = await pickSourceFile(c.accept.map((a) => a.replace(/^\./, "")));
+    if (!path) return;
+  }
+  const slots = fillSlots(c, { selection: ctx.selection ?? [...selectedIds], path });
+  try {
+    const out = await pySessionFor(st).invoke(c.plugin, c.id, slots);
+    if (out.output.trim()) logInfo(`${c.plugin} · ${out.output.trim()}`);
+    if (!out.ok) {
+      const msg = t("plg.refused", { label, why: out.error ?? out.status });
+      logWarn(msg);
+      toast(msg);
+      return;
+    }
+    const f = out.result?.file;
+    if (f) { await savePluginFile(f); return; }
+    const n = out.steps.length;
+    const v = out.result?.value;
+    toast(n ? t("plg.doneSteps", { label, n: String(n) }) : v !== undefined && v !== null
+      ? t("plg.doneValue", { label, value: typeof v === "string" ? v : JSON.stringify(v) }) : t("plg.done", { label }));
+  } catch (e) {
+    const msg = t("plg.failed", { label, why: String((e as Error)?.message ?? e) });
+    logWarn(msg);
+    toast(msg);
+  }
+}
+
+/** What an exporter returned, saved where the person says (desktop) or downloaded (web). */
+async function savePluginFile(f: { name: string; mime: string; text?: string; b64?: string }): Promise<void> {
+  const bytes = f.b64 != null ? Uint8Array.from(atob(f.b64), (ch) => ch.charCodeAt(0)) : null;
+  if (isTauri()) {
+    const where = await saveExportFile(bytes ?? (f.text ?? ""), f.name);
+    if (where) toast(t("plg.saved", { name: baseName(where) }));
+    return;
+  }
+  downloadBlob(new Blob([bytes ?? (f.text ?? "")], { type: f.mime }), f.name, f.mime);
+  toast(t("plg.saved", { name: f.name }));
+}
+
+// check@1 · the plugins' warnings: the last answer per store, asked again a
+// moment after the document moved (never while a script runs)
+let pluginChecks: { st: DocumentStore | null; rev: number; list: Issue[]; asked: number } = { st: null, rev: -1, list: [], asked: -1 };
+let pluginChecksTimer: number | undefined;
+function pluginIssuesFor(s: DocumentStore): Issue[] {
+  return pluginChecks.st === s ? pluginChecks.list : [];
+}
+function schedulePluginChecks(s: DocumentStore): void {
+  if (!pluginState || !plugins().commandsIn("check").length) {
+    if (pluginChecks.list.length) pluginChecks = { st: null, rev: -1, list: [], asked: -1 };
+    return;
+  }
+  if (pluginChecks.st === s && (pluginChecks.rev === s.rev || pluginChecks.asked === s.rev)) return;
+  window.clearTimeout(pluginChecksTimer);
+  pluginChecksTimer = window.setTimeout(() => {
+    if (store !== s) return;
+    const rev = s.rev;
+    pluginChecks.asked = rev;
+    void pySessionFor(s).checks().then((list: PyIssueWire[]) => {
+      if (store !== s) return;
+      pluginChecks = { st: s, rev, asked: rev, list: list.map((w, i): Issue => {
+        const p = plugins().plugin(w.plugin);
+        return { id: `plugin:${w.rule}:${w.node ?? ""}:${i}`, node: w.node ?? "", sev: w.sev === "info" ? "info" : "warn",
+                 rule: "plugin", txt: `${p?.name ?? w.plugin} · ${w.txt}` };
+      }) };
+      refreshIssues();
+      renderEmData();
+    }).catch(() => { /* a script running, or no session: asked again at the next change */ });
+  }, 900);
+}
+
+// the plugins asked once the bridge is up, then after each change in «Estensioni»
+setTimeout(() => void refreshPlugins(), 1500);

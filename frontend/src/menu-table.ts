@@ -48,6 +48,16 @@ export interface CommandRow {
   only?: Platform[];
 }
 export interface PredefinedRow { kind: "os"; id: string; os: Predefined; label?: string }
+/** MICRO-PL17 (W14) · an INVOCATION, not a button: a plugin's command
+ *  (`plugin:<id>/<command>`), registered at run time in a slot of a sub-menu
+ *  (`SubRow.slot`). Its label is already in the page's language (the plugin's
+ *  own words); what it does goes to the bridge (menu-ui's `invoke` hook). */
+export interface RunRow {
+  kind: "run";
+  id: string;
+  text: string;
+  title?: string;
+}
 export interface SepRow { kind: "sep" }
 export interface SubRow {
   kind: "sub";
@@ -56,10 +66,27 @@ export interface SubRow {
   title?: string;
   /** filled when it opens (the recent files) rather than from rows */
   dynamic?: "recent";
+  /** MICRO-PL17 · the plugin slot this sub-menu offers (`menu.file.import@1`):
+   *  the commands registered there follow its rows, after a separator */
+  slot?: string;
   rows: Row[];
   only?: Platform[];
 }
-export type Row = CommandRow | PredefinedRow | SepRow | SubRow;
+export type Row = CommandRow | PredefinedRow | SepRow | SubRow | RunRow;
+
+// ── MICRO-PL17 · the rows registered at run time, per slot ──────────────────
+const runs = new Map<string, RunRow[]>();
+/** The plugins' commands of a slot (replacing those of before); [] takes them away. */
+export function setSlotRuns(slot: string, rows: RunRow[]): void {
+  if (rows.length) runs.set(slot, rows.map((r) => ({ ...r }))); else runs.delete(slot);
+}
+export function slotRuns(slot: string): RunRow[] {
+  return runs.get(slot) ?? [];
+}
+export function findRun(id: string): RunRow | null {
+  for (const rows of runs.values()) { const f = rows.find((r) => r.id === id); if (f) return f; }
+  return null;
+}
 
 export interface MenuDef {
   id: "app" | "file" | "edit" | "window" | "help";
@@ -130,11 +157,11 @@ export const MENUS: MenuDef[] = [
       cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint" }),
       // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione»: each graph its system
       cmd("georef", "gr.menu", "btn-georef", { title: "gr.menuTitle" }),
-      { kind: "sub", id: "import", label: "toolbar.import", rows: [
+      { kind: "sub", id: "import", label: "toolbar.import", slot: "menu.file.import@1", rows: [
         cmd("importGraphml", "toolbar.importGraphmlItem", "btn-import-graphml", { title: "toolbar.importGraphmlTitle" }),
         cmd("importMapping", "impmap.menu", "btn-import-mapping", { title: "impmap.menuTitle" }),
       ] },
-      { kind: "sub", id: "export", label: "toolbar.export", title: "menu.exportTitle", rows: [
+      { kind: "sub", id: "export", label: "toolbar.export", title: "menu.exportTitle", slot: "menu.file.export@1", rows: [
         cmd("exportSvg", "menu.svgItem", "btn-svg", { title: "menu.svgTitle" }),
         cmd("exportTtl", "menu.ttlItem", "btn-ttl", { title: "menu.ttlTitle" }),
       ] },
@@ -220,6 +247,8 @@ export function menuRows(menu: MenuDef, platform: Platform, surface: Surface): R
       if (row.kind === "sep" && (!out.length || out[out.length - 1].kind === "sep")) continue;
       if (row.kind === "sub") {
         const inner = row.dynamic ? [] : pick(row.rows);
+        const extra = row.slot ? slotRuns(row.slot) : [];
+        if (extra.length) inner.push(...(inner.length ? [{ kind: "sep" } as SepRow] : []), ...extra);
         if (!row.dynamic && !inner.length) continue;
         out.push({ ...row, rows: inner });
         continue;
@@ -247,7 +276,7 @@ export function outline(rows: Row[], prefix = ""): string[] {
     else if (r.kind === "sub") {
       out.push(`${prefix}${r.id}▸`);
       out.push(...outline(r.rows, `${prefix}${r.id}/`));
-    } else out.push(`${prefix}${r.id}`);
+    } else out.push(`${prefix}${r.id}`);   // a run row: its `plugin:<id>/<command>`
   }
   return out;
 }

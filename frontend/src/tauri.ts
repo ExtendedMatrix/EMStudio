@@ -187,6 +187,17 @@ export async function saveTtl(
   return path;
 }
 
+/** MICRO-PL17 · a file a plugin's exporter made, saved where the person says
+ *  (text or bytes; the filter is its extension). */
+export async function saveExportFile(content: string | Uint8Array, defaultName: string): Promise<string | null> {
+  const ext = /\.([A-Za-z0-9]+)$/.exec(defaultName)?.[1];
+  const path = picked(await save({ defaultPath: toNative(defaultName), ...(ext ? { filters: [{ name: ext.toUpperCase(), extensions: [ext] }] } : {}) }));
+  if (!path) return null;
+  if (typeof content === "string") await writeTextFile(toNative(path), content);
+  else await writeFile(toNative(path), content);
+  return path;
+}
+
 /** MICRO-G-SCHEDE p.5 · the A4 of a sheet, saved where the person says (the
  *  system's «Save As…» already asked about a file that is there). */
 export async function savePdf(bytes: Uint8Array, defaultName: string): Promise<string | null> {

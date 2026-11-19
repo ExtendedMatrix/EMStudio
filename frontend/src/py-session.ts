@@ -29,8 +29,10 @@
 import type { LibraryDelta } from "./property-source";
 
 export const PY_LEVEL = 81;
+/** MICRO-PL17 (W14) · /py/plugins, /py/invoke, /py/checks */
+export const PY_PLUGINS_LEVEL = 83;
 
-export type PyEvent = "selection-changed" | "graph-changed" | "document-opened" | "document-closed" | "locale-changed";
+export type PyEvent = "selection-changed" | "graph-changed" | "document-opened" | "document-saved" | "document-closed" | "locale-changed";
 
 export interface PyStep {
   label: string;
@@ -67,6 +69,19 @@ export interface PyAnswer {
   listeners?: Record<string, number>;
   revision?: number;
   stale?: boolean;
+  /** level 83 (MICRO-PL17): what a plugin's command gave back, or the checks' warnings */
+  result?: PyResult;
+}
+
+/** What a plugin's command returned: a value, a file (an exporter), warnings (the checks). */
+export interface PyResult {
+  value?: unknown;
+  file?: { name: string; mime: string; text?: string; b64?: string };
+  issues?: PyIssueWire[];
+}
+export interface PyIssueWire {
+  plugin: string; command: string; verified: boolean;
+  rule: string; sev: "error" | "warning" | "info"; node: string | null; txt: string;
 }
 
 /** A proof as the bridge says it (`em_py.proof_of`); the console draws it. */
@@ -92,6 +107,8 @@ export interface PyOutcome {
   /** the proofs of the run (a «try», or `em.write(dry_run=True)`) */
   proofs: PyProofWire[];
   requests: PyRequest[];
+  /** level 83: a plugin's command, the checks */
+  result?: PyResult;
 }
 
 /** `em.app` as EMStudio does it. */
@@ -216,9 +233,32 @@ export class PySession {
     return status === 200 ? ((answer as { entries?: Array<{ code: string }> }).entries ?? []) : [];
   }
 
+  /** MICRO-PL17 · a plugin's command on this document (its steps applied as
+   *  every other: one undo step each, a Log line). */
+  async invoke(plugin: string, command: string, slots: Record<string, unknown>): Promise<PyOutcome> {
+    return this.drive(() => this.onDocument("/py/invoke", { plugin, command, slots }));
+  }
+
+  /** MICRO-PL17 · the plugins' checks (check@1) on this document: warnings only. */
+  async checks(): Promise<PyIssueWire[]> {
+    const out = await this.drive(() => this.onDocument("/py/checks", {}));
+    return out.result?.issues ?? [];
+  }
+
+  /** MICRO-PL17 · the plugins active for EMStudio, as the bridge loaded them (no session needed). */
+  async plugins(): Promise<unknown> {
+    const { status, answer } = await this.post("/py/plugins", { lang: this.page.lang() });
+    if (status !== 200) throw new PyError(wordsOf(answer, this.page.lang()) || `HTTP ${status}`, status, answer);
+    const a = answer as { listeners?: Record<string, number> };
+    // the plugins' listeners hear every document: an event is forwarded when one waits
+    if (a.listeners) for (const [k, n] of Object.entries(a.listeners)) if (n > 0) this.listeners[k] = Math.max(this.listeners[k] ?? 0, n);
+    return answer;
+  }
+
   /** An event of the page, forwarded only when a Python listener waits for it. */
   async event(name: PyEvent, payload: Record<string, unknown> = {}): Promise<PyOutcome | null> {
-    if (!this.id || !(this.listeners[name] > 0) || this.busy) return null;
+    if (!(this.listeners[name] > 0) || this.busy) return null;
+    if (!this.id) await this.open();
     if (name === "graph-changed" && this.applying) return null;
     return this.drive(() => this.onDocument("/py/events", { event: name, payload }));
   }
@@ -260,6 +300,7 @@ export class PySession {
           out.status = a.status ?? "done";
           out.ok = !!a.ok;
           if (a.value !== undefined) out.value = a.value;
+          if (a.result !== undefined) out.result = a.result;
           if (!a.ok) out.error = wordsOf(a, this.page.lang());
           return out;
         }

@@ -98,8 +98,8 @@ ok(keys.length >= 28, `the console's words (${keys.length})`);
 for (const k of keys) eq((i18n.match(new RegExp(`"${k.replace(".", "\\.")}":`, "g")) ?? []).length, 2, `${k}: EN and IT`);
 const used = [...read("frontend/src/console-window.ts").matchAll(/t\("(pyc\.[A-Za-z]+)"/g)].map((m) => m[1]);
 for (const k of new Set(used)) ok(keys.includes(k), `${k} used and translated`);
-ok(/"\/py\/history"\)\}/.test(bridge) && /^BRIDGE_LEVEL = 82/m.test(bridge) && /^LEVEL = 82/m.test(emPy), "the bridge: /py/history in the table, level 82");
-ok(/const BRIDGE_LEVEL_WANTED = 82;/.test(main), "the page wants 82");
+ok(/"\/py\/history"/.test(bridge) && /^BRIDGE_LEVEL = (8[2-9]|9\d)/m.test(bridge) && /^LEVEL = (8[2-9]|9\d)/m.test(emPy), "the bridge: /py/history in the table, level 82 or later");
+ok(/const BRIDGE_LEVEL_WANTED = (8[2-9]|9\d);/.test(main), "the page wants 82 or later");
 ok(/^\.pyc \{/m.test(css), "its style");
 
 // ── the window in a DOM ─────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ for (let i = 0; i < 150; i++) {
 }
 try {
   const h = await (await fetch(`${B}/health`)).json();
-  eq(h.bridge_level, 82, "the bridge at level 82");
+  ok(h.bridge_level >= 82, "the bridge at level 82 or later");
   const st = new M.DocumentStore({ header: { format: "em.json", schema_version: 2, version: "1.0" },
     graph: { graph_id: "pl16", nodes: [
       { id: "us1", node_type: "US", name: "US1", description: "" },

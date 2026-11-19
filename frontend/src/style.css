@@ -12419,3 +12419,12 @@ button.uo-col { cursor: pointer; }
 .pyc-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pyc-status { color: var(--text-muted); font-size: 0.76rem; }
 .pyc-status.pyc-why { color: var(--warn); }
+
+/* MICRO-PL17 (W14) · Tools ▸ Plugins ▸: a plugin's name above its commands */
+.dd-sub-menu .dd-head {
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
