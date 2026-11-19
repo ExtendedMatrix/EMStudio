@@ -7,7 +7,7 @@ import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
 import { dataGlyphLabel, glyphFor, glyphSvg } from "./glyphs";
 import { activeTheme, canvasTheme } from "./theme";
-import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf, typeDescription, typeLabel } from "./rules";
+import { classOf, conceptParts, edgeLabel, isGroupType, isStratigraphicType, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf, typeDescription, typeLabel } from "./rules";
 import { renderProvenance } from "./provenance-ui";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
 import { qualiaList } from "./vocab";
@@ -289,7 +289,7 @@ function renderEditorialStamps(root: HTMLElement, node: EmNode): void {
       a.target = "_blank";
       a.rel = "noreferrer noopener";
       a.textContent = String(by);
-      a.title = "ORCID iD of the editor (automatic — not the interpretive author)";
+      a.title = t("insp.stampOrcid");
       row.appendChild(a);
     }
     if (how) row.appendChild(el("span", "insp-stamp-how", how));
@@ -297,11 +297,11 @@ function renderEditorialStamps(root: HTMLElement, node: EmNode): void {
   };
 
   const rows = [
-    line("Created", "created_by", "created_at", "created_auth"),
-    line("Modified", "modified_by", "modified_at", "modified_auth"),
+    line(t("insp.stampCreated"), "created_by", "created_at", "created_auth"),
+    line(t("insp.stampModified"), "modified_by", "modified_at", "modified_auth"),
   ].filter(Boolean) as HTMLElement[];
   if (!rows.length) return;
-  root.appendChild(el("h3", "insp-sect", "Last hand (editorial)"));
+  root.appendChild(el("h3", "insp-sect", t("insp.lastHand")));
   const box = el("div", "insp-stamps");
   for (const r of rows) box.appendChild(r);
   root.appendChild(box);
@@ -422,23 +422,23 @@ export function renderInspector(
     const nm = (id: string): string =>
       String(nodeById.get(id)?.name || (showId ? id : (nodeById.get(id)?.node_type ?? id)));
     const panel = el("div", "insp-canvas");
-    panel.appendChild(el("div", "insp-section-title", "Connector"));
-    const t = el("div", "insp-group-title", es.label);
+    panel.appendChild(el("div", "insp-section-title", t("insp.connector")));
+    const head = el("div", "insp-group-title", edgeLabel(selEdge.edge_type ?? "") || es.label);
     // I2 · the relation's colour is a bar beside the words, never the ink of
     // them: dark relation colours fell under AA on the dark theme
-    t.style.setProperty("--rel", es.color);
-    panel.appendChild(t);
-    panel.appendChild(el("label", "insp-field-label", "From"));
+    head.style.setProperty("--rel", es.color);
+    panel.appendChild(head);
+    panel.appendChild(el("label", "insp-field-label", t("insp.edgeFrom")));
     const from = el("button", "insp-link", `→ ${nm(selEdge.source)}`);
     from.addEventListener("click", () => cb.onJump(selEdge.source));
     panel.appendChild(from);
-    panel.appendChild(el("label", "insp-field-label", "To"));
+    panel.appendChild(el("label", "insp-field-label", t("insp.edgeTo")));
     const to = el("button", "insp-link", `→ ${nm(selEdge.target)}`);
     to.addEventListener("click", () => cb.onJump(selEdge.target));
     panel.appendChild(to);
     root.appendChild(panel);
     const danger = el("div", "insp-actions");
-    const delE = el("button", "insp-btn danger", "Delete connector");
+    const delE = el("button", "insp-btn danger", t("insp.deleteConnector"));
     delE.addEventListener("click", () => cb.onDeleteEdge(selEdge));
     danger.appendChild(delE);
     root.appendChild(danger);
@@ -537,7 +537,7 @@ export function renderInspector(
     hex.type = "text";
     hex.className = "insp-color-hex";
     hex.value = stored;
-    hex.placeholder = "#RRGGBB";
+    hex.placeholder = "#RRGGBB";            // ALLOW-TEXT: a notation, the same in every language
     hex.title = t("l.colourHex");
     const hasColour = (n: EmNode): boolean =>
       n.node_type === "EpochNode" || typeof (n.data as Record<string, unknown> | undefined)?.color === "string";
@@ -605,7 +605,7 @@ export function renderInspector(
     const desc = document.createElement("textarea");
     desc.className = "insp-desc-input";
     desc.rows = 3;
-    desc.placeholder = "description…";
+    desc.placeholder = t("insp.descPh");
     desc.value = String(node.description ?? "");
     root.appendChild(desc);
     bindMulti(scope, nodeId, desc, t("multi.f.description"), (n) => n.node_type !== "property",
@@ -710,12 +710,12 @@ export function renderInspector(
   // of SU020, its value in `data.value`, showed an empty «value…».
   // p.3 · a GEOMETRY's value is its shape, said and reached, never typed.
   if (node.node_type === "property" && isGeometryProperty(node)) {
-    root.appendChild(el("label", "insp-field-label", "Value"));
+    root.appendChild(el("label", "insp-field-label", t("insp.value")));
     root.appendChild(geometryValueEl(store, nodeId, cb.onJump));
     renderQualeObject(root, store, node, cb, scope);
   } else if (node.node_type === "property") {
     const pdata = (node.data ?? {}) as Record<string, unknown>;
-    root.appendChild(el("label", "insp-field-label", "Value"));
+    root.appendChild(el("label", "insp-field-label", t("insp.value")));
     const valIn = document.createElement("input");
     valIn.className = "insp-name-input";
     valIn.dataset.propValue = nodeId;
@@ -768,7 +768,7 @@ export function renderInspector(
     const isPhase = parentEpoch != null;
     if (isPhase) {
       // a phase (sub-epoch) — show its parent, no swimlane reorder
-      root.appendChild(el("div", "insp-field-label", "Phase of"));
+      root.appendChild(el("div", "insp-field-label", t("insp.phaseOf")));
       const row = el("div", "insp-link-row");
       const pb = el(
         "button",
@@ -786,8 +786,8 @@ export function renderInspector(
       // immediately. `store.canReorderPhase` owns that rule, so the button and
       // the action cannot disagree about when it is possible.
       const phBar = el("div", "insp-actions");
-      const phUp = el("button", "insp-btn", "▲ Move up") as HTMLButtonElement;
-      const phDown = el("button", "insp-btn", "▼ Move down") as HTMLButtonElement;
+      const phUp = el("button", "insp-btn", t("insp.moveUp")) as HTMLButtonElement;
+      const phDown = el("button", "insp-btn", t("insp.moveDown")) as HTMLButtonElement;
       for (const [b, dir] of [
         [phUp, -1],
         [phDown, 1],
@@ -795,11 +795,10 @@ export function renderInspector(
         const can = store.canReorderPhase(nodeId, dir);
         b.disabled = !can;
         b.title = can
-          ? `Move this phase ${dir < 0 ? "up (newer)" : "down (older)"}`
+          ? t(dir < 0 ? "insp.phaseUpTitle" : "insp.phaseDownTitle")
           : store.isDated(nodeId)
-            ? "This phase is dated — its position follows its date. Change the " +
-              "date to move it."
-            : "No sibling phase in that direction";
+            ? t("insp.phaseDated")
+            : t("insp.phaseNoSibling");
         b.addEventListener("click", () => cb.onReorderPhase(nodeId, dir));
       }
       phBar.appendChild(phUp);
@@ -807,7 +806,7 @@ export function renderInspector(
       root.appendChild(phBar);
 
       const delBar = el("div", "insp-actions");
-      const delPh = el("button", "insp-btn danger", "Delete phase") as HTMLButtonElement;
+      const delPh = el("button", "insp-btn danger", t("insp.deletePhase")) as HTMLButtonElement;
       delPh.title = t("l.removePhase");
       delPh.addEventListener("click", () => cb.onDeletePhase(nodeId));
       delBar.appendChild(delPh);
@@ -817,16 +816,16 @@ export function renderInspector(
       // populated epoch can't move without risking upward-connection errors)
       const empty = store.isEpochEmpty(nodeId);
       const bar = el("div", "insp-actions");
-      const up = el("button", "insp-btn", "▲ Move up") as HTMLButtonElement;
-      const down = el("button", "insp-btn", "▼ Move down") as HTMLButtonElement;
+      const up = el("button", "insp-btn", t("insp.moveUp")) as HTMLButtonElement;
+      const down = el("button", "insp-btn", t("insp.moveDown")) as HTMLButtonElement;
       for (const [b, dir] of [
         [up, -1],
         [down, 1],
       ] as const) {
         b.disabled = !empty;
         b.title = empty
-          ? `Move this epoch's swimlane ${dir < 0 ? "up (newer)" : "down (older)"}`
-          : "Can't reorder a populated epoch (would risk upward connections)";
+          ? t(dir < 0 ? "insp.epochUpTitle" : "insp.epochDownTitle")
+          : t("insp.epochPopulated");
         b.addEventListener("click", () => cb.onReorderEpoch(nodeId, dir));
       }
       bar.appendChild(up);
@@ -898,7 +897,7 @@ export function renderInspector(
     // whole section (list + "Add phase") is hidden on a phase; "Delete phase"
     // (above) stays.
     if (!isPhase) {
-      root.appendChild(el("h3", "insp-sect", "Phases"));
+      root.appendChild(el("h3", "insp-sect", t("insp.phases")));
       const phases = store.epochPhases(nodeId);
       for (const ph of phases) {
         const pn = store.node(ph);
@@ -921,7 +920,7 @@ export function renderInspector(
         root.appendChild(row);
       }
       const pbar = el("div", "insp-actions");
-      const addPh = el("button", "insp-btn", "+ Add phase") as HTMLButtonElement;
+      const addPh = el("button", "insp-btn", t("insp.addPhase")) as HTMLButtonElement;
       addPh.title = t("l.addPhase");
       addPh.addEventListener("click", () => cb.onAddPhase(nodeId));
       pbar.appendChild(addPh);
@@ -944,16 +943,16 @@ export function renderInspector(
       topEpoch = store.parentEpoch(topEpoch)!;
     }
     if (store.epochPhases(topEpoch).length) {
-      root.appendChild(el("h3", "insp-sect", "Phase bands"));
+      root.appendChild(el("h3", "insp-sect", t("insp.phaseBands")));
       const shown = cb.isPhasesVisible(topEpoch);
       const tog = el(
         "button",
         "insp-btn",
-        shown ? "▾ Hide phase bands" : "▸ Show phase bands",
+        shown ? t("insp.hidePhaseBands") : t("insp.showPhaseBands"),
       ) as HTMLButtonElement;
       tog.title = shown
-        ? "Collapse this epoch's phases back into a single lane"
-        : "Split this epoch's lane into one sub-band per phase";
+        ? t("insp.hidePhaseBandsTitle")
+        : t("insp.showPhaseBandsTitle");
       tog.addEventListener("click", () => cb.onTogglePhases(topEpoch));
       const bar = el("div", "insp-actions");
       bar.appendChild(tog);
@@ -1027,11 +1026,11 @@ export function renderInspector(
     const fold = el(
       "button",
       "insp-btn",
-      store.isFolded(nodeId) ? "Unfold group" : "Fold group",
+      store.isFolded(nodeId) ? t("insp.unfoldGroup") : t("insp.foldGroup"),
     ) as HTMLButtonElement;
     fold.addEventListener("click", () => cb.onToggleFold(nodeId));
     bar.appendChild(fold);
-    const enter = el("button", "insp-btn", "Enter group ▸") as HTMLButtonElement;
+    const enter = el("button", "insp-btn", t("insp.enterGroup")) as HTMLButtonElement;
     enter.title = t("l.enterGroup");
     enter.addEventListener("click", () => cb.onEnterGroup(nodeId));
     bar.appendChild(enter);
@@ -1299,7 +1298,9 @@ export function renderInspector(
         ? new Date(rights.attributedAt).toLocaleString()
         : "";
       panel.appendChild(el("div", "insp-hint",
-        `Attribuito da ${rights.attributedBy || "?"}${when ? ` il ${when}` : ""}`));
+        when
+          ? t("insp.attributedByOn", { who: rights.attributedBy || "?", when })
+          : t("insp.attributedBy", { who: rights.attributedBy || "?" })));
     }
 
     const actions = el("div", "insp-actions");
@@ -1683,7 +1684,7 @@ export function renderInspector(
     groups.get(key)!.push({ edge: e, otherId, out });
   }
   if (groups.size) {
-    root.appendChild(el("h3", "insp-sect", "Connections"));
+    root.appendChild(el("h3", "insp-sect", t("insp.connections")));
     const nodeById = new Map(doc.graph.nodes.map((n) => [n.id, n]));
     for (const [type, list] of [...groups.entries()].sort()) {
       const es = edgeStyle(type);
@@ -1691,7 +1692,7 @@ export function renderInspector(
       const title = el(
         "div",
         "insp-group-title",
-        `${es.label} (${list.length})`,
+        `${edgeLabel(type) || es.label} (${list.length})`,
       );
       title.style.setProperty("--rel", es.color);   // I2 · a bar, not the ink
       g.appendChild(title);
@@ -1727,7 +1728,7 @@ export function renderInspector(
       const es = edgeStyle(l.edgeType);
       const row = el("div", "insp-link-row");
       const b = el("button", "insp-link",
-        `${l.out ? "→" : "←"} ${es.label} · ${l.nodeName} — ${l.graphName}`);
+        `${l.out ? "→" : "←"} ${edgeLabel(l.edgeType) || es.label} · ${l.nodeName} — ${l.graphName}`);
       b.title = l.resolved ? t("insp.crossGraphGo", { graph: l.graphName })
         : t("insp.crossGraphMissing", { graph: l.graphName });
       if (!l.resolved) (b as HTMLButtonElement).disabled = true;

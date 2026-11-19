@@ -209,7 +209,7 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
   const what = !block ? `${t("ninsp.chapter")} ${h.chapter + 1}`
     : block.block_type === "prose" ? t("ninsp.paragraph")
     : q ? `${t("nq.kindLabel")} · ${t(`nq.title.${q.query}`)}`
-    : `Embed · ${h.viewTypeLabel(String(block.view_type ?? ""))}`;
+    : t("ninsp.embedOf", { view: h.viewTypeLabel(String(block.view_type ?? "")) });
   head.appendChild(el("b", undefined, what));
   head.appendChild(el("div", "ninsp-dim",
     `${nr.name} · ${ch.title}${h.block != null ? ` · ${h.block + 1}` : ""}`));
@@ -301,7 +301,7 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
     else {
       const v = index.get(block.validated_by ?? "");
       const orcid = (v?.data as Record<string, unknown> | undefined)?.orcid;
-      status.textContent = `AI ✓ ${nameOf(block.validated_by)}${orcid ? ` · ORCID ${orcid}` : ""}`;
+      status.textContent = `AI ✓ ${nameOf(block.validated_by)}${orcid ? ` · ORCID ${orcid}` : ""}`;  // ALLOW-TEXT: «AI ✓» and «ORCID» are marks, a name follows
     }
     field(s, t("ninsp.status"), status);
     if (block.authored_by || block.prompt_ref) {
@@ -391,8 +391,8 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
       tbl.appendChild(tr);
     };
     row(t("ninsp.reader"), t("ninsp.readerLive"));
-    row("DOCX · LaTeX", t("nq.asStatic"));
-    row("Jupyter", t("nq.asStatic"));
+    row(t("fmt.docxLatex"), t("nq.asStatic"));
+    row(t("fmt.jupyter"), t("nq.asStatic"));
     out.appendChild(tbl);
   } else {
     // ── an embed ───────────────────────────────────────────────────────────
@@ -448,12 +448,12 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
     };
     row(t("ninsp.reader"), t("ninsp.readerLive"));
     const pk = printKindOf(cur);
-    row("DOCX · LaTeX", cur === "document" ? t("ninsp.asDocFigure")
+    row(t("fmt.docxLatex"), cur === "document" ? t("ninsp.asDocFigure")
       : cur === "scene3d" ? t("ninsp.asSceneStill")
       : pk === "citation" ? t("ninsp.asCitation")
       : pk === "figure-baked" ? t("ninsp.asBakedFigure") : t("ninsp.asFigure"));
     const nk = notebookKindOf(cur);
-    row("Jupyter", nk === "link" ? t("ninsp.asLink") : nk === "cell" ? t("ninsp.asCell") : t("ninsp.asGenericCell"));
+    row(t("fmt.jupyter"), nk === "link" ? t("ninsp.asLink") : nk === "cell" ? t("ninsp.asCell") : t("ninsp.asGenericCell"));
     out.appendChild(tbl);
   }
 

@@ -49,7 +49,7 @@ import type { EmDocument } from "./types";
 // i18n is a leaf module (imports nothing), so this cannot cycle. Only the new
 // browser-path hint goes through it for now — converting the rest of this
 // panel's strings is the I18N1 follow-up.
-import { t } from "./i18n";
+import { t, tn } from "./i18n";
 
 /** `POST /stratiminer-prompt` — Path B. */
 export interface PromptResult {
@@ -186,33 +186,29 @@ export function renderStratiMiner(host: HTMLElement, state: StratiMinerState,
 
   host.innerHTML = `
     <div class="sm-panel">
-      <p class="sm-intro">
-        A graph is built from a <b>table</b> — <code>em_data.xlsx</code> — that
-        you can open and check. Where the table comes from is up to you; the AI,
-        when you use it, writes only the table and never the graph.
-      </p>
+      <p class="sm-intro">${t("sm.intro")}</p>
 
-      <h4>How do you have the em_data.xlsx table?</h4>
+      <h4>${esc(t("sm.howHead"))}</h4>
       <div class="sm-choice">
         <label class="sm-opt${ai ? "" : " active"}">
           <input type="radio" name="sm-source" value="manual"
                  ${ai ? "" : "checked"} />
-          <span>I make it by hand</span>
+          <span>${esc(t("sm.byHand"))}</span>
         </label>
         <label class="sm-opt${ai ? " active" : ""}">
           <input type="radio" name="sm-source" value="ai" ${ai ? "checked" : ""} />
-          <span>I generate it with the AI, from messy data</span>
+          <span>${esc(t("sm.byAi"))}</span>
         </label>
       </div>
 
       ${ai ? `
       <div class="sm-branch">
-        <h5>Source folder</h5>
+        <h5>${esc(t("sm.folderHead"))}</h5>
         <div class="sm-row">
           <input id="sm-folder" type="text" spellcheck="false"
-                 placeholder="/path/to/documents"
+                 placeholder="${esc(t("sm.folderPh"))}"
                  value="${esc(state.folder)}" />
-          <button id="sm-pick-folder" title="Choose a folder">…</button>
+          <button id="sm-pick-folder" title="${esc(t("sm.pickFolder"))}">…</button>
           <!-- The BROWSER picker cannot give an absolute path (see onPickFolder):
                it is a hidden input that fills in what it can, and the hint below
                says so. On desktop the native dialog gives the real path. -->
@@ -222,75 +218,56 @@ export function renderStratiMiner(host: HTMLElement, state: StratiMinerState,
         ${opts.native ? "" : `<span class="sm-hint">${
           esc(t("stratiminer.browserPathHint"))}</span>`}
         <label class="sm-lang">
-          Output language
+          ${esc(t("sm.outLang"))}
           <input id="sm-language" type="text" spellcheck="false"
-                 placeholder="(each document's own)"
+                 placeholder="${esc(t("sm.outLangPh"))}"
                  value="${esc(state.language)}" />
         </label>
         <div class="sm-paths">
           <div class="sm-path">
             <button id="sm-extract" ${canExtract ? "" : "disabled"}>
-              ${state.busy === "extract" ? "Extracting…" : "Generate em_data.xlsx (AI)"}
+              ${esc(state.busy === "extract" ? t("sm.extracting") : t("sm.extract"))}
             </button>
-            <span class="sm-hint">
-              The bridge calls a frontier model and writes the workbook. Reads
-              text files, and PDFs when the <code>[pdf]</code> extra is
-              installed; it always lists which files it could not read, and why.
-            </span>
+            <span class="sm-hint">${t("sm.extractHint")}</span>
           </div>
           <div class="sm-path">
             <button id="sm-prompt" ${canPrompt ? "" : "disabled"}>
-              ${state.busy === "prompt" ? "Copying…" : "Copy prompt for Cowork"}
+              ${esc(state.busy === "prompt" ? t("sm.copying") : t("sm.copyPrompt"))}
             </button>
-            <span class="sm-hint">
-              Run it in a session that can read the folder, then set the path
-              below. The answer for scans and anything the API path reports as
-              unread.
-            </span>
+            <span class="sm-hint">${esc(t("sm.copyPromptHint"))}</span>
           </div>
         </div>
-        <span class="sm-hint">
-          The table it writes lands in the Graph creator below — review it first.
-        </span>
+        <span class="sm-hint">${esc(t("sm.landsBelow"))}</span>
       </div>` : `
       <div class="sm-branch">
-        <span class="sm-hint">
-          Fill in the sheets yourself (units, epochs, claims) and point the Graph
-          creator at the file. Nothing else is needed: the conversion below is
-          the same one the AI path ends with.
-        </span>
+        <span class="sm-hint">${esc(t("sm.manualHint"))}</span>
       </div>`}
 
-      <h4>Graph creator · em_data.xlsx → em.json</h4>
+      <h4>${esc(t("sm.creatorHead"))}</h4>
       <div class="sm-row">
         <input id="sm-xlsx" type="text" spellcheck="false"
-               placeholder="/path/to/em_data.xlsx"
+               placeholder="${esc(t("sm.xlsxPh"))}"
                value="${esc(state.xlsxPath)}" />
-        <button id="sm-pick-xlsx" title="Choose the xlsx">…</button>
+        <button id="sm-pick-xlsx" title="${esc(t("sm.pickXlsx"))}">…</button>
         <input id="sm-xlsx-file" type="file" accept=".xlsx"
                class="sm-hidden-file" />
       </div>
       <button id="sm-transform" class="sm-primary"
               ${canTransform ? "" : "disabled"}>
-        ${state.busy === "import" ? "Converting…" : "Transform into em.json"}
+        ${esc(state.busy === "import" ? t("sm.converting") : t("sm.transform"))}
       </button>
-      <span class="sm-hint">
-        Deterministic: the same table always yields the same document.
-      </span>
+      <span class="sm-hint">${esc(t("sm.deterministic"))}</span>
 
       ${state.report ? `<div class="sm-report">${esc(state.report)}</div>` : ""}
       ${state.promptFallback
       ? `<div class="sm-fallback">
            <label>
-             Select all and copy manually:
+             ${esc(t("sm.selectAll"))}
              <textarea id="sm-prompt-text" readonly rows="6"
                >${esc(state.promptFallback)}</textarea>
            </label>
-           <button id="sm-prompt-save">Save the prompt to a file…</button>
-           <span class="sm-hint">
-             33k characters is a lot to select by hand; a file is easier to hand
-             to a Cowork session.
-           </span>
+           <button id="sm-prompt-save">${esc(t("sm.savePrompt"))}</button>
+           <span class="sm-hint">${esc(t("sm.savePromptHint"))}</span>
          </div>`
       : ""}
       ${state.warnings.length
@@ -298,11 +275,7 @@ export function renderStratiMiner(host: HTMLElement, state: StratiMinerState,
         .map((w) => `<li>${esc(w)}</li>`).join("")}</ul>`
       : ""}
 
-      <p class="sm-todo">
-        The produced graph opens as a new graph in the workspace (EMTree), beside
-        whatever you already had open. Attaching the source folder and the table
-        to it as auxiliary files still waits for the aux mapping.
-      </p>
+      <p class="sm-todo">${esc(t("sm.todo"))}</p>
     </div>`;
 
   const on = <T extends HTMLElement>(id: string, ev: string,
@@ -400,18 +373,14 @@ export function describeExtraction(r: ExtractResult): string {
     .filter(([, n]) => n > 0)
     .map(([sheet, n]) => `${sheet} ${n}`)
     .join(" · ");
-  const parts = [`${r.model || r.provider} wrote ${rows || "no rows"}`];
+  const parts = [t("sm.wrote", { model: r.model || r.provider, rows: rows || t("sm.noRows") })];
   if (r.unread_files.length) {
-    parts.push(
-      `${r.unread_files.length} file(s) not read — their contents did NOT ` +
-      `reach the model`);
+    parts.push(tn("sm.unread", r.unread_files.length));
   }
   if (r.pdf_text === false) {
     // The actionable one: this is a missing optional dependency, not a bad
     // folder, and the fix is one install away.
-    parts.push(
-      "this build has no PDF text extractor, so PDFs were listed by name " +
-      "only — install the [pdf] extra, or use the Cowork path");
+    parts.push(t("sm.noPdfText"));
   }
   return parts.join(". ") + ".";
 }
@@ -430,7 +399,8 @@ export function unreadWarnings(r: ExtractResult): string[] {
 /** Same, for the deterministic half. */
 export function describeImport(r: ImportResult): string {
   const s = r.stats;
-  return `Read ${s.rows_units ?? 0} units · ${s.rows_epochs ?? 0} epochs · ` +
-    `${s.rows_claims ?? 0} claims → ${s.nodes_total ?? 0} nodes, ` +
-    `${s.edges_total ?? 0} edges.`;
+  return t("sm.importStats", {
+    units: s.rows_units ?? 0, epochs: s.rows_epochs ?? 0, claims: s.rows_claims ?? 0,
+    nodes: s.nodes_total ?? 0, edges: s.edges_total ?? 0,
+  });
 }

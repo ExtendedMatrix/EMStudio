@@ -418,7 +418,6 @@ import {
   connectValidity,
   edgeLabel,
   edgeTypeDescription,
-  edgeTypeLabel,
   EM_VERSION,
   GENERIC_EDGE,
   hdtoProfileTypes,
@@ -539,7 +538,7 @@ import * as alignment from "./alignment";
 import { buildCommand, type CommandVerb } from "./commands";
 import { addMembers, addResource, fileCounts, foldFiles, makeBlendLocator, materializeMember, memberRows, membersBase, movePointers, packagingLabel, parseBlendLocator, refreshMembersDigest, removeMembers, replaceFile, resourceFiles, resourceLabel, rowsDigest, storeGraph, type MemberRow } from "./resources";
 import { documentSets } from "./doc-sets";
-import { catalogueState, cite, documentOf, groupItems, setTree, isCatalogue, itemIsOf, localRoleId, mediaIndex, mediaOf, mediaRoles, roleLabel, treeRows, unitItemKeys,
+import { catalogueState, cite, documentOf, groupItems, setTree, isCatalogue, itemIsOf, localRoleId, mediaIndex, mediaOf, mediaRoles, roleLabel, BASE_ROLES, treeRows, unitItemKeys,
          FRONTISPIECE as MEDIA_FRONTISPIECE, type CatalogueState, type MediaItem } from "./media";
 import { askWhichPointersMove } from "./resource-panel";
 import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
@@ -4448,7 +4447,7 @@ function renderInspectorInto(host: HTMLElement): void {
         st.deleteEdge(edge);
         // AUDIT N11 · every deletion says what went, and gives it back
         const nm = (id: string) => String(storeOfNode(id)?.node(id)?.name || id);
-        toastUndo(t("del.edge", { a: nm(edge.source), b: nm(edge.target), type: edgeTypeLabel(String(edge.edge_type ?? "")) }), st);
+        toastUndo(t("del.edge", { a: nm(edge.source), b: nm(edge.target), type: edgeLabel(String(edge.edge_type ?? "")) }), st);
       },
       onToggleFold: (gid) => requestFold(gid),
       onEnterGroup: enterGroup,
@@ -4950,7 +4949,7 @@ function renderMediaStrip(host: HTMLElement, st: DocumentStore, nodeId: string):
     fig.type = "button";
     fig.className = "ims-thumb" + (it.role === MEDIA_FRONTISPIECE ? " front" : "");
     fig.dataset.msItem = it.key;
-    fig.title = [it.name, it.role ? roleLabel(st.doc.graph as never, it.role, getLocale()) : ""].filter(Boolean).join(" · ");
+    fig.title = [it.name, it.role ? mediaRoleLabel(st.doc.graph as never, it.role) : ""].filter(Boolean).join(" · ");
     const pic = document.createElement("img");
     pic.alt = it.name;
     fig.appendChild(pic);
@@ -5179,7 +5178,6 @@ function renderMediaViewer(win: Win, stage: HTMLElement, caption: HTMLElement, b
   const ix = mediaIndex(g);
   const all = mediaOf(ix, subject);
   const name = (id: string) => String(st.node(id)?.name || id);
-  const lang = getLocale();
   const sel = mediaSel.get(win.id) ?? new Set<string>();
   mediaSel.set(win.id, sel);
   for (const k of [...sel]) if (!all.some((x) => x.key === k)) sel.delete(k);
@@ -5274,7 +5272,7 @@ function renderMediaViewer(win: Win, stage: HTMLElement, caption: HTMLElement, b
 
   // the tree and the grid
   const shown = all.filter((x) => !only || itemIsOf(mine!, x));
-  const groups = groupItems(ix, shown, by, { none: t("mv.none"), role: (id) => roleLabel(g, id, lang) });
+  const groups = groupItems(ix, shown, by, { none: t("mv.none"), role: (id) => mediaRoleLabel(g, id) });
   const pick = winCurrent(win, "media.group");
   const wrap = document.createElement("div");
   wrap.className = "mv-wrap";
@@ -5343,7 +5341,7 @@ function renderMediaViewer(win: Win, stage: HTMLElement, caption: HTMLElement, b
       doc.dataset.mvDoc = it.doc ?? "";
       doc.textContent = it.doc ? t("mv.inDoc", { d: name(it.doc) }) : t("mv.notCensused");
       tags.appendChild(doc);
-      if (it.role) { const r = document.createElement("span"); r.className = "mv-role"; r.dataset.mvRole = it.role; r.textContent = roleLabel(g, it.role, lang); tags.appendChild(r); }
+      if (it.role) { const r = document.createElement("span"); r.className = "mv-role"; r.dataset.mvRole = it.role; r.textContent = mediaRoleLabel(g, it.role); tags.appendChild(r); }
       cell.append(img, label, tags);
       cell.addEventListener("click", (e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey) {
@@ -5436,6 +5434,30 @@ function mediaSingle(win: Win, stage: HTMLElement, st: DocumentStore, list: Medi
   })();
 }
 
+/** MICRO-COR01 · a media role in the page's language: a base concept of
+ *  em-media-role from the dictionary (`media.role.<id>`, EN + IT), a local role
+ *  with the label the project gave it (`roleLabel`, its English otherwise) */
+function mediaRoleLabel(g: Parameters<typeof roleLabel>[0], id: string | null | undefined): string {
+  if (id && BASE_ROLES.some(([b]) => b === id)) return t(`media.role.${id}`);
+  return roleLabel(g, id, getLocale());
+}
+
+/** MICRO-COR01 (G) · the line under the budget cards of «Consolidate for…»,
+ *  said in the page's language from the counts s3Dgraphy returns (its own
+ *  `say_it` is Italian, for the log and the CLI) */
+function assetCountsSay(c: AL.AssetListAnswer["counts"]): string {
+  let out = t("al.say.summary", {
+    assets: tn("al.say.assets", c.assets), models: tn("al.say.models", c.rms),
+    containers: tn("al.say.containers", c.containers), versions: tn("al.say.versions", c.versions),
+    textures: tn("al.say.textures", c.textures), shared: tn("al.say.shared", c.shared_textures),
+  });
+  out += c.estimated
+    ? t("al.say.measuredEstimated", { measured: tn("al.say.measured", c.measured), estimated: tn("al.say.estimated", c.estimated) })
+    : t("al.say.measuredOnly", { measured: tn("al.say.measured", c.measured) });
+  if (c.in_cloud) out += t("al.say.inCloud", { cloud: tn("al.say.cloud", c.in_cloud) });
+  return out;
+}
+
 /** the role picker of a dialog: the vocabulary, then «＋ nuovo ruolo…» */
 function rolePicker(st: DocumentStore, current: string | null): { el: HTMLElement; value: () => { id: string | null; newLabel: string | null } } {
   const wrap = document.createElement("div");
@@ -5450,7 +5472,7 @@ function rolePicker(st: DocumentStore, current: string | null): { el: HTMLElemen
   for (const r of mediaRoles(st.doc.graph as never)) {
     const o = document.createElement("option");
     o.value = r.id;
-    o.textContent = (r.label[getLocale()] ?? r.label.en ?? r.id) + (r.origin === "local" ? ` · ${t("mv.localRole")}` : "");
+    o.textContent = (r.origin === "base" ? t(`media.role.${r.id}`) : r.label[getLocale()] ?? r.label.en ?? r.id) + (r.origin === "local" ? ` · ${t("mv.localRole")}` : "");
     sel.appendChild(o);
   }
   const nw = document.createElement("option");
@@ -15995,14 +16017,14 @@ function createEdge(source: string, target: string, edgeType: string): void {
   if (canvasWritesToCorpus()) {
     const corpus = canvasStore()!;
     if (hasRelation(corpus.doc.graph.edges, source, target, edgeType)) {
-      toast(`${edgeTypeLabel(edgeType)} already exists`);
+      toast(t("edge.exists", { rel: edgeLabel(edgeType) }));
       return;
     }
     corpus.addEdge(source, target, edgeType);
     return;
   }
   if (hasRelation(store.doc.graph.edges, source, target, edgeType)) {
-    toast(`${edgeTypeLabel(edgeType)} already exists`);
+    toast(t("edge.exists", { rel: edgeLabel(edgeType) }));
     return;
   }
   store.addEdge(source, target, edgeType);
@@ -16014,7 +16036,7 @@ function createEdge(source: string, target: string, edgeType: string): void {
   if (ADORNMENT_EDGE_TYPES.has(edgeType))
     store.attachAdornmentToParadata(source, target);
   toast(
-    `${store.node(source)?.name || source} — ${edgeTypeLabel(edgeType)} → ${store.node(target)?.name || target}`,
+    `${store.node(source)?.name || source} — ${edgeLabel(edgeType)} → ${store.node(target)?.name || target}`,
   );
   // NAME1 · attaching an extractor to a document is what NAMES it. EMStudio has
   // no "create from the document's handle and name it on the way" path — the
@@ -16061,7 +16083,7 @@ function showEdgeMenu(
     sw.style.borderBottomColor = st.color;
     sw.style.borderBottomStyle = st.dash.length ? "dashed" : "solid";
     b.appendChild(sw);
-    b.appendChild(document.createTextNode(" " + edgeTypeLabel(et)));
+    b.appendChild(document.createTextNode(" " + edgeLabel(et)));
     b.addEventListener("click", () => {
       hideEdgeMenu();
       createEdge(source, target, et);
@@ -19469,7 +19491,7 @@ async function postSessionKey(key: string | null): Promise<string | null> {
     });
     if (res.ok) return null;
     const j = await res.json().catch(() => null);
-    return (j as { error?: string } | null)?.error ?? `bridge error ${res.status}`;
+    return (j as { error?: string } | null)?.error ?? t("sm.bridgeError", { status: res.status });
   } catch {
     return t("bridge.unreachable");
   }
@@ -19482,7 +19504,7 @@ setAiKeySave.addEventListener("click", async () => {
   }
   const key = setAiKey.value.trim();
   if (!key) {
-    toast("Incolla prima la key");
+    toast(t("ai.pasteKeyFirst"));
     return;
   }
   const err = isTauri() ? await setLlmKey(key) : await postSessionKey(key);
@@ -19492,7 +19514,7 @@ setAiKeySave.addEventListener("click", async () => {
     return;
   }
   toast(isTauri()
-    ? "Key salvata nel portachiavi — bridge riavviato"
+    ? t("ai.keySavedKeychain")
     : t("ai.sessionKeySet"));
   await refreshAiKeyState();
   // an AI action was waiting for exactly this: keep the provider and model the
@@ -19518,8 +19540,8 @@ setAiKeyClear.addEventListener("click", async () => {
   }
   setAiKey.value = "";
   toast(isTauri()
-    ? "Key rimossa dal portachiavi — bridge riavviato"
-    : "Key di sessione rimossa");
+    ? t("ai.keyRemovedKeychain")
+    : t("ai.sessionKeyRemoved"));
   await refreshAiKeyState();
 });
 
@@ -25199,7 +25221,7 @@ async function smBridgeError(res: Response): Promise<string> {
   } catch {
     /* non-JSON error body */
   }
-  return `bridge error ${res.status}`;
+  return t("sm.bridgeError", { status: res.status });
 }
 
 const smHandlers: StratiMinerHandlers = {
@@ -25213,7 +25235,7 @@ const smHandlers: StratiMinerHandlers = {
 
   onExtract: async () => {
     smSet({ busy: "extract", report: "", warnings: [] });
-    toast("StratiMiner: estrazione in corso…");
+    toast(t("sm.toastExtracting"));
     try {
       const res = await fetch(`${await bridgeUrl()}/stratiminer-extract`, {
         method: "POST",
@@ -25230,7 +25252,7 @@ const smHandlers: StratiMinerHandlers = {
       });
       if (!res.ok) {
         const msg = await smBridgeError(res);
-        smSet({ busy: "", report: `Estrazione non riuscita: ${msg}` });
+        smSet({ busy: "", report: t("sm.extractFailed", { msg }) });
         logError(`StratiMiner extract: ${msg}`);
         return;
       }
@@ -25245,7 +25267,7 @@ const smHandlers: StratiMinerHandlers = {
         // nobody read are equally things to look at before trusting the table.
         warnings: [...r.warnings, ...unreadWarnings(r)],
       });
-      toast("em_data.xlsx scritta — aprila e controllala prima di convertirla");
+      toast(t("sm.toastWritten"));
     } catch {
       smSet({ busy: "", report: BRIDGE_UNREACHABLE });
       logError(`StratiMiner extract: ${BRIDGE_UNREACHABLE}`);
@@ -25266,7 +25288,7 @@ const smHandlers: StratiMinerHandlers = {
       });
       if (!res.ok) {
         const msg = await smBridgeError(res);
-        smSet({ busy: "", report: `Prompt non disponibile: ${msg}` });
+        smSet({ busy: "", report: t("sm.promptUnavailable", { msg }) });
         return;
       }
       prompt = ((await res.json()) as PromptResult).prompt;
@@ -25284,15 +25306,13 @@ const smHandlers: StratiMinerHandlers = {
       await navigator.clipboard.writeText(prompt);
       smSet({
         busy: "",
-        report: `Prompt copiato (${prompt.length} caratteri). ${runIt}`,
+        report: t("sm.promptCopied", { n: prompt.length, run: runIt }),
       });
-      toast("Prompt StratiMiner copiato");
+      toast(t("sm.toastCopied"));
     } catch {
       smSet({
         busy: "",
-        report:
-          `Il browser ha negato l'accesso agli appunti — il prompt è qui ` +
-          `sotto (${prompt.length} caratteri). ${runIt}`,
+        report: t("sm.clipboardDenied", { n: prompt.length, run: runIt }),
         promptFallback: prompt,
       });
     }
@@ -25329,7 +25349,7 @@ const smHandlers: StratiMinerHandlers = {
     anchor.download = "StratiMiner_prompt.md";
     anchor.click();
     URL.revokeObjectURL(anchor.href);
-    toast("Prompt salvato come StratiMiner_prompt.md");
+    toast(t("sm.toastSaved", { file: "StratiMiner_prompt.md" }));
   },
 
   onPickFolder: async () => {
@@ -25869,7 +25889,7 @@ function flushOpLog(): void {
       edited.set(names[0], f);
     } else if (o.edge) {
       parts.push(t(op.op === "add_edge" ? "log.edit.linked" : "log.edit.unlinked",
-        { a: names[0], b: names[1], rel: edgeTypeLabel(String(o.edge.edge_type ?? "")) }));
+        { a: names[0], b: names[1], rel: edgeLabel(String(o.edge.edge_type ?? "")) }));
     }
   }
   const out: string[] = [];
@@ -25902,7 +25922,7 @@ function opText(op: import("./model").GraphOp): string {
   const edge = o.edge as { edge_type?: string } | undefined;
   const fields = (o.fields as { field?: string }[] | undefined)?.map((f) => f.field).filter(Boolean);
   const detail = edge?.edge_type
-    ? edgeTypeLabel(edge.edge_type)
+    ? edgeLabel(edge.edge_type)
     : fields?.length
       ? fields.join(", ")
       : "";
@@ -28130,9 +28150,9 @@ function openPublishMenu(anchor: HTMLElement): void {
   const items: [string, string, () => void][] = [
     ["live", t("nv.pub.live"), () => copyReaderLink()],
     ["html", t("nv.pub.html"), () => exportWithCheck("html")],
-    ["docx", "DOCX", () => exportWithCheck("docx")],
+    ["docx", t("fmt.docx"), () => exportWithCheck("docx")],
     ["latex", t("nv.pub.latex"), () => exportWithCheck("latex")],
-    ["ipynb", "Jupyter", () => exportWithCheck("ipynb")],
+    ["ipynb", t("fmt.jupyter"), () => exportWithCheck("ipynb")],
     // MICRO-PL17 · export.narrative@1: a plugin's format (its command returns the file)
     ...plugins().commandsIn("export.narrative").map((c): [string, string, () => void] =>
       [runId(c), labelOf(c, getLocale()), () => void runPluginCommand(c)]),
@@ -38666,8 +38686,11 @@ function openSheetPrintWindow(from: SheetPrintScope | "menu"): void {
     lists.appendChild(fs);
   };
   const types = tally((u) => [u.type]);
-  checkList("types", t("skp.types"), [...types].sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([id, n]) => ({ id, label: id, n })), c.types);
+  // MICRO-COR01 · the type by its name in the page's language (the datamodel's
+  // translations), its id in the tooltip
+  checkList("types", t("skp.types"), [...types]
+    .map(([id, n]) => ({ id, label: datamodelTypeLabel(id) || id, title: id, n }))
+    .sort((a, b) => a.label.localeCompare(b.label)), c.types);
   const epochs = tally((u) => u.epochs);
   const startOf = (id: string) => {
     const v = (st.node(id)?.data as Record<string, unknown> | undefined)?.start_time;
@@ -49620,7 +49643,9 @@ function ingestDelivery(): HTMLElement {
   for (const sc of SCOPES) {
     const o = document.createElement("option");
     o.value = sc;
-    o.textContent = sc;
+    // MICRO-COR01 · the readable name (the Shelf's), never the id
+    o.textContent = t(`shelf.scope.${sc}`);
+    o.title = sc;
     if (sc === ingestDraft.scope) o.selected = true;
     scope.appendChild(o);
   }
@@ -51546,7 +51571,6 @@ function documentsView(win: Win): HTMLElement {
   if (!store) { host.appendChild(storageEmpty(t("storage.graphFilesNoGraph"))); return host; }
   const st = store;
   const ix = mediaIndex(st.doc.graph as never);
-  const lang = getLocale();
   const open = docViewOpen.get(win.id) ?? new Set<string>();
   docViewOpen.set(win.id, open);
   const wrap = document.createElement("div");
@@ -51583,7 +51607,7 @@ function documentsView(win: Win): HTMLElement {
   const setRows = (tree: ReturnType<typeof setTreeOf>, key: string, depth: number) => {
     for (const k of tree.children) {
       const kk = `${key}/${k.id}`;
-      row(kk, k.id, depth, cite(ix, k.id) === k.name ? k.name : k.name, k.role ? roleLabel(st.doc.graph as never, k.role, lang) : "",
+      row(kk, k.id, depth, cite(ix, k.id) === k.name ? k.name : k.name, k.role ? mediaRoleLabel(st.doc.graph as never, k.role) : "",
           k.files, k.bytes, "", k.children.length > 0);
       if (open.has(kk)) setRows(k, kk, depth + 1);
     }
@@ -51610,7 +51634,7 @@ function documentsView(win: Win): HTMLElement {
         const tr = trees[i];
         const kk = `${d.id}/${tr.id}`;
         const via = r.via ? t("dv.via", { m: String(st.node(r.via)?.name ?? r.via) }) : "";
-        row(kk, tr.id, 1, tr.name, tr.role ? roleLabel(st.doc.graph as never, tr.role, lang) : via, tr.files, tr.bytes, "", tr.children.length > 0 || r.versions.length > 0);
+        row(kk, tr.id, 1, tr.name, tr.role ? mediaRoleLabel(st.doc.graph as never, tr.role) : via, tr.files, tr.bytes, "", tr.children.length > 0 || r.versions.length > 0);
         if (open.has(kk)) {
           setRows(tr, kk, 2);
           for (const v of r.versions) {
@@ -51630,7 +51654,7 @@ function documentsView(win: Win): HTMLElement {
         const tr = setTreeOf(ix, n.id);
         const kk = `__loose/${n.id}`;
         const owner = ix.inn(n.id, "has_linked_resource").map((s) => String(ix.byId.get(s)?.name ?? s))[0];
-        row(kk, n.id, 1, tr.name + (owner ? ` · ${owner}` : ""), tr.role ? roleLabel(st.doc.graph as never, tr.role, lang) : "", tr.files, tr.bytes, "", tr.children.length > 0);
+        row(kk, n.id, 1, tr.name + (owner ? ` · ${owner}` : ""), tr.role ? mediaRoleLabel(st.doc.graph as never, tr.role) : "", tr.files, tr.bytes, "", tr.children.length > 0);
         if (open.has(kk)) setRows(tr, kk, 2);
       }
   }
@@ -51775,7 +51799,7 @@ function assetListView(win: Win): HTMLElement {
   const say = document.createElement("p");
   say.className = "files-hint al-say";
   say.dataset.alSay = "";
-  say.textContent = ans.say_it;
+  say.textContent = assetCountsSay(ans.counts);
   host.appendChild(say);
   // MICRO-CODA-VISTA p.1 · no geometry key, no form: said
   const nokey = AL.shapeless(ans.assets);
@@ -65245,7 +65269,7 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
     const check = nameStatus.get(ids[0]);
     if (check?.suggestion) {
       const b = document.createElement("button");
-      b.textContent = `Rinomina a "${check.suggestion}"`;
+      b.textContent = t("ctx.renameTo", { name: check.suggestion });
       if (check.reason) b.title = check.reason;
       b.onclick = () => {
         const from = store!.node(ids[0])?.name ?? "";
@@ -65258,9 +65282,9 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
     }
   }
   if (targets.length) {
-    for (const t of targets) {
+    for (const gt of targets) {
       const b = document.createElement("button");
-      b.textContent = `Group into ${t.groupType.replace("NodeGroup", "")} group`;
+      b.textContent = t("ctx.groupInto", { group: datamodelTypeLabel(gt.groupType) });
       b.onclick = () => {
         // position the new group at the members' bounding box so the matrix
         // draws it (nodes without a layout position are skipped)
@@ -65277,17 +65301,17 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
         const pos = Number.isFinite(minX)
           ? { x: minX - 24, y: minY - 24, w: 200, h: 140 }
           : undefined;
-        const g = store!.groupNodes(ids, t.groupType, t.edgeType, pos);
+        const g = store!.groupNodes(ids, gt.groupType, gt.edgeType, pos);
         hideContextMenu();
         select(g.id);
-        toast(`grouped ${ids.length} into ${g.name}`);
+        toast(tn("ctx.grouped", ids.length, { name: g.name ?? g.id }));
       };
       menu.appendChild(b);
     }
   } else {
     const d = document.createElement("div");
     d.className = "ctx-disabled";
-    d.textContent = "No legal group for this selection";
+    d.textContent = t("ctx.noLegalGroup");
     menu.appendChild(d);
   }
   // MICRO-PL17 · context.node@1: the plugins' commands this selection allows (`when`)
