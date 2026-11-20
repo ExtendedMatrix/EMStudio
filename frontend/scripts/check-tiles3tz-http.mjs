@@ -269,6 +269,20 @@ try {
     eq([got && Buffer.from(got).toString(), log.reqs], ["città", 2], "a non-ASCII entry asked in NFD is found, in one request");
   }
 
+  // ── MICRO-TIL07 · every Range goes past the browser's HTTP cache ────────
+  // (Chrome writes ONE cache entry per URL at a time: with the cache on, the
+  // ranges of one archive left in a row). The caller's fetch (the room's
+  // signed road) gets the same option.
+  {
+    const seen = [];
+    const spy = (u, init) => { seen.push([init?.cache ?? null, !!init?.headers?.Range]); return fetch(u, init); };
+    const a = await Z.Archive3tz.open(Z.httpSource(`${BASE}/nfc.3tz`, spy));
+    await a.readEntry("Data/città.b3dm");
+    eq([seen.length > 1, seen.every(([c, r]) => c === "no-store" && r)], [true, true],
+       `every Range of a .3tz asked with cache: "no-store" (${seen.length} requests, through the caller's fetch)`);
+    eq(Z.RANGE_FETCH_OPTIONS, { cache: "no-store" }, "RANGE_FETCH_OPTIONS is { cache: \"no-store\" }");
+  }
+
   // ── a server without Range: downloaded once, as before ──────────────────
   server.ranges = false;
   const r7 = await run(`${BASE}/a.3tz`, { keep: keep1 });

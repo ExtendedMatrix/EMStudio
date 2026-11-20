@@ -64,9 +64,19 @@ export function blobSource(blob: Blob): ByteSource {
 /** HTTP with `Range`, read by the package's source (206 → ranges from then
  *  on; 200 → the whole archive kept and sliced, up to 1 GiB). Its errors carry
  *  the range asked and the status (`load-failure.ts rangeOf`); its stats the
- *  ETag and the ranges still asked. */
+ *  ETag and the ranges still asked.
+ *
+ *  MICRO-TIL07 (row T6 of the tileset plan) · the ranges go `no-store`, past
+ *  the browser's HTTP cache. Chrome lets ONE request at a time write the cache
+ *  entry of a URL, and every tile of an archive is a range of the same URL:
+ *  with the cache on, the requests of a `.3tz` left one after the other (each
+ *  one's connection opened when the previous had its headers — measured on
+ *  TempluMare 2013, 81 in a row behind a slow bridge). The tiles are kept by
+ *  the app's own cache on disk (`tile-cache.ts`), keyed on the archive's ETag;
+ *  the browser's cache of a range was never read again anyway. */
+export const RANGE_FETCH_OPTIONS: RequestInit = { cache: "no-store" };
 export function httpSource(url: string, fetchFn?: typeof fetch): ByteSource {
-  const p = packageHttp(url, { fetch: fetchFn });
+  const p = packageHttp(url, { fetch: fetchFn, fetchOptions: RANGE_FETCH_OPTIONS });
   let total: number | null = null;
   const tail = async (length: number) => {
     const t = await p.tail(length);
