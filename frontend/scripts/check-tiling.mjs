@@ -330,8 +330,9 @@ const eq = (got, want, what) => {
   const ids = W.WORKSPACES.filter((w) => w.builtin).map((w) => w.id);
   // NIGHT-SPAZIO (30 set 2026) · the fifth space, «Spazio» (scrivania v11b)
   // MICRO-G-SCHEDE (17 Nov 2026) · the sixth, «Schede»
-  eq(ids, ["canvas", "provenance", "assets", "narrative", "space", "sheets"],
-     "the six spaces, with the ids every saved arrangement is keyed by");
+  // MICRO-SEG02 p.0 (20 Nov 2026) · the seventh, «Scripting»
+  eq(ids, ["canvas", "provenance", "assets", "narrative", "space", "sheets", "scripting"],
+     "the seven spaces, with the ids every saved arrangement is keyed by");
   // MICRO-VIEWER-UNICO · the Annotator went: it was Fonti with the Viewer large
   eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons"], "the rest stay parked");
   const sig = (id) => W.arrangementSignature(W.WORKSPACES.find((w) => w.id === id).arrangement);

@@ -130,7 +130,7 @@ try {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/close-2-closed.png` });
   // ── every workspace: no name of the closed graph on screen ──
   const names = ["SU001", "SU020", "USD009", "Survey2015", "conservation_state", "TempluMare (Cesium"];
-  for (const id of ["canvas", "provenance", "assets", "narrative", "space", "sheets"]) {
+  for (const id of ["canvas", "provenance", "assets", "narrative", "space", "sheets", "scripting"]) {
     await ws(id);
     const seen = await E((ns) => {
       const root = document.getElementById("tile-root") ?? document.body;

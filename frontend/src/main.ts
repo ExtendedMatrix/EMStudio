@@ -62509,7 +62509,8 @@ function showWorkspacesHelp(): void {
     const wins = document.createElement("td");
     wins.textContent = describeArrangement(w.arrangement!);
     const insp = document.createElement("td");
-    insp.textContent = w.arrangement!.wins.some((x) => x.type === "inspector") ? t("ws.yes") : t("ws.noInspContents");
+    insp.textContent = w.arrangement!.wins.some((x) => x.type === "inspector") ? t("ws.yes")
+      : w.id === "scripting" ? t("ws.noInspScripting") : t("ws.noInspContents");
     tr.append(name, q, wins, insp);
     table.appendChild(tr);
   }
@@ -62597,7 +62598,7 @@ function renderWorkspaceBar(): void {
   // the name is asked by the app's dialog: `prompt` opens nothing in the
   // desktop's WKWebView and returned null — the «+» did nothing (26 Oct 2026)
   // MICRO-TIL002 · the «+» offers a copy of this arrangement (as before) and the
-  // MODELS (`WORKSPACE_TEMPLATES`: Scripting) — none of them among the six tabs
+  // MODELS (`WORKSPACE_TEMPLATES`: Scripting — also the seventh tab since MICRO-SEG02)
   add.addEventListener("click", (e) => {
     e.stopPropagation();
     const r = add.getBoundingClientRect();

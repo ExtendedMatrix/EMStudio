@@ -217,8 +217,29 @@ export type ArrangementNode =
   | { win: string }
   | { dir: "row" | "col"; ratio: number; a: ArrangementNode; b: ArrangementNode };
 
+/** MICRO-SEG02 p.0 · SCRIPTING — «Che cosa può fare uno script con questo
+ *  grafo?» The Script Editor on the left, the Python console under it, the
+ *  Matrix on the right. The seventh built-in (after Schede) and the model of
+ *  the «+» of MICRO-TIL002 (`WORKSPACE_TEMPLATES`). */
+const SCRIPTING: WorkspacePreset = {
+  id: "scripting", labelKey: "ws.scripting", hintKey: "ws.qScripting",
+  icon: "⌨", windowType: "script", builtin: true,
+  arrangement: {
+    wins: [
+      { name: "editor", type: "script" },
+      { name: "console", type: "console" },
+      { name: "canvas", type: "graph", state: { mode: "matrix" } },
+    ],
+    active: "editor",
+    layout: { dir: "row", ratio: 0.55,
+              a: { dir: "col", ratio: 0.62, a: { win: "editor" }, b: { win: "console" } },
+              b: { win: "canvas" } },
+  },
+};
+
 /**
- * THE TABS ARE ARRANGEMENTS. All six of them, one species.
+ * THE TABS ARE ARRANGEMENTS. All seven of them, one species (Scripting, the
+ * seventh, since MICRO-SEG02).
  *
  * They used to be two species — four PHASES (`Documentation · Analysis ·
  * Comparisons · Output`) and two VIEWS (`IDE`, `Table`) with a hairline between
@@ -400,6 +421,11 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
                      b: { win: "viewer" } } },
     },
   },
+  // SCRIPTING · «Che cosa può fare uno script con questo grafo?» (MICRO-SEG02
+  // p.0, E.D., 20 Nov 2026): the seventh, last. A saved registry that never
+  // knew it gets it seeded (`loadRegistry` seeds every built-in it lacks), so
+  // the person's own arrangements and workspaces stay as they were.
+  SCRIPTING,
 ];
 
 /**
@@ -456,29 +482,17 @@ export const PARKED_WORKSPACES: WorkspacePreset[] = [
 
 /**
  * MICRO-TIL002 · THE MODELS of the «+»: arrangements a new workspace can START
- * from, besides a copy of the one in front of you. Not tabs: none of them is
- * among the built-ins (the six stay six), and a workspace made from one is the
- * person's — renamed, reshaped, removed like any other.
+ * from, besides a copy of the one in front of you. A workspace made from one is
+ * the person's — renamed, reshaped, removed like any other.
  *
  * SCRIPTING, as in Blender: the Script Editor on the left, the Python console
  * under it, the graph on the right (the Matrix: what a script reads and writes).
+ * MICRO-SEG02 p.0 (E.D., 20 Nov 2026, 13:35: «conviene avere uno spazio di
+ * lavoro in più: Scripting») · it is also the SEVENTH built-in tab (last,
+ * after Schede: `BUILTIN_WORKSPACES`), and stays a model of the «+».
  */
 export const WORKSPACE_TEMPLATES: WorkspacePreset[] = [
-  {
-    id: "scripting", labelKey: "ws.scripting", hintKey: "ws.qScripting",
-    icon: "⌨", windowType: "script",
-    arrangement: {
-      wins: [
-        { name: "editor", type: "script" },
-        { name: "console", type: "console" },
-        { name: "canvas", type: "graph", state: { mode: "matrix" } },
-      ],
-      active: "editor",
-      layout: { dir: "row", ratio: 0.55,
-                a: { dir: "col", ratio: 0.62, a: { win: "editor" }, b: { win: "console" } },
-                b: { win: "canvas" } },
-    },
-  },
+  (({ builtin: _b, ...model }) => ({ ...model, arrangement: JSON.parse(JSON.stringify(SCRIPTING.arrangement)) as Arrangement }))(SCRIPTING),
 ];
 
 /**

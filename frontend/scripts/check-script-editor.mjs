@@ -84,7 +84,8 @@ eq(tp.arrangement.layout.dir, "row", "…the editor and the console on the left�
 eq([tp.arrangement.layout.a.dir, tp.arrangement.layout.a.a.win, tp.arrangement.layout.a.b.win, tp.arrangement.layout.b.win],
    ["col", "editor", "console", "canvas"], "…the console UNDER the editor, the graph on the right");
 const builtin = ws.slice(ws.indexOf("const BUILTIN_WORKSPACES"), ws.indexOf("export const PARKED_WORKSPACES"));
-ok(!/scripting/.test(builtin) && (builtin.match(/^\s*id: "/gm) ?? []).length === 6, "…NOT among the six built-in tabs");
+// MICRO-SEG02 p.0 · Scripting is ALSO the seventh built-in tab (last, after Schede)
+ok(/\n  SCRIPTING,\n\];/.test(builtin) && (builtin.match(/^\s*id: "/gm) ?? []).length === 6, "…and the seventh built-in tab, last");
 ok(/showWorkspaceAddMenu\(r\.left, r\.bottom \+ 2\)/.test(main) && /for \(const tp of WORKSPACE_TEMPLATES\)/.test(main), "the «+» offers the models");
 // keys and places
 ok(/ev\.altKey && !ev\.ctrlKey && !ev\.metaKey && ev\.code === "KeyP"/.test(sce), "Alt+P runs the script, by the key's place");
