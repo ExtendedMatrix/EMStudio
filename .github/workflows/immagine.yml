@@ -71,6 +71,14 @@ jobs:
 
       - uses: actions/checkout@v5
 
+      # IL RAMO DI RILASCIO (MICRO-SEG07, 20 nov 2026): l'immagine pubblica
+      # porta il nome di un tag, e i tag nascono solo sul ramo di versione
+      # (`./em.sh release-branch`, oggi 1.6), mai su main. Stesso controllo
+      # di release.yml, stessa funzione: 1 = fuori dal ramo, 2 = non so.
+      - name: Il tag viene dal ramo di rilascio (mai main)
+        shell: bash
+        run: ./em.sh release-branch --check "${{ inputs.tag || github.ref_name }}"
+
       # QEMU non serve per COSTRUIRE (i due stadi che fanno lavoro vero sono
       # `--platform=$BUILDPLATFORM` e girano nativi, vedi il Dockerfile), ma
       # l'ultimo stadio è per-architettura e buildx lo vuole.

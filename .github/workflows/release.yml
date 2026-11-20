@@ -152,6 +152,18 @@ jobs:
             exit 1
           fi
 
+      # THE RELEASE BRANCH (MICRO-SEG07, 20 Nov 2026). E.D.'s rule: releases
+      # come from the version branch (`./em.sh release-branch`, today 1.6),
+      # never from main. A tag has no branch, so the check is on the commit:
+      # it must be contained in origin's release branch. `devrel` pushes the
+      # branch BEFORE the tag, so on a tag push the branch already holds it;
+      # older tags (≤ dev.143, cut on main) are ancestors of 1.6 and pass, so a
+      # rebuild by dispatch still works. Exit 1 = not on the branch, 2 = cannot
+      # verify — and a release is not built on a maybe.
+      - name: The tag must come from the release branch (never main)
+        shell: bash
+        run: ./em.sh release-branch --check "$EM_TAG"
+
       # THE GATE, and it is not a copy of the gate: `./em.sh s3d status --check` is
       # the same function `devrel` runs on a laptop — same probe, same retries for
       # a release that was pushed seconds ago, same fail-closed for an index that

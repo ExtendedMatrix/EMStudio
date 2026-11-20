@@ -90,6 +90,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          # THE RELEASE BRANCH, NAMED (MICRO-SEG07, 20 Nov 2026). E.D.'s rule:
+          # releases come from the version branch, never from main. The button
+          # lives on main's copy of this file too (main is the default branch),
+          # so the checkout names the branch instead of taking the run's ref:
+          # whichever branch the button was pressed on, `devrel` runs on 1.6 —
+          # and refuses anywhere else (`require_release_branch` in em.sh).
+          # It must be a literal: this is read BEFORE there is a tree to ask
+          # `./em.sh release-branch`. Same value as RELEASE_BRANCH in em.sh;
+          # when 1.7 opens, both change together.
+          ref: "1.6"
           # the whole history and every tag: `--if-changed` counts commits since
           # the last v* tag, and a shallow clone has no tags to count from
           fetch-depth: 0
@@ -101,6 +111,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: The checkout's ref agrees with em.sh's release branch
+        shell: bash
+        run: |
+          want="$(./em.sh release-branch)"
+          [ "$want" = "1.6" ] || { echo "::error::em.sh says the release branch is '$want' but nightly.yml checks out '1.6': change both together"; exit 1; }
 
       - name: Who commits the bump
         run: |

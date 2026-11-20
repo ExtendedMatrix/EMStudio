@@ -57,6 +57,13 @@
 #                                opens) → inc → commit → tag → push.
 #                                GitHub Actions then builds the three installers.
 #   ./em.sh ghrelease <x.y.z>    A stable release at an exact version.
+#   ./em.sh release-branch [--check [<ref>]]
+#                                The branch releases come from (1.6, never
+#                                main). `--check <ref>` exits 0 if <ref> (a
+#                                tag; default HEAD) is contained in origin's
+#                                release branch, 1 if not, 2 if it cannot tell.
+#                                devrel and ghrelease refuse on another branch;
+#                                release.yml and immagine.yml run the check.
 #   ./em.sh help
 #
 # In a DISTRIBUTED build the datamodels are already inlined into dist/index.html
@@ -734,6 +741,58 @@ do_pack() {
 
 # ── the release ──────────────────────────────────────────────────────────────
 
+# ── IL RAMO DI RILASCIO: 1.6, MAI main (MICRO-SEG07, 20 nov 2026) ────────────
+#
+# Regola di E.D.: i rilasci non partono mai da `main`, solo dal ramo della
+# versione — come s3Dgraphy (`s3dgraphy_v1.6dev`), EM Tools
+# (`EM-tools_v1.6.0_dev`) e 3DSC (`3DSC-dev-1.7.0`). `main` resta il ramo di
+# default su GitHub e SEGUE il ramo di versione con un merge a ogni rilascio
+# stabile (`ghrelease`); non riceve mai un tag per primo.
+#
+# Un posto solo per il nome: i workflow lo leggono da qui
+# (`./em.sh release-branch`), e quando si apre la 1.7 si cambia questa riga
+# (e il `ref:` di nightly.yml, che deve saperlo PRIMA del checkout).
+RELEASE_BRANCH="${EM_RELEASE_BRANCH:-1.6}"
+
+require_release_branch() {
+  [[ "$RELEASE_BRANCH" != "main" ]] || die "EM_RELEASE_BRANCH=main: releases never \
+come from main (E.D.'s rule) — main follows the version branch"
+  local branch
+  branch="$(git -C "$ROOT" branch --show-current)"
+  [[ "$branch" == "$RELEASE_BRANCH" ]] || die "releases come from the branch \
+'$RELEASE_BRANCH', and this checkout is on '${branch:-a detached HEAD}'. \
+E.D.'s rule: never from main — main follows $RELEASE_BRANCH with a merge after \
+each stable release. Switch with: git switch $RELEASE_BRANCH"
+}
+
+#: `release-branch --check [<ref>]`: is <ref> inside origin's release branch?
+#: 0 yes · 1 no · 2 cannot verify (no network, no such branch on origin).
+#: In a shallow CI clone the history is deepened commits-only (tree:0), which
+#: is all `merge-base --is-ancestor` needs.
+do_release_branch() {
+  if [[ "${1:-}" != "--check" ]]; then
+    printf '%s\n' "$RELEASE_BRANCH"
+    return 0
+  fi
+  local ref="${2:-HEAD}" sha
+  sha="$(git -C "$ROOT" rev-parse -q --verify "$ref^{commit}" 2>/dev/null)" \
+    || fail 2 "release-branch: '$ref' is not a commit in this checkout"
+  local spec="+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+  if [[ "$(git -C "$ROOT" rev-parse --is-shallow-repository)" == "true" ]]; then
+    git -C "$ROOT" fetch -q --no-tags --filter=tree:0 --unshallow origin "$spec" \
+      || fail 2 "release-branch: cannot fetch origin/$RELEASE_BRANCH"
+  else
+    git -C "$ROOT" fetch -q --no-tags origin "$spec" \
+      || fail 2 "release-branch: cannot fetch origin/$RELEASE_BRANCH (does it exist on origin?)"
+  fi
+  if git -C "$ROOT" merge-base --is-ancestor "$sha" "origin/$RELEASE_BRANCH"; then
+    log "$ref ($sha) is on origin/$RELEASE_BRANCH"
+    return 0
+  fi
+  fail 1 "$ref ($sha) is NOT on origin/$RELEASE_BRANCH. Releases come from \
+'$RELEASE_BRANCH' only (never main): tag on $RELEASE_BRANCH with ./em.sh devrel."
+}
+
 require_clean_tree() {
   [[ -z "$(git -C "$ROOT" status --porcelain)" ]] || die "the working tree is not \
 clean. A release tags what is COMMITTED; anything else would produce a build that \
@@ -750,6 +809,7 @@ do_devrel() {
       *) die "unknown option for devrel: $arg" ;;
     esac
   done
+  require_release_branch
 
   local branch current next tag
   branch="$(git -C "$ROOT" branch --show-current)"
@@ -831,6 +891,7 @@ do_ghrelease() {
 stable version — a dev release is ./em.sh devrel)"
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "'$version' is not a stable \
 x.y.z — a dev build is what ./em.sh devrel is for"
+  require_release_branch
   require_clean_tree
   s3d_gate
   do_apertura
@@ -846,6 +907,9 @@ x.y.z — a dev build is what ./em.sh devrel is for"
   git -C "$ROOT" push origin "$branch"
   git -C "$ROOT" push origin "v$version"
   log "pushed v$version — $REPO_URL/releases/tag/v$version"
+  # main follows the release branch, by hand and only here (a stable release):
+  log "then bring main up to $RELEASE_BRANCH (never the other way round):"
+  echo "   git switch main && git merge --ff-only $RELEASE_BRANCH && git push origin main && git switch $RELEASE_BRANCH"
 }
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
@@ -880,6 +944,7 @@ case "$cmd" in
   apertura) do_apertura ;;
   devrel) do_devrel "$@" ;;
   ghrelease) do_ghrelease "$@" ;;
+  release-branch) do_release_branch "$@" ;;
   help | -h | --help) usage ;;
   *)
     warn "unknown command: $cmd"
