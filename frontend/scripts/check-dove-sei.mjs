@@ -90,7 +90,10 @@ ok(/accredited/.test(host.querySelector(".conn-access").textContent), "the acces
 // «Mode» left the top bar; the label is the way in, and ⇧⌘L
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 ok(!/id="dd-mode"/.test(html), "no Mode menu in the top bar");
-ok(/id="mode-actions" hidden/.test(html), "the mode buttons stay, hidden, pressed by the chip's menu");
+ok(!/id="btn-mode-(standalone|sidecar|hub)"/.test(html), "no Standalone · Sidecar · Hub buttons: the chip's «Where you work» is the one way (MICRO-COR08)");
+const mainSrc = readFileSync(`${SRC}main.ts`, "utf8");
+ok(/setMode: \(m\) => \{ closeWhoMenu\(\); MODES\[m\]\(\); \}/.test(mainSrc) && !/btn-mode-/.test(mainSrc),
+   "the chip calls the three modes directly, no hidden button pressed");
 const keymap = readFileSync(`${SRC}keymap.ts`, "utf8");
 ok(/id: "where", keys: "⇧⌘L"/.test(keymap), "⇧⌘L is in the key map (Help ▸ Shortcuts)");
 

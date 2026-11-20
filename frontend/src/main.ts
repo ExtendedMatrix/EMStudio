@@ -1662,13 +1662,6 @@ function setModeIndicator(mode: SessionMode | boolean): void {
     connectors.clear();     // nothing is announced when nothing is connected
     sidecarDetail.innerHTML = "";
   }
-  // MENU1 · reflect the active session mode in the Mode menu (a leading ✓).
-  document.getElementById("btn-mode-standalone")
-    ?.classList.toggle("mode-active", m === "standalone");
-  document.getElementById("btn-mode-sidecar")
-    ?.classList.toggle("mode-active", m === "sidecar");
-  document.getElementById("btn-mode-hub")
-    ?.classList.toggle("mode-active", m === "hub");
   renderSyncControl();
 }
 
@@ -1928,7 +1921,7 @@ setInterval(() => void pollNodeReach(), 10000);
 function connectionGestures(): ConnectionGestures {
   const away = (run: () => void) => () => { closeWhoMenu(); run(); };
   return {
-    setMode: (m) => { closeWhoMenu(); document.getElementById(`btn-mode-${m}`)?.click(); },
+    setMode: (m) => { closeWhoMenu(); MODES[m](); },
     openNodeSettings: away(() => openNodeSettings()),
     openRoomSettings: () => openRoomPanel(),
     openOnNode: away(() => shareThisRoom()),
@@ -11885,7 +11878,7 @@ function enterRoom(roomId: string): void {
   // T1 · changing room is leaving one: its graphs go, through the one door
   if (sync.connected || sync.retrying) leaveHostDocuments();
   hubReconnecting = false;
-  document.getElementById("btn-mode-hub")?.click();
+  void joinHubRoom();
 }
 
 /**
@@ -19179,20 +19172,24 @@ btnSync.addEventListener("click", () => {
   });
 });
 
-// ---------- MENU1 · Mode menu (Standalone / Sidecar / Hub) ----------
-// Reuses the existing sync toggle (btnSync) rather than reimplementing it:
-// Sidecar connects if not connected, Standalone disconnects if connected. Hub
-// is disabled (StratiGraph Server, later). The active mode's ✓ is set by setModeIndicator.
-document.getElementById("btn-mode-standalone")?.addEventListener("click", () => {
-  if (sync.connected || sync.retrying) btnSync.click(); // disconnect → back to local document
-});
-document.getElementById("btn-mode-sidecar")?.addEventListener("click", () => {
-  if (!sync.connected && !sync.retrying) btnSync.click(); // connect → live-synced to the host
-});
-// P4.3 · Hub is now a real mode with a real server behind it (StratiGraph Server, P4.2).
-// The endpoint and the room live in Settings; the TOKEN is asked for and kept in
-// memory only — the same rule the AI key follows, because a token written to
-// disk is a token that leaks.
+// ---------- the three places of «Where you work» ----------
+// On this computer · With an app · In a room: the chip's menu calls these, and
+// nothing else names them (MICRO-COR08: the hidden Standalone · Sidecar · Hub
+// buttons it used to press are gone). The first two reuse the sync toggle
+// (btnSync) rather than reimplementing it.
+/** On this computer: leave the app or the room → back to the local document */
+function modeStandalone(): void {
+  if (sync.connected || sync.retrying) btnSync.click();
+}
+/** With an app: live-synced to the host (Blender/EMtools) — ADR-002 */
+function modeSidecar(): void {
+  if (!sync.connected && !sync.retrying) btnSync.click();
+}
+const MODES: Record<"standalone" | "sidecar" | "hub", () => void> = {
+  standalone: modeStandalone,
+  sidecar: modeSidecar,
+  hub: () => void joinHubRoom(),
+};
 document.getElementById("btn-open-other")
   ?.addEventListener("click", () => void openRoomElsewhere());
 document.getElementById("btn-share-room")
@@ -19220,7 +19217,10 @@ zoomSelBtn?.addEventListener("click", () => {
 });
 paintZoomSelection();
 
-document.getElementById("btn-mode-hub")?.addEventListener("click", async () => {
+/** In a room: the room of Settings on the node of Settings (StratiGraph Server,
+ *  P4.2). The TOKEN is asked for and kept in memory only — the same rule the AI
+ *  key follows, because a token written to disk is a token that leaks. */
+async function joinHubRoom(): Promise<void> {
   const s = getSettings().sync;
   if (!s.hubUrl || !s.hubRoom) {
     toast(t("hub.needsConfig"));
@@ -19233,7 +19233,7 @@ document.getElementById("btn-mode-hub")?.addEventListener("click", async () => {
   const token = hubToken ?? (await askText(t("hub.tokenPrompt"))) ?? "";
   hubToken = token || null;
   connectToHub(s.hubUrl, s.hubRoom, hubToken);
-});
+}
 
 /** The access token for this session. In MEMORY: never localStorage, never the
  *  settings file — a token on disk outlives the reason it was issued. */
@@ -45503,7 +45503,7 @@ function filesPackSection(listing: FsListing): HTMLElement {
   const isTileset = !listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json");
   ph.append(" ", tabTip(t(isTileset ? "files.optPackBorn" : "files.optPackWhere")));
   if (isTileset) {
-    pk.appendChild(pack3tzButton(listing.path, { viaBridge: true }));
+    pk.appendChild(pack3tzButton(listing.path));
     if (!filesFolderStamped(listing)) pk.appendChild(tabLead(t("files.optPackStampFirst"), "files-hint files-warn"));
   }
   const prows = jobRows(["pack3tz"]);
@@ -47960,19 +47960,20 @@ async function doStamp(win: Win): Promise<void> {
   }
 }
 
-/** RISORSA-FILE · «Impacchetta un tileset in .3tz». The desktop writes it (the
- *  bridge beside it, 3DSC's writer, the canonical profile); the web reads a
- *  .3tz and does not write one, and says where it is done. */
-function pack3tzButton(folder: string, opts: { viaBridge?: boolean } = {}): HTMLElement {
+/** RISORSA-FILE · «Impacchetta un tileset in .3tz». EMStudio's service on this
+ *  computer writes it (dtcstamp's writer, the canonical profile — the one 3DSC
+ *  and s3Dgraphy call too): the desktop app has it, a page beside a running
+ *  service has it; a page the node serves has none, and the button says so in
+ *  place of packing (MICRO-COR08, E.D. 19 Nov: «via bridge, con messaggio
+ *  chiaro»). */
+function pack3tzButton(folder: string): HTMLElement {
   const box = document.createElement("div");
   box.className = "stamp-report-ask";
   const b = document.createElement("button");
   b.className = "ghost";
   b.dataset.action = "pack-3tz";
   b.textContent = t("pack3tz.button");
-  // MICRO-OTTIMIZZA-1 · in the File window the bridge serves the folder, and
-  // it is the bridge that writes: the browser of the dev stack packs too
-  const here = isTauri() || !!opts.viaBridge;
+  const here = canPack3tzHere();
   b.disabled = !here || pack3tzBusy;
   b.title = here ? t("pack3tz.hint") : t("pack3tz.desktopOnly");
   b.onclick = () => { void packTilesetFlow(folder); };
@@ -47987,12 +47988,29 @@ function pack3tzButton(folder: string, opts: { viaBridge?: boolean } = {}): HTML
   return box;
 }
 
+/** MICRO-COR08 · the bridge level whose `/fs/pack-3tz` this page calls (39:
+ *  with `root`, the RealityScan pair) */
+const BRIDGE_LEVEL_PACK3TZ = 39;
+/** Can this page pack a .3tz, from what the service last said (`serviceSeen`,
+ *  asked at start and every 30 s)? The desktop always can (its service is
+ *  beside it); not yet asked counts as yes, and the click asks again. */
+function canPack3tzHere(): boolean {
+  if (isTauri() || serviceSeen === undefined) return true;
+  return serviceSeen?.reach === "reachable" && (serviceSeen.level ?? 0) >= BRIDGE_LEVEL_PACK3TZ;
+}
+
 let pack3tzBusy = false;
 /** Pack, then the graph: the folder and the archive as two FORMS of one
  *  content (equal `content_digest`), the archive derived from the folder.
  *  Locators beside the em.json are written relative to it. */
-async function packTilesetFlow(folder: string, theirs?: { software: string; generator: string }): Promise<import("./pack3tz").PackResult | null> {
+async function packTilesetFlow(folder: string, theirs?: { software: string; generator: string }): Promise<(import("./pack3tz").PackResult & { stamped?: boolean }) | null> {
   if (pack3tzBusy) return null;
+  // MICRO-COR08 · no service that packs (the page the node serves): said, not tried
+  if (!isTauri() && !(await bridgeLevelAtLeast(BRIDGE_LEVEL_PACK3TZ))) {
+    const why = t("pack3tz.desktopOnly");
+    toast(why);
+    return { ok: false, error: why };
+  }
   pack3tzBusy = true;
   renderStorage();
   toast(t("pack3tz.working", { name: baseName(folder) }));
@@ -48045,6 +48063,7 @@ async function packTilesetFlow(folder: string, theirs?: { software: string; gene
       if (stamped) logInfo(t("pack3tz.stamped", { name: baseName(out.path) }));
       else logWarn(t("pack3tz.notStamped", { name: baseName(out.path) }));
       folderStamps.delete(folder);
+      return { ...out, stamped: !!stamped };
     }
     return out;
   } finally {
@@ -52823,6 +52842,40 @@ async function masterReplaceAsked(model: string, name: string): Promise<void> {
 /** MICRO-E p.2 · a removal refused on a version row: the reason, on the row */
 const verRefused = new Map<string, string>();
 
+/** MICRO-COR08 · «Pack into a .3tz» on a tileset's FOLDER row of Archive ▸
+ *  Assets: the folder on this disk (the tileset.json's folder), or null for a
+ *  .3tz, an address, a .blend's object, a tileset not found here */
+function tilesetFolderOf(x: AL.VersionRow): string | null {
+  if (!x.tileset) return null;
+  const raw = (fileStateOf(x.id)?.path || x.url || "").split("#")[0].replace(/^file:\/\//i, "");
+  if (!raw || /\.3tz$/i.test(raw) || (paths.hasScheme(raw) && !/^[A-Za-z]:/.test(raw))) return null;
+  const p = paths.resolveRelative(currentFilePath, raw);
+  if (!paths.isAbsolute(p)) return null;
+  return /(^|\/)tileset\.json$/i.test(p) ? paths.dirname(p) : p;
+}
+/** …its .3tz already among the asset's versions (the same name beside it) */
+function packedFormOf(a: AL.AssetRow, folder: string): AL.VersionRow | null {
+  const want = `${paths.basename(folder)}.3tz`.toLowerCase();
+  return a.versions.find((y) => y.tileset && paths.basename((y.url || "").split("#")[0]).toLowerCase() === want) ?? null;
+}
+/** …and what the last packing of that row said: written or the same bytes, stamped or not */
+const packSaid = new Map<string, { text: string; ok: boolean }>();
+async function packFromAssets(versionId: string, folder: string, repaint: () => void): Promise<void> {
+  const out = await packTilesetFlow(folder);
+  if (!out) return;
+  if (!out.ok) packSaid.set(versionId, { text: t("pack3tz.failed", { detail: out.error ?? "" }), ok: false });
+  else {
+    const name = baseName(out.path ?? "");
+    const said = t(out.state === "same" ? "pack3tz.same" : "pack3tz.done", {
+      name, sha: (out.sha256 ?? "").slice(0, 19), cd: (out.content_digest?.digest ?? "").slice(0, 19),
+      n: String(out.content_digest?.files ?? 0), s: String(out.seconds ?? 0) });
+    const stamp = out.stamped === undefined ? "" : ` · ${t(out.stamped ? "pack3tz.stamped" : "pack3tz.notStamped", { name })}`;
+    packSaid.set(versionId, { text: said + stamp, ok: true });
+    askAssetListSoon();
+  }
+  repaint();
+}
+
 /** One asset: its row, and when open its versions and their textures. */
 function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0: AL.Bands | undefined,
                    shared: Map<string, number>, repaint: () => void, inShape = false): void {
@@ -53000,6 +53053,32 @@ function assetRows(tb: HTMLElement, a: AL.AssetRow, targets: AL.TargetKey[], b0:
       rn.dataset.alVerRefused = x.id;
       rn.textContent = refused;
       name.appendChild(rn);
+    }
+    // MICRO-COR08 · a tileset's folder: «Pack into a .3tz», its .3tz if it is
+    // already there, and what the last packing said (the same bytes, stamped)
+    const folder = tilesetFolderOf(x);
+    if (folder) {
+      const packed = packedFormOf(a, folder);
+      const pb = document.createElement("button");
+      pb.type = "button";
+      pb.className = "ghost al-fix";
+      pb.dataset.action = "al-pack-3tz";
+      pb.textContent = t("al.pack.button");
+      const here = canPack3tzHere();
+      pb.disabled = !here || pack3tzBusy;
+      pb.title = here ? t(packed ? "al.pack.again" : "pack3tz.hint") : t("pack3tz.desktopOnly");
+      pb.onclick = (e) => { e.stopPropagation(); void packFromAssets(x.id, folder, repaint); };
+      stv.appendChild(pb);
+      const said = packSaid.get(x.id);
+      const line = said?.text ?? (packed ? t("al.pack.packed", { name: paths.basename(packed.url.split("#")[0]) })
+        : here ? "" : t("pack3tz.desktopOnly"));
+      if (line) {
+        const pn = document.createElement("div");
+        pn.className = `al-pack-said${said && !said.ok ? " files-warn" : ""}`;
+        pn.dataset.alPackSaid = x.id;
+        pn.textContent = line;
+        name.appendChild(pn);
+      }
     }
     vr.append(moreTd, name, cell(AL.levelSay(x, t("al.tilesetStreaming"), t("al.chainLod")), "", x.tiles ? tilesTitle(x) : ""),
       x.tiles ? cell(tilesTri(x), "n", tilesTitle(x)) : cell(fmtN(x.triangles), `n${obv.tri ? " over" : ""}`), cell(fmtMB(x.size_bytes)),

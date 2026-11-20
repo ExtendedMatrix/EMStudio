@@ -1202,11 +1202,6 @@ body.sync-active #mode-indicator::before {
   color: var(--text-faint);
   font-weight: 600;
 }
-/* MENU1 · active session mode gets a leading check */
-#toolbar .dd-menu button.mode-active::before {
-  content: "✓ ";
-  color: var(--accent-ink);
-}
 /* MENU1 · Help → About / Ontology models popover */
 .help-pop {
   position: fixed;

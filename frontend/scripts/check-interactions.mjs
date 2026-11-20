@@ -11256,6 +11256,45 @@ test("COR6.graphgeo", "MICRO-COR06 · dal connettore del nodo del grafo (↓) il
     detail: { entry, geo0, r, undone, errors } };
 });
 
+test("COR8.modes", "MICRO-COR08 · i vecchi bottoni Standalone · Sidecar · Hub non ci sono più: «Dove lavori» del chip chiama i tre modi da sé — «In una stanza» senza nodo dice di sceglierlo e apre le Connessioni, «Con un'app» aspetta Blender, «Su questo computer» torna al file", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  const gone = await p.evaluate(() => !document.querySelector("#btn-mode-standalone, #btn-mode-sidecar, #btn-mode-hub"));
+  await p.click("#mode-indicator");
+  await p.click('#who-menu .conn-mode[data-mode="hub"]');
+  await p.waitForTimeout(600);
+  const hub = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  await p.keyboard.press("Escape");
+  await p.click("#mode-indicator");
+  await p.click('#who-menu .conn-mode[data-mode="sidecar"]');
+  await p.waitForTimeout(1200);
+  const waiting = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  await p.click("#mode-indicator");
+  await p.click('#who-menu .conn-mode[data-mode="standalone"]');
+  await p.waitForTimeout(500);
+  const back = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  await ctx.close();
+  const conds = { gone, hub: /Scegli prima un nodo e una stanza/.test(hub), waiting: /Blender/.test(waiting),
+    back: !/Blender/.test(back), noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, hub, waiting, back, errors } };
+});
+
+test("COR8.pack", "MICRO-COR08 · «Impacchetta in .3tz» dove non risponde il servizio di EMStudio (la pagina servita dal nodo): il messaggio vero — serve l'app desktop o il servizio su questo computer — e nessuna chiamata a /fs/pack-3tz", async () => {
+  const asked = [];
+  const { p, ctx, errors } = await open({ doc: "catena", route: { pattern: `${BRIDGE}/**`, handler: (route) => {
+    const u = new URL(route.request().url());
+    if (u.pathname === "/health" || u.pathname === "/fs/pack-3tz" || u.pathname === "/jobs") { asked.push(u.pathname); return route.abort(); }
+    return route.continue();
+  } } });
+  const out = await p.evaluate(() => window.__EM_DRAG__.packTileset("/tmp/nessuno/TempluMare_cesium"));
+  await p.waitForTimeout(400);
+  const toast = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  await ctx.close();
+  const conds = { refused: out && out.ok === false && /app desktop di EMStudio/.test(out.error ?? ""),
+    said: /pagina servita dal nodo/.test(toast), noPack: !asked.includes("/fs/pack-3tz") && !asked.includes("/jobs"),
+    noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, out, toast, asked, errors } };
+});
+
 test("TD2.pair", "tileset trascinato · la forma RealityScan (X/ dallo Storage, X.json accanto) sul Viewer: riconosciuta e detta, la posizione avvisa «geocentriche», centrata solo per la vista, le tile si vedono", async () => {
   const { dir } = await tsdBench("td2");
   const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });

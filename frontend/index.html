@@ -56,13 +56,11 @@
         </div>
       </div>
       <!-- MICRO-DOVE-CHI-MENU p.3 · «Mode» left the top bar: the mode, the node
-           and the room have ONE place, «Where you are» (the status bar's left
-           label, ⇧⌘L). The buttons stay, hidden, because the panel presses
-           them: their handlers are the mode's one implementation. -->
+           and the room have ONE place, the chip's «Where you work» (On this
+           computer · With an app · In a room), which calls the three modes
+           directly (MICRO-COR08: the old Standalone · Sidecar · Hub buttons are
+           gone). The room's two gestures stay here, hidden: the chip presses them. -->
       <div id="mode-actions" hidden>
-        <button id="btn-mode-standalone" data-i18n-title="menu.standaloneTitle" title="Standalone: editing a local .em.json"><span data-i18n="toolbar.modeStandalone">Standalone</span></button>
-        <button id="btn-mode-sidecar" data-i18n-title="menu.sidecarTitle" title="Sidecar: live-synced to a host (Blender/EMtools) — ADR-002"><span data-i18n="toolbar.modeSidecar">Sidecar (sync)</span></button>
-        <button id="btn-mode-hub" data-i18n-title="mode.hubTitle" title="Join a room on a StratiGraph node"><span data-i18n="toolbar.modeHub">Join Room</span></button>
         <button id="btn-open-other" class="hidden" data-i18n-title="roundtrip.title"><span data-i18n="roundtrip.item">Open this room in…</span></button>
         <button id="btn-share-room" class="hidden" data-i18n-title="share.openTitle"><span data-i18n="share.open">Share this room…</span></button>
       </div>
