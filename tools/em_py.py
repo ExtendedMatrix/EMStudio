@@ -326,6 +326,11 @@ def _release() -> None:
 
 def _em():
     from s3dgraphy import em                         # noqa: WPS433 — imported when asked
+    # MICRO-TIL002 · «import em», as the reference writes it (and the Script
+    # Editor's templates, taken from it): the console's `em` is already in the
+    # namespace, but a script that imports it found no module of that name —
+    # «from s3dgraphy import em» was the only spelling that worked here
+    sys.modules.setdefault("em", em)
     return em
 
 
