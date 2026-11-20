@@ -478,7 +478,7 @@ import {
 } from "./tauri";
 import { PySession, pyToken, wordsOf, PY_COMPUTE_LEVEL, PY_DEV_LEVEL, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep, type PyValueWire } from "./py-session";
 // MICRO-PL16 (W13) · the Python console (beta; out of «Funzioni sperimentali», MICRO-COR11)
-import { consoleContent, newConsoleState, CONSOLE_LEVEL, type ConsoleHost } from "./console-window";
+import { consoleContent, newConsoleState, CONSOLE_LEVEL, PYTHON_API_URL, type ConsoleHost } from "./console-window";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): since MICRO-COR11
 // only the site and its footprint (experimental.ts)
 import { EXPERIMENTAL, experimentalStored, setExperimental } from "./experimental";
@@ -66067,7 +66067,15 @@ const consoleHost: ConsoleHost = {
   complete: (text) => (store ? pySessionFor(store).complete(text) : Promise.resolve([])),
   history: async () => (store && (await bridgeLevelAtLeast(CONSOLE_LEVEL)) ? pySessionFor(store).history() : []),
   docName: () => (store ? emtree.activeFile()?.name ?? null : null),
+  openExternal: (url) => openOutside(url),
 };
+/** MICRO-TIL00 · an address outside the app: the system browser on the
+ *  desktop, a new tab on the web. */
+function openOutside(url: string): void {
+  if (isTauri()) void openInSystemBrowser(url); else window.open(url, "_blank", "noopener");
+}
+// Help ▸ «Python API reference» (the console's head says the same)
+document.getElementById("btn-help-python-api")?.addEventListener("click", () => openOutside(PYTHON_API_URL));
 const consoleWindow = new ColoursWindow(coloursWindowHostForVocab(), document, {
   prefKey: "emstudio.console.window.v1", titleKey: "pyc.title", helpKey: "pyc.helpText", popupName: "emstudio-console", data: "consoleWindow",
   content: (d) => consoleContent(d, consoleHost, pyConsoleState),

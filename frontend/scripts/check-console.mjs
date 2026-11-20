@@ -134,7 +134,9 @@ const host = {
   complete: async (text) => (text.endsWith("em.wri") ? ["em.write("] : text.endsWith("('U") ? ["US1", "US2"] : []),
   history: async () => [{ code: "g.node('US1')" }, { code: "len(g)" }],
   docName: () => "prova.em.json",
+  openExternal: (url) => opened.push(url),
 };
+const opened = [];
 const state = M.newConsoleState();
 let root = M.consoleContent(document, host, state);
 document.body.append(root);
@@ -142,6 +144,12 @@ await tick();
 const $ = (sel) => root.querySelector(sel);
 eq(state.history, ["g.node('US1')", "len(g)"], "the machine's history read when the window opens");
 ok(/pyc\.on.*prova\.em\.json/.test($(".pyc-where").textContent), "it says which document it works on");
+// MICRO-TIL00 · the `import em` reference, one click from the prompt, outside the app
+const api = $('[data-pyc="api"]');
+eq([api?.textContent, api?.getAttribute("href")], ["help.pythonApi", M.PYTHON_API_URL], "the head links the Python API reference");
+ok(/^https:\/\/docs\.extendedmatrix\.org\/projects\/emstudio-python-api\//.test(M.PYTHON_API_URL), "…on docs.extendedmatrix.org");
+api.click();
+eq(opened, [M.PYTHON_API_URL], "…and a click opens it through the host (system browser / new tab)");
 const ta = $(".pyc-input");
 put(ta, "for n in g.nodes():");
 ok(!key(ta, "Enter").defaultPrevented && runs.length === 0, "Enter on «…:» goes on (a new line)");

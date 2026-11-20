@@ -41,7 +41,15 @@ export interface ConsoleHost {
   history(): Promise<HistoryEntry[]>;
   /** the open document's name (null: none) */
   docName(): string | null;
+  /** MICRO-TIL00 · opens an address outside the app: the system browser on
+   *  the desktop, a new tab on the web (absent: the link opens as a link) */
+  openExternal?(url: string): void;
 }
+
+/** MICRO-TIL00 (E.D., 20 Nov 2026) · the `import em` reference, published on
+ *  Read the Docs as a sub-project of docs.extendedmatrix.org. The console's
+ *  head and Help ▸ «Python API reference» open it. */
+export const PYTHON_API_URL = "https://docs.extendedmatrix.org/projects/emstudio-python-api/en/latest/";
 
 export type LineKind = "in" | "out" | "value" | "error" | "step" | "proof" | "info";
 export interface Line { kind: LineKind; text: string; dry?: boolean; detail?: string[] }
@@ -252,7 +260,15 @@ export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleS
   const where = el("span", "pyc-where", host.docName() ? t("pyc.on", { doc: host.docName()! }) : t("pyc.noDoc"));
   const note = el("span", "pyc-note beta-mark", t("ui.beta"));
   note.title = t("ui.betaTip");
-  head.append(where, note);
+  // MICRO-TIL00 · the reference of what `em` offers, one click from the prompt
+  const api = el("a", "pyc-api", t("help.pythonApi"));
+  api.href = PYTHON_API_URL;
+  api.target = "_blank";
+  api.rel = "noopener";
+  api.title = t("help.pythonApiTitle");
+  api.dataset.pyc = "api";
+  if (host.openExternal) api.addEventListener("click", (e) => { e.preventDefault(); host.openExternal!(PYTHON_API_URL); });
+  head.append(where, note, api);
 
   const out = el("div", "pyc-out");
   out.setAttribute("role", "log");

@@ -12284,6 +12284,8 @@ button.uo-col { cursor: pointer; }
 .pyc-head { display: flex; align-items: baseline; gap: 8px; color: var(--text-muted); }
 .pyc-where { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pyc-note { font-size: 0.72rem; padding: 0 6px; border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--warn); }
+.pyc-api { font-size: 0.78rem; white-space: nowrap; color: var(--accent); text-decoration: none; }
+.pyc-api:hover { text-decoration: underline; }
 .pyc-out { flex: 1 1 200px; min-height: 160px; overflow: auto; padding: 6px 8px; background: var(--bg-sunken); border: 1px solid var(--border);
   border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.4; user-select: text; }
 .pyc-line { white-space: pre-wrap; word-break: break-word; margin: 0 0 2px 0; }

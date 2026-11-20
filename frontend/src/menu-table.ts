@@ -221,6 +221,8 @@ export const MENUS: MenuDef[] = [
       cmd("workspaces", "ws.helpMenu", "btn-help-workspaces"),
       cmd("shortcuts", "shortcuts.menu", "btn-help-shortcuts"),
       cmd("legend", "legend.full", "btn-help-legend"),
+      // MICRO-TIL00 · the `import em` reference, in the browser (PYTHON_API_URL)
+      cmd("pythonApi", "help.pythonApi", "btn-help-python-api"),
       { ...sep, only: NOT_MAC_DESKTOP } as SepRow,
       cmd("aboutHelp", "toolbar.about", "btn-help-about", { only: NOT_MAC_DESKTOP }),
       cmd("settingsHelp", "toolbar.settingsItem", "btn-settings", { accel: "CmdOrCtrl+,", only: NOT_MAC_DESKTOP }),
