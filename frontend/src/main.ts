@@ -31191,10 +31191,42 @@ let spaceEpochId: string | null = null;
  *  button each; above, a menu with ← → (E.D.: «con molte epoche non ci stanno») */
 const SPACE_EPOCH_BUTTONS = 5;
 /** what s3Dgraphy says is resident (the bridge), for the document it was asked
- *  about; null = not asked yet or offline, and the recorded state decides */
-let spaceResident: { version: number; ids: Set<string> } | null = null;
+ *  about; null = not asked yet or offline, and the recorded state decides.
+ *  MICRO-TIL04 (row T3 of the tileset plan) · the answer belongs to the
+ *  document's CONTENT (`key`, `spaceAskKey`), not only to its version: a change
+ *  that s3Dgraphy does not read (the layout — the Space's opening rewrites it,
+ *  `reassertSizes`) keeps the answer, and no second request goes */
+let spaceResident: { version: number; store: unknown; key: string; ids: Set<string>; staleAt?: number } | null = null;
 let spaceVersion = 0;
 let spaceAsking = false;
+/** the timer of a question put off until the document stays still (`askResident`) */
+let spaceAskTimer: ReturnType<typeof setTimeout> | null = null;
+/** MICRO-TIL04 · a document changing several times in a row (an edit, its
+ *  follow-ups) is asked about ONCE, this long after its last change; the first
+ *  question of a document goes at once */
+const SPACE_ASK_SETTLE_MS = 400;
+/** MICRO-TIL04 · what `/geometry-summary` depends on: the document without its
+ *  layout (s3Dgraphy's `geometry_summary` reads the graph; `load_emjson` puts
+ *  the layout aside, `container.py`). Built once per version of the document. */
+let spaceAskKeyMemo: { store: unknown; version: number; key: string } | null = null;
+function spaceAskKey(): string {
+  if (!store) return "";
+  if (spaceAskKeyMemo && spaceAskKeyMemo.store === store && spaceAskKeyMemo.version === spaceVersion) return spaceAskKeyMemo.key;
+  const { layout: _layout, ...rest } = store.doc as unknown as Record<string, unknown>;
+  const key = JSON.stringify(rest);
+  spaceAskKeyMemo = { store, version: spaceVersion, key };
+  return key;
+}
+/** the resident ids s3Dgraphy gave for the document as it is now, or null */
+function residentNow(): Set<string> | null {
+  const r = spaceResident;
+  if (!r || !store || r.store !== store) return null;
+  if (r.version === spaceVersion) return r.ids;
+  if (r.staleAt === spaceVersion) return null;
+  if (r.key !== spaceAskKey()) { r.staleAt = spaceVersion; return null; }
+  r.version = spaceVersion;   // the same content: the answer stands for this version too
+  return r.ids;
+}
 /** resident files the scene fetched and did not find, and (MICRO-SPAZIO-
  *  FIRMATO) those the node refused to it (401/403): access, not absence — said
  *  apart from «file missing». Both are emptied when the token or the room
@@ -31278,7 +31310,7 @@ function baseSpace(): Space | null {
   spaceAccessChanged();
   // Y6 · the proxies the connected host has in its scene count too
   const hostProxies = sync.connected && Array.isArray(hostInfo.scene_proxies) ? hostInfo.scene_proxies : null;
-  const resident = spaceResident?.version === spaceVersion ? spaceResident.ids : null;
+  const resident = residentNow();
   const fromStore = !!assetStoreBase();
   const key = [store, store.doc, spaceVersion, resident, spaceMarks.notFound.size, spaceMarks.refused.size, hostProxies, hostProxies?.length, fromStore];
   if (spaceMemo && spaceMemo.key.length === key.length && spaceMemo.key.every((k, i) => k === key[i])) return spaceMemo.sp;
@@ -31290,12 +31322,28 @@ function baseSpace(): Space | null {
   return sp;
 }
 
-/** Ask s3Dgraphy what can be fetched (`geometry_summary`), once per version of
- *  the document. Offline, nothing is asked and the resources' own state is read. */
+/** Ask s3Dgraphy what can be fetched (`geometry_summary`), once per stable
+ *  content of the document (MICRO-TIL04). Offline, nothing is asked and the
+ *  resources' own state is read. */
 function askResident(): void {
-  if (!store || spaceAsking || spaceResident?.version === spaceVersion) return;
+  // MICRO-TIL04 · one question per STABLE content of the document: a change
+  // arrived while a question was out is asked about when it has answered (the
+  // answer refreshes the scene, and the scene asks again if the content moved);
+  // a change of the content already answered is asked about once the document
+  // stays still for SPACE_ASK_SETTLE_MS; the first question goes at once
+  if (!store || spaceAsking || residentNow()) return;
+  if (spaceResident?.store === store) {
+    if (spaceAskTimer) clearTimeout(spaceAskTimer);   // another change: the wait starts again
+    spaceAskTimer = setTimeout(() => { spaceAskTimer = null; askResidentNow(); }, SPACE_ASK_SETTLE_MS);
+    return;
+  }
+  askResidentNow();
+}
+function askResidentNow(): void {
+  if (!store || spaceAsking || residentNow()) return;
   const st = store;
   const version = spaceVersion;
+  const key = spaceAskKey();
   spaceAsking = true;
   void (async () => {
     try {
@@ -31305,7 +31353,7 @@ function askResident(): void {
       if (!r.ok) throw new Error(String(r.status));
       const j = await r.json() as { resident?: Array<{ resource_id: string }> };
       if (st !== store) return;
-      spaceResident = { version, ids: new Set((j.resident ?? []).map((x) => x.resource_id)) };
+      spaceResident = { version, store: st, key, ids: new Set((j.resident ?? []).map((x) => x.resource_id)) };
       refreshSurfaces("scene");
       refreshSurfaces("viewer");
       renderEmData();
@@ -66459,7 +66507,7 @@ function ledgerWhere(id: string): "disk" | "store" | "both" | "missing" | "refer
   if (fs === "in_store" || fs === "store_only" || fs === "bucket_only") return "store";
   const d = (store?.node(id)?.data ?? {}) as Record<string, unknown>;
   if (d.residency === "reference") return "reference";
-  if (spaceResident?.version === spaceVersion && spaceResident.ids.has(id)) return "disk";
+  if (residentNow()?.has(id)) return "disk";
   if (assetStoreBase() && typeof d.checksum === "string" && d.checksum) return "store";
   return null;
 }

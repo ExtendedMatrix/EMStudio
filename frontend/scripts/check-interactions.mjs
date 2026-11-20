@@ -3682,6 +3682,45 @@ test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM na
     detail: { s0: [s0.items, s0.tiles, s0.labels], root: rm1(sRoot), s1: s1.tiles, s2: [s2.items, s2.tiles], at, errors } };
 });
 
+test("TIL4.ask", "TIL04 · riga T3 del piano tileset: lo Spazio chiede `POST /geometry-summary` UNA volta per contenuto stabile del documento: una all'apertura; nessuna per un cambio del solo layout (lo Spazio che si apre riscrive le misure, «Riordina»); tre modifiche del grafo di fila = una richiesta sola, dopo che il documento sta fermo; la risposta resta valida dopo un cambio di layout", async () => {
+  // every POST /geometry-summary the page sends, counted in the page (before its scripts run)
+  const hook = () => {
+    window.__gsAsked = [];
+    const f0 = window.fetch;
+    window.fetch = function (u, o) {
+      if (String(u).includes("/geometry-summary") && (o?.method ?? "GET") === "POST") window.__gsAsked.push(performance.now());
+      return f0.apply(this, arguments);
+    };
+  };
+  const { p, ctx, errors } = await open({ doc: "tiles", ws: "space", hook });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const asked = () => p.evaluate(() => window.__gsAsked.length);
+  const items = () => p.evaluate(() => JSON.stringify(document.querySelector(".scn-host").__space().map((i) => [i.id, i.as])));
+  const waitAsked = async (n, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms && await asked() < n) await p.waitForTimeout(100); };
+  await waitAsked(1);
+  await p.waitForTimeout(2000);
+  const n0 = await asked();
+  const i0 = await items();
+  // a change of the layout only: the answer stands, nothing is asked
+  await p.evaluate(() => window.__EM_DRAG__.reflowAll());
+  await p.waitForTimeout(1500);
+  const n1 = await asked();
+  const i1 = await items();
+  // three changes of the graph in a row: one question, once the document stays still
+  const id = await p.evaluate(() => window.__EM_DRAG__.edgesOf("has_representation_model")[0]?.source
+    ?? document.querySelector(".scn-host").__space().find((i) => i.kind === "rm")?.id);
+  const name0 = await p.evaluate((id) => window.__EM_DRAG__.nodeName(id), id);
+  for (const k of ["a", "b", "c"]) { await p.evaluate(([id, n]) => window.__EM_DRAG__.renameNode(id, n), [id, `${name0}${k}`]); await p.waitForTimeout(80); }
+  const n2early = await asked();
+  await waitAsked(n1 + 1);
+  await p.waitForTimeout(1500);
+  const n2 = await asked();
+  const i2 = await items();
+  await ctx.close();
+  return { pass: n0 === 1 && n1 === 1 && n2early === 1 && n2 === 2 && i1 === i0 && i2 === i0 && !!id && !errors.length,
+    detail: { n0, n1, n2early, n2, id, i0, i1, i2, errors } };
+});
+
 /** MICRO-TILE-METASHAPE · a `.3tz` with the SHAPE of Metashape 2.3's exports, made here (no data of
  *  the lab): glb tiles whose texture is KTX2 (`KHR_texture_basisu` REQUIRED — the image is the one
  *  of `testdata/variant-meshopt-ktx2.glb`, a synthetic cube's), Z-up box volumes, REPLACE, and a
