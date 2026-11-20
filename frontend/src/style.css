@@ -1158,6 +1158,32 @@ body.sync-active #mode-indicator::before {
   margin: 4px 6px;
   background: var(--border);
 }
+/* MICRO-TIL003 · the box of a command (File ▸ Open… ▸ «Replace the open
+   files»): under its command, indented, smaller — an option, not a command */
+#toolbar .dd-menu .dd-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 4px 22px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+#toolbar .dd-menu .dd-opt:hover { background: var(--bg-hover); color: var(--text); }
+#toolbar .dd-menu .dd-opt input { margin: 0; }
+/* MICRO-TIL003 · the window «Bring in…»: three choices, each a name and its hint */
+.bring-in { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.bring-in-choice {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer;
+}
+.bring-in-choice:hover { background: var(--bg-hover); }
+.bring-in-choice:has(input:checked) { border-color: var(--accent, var(--text-muted)); }
+.bring-in-choice input { margin-top: 3px; }
+.bring-in-text { display: flex; flex-direction: column; gap: 2px; }
+.bring-in-text small { color: var(--text-muted); font-size: 12px; line-height: 1.35; max-width: 52ch; }
 /* BUGS-UI · nested sub-menu (File ▸ Export): a flyout to the right of its row,
    styled as the parent menu so the nesting reads as depth, not as a new
    surface. */

@@ -16,7 +16,8 @@
  */
 import { applyStaticTranslations, onLocaleChange, t } from "./i18n";
 import {
-  type CommandRow, type Platform, type Row, type RunRow, MENUS, findRun, keysFor, menuRows, menusFor, slotRuns,
+  type CommandRow, type OptRow, type Platform, type Row, type RunRow, MENUS, findRun, keysFor, menuRows, menusFor,
+  optionOn, setOption, slotRuns,
 } from "./menu-table";
 
 /** the dynamic sub-menus' content (p.2: the recent files), asked when drawn */
@@ -102,9 +103,28 @@ function runButton(row: RunRow): HTMLButtonElement {
   return b;
 }
 
+/** MICRO-TIL003 · an option of the command above: a box under it, indented.
+ *  A click ticks it and leaves the menu open (the command is still to choose). */
+function optionBox(row: OptRow): HTMLLabelElement {
+  const l = el("label", "dd-opt");
+  l.dataset.opt = row.id;
+  if (row.title) l.dataset.i18nTitle = row.title;
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = optionOn(row.id);
+  box.addEventListener("change", () => { setOption(row.id, box.checked); void syncNativeOption(row.id); });
+  const label = el("span", "dd-label-text");
+  label.dataset.i18n = row.label;
+  label.textContent = t(row.label);
+  l.append(box, label);
+  l.addEventListener("click", (e) => e.stopPropagation());
+  return l;
+}
+
 function drawRows(host: HTMLElement, rows: Row[], platform: Platform, made: Set<string>): void {
   for (const row of rows) {
     if (row.kind === "sep") { host.appendChild(el("div", "dd-sep")); continue; }
+    if (row.kind === "opt") { host.appendChild(optionBox(row)); continue; }
     if (row.kind === "os") continue;
     if (row.kind === "run") { host.appendChild(runButton(row)); continue; }
     if (row.kind === "cmd") {
@@ -149,6 +169,18 @@ export function buildPageMenus(platform: Platform, h: MenuHooks = {}): string[] 
     const host = dd?.querySelector<HTMLElement>(".dd-menu");
     const rows = menuRows(menu, platform, "internal");
     if (!dd || !host) continue;
+    if (menu.anchor) {
+      // MICRO-TIL003 · a menu of the page's own (Tools): the rows after the
+      // anchor, the items of index.html kept; drawn again = the old ones out
+      host.querySelectorAll(":scope > [data-table-row]").forEach((n) => n.remove());
+      const box = el("div");
+      drawRows(box, rows, platform, made);
+      const at = host.querySelector<HTMLElement>(`#${menu.anchor}`);
+      const items = [...box.children] as HTMLElement[];
+      for (const n of items) n.dataset.tableRow = "1";
+      if (at) at.after(...items); else host.append(...items);
+      continue;
+    }
     host.textContent = "";
     dd.classList.toggle("hidden", !rows.length);
     drawRows(host, rows, platform, made);
@@ -248,6 +280,15 @@ const PREDEFINED: Record<string, string> = {
 };
 
 let nativeItems: { button: string; item: NativeItem }[] = [];
+/** MICRO-TIL003 · the system's check items of the options, to follow the page's box */
+const nativeOptions = new Map<string, { setChecked(v: boolean): Promise<void> }>();
+async function syncNativeOption(id: string): Promise<void> {
+  try { await nativeOptions.get(id)?.setChecked(optionOn(id)); } catch { /* the bar is being rebuilt */ }
+}
+/** the page's box follows the system's check item */
+function syncPageOption(id: string): void {
+  document.querySelectorAll<HTMLInputElement>(`.dd-opt[data-opt="${id}"] input`).forEach((b) => { b.checked = optionOn(id); });
+}
 let nativeRecent: NativeSub | null = null;
 let observer: MutationObserver | null = null;
 
@@ -260,6 +301,18 @@ async function nativeRows(api: TauriMenu, rows: Row[], platform: Platform): Prom
         item: PREDEFINED[row.os] as "Quit",
         ...(row.label ? { text: t(row.label) } : {}),
       }));
+      continue;
+    }
+    if (row.kind === "opt") {
+      // MICRO-TIL003 · the box of a command: a check item under it
+      if (!api.CheckMenuItem) continue;            // an older shell: the page's box is enough
+      const id = row.id;
+      const item = await api.CheckMenuItem.new({
+        id, text: t(row.label), checked: optionOn(id),
+        action: () => { setOption(id, !optionOn(id)); syncPageOption(id); void syncNativeOption(id); },
+      });
+      nativeOptions.set(id, item);
+      out.push(item);
       continue;
     }
     if (row.kind === "run") {

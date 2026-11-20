@@ -7037,19 +7037,81 @@ if (K_NODE) test("TT1.live", "MICRO T1 dal vivo · utente dev in una stanza del 
 test("DC1.menu", "DOVE-CHI-MENU p.1 · il File della pagina viene dalla tabella: Nuovo, Apri…, Apri recenti ▸, Apri al posto…, Chiudi, Salva…, Importa ▸, Esporta ▸, Integra, Crea una stanza, Porta in una nuova stanza; Impostazioni non è più in Modifica ma nell'Aiuto (web)", async () => {
   const { p, ctx, errors } = await open({ doc: "catena", locale: "it" });
   const file = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > *")].map((e) =>
-    e.classList.contains("dd-sep") ? "—" : e.dataset.cmd ?? e.dataset.sub));
+    e.classList.contains("dd-sep") ? "—" : e.dataset.cmd ?? e.dataset.sub ?? e.dataset.opt));
   const edit = await p.evaluate(() => [...document.querySelectorAll("#dd-edit .dd-menu > button")].map((e) => e.dataset.cmd));
   const help = await p.evaluate(() => [...document.querySelectorAll("#dd-help .dd-menu > button")].map((e) => e.dataset.cmd));
   const labels = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > button .dd-label-text")].map((e) => e.textContent));
   await ctx.close();
   // MICRO-CONTENTS-1 D9 · «New EM project…» beside New
   // MICRO-ARCHIVIO-2 · the project's four together under New: Nuovo progetto, Apri progetto, Riordina, Chiudi il progetto
-  const want = ["new", "newProject", "openProject", "reorderProject", "closeProject", "revealDoc", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
-    "import", "export", "integrate", "relocate", "collect", "—", "createRoom", "bringIntoRoom"];
+  // MICRO-TIL003 · File on Blender's model: 18 entries in six groups (Open's box is not a command)
+  const want = ["new", "newProject", "open", "openReplaceBox", "openProject", "openRecent", "—", "save", "saveAs", "saveAll", "pin", "—",
+    "bringIn", "integrate", "import", "export", "—", "externalData", "cleanUp", "—", "room", "—", "close", "closeProject"];
   return { pass: JSON.stringify(file) === JSON.stringify(want) && JSON.stringify(edit) === JSON.stringify(["undo", "redo"])
       && help.includes("settingsHelp") && help.includes("aboutHelp") && !help.includes("updatesHelp")
       && labels[0] === "Nuovo" && labels.includes("Chiudi") && !errors.length,
     detail: { file, edit, help, labels, errors } };
+});
+
+// ── MICRO-TIL003 (20 nov 2026) · il menù File riordinato sul modello di Blender ─
+test("TIL3.file", "TIL003 · File: «Porta dentro…» apre UNA finestra con tre scelte (file, cartella, DosCo) e Annulla non apre niente; la casella «Sostituisci i file aperti» sotto Apri si spunta senza chiudere il menù; File esterni ▸, Pulizia ▸, Stanza ▸; Esporta ▸ ha la scena Blender, Consolida e Stampa schede; Georeferenziazione è in Strumenti e non più in File (it + en)", async () => {
+  const out = {};
+  for (const locale of ["it", "en"]) {
+    const { p, ctx, errors } = await open({ doc: "catena", locale });
+    await p.click("#dd-file .dd-toggle");
+    const box = p.locator('#dd-file .dd-opt[data-opt="openReplaceBox"]');
+    const boxText = (await box.textContent())?.trim();
+    await box.click();
+    const afterBox = await p.evaluate(() => ({
+      menuOpen: !document.querySelector("#dd-file > .dd-menu").classList.contains("hidden"),
+      ticked: document.querySelector('#dd-file .dd-opt[data-opt="openReplaceBox"] input').checked }));
+    // ticked, Open… takes the road of «Open in place…» (its own picker accepts .xml too); unticked, the usual one
+    const road = async () => p.evaluate(() => new Promise((res) => {
+      const orig = HTMLInputElement.prototype.click;
+      HTMLInputElement.prototype.click = function () { HTMLInputElement.prototype.click = orig; res(this.id === "file-input" ? "open" : (this.accept.includes(".xml") ? "replace" : this.id)); };
+      document.getElementById("btn-open").click();
+      setTimeout(() => res("none"), 3000);
+    }));
+    const roadTicked = await road();
+    await p.click("#dd-file .dd-toggle");
+    await box.click();
+    const roadUnticked = await road();
+    await p.click("#dd-file .dd-toggle");
+    const subs = await p.evaluate(() => Object.fromEntries(["externalData", "cleanUp", "room", "export"].map((id) =>
+      [id, { label: document.querySelector(`#dd-file [data-sub="${id}"] > .dd-sub-toggle span`)?.textContent,
+             cmds: [...document.querySelectorAll(`#dd-file [data-sub="${id}"] > .dd-sub-menu > button`)].map((b) => b.dataset.cmd) }])));
+    const blend = await p.evaluate(() => document.querySelector('#dd-file button[data-cmd="composeFromGraph"] .dd-label-text')?.textContent);
+    const tools = await p.evaluate(() => [...document.querySelectorAll("#dd-tools .dd-menu > *")].map((n) => n.id));
+    const geoInFile = await p.evaluate(() => !!document.querySelector("#dd-file #btn-georef"));
+    await p.click('#dd-file button[data-cmd="bringIn"]');
+    await p.waitForSelector('[data-app-dialog="bring-in"]', { timeout: 5000 }).catch(() => null);
+    const dlg = await p.evaluate(() => {
+      const d = document.querySelector('[data-app-dialog="bring-in"]');
+      return d && { title: d.querySelector(".modal-head")?.textContent,
+        choices: [...d.querySelectorAll(".bring-in-choice")].map((c) => [c.dataset.choice, c.querySelector("strong").textContent]),
+        checked: d.querySelector("input[name=bring-in]:checked")?.value };
+    });
+    await p.click('[data-app-dialog="bring-in"] [data-dialog-cancel]').catch(() => {});
+    const gone = await p.evaluate(() => !document.querySelector('[data-app-dialog="bring-in"]'));
+    await ctx.close();
+    out[locale] = { boxText, afterBox, roadTicked, roadUnticked, subs, blend, tools, geoInFile, dlg, gone, errors };
+  }
+  const it = out.it, en = out.en;
+  const ix = it.tools.indexOf("btn-tool-chronology");
+  const pass = it.boxText === "Sostituisci i file aperti" && en.boxText === "Replace the open files"
+    && it.afterBox.menuOpen && it.afterBox.ticked && it.roadTicked === "replace" && it.roadUnticked === "open"
+    && it.subs.externalData.label === "File esterni" && en.subs.externalData.label === "External data"
+    && it.subs.cleanUp.label === "Pulizia" && en.subs.room.label === "Room"
+    && JSON.stringify(it.subs.externalData.cmds) === JSON.stringify(["relocate", "collect", "revealDoc"])
+    && JSON.stringify(it.subs.cleanUp.cmds) === JSON.stringify(["cleanFile", "reorderProject"])
+    && JSON.stringify(it.subs.room.cmds) === JSON.stringify(["createRoom", "bringIntoRoom"])
+    && JSON.stringify(it.subs.export.cmds) === JSON.stringify(["exportSvg", "exportTtl", "composeFromGraph", "consolidate", "printSheets"])
+    && it.blend === "Scena Blender (.blend)…" && en.blend === "Blender scene (.blend)…"
+    && it.tools[ix + 1] === "btn-georef" && !it.geoInFile
+    && it.dlg?.title === "Porta dentro" && en.dlg?.title === "Bring in"
+    && JSON.stringify(it.dlg.choices.map((c) => c[0])) === JSON.stringify(["files", "folder", "dosco"])
+    && it.dlg.checked === "files" && it.gone && en.gone && !it.errors.length && !en.errors.length;
+  return { pass, detail: out };
 });
 
 test("DC2.recent", "DOVE-CHI-MENU p.2 · Apri recenti dallo Spazio: la stanza (nodo · stanza), il file (cartella), quello trascinato (non riapribile), «Svuota l'elenco»; svuotato, anche il pannello di Stratigrafia è vuoto (una sorgente)", async () => {
@@ -8553,7 +8615,8 @@ test("WM4.relocate", "WINDOWS-MODELLI p.4 · «Ritrova i file» nella cartella d
 
 test("WM5.collect", "WINDOWS-MODELLI p.5 · File ▸ «Raccogli le risorse…» su v4 senza cartella di OneDrive: 46 file fuori dallo studio (44 onedrive://, 2 smb://), nessuno raggiungibile da qui e ognuno dice perché; niente da copiare, nessun pulsante «Copia 0 file»: una riga dice cosa fare; le cartelle per tipo proposte sono modificabili", async () => {
   const { p, ctx, errors } = await wmOpenCopy();
-  const inMenu = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > button")].map((e) => e.dataset.cmd).includes("collect"));
+  // MICRO-TIL003 · in File ▸ External data ▸
+  const inMenu = await p.evaluate(() => !!document.querySelector('#dd-file [data-sub="externalData"] button[data-cmd="collect"]'));
   await p.evaluate(() => window.__EM_DRAG__.collect());
   await p.waitForSelector('.modal[data-dialog="collect"]', { timeout: 60000 });
   await p.waitForTimeout(800);

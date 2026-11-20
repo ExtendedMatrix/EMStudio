@@ -34,6 +34,7 @@ const fakeMenu = `
   export const MenuItem = { new: async (o) => new Item(o, "item") };
   export const PredefinedMenuItem = { new: async (o) => new Item(o, "os") };
   export const Submenu = { new: async (o) => new Item(o, "sub") };
+  export const CheckMenuItem = { new: async (o) => { const i = new Item(o, "check"); i.setChecked = async (v) => { o.checked = v; }; return i; } };
   export const Menu = { new: async (o) => { const m = new Item(o, "bar"); m.setAsAppMenu = async () => { built.bar = m; return null; }; return m; } };
 `;
 const bundle = await esbuild.build({
@@ -65,6 +66,7 @@ function pageOutline(menuEl, prefix = "") {
       out.push(`${prefix}${id}▸`);
       out.push(...pageOutline(node.querySelector(".dd-sub-menu"), `${prefix}${id}/`));
     } else if (node.tagName === "BUTTON") out.push(`${prefix}${node.dataset.cmd}`);
+    else if (node.classList.contains("dd-opt")) out.push(`${prefix}${node.dataset.opt}`);
   }
   return out;
 }
@@ -78,25 +80,73 @@ function nativeOutline(items, prefix = "") {
       const id = it.o.id.replace(/^sub-/, "");
       out.push(`${prefix}${id}▸`);
       if (id !== "openRecent") out.push(...nativeOutline(it.o.items, `${prefix}${id}/`));
-    } else out.push(`${prefix}${it.o.id}`);
+    } else out.push(`${prefix}${it.o.id}`);   // an item, or a check item (an option)
   }
   return out;
 }
 
 const EN = readFileSync(`${SRC}i18n.ts`, "utf8").split("const IT: Dict")[0];
 const MAIN = readFileSync(`${SRC}main.ts`, "utf8");
-// MICRO-ARCHIVIO-2 · the project's four, together under New as in the mockup: New project, Open project, Reorder by the standard, Close the project
-const FILE_ORDER = ["new", "newProject", "openProject", "reorderProject", "closeProject", "revealDoc", "open", "openRecent▸", "openReplace", "close", "—",
+// MICRO-TIL003 (E.D., 20 Nov 2026) · File on Blender's model: 28 items → 18 in
+// six groups. Create and open (Open's box under it) · save · bring in and out ·
+// the files outside · the room · close.
+const FILE_ORDER = ["new", "newProject", "open", "openReplaceBox", "openProject", "openRecent▸", "—",
   "save", "saveAs", "saveAll", "pin", "—",
-  // MICRO-E p.1 · «Porta dentro…», the one door, before Import
-  "door", "doorFolder",
-  // MICRO-COR06 · «Read as DosCo…»: a DosCo folder through the door (the «Resources» window absorbed)
-  "doorDosco", "georef",
+  "bringIn", "integrate",
   "import▸", "import/importGraphml", "import/importMapping",
-  "export▸", "export/exportSvg", "export/exportTtl",
-  // MICRO-PL002 · «Stampa schede…», after Export
-  "printSheets", "integrate", "relocate", "collect", "cleanFile", "—",
-  "createRoom", "bringIntoRoom", "consolidate", "composeFromGraph"];
+  "export▸", "export/exportSvg", "export/exportTtl", "export/composeFromGraph", "export/consolidate", "export/printSheets", "—",
+  "externalData▸", "externalData/relocate", "externalData/collect", "externalData/revealDoc",
+  "cleanUp▸", "cleanUp/cleanFile", "cleanUp/reorderProject", "—",
+  "room▸", "room/createRoom", "room/bringIntoRoom", "—",
+  "close", "closeProject"];
+/** the 18 entries of File's first level (Quit aside), counted as E.D. counted them */
+const FIRST_LEVEL = FILE_ORDER.filter((x) => x !== "—" && !x.includes("/") && x !== "openReplaceBox");
+eq(FIRST_LEVEL.length, 18, "File: 18 entries on the first level (were 28)");
+
+/** MICRO-TIL003 · every command of the table BEFORE the reorder (HEAD 8b211e8):
+ *  menu/id → button. None may be lost: each is still a row, its button exists,
+ *  runCommand presses it. */
+const BEFORE = {
+  "app/about": "btn-help-about", "app/updates": "btn-help-updates", "app/settings": "btn-settings",
+  "file/new": "btn-new", "file/newProject": "btn-new-project", "file/openProject": "btn-open-project",
+  "file/reorderProject": "btn-reorder-project", "file/closeProject": "btn-close-project", "file/revealDoc": "btn-reveal-doc",
+  "file/open": "btn-open", "file/openReplace": "btn-open-replace", "file/close": "btn-close-doc",
+  "file/save": "btn-save", "file/saveAs": "btn-save-as", "file/saveAll": "btn-save-all", "file/pin": "btn-pin-version",
+  "file/door": "btn-porta-dentro", "file/doorFolder": "btn-porta-dentro-cartella", "file/doorDosco": "btn-door-dosco",  // ALLOW-IT: element ids
+  "file/georef": "btn-georef", "file/import/importGraphml": "btn-import-graphml", "file/import/importMapping": "btn-import-mapping",
+  "file/export/exportSvg": "btn-svg", "file/export/exportTtl": "btn-ttl", "file/printSheets": "btn-print-sheets",
+  "file/integrate": "btn-add-project", "file/relocate": "btn-relocate-files", "file/collect": "btn-collect-files",
+  "file/cleanFile": "btn-clean-file", "file/createRoom": "btn-create-room", "file/bringIntoRoom": "btn-bring-into-room",
+  "file/consolidate": "btn-consolidate", "file/composeFromGraph": "btn-compose-graph", "file/quitFile": "btn-quit",
+  "edit/undo": "btn-undo", "edit/redo": "btn-redo",
+  "help/workspaces": "btn-help-workspaces", "help/shortcuts": "btn-help-shortcuts", "help/legend": "btn-help-legend",
+  "help/pythonApi": "btn-help-python-api", "help/aboutHelp": "btn-help-about", "help/settingsHelp": "btn-settings",
+  "help/updatesHelp": "btn-help-updates",
+};
+/** where each moved command is now (menu/…/id), the rest stayed */
+const MOVED = {
+  "file/georef": "tools/georef",
+  "file/reorderProject": "file/cleanUp/reorderProject", "file/revealDoc": "file/externalData/revealDoc",
+  "file/printSheets": "file/export/printSheets", "file/relocate": "file/externalData/relocate",
+  "file/collect": "file/externalData/collect", "file/cleanFile": "file/cleanUp/cleanFile",
+  "file/createRoom": "file/room/createRoom", "file/bringIntoRoom": "file/room/bringIntoRoom",
+  "file/consolidate": "file/export/consolidate", "file/composeFromGraph": "file/export/composeFromGraph",
+};
+const AFTER = {};
+{
+  const walk = (rs, p) => rs.forEach((r) => { if (r.kind === "cmd") AFTER[`${p}${r.id}`] = r; if (r.kind === "sub") walk(r.rows, `${p}${r.id}/`); });
+  M.MENUS.forEach((m) => walk(m.rows, `${m.id}/`));
+}
+for (const [path, button] of Object.entries(BEFORE)) {
+  const now = AFTER[MOVED[path] ?? path];
+  ok(now && now.button === button, `${path}: still a command (${MOVED[path] ?? path}) pressing ${button}`);
+}
+// the commands that only lost their item: their id, kept, presses the same button
+for (const id of ["openReplace", "door", "doorFolder", "doorDosco"]) {
+  eq(AFTER[`file/${id}`]?.only, [], `${id}: a command drawn nowhere (its window or box took the item)`);
+}
+// the one new command
+eq(AFTER["file/bringIn"]?.button, "btn-bring-in", "File ▸ Bring in… is a command of its own");
 
 for (const platform of ["web", "mac", "win", "linux"]) {
   // the page
@@ -120,6 +170,36 @@ for (const platform of ["web", "mac", "win", "linux"]) {
   }
   const fileWant = platform === "win" || platform === "linux" ? [...FILE_ORDER, "—", "quitFile"] : FILE_ORDER;
   eq(page.file, fileWant, `${platform}: File in the MICRO's order`);
+  // MICRO-TIL003 · Georeferencing in Tools, after «Check the chronology…»; Tools keeps its own items
+  const tools = [...doc.querySelectorAll("#dd-tools .dd-menu > *")].map((n) => n.id || n.className);
+  const ix = tools.indexOf("btn-tool-chronology");
+  eq(tools[ix + 1], "btn-georef", `${platform}: Tools ▸ Georeferencing… after Check the chronology…`);
+  ok(["btn-tool-add", "btn-tool-stratiminer", "btn-tool-extensions", "btn-door-dosco-tools"].every((id) => tools.includes(id)),
+     `${platform}: Tools keeps the items of index.html`);
+  ok(!doc.querySelector("#dd-file #btn-georef"), `${platform}: Georeferencing left File`);
+  // every command of before has its button in the page (drawn, or in the hidden holder)
+  for (const button of new Set(Object.values(BEFORE))) {
+    if (button === "btn-quit" && !["win", "linux"].includes(platform)) continue;
+    if (["btn-help-updates"].includes(button) && platform === "web") continue;
+    ok(doc.querySelectorAll(`#${button}`).length >= 1, `${platform}: ${button} exists`);
+  }
+  for (const id of ["btn-open-replace", "btn-porta-dentro", "btn-porta-dentro-cartella", "btn-door-dosco"]) {  // ALLOW-IT: element ids
+    ok(doc.getElementById(id)?.closest("#menu-commands"), `${platform}: ${id} waits in the hidden holder`);
+  }
+  // runCommand(id) presses the same button as before, for the moved ones too
+  const pressed = [];
+  for (const id of ["georef", "openReplace", "door", "doorFolder", "doorDosco", "relocate", "collect", "revealDoc", "cleanFile", "reorderProject",
+    "createRoom", "bringIntoRoom", "consolidate", "composeFromGraph", "printSheets", "bringIn"]) {
+    const row = Object.values(AFTER).find((r) => r.id === id);
+    const b = doc.getElementById(row.button);
+    let n = 0; const h = () => { n++; }; b.addEventListener("click", h);
+    M.runCommand(id); b.removeEventListener("click", h);
+    if (n === 1) pressed.push(id);
+  }
+  eq(pressed.length, 16, `${platform}: runCommand presses the button of every moved command — got ${pressed.length}`);
+  // the box under Open: unticked, it ticks without closing the menu
+  const box = doc.querySelector('#dd-file .dd-opt[data-opt="openReplaceBox"] input');
+  ok(box && !box.checked && !M.optionOn("openReplaceBox"), `${platform}: Open's box, unticked`);
 
   if (platform !== "mac") {
     eq(installed, false, `${platform}: no system menu bar is drawn`);

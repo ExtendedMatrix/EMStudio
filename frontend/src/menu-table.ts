@@ -61,6 +61,11 @@ export interface RunRow {
   badge?: string;
 }
 export interface SepRow { kind: "sep" }
+/** MICRO-TIL003 · an OPTION of the command above it (Blender's options of File ▸
+ *  Open): a box, ticked or not, that changes what that command does. Drawn on
+ *  the page as a box under its command, on the system's bar as a check item.
+ *  Its state is `optionOn(id)`; the command reads it. */
+export interface OptRow { kind: "opt"; id: string; label: string; title?: string; only?: Platform[] }
 export interface SubRow {
   kind: "sub";
   id: string;
@@ -74,7 +79,14 @@ export interface SubRow {
   rows: Row[];
   only?: Platform[];
 }
-export type Row = CommandRow | PredefinedRow | SepRow | SubRow | RunRow;
+export type Row = CommandRow | PredefinedRow | SepRow | SubRow | RunRow | OptRow;
+
+// ── MICRO-TIL003 · the options' state (the boxes of a command) ──────────────
+// In memory, for this session: a box that stayed ticked from yesterday would
+// make tomorrow's ⌘O close the open files without anyone having asked.
+const options = new Map<string, boolean>();
+export function optionOn(id: string): boolean { return options.get(id) === true; }
+export function setOption(id: string, on: boolean): void { options.set(id, on); }
 
 // ── MICRO-PL17 · the rows registered at run time, per slot ──────────────────
 const runs = new Map<string, RunRow[]>();
@@ -91,12 +103,15 @@ export function findRun(id: string): RunRow | null {
 }
 
 export interface MenuDef {
-  id: "app" | "file" | "edit" | "window" | "help";
+  id: "app" | "file" | "edit" | "tools" | "window" | "help";
   /** i18n key; the app menu is named by the system after the app */
   label: string;
   /** which surfaces draw this menu, per platform */
   surfaces: Partial<Record<Platform, Surface[]>>;
   rows: Row[];
+  /** MICRO-TIL003 · the page's menu has items of its own (index.html): the
+   *  rows are drawn after this element instead of replacing the menu's content */
+  anchor?: string;
 }
 
 const sep: SepRow = { kind: "sep" };
@@ -109,6 +124,10 @@ const os = (id: string, which: Predefined, label?: string): PredefinedRow =>
  *  menu on the Mac desktop, and in the page's Help everywhere else. Check for
  *  updates is desktop only (p.7): the web build is updated by its node. */
 const NOT_MAC_DESKTOP: Platform[] = ["web", "win", "linux"];
+/** MICRO-TIL003 · a command no menu draws any more, kept as a command: its
+ *  button waits in the hidden holder for `runCommand` (em.app.run_command, a
+ *  key, the window that replaced its item) */
+const NOWHERE: Platform[] = [];
 
 export const MENUS: MenuDef[] = [
   {
@@ -134,35 +153,41 @@ export const MENUS: MenuDef[] = [
     id: "file",
     label: "toolbar.file",
     surfaces: { web: ["internal"], mac: ["internal", "native"], win: ["internal"], linux: ["internal"] },
+    // MICRO-TIL003 (E.D., 20 Nov 2026, 07:50) · Blender's File menu as model:
+    // 28 items in a row became 18 in six groups (create and open · save · bring
+    // in and out · the files outside · the room · close). The command ids did
+    // not change, only where they are drawn: a command that left the page's
+    // File keeps its row here with `only: NOWHERE` (its button waits in the
+    // hidden holder, `em.app.run_command` and the keys still find it).
     rows: [
       cmd("new", "toolbar.new", "btn-new", { title: "menu.newTitle", accel: "CmdOrCtrl+N" }),
-      // MICRO-CONTENTS-1 D9 · the folders of a new EM project, beside New (it was
-      // among the file tools of a graph already open, in the Storage)
+      // MICRO-CONTENTS-1 D9 · the folders of a new EM project, beside New
       cmd("newProject", "fs.newProject", "btn-new-project", { title: "fs.newProjectMenuTitle" }),
-      // MICRO-ARCHIVIO-2 · the project is the folder: open it, reorder it, close it
-      cmd("openProject", "fs.openProject", "btn-open-project", { title: "fs.openProjectTitle" }),
-      cmd("reorderProject", "fs.reorderItem", "btn-reorder-project", { title: "fs.reorderItemTitle" }),
-      cmd("closeProject", "fs.closeProject", "btn-close-project", { title: "fs.closeProjectTitle" }),
-      // MICRO-SPAZIO-RITOCCHI-2 p.1 · the active em.json's folder, the file selected
-      cmd("revealDoc", "fs.revealDoc", "btn-reveal-doc", { title: "fs.revealDocTitle" }),
       cmd("open", "toolbar.open", "btn-open", { title: "menu.openTitle", accel: "CmdOrCtrl+O" }),
+      // MICRO-TIL003 · «Open in place of the open files…» is a box of Open now
+      // (Blender's options of File ▸ Open): ticked, Open closes the open files first
+      { kind: "opt", id: "openReplaceBox", label: "menu.openReplaceBox", title: "menu.openReplaceBoxTitle" },
+      cmd("openReplace", "toolbar.openReplace", "btn-open-replace", { title: "menu.openReplaceTitle", only: NOWHERE }),
+      // MICRO-ARCHIVIO-2 · the project is the folder
+      cmd("openProject", "fs.openProject", "btn-open-project", { title: "fs.openProjectTitle" }),
       { kind: "sub", id: "openRecent", label: "menu.openRecent", title: "menu.openRecentTitle", dynamic: "recent", rows: [] },
-      cmd("openReplace", "toolbar.openReplace", "btn-open-replace", { title: "menu.openReplaceTitle" }),
-      cmd("close", "toolbar.close", "btn-close-doc", { title: "menu.closeTitle", accel: "CmdOrCtrl+W", accelNotOnWeb: true }),
       sep,
       cmd("save", "toolbar.save", "btn-save", { title: "menu.saveTitle", accel: "CmdOrCtrl+S" }),
       cmd("saveAs", "toolbar.saveAs", "btn-save-as", { title: "menu.saveAsTitle", accel: "CmdOrCtrl+Shift+S" }),
       cmd("saveAll", "toolbar.saveAll", "btn-save-all", { title: "menu.saveAllTitle", accel: "CmdOrCtrl+Alt+S" }),
       cmd("pin", "version.pin", "btn-pin-version", { title: "version.pinTitle" }),
       sep,
-      // MICRO-E p.1 · «Porta dentro…»: the one door (files into a document)
-      cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint" }),
+      // MICRO-TIL003 · «Bring in…»: ONE window, three choices (files, a folder,
+      // a folder read as DosCo) — the three doors of before, behind one entry
+      cmd("bringIn", "door.menu", "btn-bring-in", { title: "door.bringInHint" }),
+      // MICRO-E p.1 · the files (the system's selector, several files)
+      cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint", only: NOWHERE }),
       // MICRO-GEO09 · a folder (a stack of slices): read by a plugin's reader of folders (door.reader@2)
-      cmd("doorFolder", "door.folderMenu", "btn-porta-dentro-cartella", { title: "door.folderMenuHint" }),  // ALLOW-IT: an element id (as btn-porta-dentro), not words on screen
-      // MICRO-COR06 · a DosCo folder: each file with an EM id the document of that id (the «Resources» window absorbed)
-      cmd("doorDosco", "door.doscoMenu", "btn-door-dosco", { title: "door.doscoMenuHint" }),
-      // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione»: each graph its system
-      cmd("georef", "gr.menu", "btn-georef", { title: "gr.menuTitle" }),
+      cmd("doorFolder", "door.folderMenu", "btn-porta-dentro-cartella", { title: "door.folderMenuHint", only: NOWHERE }),  // ALLOW-IT: an element id (as btn-porta-dentro), not words on screen
+      // MICRO-COR06 · a DosCo folder: each file with an EM id the document of that id
+      cmd("doorDosco", "door.doscoMenu", "btn-door-dosco", { title: "door.doscoMenuHint", only: NOWHERE }),
+      // Blender's Append
+      cmd("integrate", "container.addToProject", "btn-add-project", { title: "container.addToProjectTitle" }),
       { kind: "sub", id: "import", label: "toolbar.import", slot: "menu.file.import@1", rows: [
         cmd("importGraphml", "toolbar.importGraphmlItem", "btn-import-graphml", { title: "toolbar.importGraphmlTitle" }),
         cmd("importMapping", "impmap.menu", "btn-import-mapping", { title: "impmap.menuTitle" }),
@@ -170,27 +195,56 @@ export const MENUS: MenuDef[] = [
       { kind: "sub", id: "export", label: "toolbar.export", title: "menu.exportTitle", slot: "menu.file.export@1", rows: [
         cmd("exportSvg", "menu.svgItem", "btn-svg", { title: "menu.svgTitle" }),
         cmd("exportTtl", "menu.ttlItem", "btn-ttl", { title: "menu.ttlTitle" }),
+        // MICRO-TIL003 · what goes OUT of the study, with the formats: the
+        // .blend composed from the graph (MICRO-BLEND-OFFICINA-3), «Consolidate
+        // for…» (what a viewer will find), the sheets printed (MICRO-PL002)
+        cmd("composeFromGraph", "menu.blendItem", "btn-compose-graph", { title: "gcomp.menuTitle" }),
+        cmd("consolidate", "cons.menu", "btn-consolidate", { title: "cons.menuTitle" }),
+        cmd("printSheets", "skp.menu", "btn-print-sheets", { title: "skp.menuTitle" }),
       ] },
-      // MICRO-PL002 · the sheets printed: which ones (criteria), how many, in which order
-      cmd("printSheets", "skp.menu", "btn-print-sheets", { title: "skp.menuTitle" }),
-      cmd("integrate", "container.addToProject", "btn-add-project", { title: "container.addToProjectTitle" }),
-      // MICRO-PERCORSI-WINDOWS p.3 · Blender's «Find Missing Files», for a study
-      cmd("relocate", "fs.relocate", "btn-relocate-files", { title: "fs.relocateTitle" }),
-      // MICRO-WINDOWS-MODELLI p.5 · Maya's «Collect Files», Blender's «Pack Resources»
-      cmd("collect", "fs.collect", "btn-collect-files", { title: "fs.collectTitle" }),
-      // MICRO-T · the presentation section out of the file, after saying what it holds
-      cmd("cleanFile", "pres.clean", "btn-clean-file", { title: "pres.cleanTitle" }),
       sep,
-      cmd("createRoom", "room.createItem", "btn-create-room", { title: "room.createItemTitle" }),
-      cmd("bringIntoRoom", "room.bringItem", "btn-bring-into-room", { title: "room.bringItemTitle" }),
-      // MICRO-BLEND-OFFICINA-3 · two actions, not one (E.D.): what a viewer will
-      // find, model by model, and a working .blend composed from the graph
-      cmd("consolidate", "cons.menu", "btn-consolidate", { title: "cons.menuTitle" }),
-      cmd("composeFromGraph", "gcomp.menu", "btn-compose-graph", { title: "gcomp.menuTitle" }),
+      // MICRO-TIL003 · Blender's File ▸ External Data
+      { kind: "sub", id: "externalData", label: "menu.externalData", title: "menu.externalDataTitle", rows: [
+        // MICRO-PERCORSI-WINDOWS p.3 · Blender's «Find Missing Files», for a study
+        cmd("relocate", "fs.relocate", "btn-relocate-files", { title: "fs.relocateTitle" }),
+        // MICRO-WINDOWS-MODELLI p.5 · Maya's «Collect Files», Blender's «Pack Resources»
+        cmd("collect", "fs.collect", "btn-collect-files", { title: "fs.collectTitle" }),
+        // MICRO-SPAZIO-RITOCCHI-2 p.1 · the active em.json's folder
+        cmd("revealDoc", "fs.revealDoc", "btn-reveal-doc", { title: "fs.revealDocTitle" }),
+      ] },
+      // MICRO-TIL003 · Blender's File ▸ Clean Up
+      { kind: "sub", id: "cleanUp", label: "menu.cleanUp", title: "menu.cleanUpTitle", rows: [
+        // MICRO-T · the presentation section out of the file, after saying what it holds
+        cmd("cleanFile", "pres.clean", "btn-clean-file", { title: "pres.cleanTitle" }),
+        cmd("reorderProject", "fs.reorderItem", "btn-reorder-project", { title: "fs.reorderItemTitle" }),
+      ] },
+      sep,
+      { kind: "sub", id: "room", label: "menu.room", title: "menu.roomTitle", rows: [
+        cmd("createRoom", "room.createItem", "btn-create-room", { title: "room.createItemTitle" }),
+        cmd("bringIntoRoom", "room.bringItem", "btn-bring-into-room", { title: "room.bringItemTitle" }),
+      ] },
+      sep,
+      cmd("close", "toolbar.close", "btn-close-doc", { title: "menu.closeTitle", accel: "CmdOrCtrl+W", accelNotOnWeb: true }),
+      cmd("closeProject", "fs.closeProject", "btn-close-project", { title: "fs.closeProjectTitle" }),
+      // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione» moved to Tools
+      // (MICRO-TIL003): its row is in the menu «tools» below
       // Windows and Linux: Quit at the bottom of File, as is the custom there
       // (the Mac has it in the EMStudio menu; the web closes its tab)
       { ...sep, only: ["win", "linux"] } as SepRow,
       cmd("quitFile", "menu.quit", "btn-quit", { accel: "CmdOrCtrl+Q", only: ["win", "linux"] }),
+    ],
+  },
+  {
+    // MICRO-TIL003 · Tools: the menu is the page's own (index.html: the
+    // instruments, the console, the plugins); the table adds its rows AFTER
+    // `anchor`, keeping the items already there. The system's bar has no Tools.
+    id: "tools",
+    label: "toolbar.tools",
+    surfaces: { web: ["internal"], mac: ["internal"], win: ["internal"], linux: ["internal"] },
+    anchor: "btn-tool-chronology",
+    rows: [
+      // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione»: each graph its system
+      cmd("georef", "gr.menu", "btn-georef", { title: "gr.menuTitle" }),
     ],
   },
   {

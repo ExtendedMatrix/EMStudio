@@ -848,7 +848,8 @@ import {
   buildPageMenus, commandForKey, followLocale, installNativeMenu, redrawSlots, refreshNativeRecent, runCommand,
   type DynamicItem,
 } from "./menu-ui";
-import { currentPlatform, setSlotRuns, type RunRow } from "./menu-table";
+import { currentPlatform, optionOn, setSlotRuns, type RunRow } from "./menu-table";
+import { askBringIn } from "./bring-in";
 // MICRO-PL17 (W14) · the plugins loaded from disk: their commands in the slots of phase 1
 import {
   PluginState, badgeOf, byPlugin, fillSlots, labelOf, parseRunId, provenance, runId, whenHolds,
@@ -18275,9 +18276,11 @@ document
     if (!(await confirmLeaveSidecar("Starting a new document"))) return;
     newDocument();
   });
+// MICRO-TIL003 · Open… with its box «Replace the open files» ticked is the
+// old «Open in place of the open files…» (openReplacing, command openReplace)
 document
   .getElementById("btn-open")!
-  .addEventListener("click", () => void openDocument());
+  .addEventListener("click", () => void (optionOn("openReplaceBox") ? openReplacing() : openDocument()));
 fileInput.addEventListener("change", () => {
   if (fileInput.files?.[0]) loadFile(fileInput.files[0]);
   fileInput.value = "";
@@ -18322,6 +18325,14 @@ document.getElementById("btn-porta-dentro")?.addEventListener("click", () => { v
 // MICRO-GEO09 · File ▸ Porta dentro una cartella… (a stack of slices: read by a plugin's reader of folders)
 document.getElementById("btn-porta-dentro-cartella")?.addEventListener("click", () => { void doorFolderFromMenu(); });  // ALLOW-IT: an element id (as btn-porta-dentro), not words on screen
 document.getElementById("btn-door-dosco")?.addEventListener("click", () => { void doorDoscoFromMenu(); });
+// MICRO-TIL003 · File ▸ «Bring in…»: one window, the three roads above behind it
+document.getElementById("btn-bring-in")?.addEventListener("click", () => {
+  void askBringIn().then((c) => {
+    if (c === "files") void doorFromMenu();
+    else if (c === "folder") void doorFolderFromMenu();
+    else if (c === "dosco") void doorDoscoFromMenu();
+  });
+});
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");
@@ -66813,12 +66824,19 @@ async function savePluginFile(f: { name: string; mime: string; text?: string; b6
 
 // check@1 · the plugins' warnings: the last answer per store, asked again a
 // moment after the document moved (never while a script runs)
-let pluginChecks: { st: DocumentStore | null; rev: number; list: Issue[]; asked: number } = { st: null, rev: -1, list: [], asked: -1 };
-let pluginChecksTimer: number | undefined;
+// MICRO-TIL003 · `var`, not `let`: the issues are counted while the module is
+// still being read (a document opened at start-up), before this line runs —
+// with `let` that read threw «Cannot access 'pluginChecks' before
+// initialization» on every page (HEAD 8b211e8). Undefined = nothing asked yet.
+// eslint-disable-next-line no-var
+var pluginChecks: { st: DocumentStore | null; rev: number; list: Issue[]; asked: number } | undefined;
+// eslint-disable-next-line no-var
+var pluginChecksTimer: number | undefined;
 function pluginIssuesFor(s: DocumentStore): Issue[] {
-  return pluginChecks.st === s ? pluginChecks.list : [];
+  return pluginChecks?.st === s ? pluginChecks.list : [];
 }
 function schedulePluginChecks(s: DocumentStore): void {
+  pluginChecks ??= { st: null, rev: -1, list: [], asked: -1 };
   if (!pluginState || !plugins().commandsIn("check").length) {
     if (pluginChecks.list.length) pluginChecks = { st: null, rev: -1, list: [], asked: -1 };
     return;
@@ -66828,7 +66846,7 @@ function schedulePluginChecks(s: DocumentStore): void {
   pluginChecksTimer = window.setTimeout(() => {
     if (store !== s) return;
     const rev = s.rev;
-    pluginChecks.asked = rev;
+    pluginChecks!.asked = rev;
     void pySessionFor(s).checks().then((list: PyIssueWire[]) => {
       if (store !== s) return;
       pluginChecks = { st: s, rev, asked: rev, list: list.map((w, i): Issue => {
