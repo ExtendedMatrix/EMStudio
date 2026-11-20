@@ -209,6 +209,23 @@ function routesFor(scene: Scene, state: RenderState): RouteCache {
  * past a few thousand entries.
  */
 const fitCache = new Map<string, string>();
+/** MICRO-TIL001 · a name in two lines: the longest run of whole words that
+ *  fits on the first, the rest (fitted) on the second; null when not even the
+ *  first word fits (the one-line ellipsis then) */
+function twoLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): [string, string] | null {
+  const words = text.split(/\s+/).filter(Boolean);
+  for (let k = words.length - 1; k >= 1; k--) {
+    const first = words.slice(0, k).join(" ");
+    if (ctx.measureText(first).width <= maxW) return [first, fitText(ctx, words.slice(k).join(" "), maxW)];
+  }
+  return null;
+}
+/** MICRO-TIL001 · fitted, but never shorter than the identifier — the first
+ *  word («TM015», «D.35»): the box widens for it, the rest takes the «…» */
+function fitKeepingId(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
+  const id = text.split(/\s+/)[0] ?? text;
+  return fitText(ctx, text, Math.max(maxW, ctx.measureText(id + "…").width + 1));
+}
 function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
   const key = `${ctx.font}|${Math.round(maxW * 10)}|${text}`;
   const hit = fitCache.get(key);
@@ -358,6 +375,19 @@ let adornmentHits: { ornamentId: string; x: number; y: number; w: number; h: num
 /** For the checks: the ornament badges as drawn (canvas-relative, screen px). */
 export function drawnAdornmentHits(): ReadonlyArray<{ ornamentId: string; x: number; y: number; w: number; h: number }> {
   return adornmentHits;
+}
+/** MICRO-TIL001 · the «!» of a node with a warning, as drawn (canvas-relative,
+ *  screen px): main.ts reads it for the tooltip and the click */
+let warnBadgeHits: { id: string; x: number; y: number; w: number; h: number }[] = [];
+export function drawnWarnBadges(): ReadonlyArray<{ id: string; x: number; y: number; w: number; h: number }> {
+  return warnBadgeHits;
+}
+export function hitWarnBadge(sx: number, sy: number): string | null {
+  for (let i = warnBadgeHits.length - 1; i >= 0; i--) {
+    const t = warnBadgeHits[i];
+    if (sx >= t.x && sx <= t.x + t.w && sy >= t.y && sy <= t.y + t.h) return t.id;
+  }
+  return null;
 }
 export function hitAdornmentBadge(sx: number, sy: number): string | null {
   for (const t of adornmentHits)
@@ -910,11 +940,15 @@ export function render(
   for (const i of contIdx) {
     const e = scene.edges[i];
     const br = scene.byId.get(e.source)?.continuity ? scene.byId.get(e.source)! : scene.byId.get(e.target)!;
-    const pts = routes[i].pts;
-    const tip = br.id === e.source ? pts[0] : pts[pts.length - 1];
-    const from = br.id === e.source ? pts[pts.length - 1] : pts[0];
+    // MICRO-TIL001 · the line as routed (straight, or orthogonal for a BR the
+    // hand moved), unit → rhombus; the mark across its LAST segment
+    const line = br.id === e.source ? [...routes[i].pts].reverse() : routes[i].pts;
+    const tip = line[line.length - 1];
+    const prev = line[line.length - 2] ?? tip;
     const ink = nodeStyle(br.node.node_type).fill || canvasTheme().labelInk;
-    const up = tip.y <= from.y ? -1 : 1; // the line's direction, unit → rhombus
+    const len = Math.hypot(tip.x - prev.x, tip.y - prev.y) || 1;
+    const dx = (tip.x - prev.x) / len, dy = (tip.y - prev.y) / len; // the line's direction, unit → rhombus
+    const px = -dy, py = dx;
     ctx.save();
     ctx.globalAlpha = lit ? 0.25 : 1;
     ctx.strokeStyle = activeTheme() === "dark" && ink.toLowerCase() === "#000000" ? canvasTheme().labelInk : ink;
@@ -922,22 +956,24 @@ export function render(
     ctx.lineWidth = 1.6 * k;
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(tip.x, tip.y);
+    ctx.moveTo(line[0].x, line[0].y);
+    for (let q = 1; q < line.length; q++) ctx.lineTo(line[q].x, line[q].y);
     ctx.stroke();
     const a = Math.max(5, 7 * k);
     ctx.beginPath();
     if (br.continuity!.kind === "end") {
       // the end: a bar across the line, just before the rhombus
       ctx.lineWidth = 2.4 * k;
-      ctx.moveTo(tip.x - a, tip.y - up * a * 0.5);
-      ctx.lineTo(tip.x + a, tip.y - up * a * 0.5);
+      const cx = tip.x - dx * a * 0.5, cy = tip.y - dy * a * 0.5;
+      ctx.moveTo(cx - px * a, cy - py * a);
+      ctx.lineTo(cx + px * a, cy + py * a);
       ctx.stroke();
     } else {
       // the survival: an arrowhead pointing at the rhombus
+      const bx = tip.x - dx * a * 1.1, by = tip.y - dy * a * 1.1;
       ctx.moveTo(tip.x, tip.y);
-      ctx.lineTo(tip.x - a * 0.6, tip.y - up * a * 1.1);
-      ctx.lineTo(tip.x + a * 0.6, tip.y - up * a * 1.1);
+      ctx.lineTo(bx - px * a * 0.6, by - py * a * 0.6);
+      ctx.lineTo(bx + px * a * 0.6, by + py * a * 0.6);
       ctx.closePath();
       ctx.fill();
     }
@@ -1174,8 +1210,19 @@ export function render(
         // made the name disappear on a white sheet in dark mode.
         ctx.fillStyle = labelInk(state, n.node.id ?? n.id, labelOn("#FFFFFF"));
         ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(label, n.x + n.w / 2, y0 + ih * 0.62);
+        if (ctx.measureText(label).width <= iw - 3) {
+          ctx.textBaseline = "middle";
+          ctx.fillText(label, n.x + n.w / 2, y0 + ih * 0.62);
+        } else {
+          // MICRO-TIL001 · a name wider than the sheet ran out of it, under its
+          // border and its socket: «TM0…», «D.3…» was all that could be read
+          // (E.D., GT16 v11). It goes UNDER the sheet, in the canvas ink, past
+          // the uses' disc; the identifier (the first word) is never cut
+          ctx.fillStyle = labelInk(state, n.node.id ?? n.id, canvasTheme().labelInk);
+          ctx.textBaseline = "top";
+          const below = y0 + ih + (n.useCount && ov("doc_uses") ? 8 : 2 / Math.sqrt(vp.scale));
+          ctx.fillText(fitKeepingId(ctx, label, iw + 40), n.x + n.w / 2, below);
+        }
       }
       if (n.useCount && ov("doc_uses") && !glyphsOff(n)) {
         // BUGS-UI · world-constant, like every other node decorator
@@ -1242,7 +1289,14 @@ export function render(
         const vmW = vmText ? ctx.measureText(vmText).width + 9 : 0;
         const maxW = n.w - 10 - vmW;
         const text = fitText(ctx, label, maxW);
-        ctx.fillText(text, n.x + (n.w - vmW) / 2, n.y + n.h / 2);
+        // MICRO-TIL001 · a name cut on one line («Absolute Ti…») takes two when
+        // the box holds them: «Absolute Time» / «Start»
+        const px = fitPx(CANVAS_TYPE.nodeLabel.px, n.h);
+        const two = text !== label && n.h >= px * 2.4 ? twoLines(ctx, label, maxW) : null;
+        if (two) {
+          ctx.fillText(two[0], n.x + (n.w - vmW) / 2, n.y + n.h / 2 - px * 0.58);
+          ctx.fillText(two[1], n.x + (n.w - vmW) / 2, n.y + n.h / 2 + px * 0.58);
+        } else ctx.fillText(text, n.x + (n.w - vmW) / 2, n.y + n.h / 2);
         if (vmText) {
           ctx.fillStyle = vm === "linked" ? accentColor() : vm === "missing" ? "#b06d00" : canvasTheme().labelMuted;
           ctx.textAlign = "right";
@@ -1386,13 +1440,20 @@ export function render(
           const maxW = n.w - 6;
           const text = fitText(ctx, label, maxW);
           ctx.fillText(text, n.x + n.w / 2, iy + ih + 2);
-        } else {
+        } else if (ctx.measureText(label).width <= iw - 10) {
           // "over": centred on the icon (document sheet / property chip)
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          const maxW = iw - 10;
-          const text = fitText(ctx, label, maxW);
-          ctx.fillText(text, n.x + n.w / 2, iy + ih * 0.62);
+          ctx.fillText(label, n.x + n.w / 2, iy + ih * 0.62);
+        } else {
+          // MICRO-TIL001 · a name that does not fit ON the sheet was cut to
+          // «TM0…», «D.3…» — nothing of it left to read. It goes UNDER the
+          // glyph, as an extractor's, and the identifier (its first word) is
+          // never cut: only what follows it takes the ellipsis
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          const text = fitKeepingId(ctx, label, iw + 40);
+          ctx.fillText(text, n.x + n.w / 2, iy + ih + 2 / Math.sqrt(vp.scale));
         }
       }
       if (isSel(n) || n.id === state.hoverId) {
@@ -1625,6 +1686,12 @@ export function render(
   // STRUTTURA · the WARNING badge: an ochre disc with «!», on the top-left
   // corner (the top-right one is the lock's and the use-count's). World-space
   // like the lock, a constant screen size; chrome, never a node's own style.
+  // MICRO-TIL001 · on the corner of the DRAWING (`visibleBoxOf`), not of the
+  // box em-core leaves around a glyph: an extractor's or a document's «!» sat
+  // at the left end of a 90 × 32 box, 35 world units off its disc (E.D., GT16
+  // v11, D.40.01 / D.37.01 / D.35.01: «sparsi, lontani dai nodi»). Hit rects
+  // for the tooltip and the click (main.ts)
+  warnBadgeHits = [];
   if (state.warnIds?.size && ov("warning")) {
     for (const n of shown) {
       if (!state.warnIds.has(n.id) || glyphsOff(n)) continue;
@@ -1632,8 +1699,10 @@ export function render(
       // p.1 · 14 px across, never more than its unit allows
       const f = glyphFactor(14, unitPxOf(n));
       const r = (7 * f) / vp.scale;
-      const cx = n.x;
-      const cy = n.y;
+      const vb = visibleBoxOf(n);
+      const cx = vb.x;
+      const cy = vb.y;
+      warnBadgeHits.push({ id: n.id, x: (cx - r) * vp.scale + vp.x, y: (cy - r) * vp.scale + vp.y, w: 2 * r * vp.scale, h: 2 * r * vp.scale });
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = "#e3b43a";
@@ -2025,6 +2094,16 @@ export function render(
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   const RAIL = 6; // strong colour rail width (px) on the first pixels of a lane
+  // MICRO-TIL001 · a header chip sticks to the top of the view: scrolled, it
+  // lay over a node and hid it (GT16: a document under «XX sec», read as «a
+  // small empty rectangle with an arrow»). A stuck chip over a node is
+  // see-through: the node shows under it.
+  const chipOverNode = (x: number, y: number, w: number, h: number): boolean => scene.nodes.some((n) => {
+    if (n.collapsed) return false;
+    const nx = n.x * vp.scale + vp.x, ny = n.y * vp.scale + vp.y;
+    return nx < x + w && x < nx + n.w * vp.scale && ny < y + h && y < ny + n.h * vp.scale;
+  });
+  const CHIP_SEE_THROUGH = 0.45;
   // "PD" tag: a small clickable badge for an epoch/phase temporal PDG, drawn in
   // the label chip instead of a box. Registers its screen rect for click-to-enter.
   pdTagHits = [];
@@ -2176,6 +2255,11 @@ export function render(
     const chipFill = hzChip ? canvasTheme().laneChip : lane.color || canvasTheme().laneChip;
     const chipInk = hzChip ? canvasTheme().laneChipInk : lane.color ? labelOn(lane.color) : canvasTheme().laneChipInk;
     ctx.fillStyle = chipFill;
+    // only a chip the scroll carried (stuck to the view's top): at its own
+    // place over its lane's top the layout keeps the nodes clear of it
+    const laneSeeThrough = ty > sy + 4 + 0.5 && chipOverNode(chipX, ty - 2, chipW, chipH);
+    ctx.save();
+    if (laneSeeThrough) ctx.globalAlpha = CHIP_SEE_THROUGH;
     if (hzChip && typeof ctx.roundRect === "function") {
       ctx.beginPath();
       ctx.roundRect(chipX, ty - 2, chipW, chipH, 5);
@@ -2205,6 +2289,7 @@ export function render(
       ctx.strokeStyle = selectedLane ? accentColor() : canvasTheme().chipBorder;
       ctx.strokeRect(chipX, ty - 2, chipW, chipH);
     }
+    ctx.restore();
     const textX = chipX + 8;
     ctx.fillStyle = chipInk;
     ctx.font = canvasFont(CANVAS_TYPE.laneLabel.weight, CANVAS_TYPE.laneLabel.px);
@@ -2369,7 +2454,8 @@ export function render(
         bandLabelHits.push({ id: sb.phaseId, x, y, w, h: 10 });
         continue;
       }
-      const ty = Math.max(sy + 2, 4);
+      let ty = Math.max(sy + 2, 4);
+      const bandStuck = ty > sy + 2 + 0.5;
       // a phase band shows its start–end under the name (like the lane chip)
       // when the band has the room for two lines
       const hasBounds = fullRoom && (sb.start != null || sb.end != null);
@@ -2387,7 +2473,11 @@ export function render(
       const chipW = 7 + 5 + Math.max(nameW, boundsW) + warnSpace + tagSpace + 8;
       const chipH = hasBounds ? 30 : 17;
       const hit = clash(chipX, ty - 1, chipW, chipH);
-      if (hit) chipX = hit.x + hit.w + 6;
+      // MICRO-TIL001 · a phase at the top of its epoch put its chip BESIDE the
+      // epoch's («XX sec» · «2015» read as two siblings): it goes UNDER it,
+      // indented — the nesting reads — when the band has the room; else beside
+      if (hit && laneChipHits.includes(hit as typeof laneChipHits[number]) && hit.y + hit.h + 3 + chipH <= sy + sh - 2) ty = hit.y + hit.h + 4;
+      else if (hit) chipX = hit.x + hit.w + 6;
       const selectedBand = sb.phaseId === state.selectedId;
       // same rule as the lane chip: a coloured phase fills its own colour and
       // takes labelOn for the ink; the residual band (the epoch) has no colour
@@ -2399,6 +2489,8 @@ export function render(
           ? canvasTheme().labelMuted
           : canvasTheme().laneChipInk;
       ctx.fillStyle = bandFill;
+      ctx.save();
+      if (bandStuck && chipOverNode(chipX, ty - 1, chipW, chipH)) ctx.globalAlpha = CHIP_SEE_THROUGH;
       if (typeof ctx.roundRect === "function") {
         ctx.beginPath();
         ctx.roundRect(chipX, ty - 1, chipW, chipH, 4);
@@ -2412,6 +2504,7 @@ export function render(
         ctx.strokeStyle = selectedBand ? accentColor() : canvasTheme().chipBorder;
         ctx.strokeRect(chipX, ty - 1, chipW, chipH);
       }
+      ctx.restore();
       const bandTextX = chipX + 7 + 5;
       ctx.fillStyle = bandInk;
       ctx.font = canvasFont(sb.residual ? 400 : 600, 11, { italic: sb.residual });

@@ -169,6 +169,34 @@ export function compactableUnits(doc: EmDocument): string[] {
   return out;
 }
 
+/** MICRO-TIL001 · what «Compact the properties (whole graph)» would do, said
+ *  before it is pressed. E.D. (GT16 v11, USV100): the button said «No direct
+ *  properties to compact» over USV100_PD open with a row of 14 properties —
+ *  they were all IN the group already (the count looked at the loose ones
+ *  only), and the group was simply open. Now:
+ *    · `units`: the units with something loose to gather (as before);
+ *    · `open`: the paradata groups of units holding properties that are open
+ *      (not in `layout.folded_groups`) — «Compact» closes them;
+ *    · `shared`: the properties left out by choice (rule 2: more than one
+ *      owner, none a declared heir) — the tooltip names how many and why. */
+export interface CompactPlan { units: string[]; open: string[]; shared: string[] }
+export function compactPlan(doc: EmDocument): CompactPlan {
+  const ix = index(doc);
+  const units = compactableUnits(doc);
+  const folded = new Set(doc.layout?.folded_groups ?? []);
+  const open: string[] = [];
+  const shared = new Set<string>();
+  for (const [id, n] of ix.node) {
+    if (!isStratigraphicType(n.node_type)) continue;
+    for (const e of outOf(ix, id, HAS_PROPERTY))
+      if (!isInherited(e) && cls(ix, e.target) === "PropertyNode" && declaredOwners(ix, e.target).length > 1) shared.add(e.target);
+    const g = groupOf(ix, id);
+    if (!g || folded.has(g) || open.includes(g)) continue;
+    if (inOf(ix, g, IS_IN_PARADATA_NODEGROUP).some((e) => cls(ix, e.source) === "PropertyNode")) open.push(g);
+  }
+  return { units, open, shared: [...shared] };
+}
+
 /** MICRO-INSPECTOR-SEZIONI p.1 · what «Compact» would move for this unit: a
  *  direct property of its own (one declared owner) outside its group, or an
  *  element of its chain outside it. Until 25 Oct every unit with a direct
@@ -210,6 +238,8 @@ export interface CompactResult {
   skipped: Array<{ property: string; owners: string[] }>;
   /** the groups touched (closed after the command) */
   groups: string[];
+  /** MICRO-TIL001 · groups whose properties were already in them, closed */
+  closed: number;
 }
 
 /** Data of a copy: the original's, without the clocks, the stamps and the yEd
@@ -363,9 +393,11 @@ function take(store: DocumentStore, id: string, upper: EmEdge, unitId: string, g
  * «Compact the properties» for the given units (all units with direct
  * properties when omitted). ONE undo step; the groups touched are closed.
  */
-export function compactProperties(store: DocumentStore, unitIds?: string[]): CompactResult {
+export function compactProperties(store: DocumentStore, unitIds?: string[],
+                                  /** MICRO-TIL001 · open groups to close in the same step */
+                                  close: readonly string[] = []): CompactResult {
   const res: CompactResult = { units: 0, properties: 0, groupsCreated: 0, duplicates: 0,
-                               instances: 0, skipped: [], groups: [] };
+                               instances: 0, skipped: [], groups: [], closed: 0 };
   const units = (unitIds ?? compactableUnits(store.doc))
     .filter((id) => isStratigraphicType(store.node(id)?.node_type));
   const skipped = new Set<string>();
@@ -400,7 +432,9 @@ export function compactProperties(store: DocumentStore, unitIds?: string[]): Com
           take(store, e.target, e, unitId, g.id, res, seen);
       }
     }
-    if (res.groups.length) store.setFoldedMany(res.groups, true);
+    const shut = close.filter((g) => !res.groups.includes(g));
+    res.closed = shut.length;
+    if (res.groups.length || shut.length) store.setFoldedMany([...res.groups, ...shut], true);
   });
   return res;
 }

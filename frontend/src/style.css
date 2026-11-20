@@ -12009,7 +12009,19 @@ button.uo-col { cursor: pointer; }
 /* p.1 · in a narrow head the empty part gives way before the search field does
    (it still takes every pixel left over: the double-click target) */
 .win-header .win-sep { min-width: 8px; }
-.win-header .win-search, .win-search { min-width: 48px; }
+/* MICRO-TIL001 · never «S…»: the least width holds the longest placeholder of
+   the languages (main.ts measureSearchMin); a head too tight makes it a
+   magnifier (fitHeader) that opens over its neighbours */
+.win-header .win-search, .win-search { min-width: var(--win-search-min, 96px); }
+.win-search.win-search-icon { flex: 0 0 26px; min-width: 26px; max-width: 26px; }
+.win-search.win-search-icon .win-search-glyph { left: 50%; transform: translate(-50%, -50%); cursor: pointer; }
+.win-search.win-search-icon .win-search-q { width: 26px; padding: 0; color: transparent; }
+.win-search.win-search-icon .win-search-q::placeholder { color: transparent; }
+.win-search.win-search-icon.win-search-open { position: relative; z-index: 60; }
+.win-search.win-search-icon.win-search-open .win-search-q { position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: calc(var(--win-search-min, 96px) + 60px); padding: 0 6px 0 20px; color: var(--text); }
+.win-search.win-search-icon.win-search-open .win-search-q::placeholder { color: var(--text-dim, #8a8f98); }
+.win-search.win-search-icon.win-search-open .win-search-glyph { left: auto; right: calc(var(--win-search-min, 96px) + 60px - 14px); transform: translateY(-50%); z-index: 1; }
 .win-search .win-search-q { padding-left: 18px; }
 .uo-marks { flex: 0 0 auto; overflow: visible; }
 /* the fixed columns sit at the row's right edge whatever the row holds: the

@@ -78,12 +78,28 @@ export function continuityPlace(unit: Box, br: { w: number; h: number }, lane: B
 }
 
 /** the line: from the unit's edge facing the BR to the BR's facing edge,
- *  vertical (both centred on the unit) */
+ *  vertical (both centred on the unit). MICRO-TIL001 · a BR the hand moved off
+ *  the unit's axis: orthogonal — out of the unit's top (or bottom) centre, a
+ *  horizontal half way, into the BR's facing edge; side by side, over the top of
+ *  both. The points go BR → unit. */
 export function continuityRoute(unit: Box, br: Box): { x: number; y: number }[] {
   const x = unit.x + unit.w / 2;
-  if (br.y + br.h <= unit.y) return [{ x, y: br.y + br.h }, { x, y: unit.y }];
-  if (br.y >= unit.y + unit.h) return [{ x, y: br.y }, { x, y: unit.y + unit.h }];
-  return [{ x, y: br.y + br.h / 2 }, { x, y: unit.y + unit.h / 2 }];
+  const bx = br.x + br.w / 2;
+  if (Math.abs(bx - x) < 0.5) {
+    if (br.y + br.h <= unit.y) return [{ x, y: br.y + br.h }, { x, y: unit.y }];
+    if (br.y >= unit.y + unit.h) return [{ x, y: br.y }, { x, y: unit.y + unit.h }];
+    return [{ x, y: br.y + br.h / 2 }, { x, y: unit.y + unit.h / 2 }];
+  }
+  if (br.y + br.h <= unit.y) {
+    const ym = (br.y + br.h + unit.y) / 2;
+    return [{ x: bx, y: br.y + br.h }, { x: bx, y: ym }, { x, y: ym }, { x, y: unit.y }];
+  }
+  if (br.y >= unit.y + unit.h) {
+    const ym = (br.y + unit.y + unit.h) / 2;
+    return [{ x: bx, y: br.y }, { x: bx, y: ym }, { x, y: ym }, { x, y: unit.y + unit.h }];
+  }
+  const yt = Math.min(br.y, unit.y) - CONTINUITY_GAP;
+  return [{ x: bx, y: br.y }, { x: bx, y: yt }, { x, y: yt }, { x, y: unit.y }];
 }
 
 /** The overlay «Continuity» switched off: the continuity nodes and their lines

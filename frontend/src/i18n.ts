@@ -684,7 +684,11 @@ const EN: Dict = {
   "compact.cmdAll": "Compact the properties (whole graph)",
   "compact.dissolve": "Dissolve the group",
   "compact.done": "Compacted {units} units: {props} properties into their groups, {groups} new groups, {dups} copies of combiners and extractors",
-  "compact.none": "No direct properties to compact",
+  "warn.badgeClick": "click: select it, the Inspector says it and opens the Warnings",
+  "compact.none": "Nothing to compact: every unit's properties are already in its paradata group, and the groups are closed",
+  "compact.closed": "Closed {g} paradata groups: their properties were already in them",
+  "compact.willClose": "closes {g} open groups whose properties are already in them",
+  "compact.leftOut": "{n} properties stay out: each has more than one owner and none is declared an heir («Duplicate for each owner» in the Inspector)",
   "compact.skipped": "Left out {n} properties with more than one owner not declared heirs: {names}",
   "compact.dissolved": "Dissolved {units} groups: {m} memberships removed, {g} empty groups removed",
   "compact.owners": "«{p}» has {n} owners and none is declared an heir: {owners}",
@@ -1166,6 +1170,7 @@ const EN: Dict = {
   "gesture.clickFolder": "click a folder",
   "ninsp.titleInPage": "Rename it in the page: click the chapter's heading",
   "ws.notModified": "This space is as it came: nothing to reset",
+  "win.foldedVerbs": "In the bar (no room for them)",
   "win.moreTitle": "This window's tools",
   "nv.export": "Export",
   "menu.document": "Document",
@@ -3679,7 +3684,7 @@ const EN: Dict = {
   "tsp.recentredScene": "Placed at the centre of the space for viewing only: its transform does not put it in the study's frame; the files are not changed",
   "tsp.attach": "Attach to the epoch…",
   "tsp.attachHint": "A representation model in the chosen epoch, with the resource of this file: one step of undo",
-  "tsp.doorHint": "Opens «Porta dentro…» again: the document, its date, the epoch the tileset represents, its role, the licence",
+  "tsp.doorHint": "Opens «Bring in…» again: the document, its date, the epoch the tileset represents, its role, the licence",
   "tsp.nameOnlyHint": "Dropped from the system, its path is not known: the resource will name the file only. Drag it from the Files window to record where it is",
   "tsp.noEpochs": "The graph has no epoch",
   "tsp.prepareFirst": "Not a package yet: prepare it first (a .3tz), then attach it",
@@ -6699,19 +6704,19 @@ const EN: Dict = {
   "dv.loose": "Sets not censused",
   "dv.via": "through {m}",
   "dv.version": "version",
-  "door.menu": "Porta dentro…",
-  "door.menuN": "Porta dentro {n} file…",
-  "door.menuHint": "Porta dentro — bring files in as documents: what each is, the document, its date, the epoch it represents",
-  "door.pickTitle": "Porta dentro: the files",
-  "door.folderMenu": "Porta dentro una cartella…",
+  "door.menu": "Bring in…",
+  "door.menuN": "Bring in {n} files…",
+  "door.menuHint": "Bring in — files into the study as documents: what each is, the document, its date, the epoch it represents",
+  "door.pickTitle": "Bring in: the files",
+  "door.folderMenu": "Bring in a folder…",
   "door.folderMenuHint": "Bring a folder in: read as DosCo, or by an add-on that reads folders (a stack of geophysical slices, say)",
-  "door.folderPickTitle": "Porta dentro: the folder",
+  "door.folderPickTitle": "Bring in: the folder",
   "door.pickReader": "Which add-on reads {name}?",
   "door.readerPanel": "{name}: say in «{panel}» what the files do not, then press its button",
   "door.readAs": "Read as:",
   "door.readAsHost": "EMStudio (as it is)",
-  "door.plusHint": "Porta dentro… — files into this study (the epoch shown proposed)",
-  "door.title": "Porta dentro…",
+  "door.plusHint": "Bring in… — files into this study (the epoch shown proposed)",
+  "door.title": "Bring in…",
   "door.nothing": "Nothing to bring in (a graph opens as a graph)",
   "door.inBucket": "in the bucket: it stays there, the graph cites its address",
   "door.role.rm": "RM — represents the place in an epoch",
@@ -6745,8 +6750,8 @@ const EN: Dict = {
   "door.siteThere": "The GIS layer hangs from the site «{site}» (experimental)",
   "door.siteMade": "Site «{site}» made: the GIS layer hangs from it",
   "door.licenseNone": "— as it is —",
-  "door.go": "Porta dentro",
-  "door.failed": "Porta dentro: {why}",
+  "door.go": "Bring in",
+  "door.failed": "Bring in: {why}",
   "door.doneNew": "{d}: a new document with {n} files ({reused} already in the graph, published by it)",
   "door.done": "{d}: {n} files brought in ({reused} already in the graph)",
   "door.tropyTitle": "Tropy · {file}: {n} items",
@@ -6770,9 +6775,9 @@ const EN: Dict = {
   "door.kind.graph": "graph",
   "door.kind.other": "file",
   "door.doscoMenu": "Read as DosCo…",
-  "door.doscoMenuHint": "Porta dentro a DosCo folder: each file with an EM id (D.12…) becomes the document of that id — its date, its licence, its role asked in one block",
+  "door.doscoMenuHint": "Bring in a DosCo folder: each file with an EM id (D.12…) becomes the document of that id — its date, its licence, its role asked in one block",
   "door.doscoHere": "Read this folder as DosCo…",
-  "door.doscoHereHintOf": "Porta dentro {folder} as DosCo: its files with an EM id become documents of the graph {graph}",
+  "door.doscoHereHintOf": "Bring in {folder} as DosCo: its files with an EM id become documents of the graph {graph}",
   "door.doscoNoGraph": "Open a graph first: the files of a DosCo become its documents",
   "door.doscoPickTitle": "Read as DosCo: the folder",
   "door.doscoDup": "{id}: {n} files, one document ({files})",
@@ -9648,7 +9653,11 @@ const IT: Dict = {
   "compact.cmdAll": "Compatta le proprietà (tutto il grafo)",
   "compact.dissolve": "Sciogli il gruppo",
   "compact.done": "Compattate {units} unità: {props} proprietà nei loro gruppi, {groups} gruppi nuovi, {dups} copie di combinatori ed estrattori",
-  "compact.none": "Nessuna proprietà diretta da compattare",
+  "warn.badgeClick": "clic: lo seleziona, l'Ispettore lo dice e apre gli Avvisi",
+  "compact.none": "Niente da compattare: le proprietà di ogni unità sono già nel suo gruppo dei paradati, e i gruppi sono chiusi",
+  "compact.closed": "Chiusi {g} gruppi dei paradati: le loro proprietà c'erano già",
+  "compact.willClose": "chiude {g} gruppi aperti le cui proprietà ci sono già",
+  "compact.leftOut": "{n} proprietà restano fuori: ognuna ha più di un proprietario e nessuno è dichiarato erede («Duplica per ogni proprietario» nell'Ispettore)",
   "compact.skipped": "Saltate {n} proprietà con più proprietari non dichiarati eredi: {names}",
   "compact.dissolved": "Sciolti {units} gruppi: {m} appartenenze tolte, {g} gruppi vuoti rimossi",
   "compact.owners": "«{p}» ha {n} proprietari e nessuno è dichiarato erede: {owners}",
@@ -10130,6 +10139,7 @@ const IT: Dict = {
   "gesture.clickFolder": "clic su una cartella",
   "ninsp.titleInPage": "Si rinomina nella pagina: clic sul titolo del capitolo",
   "ws.notModified": "Questo spazio è com'era: niente da ripristinare",
+  "win.foldedVerbs": "Nella barra (non c'è posto)",
   "win.moreTitle": "Gli strumenti di questa finestra",
   "nv.export": "Esporta",
   "menu.document": "Documento",
@@ -20162,7 +20172,11 @@ const DE: Dict = {
   "compact.cmdAll": "Eigenschaften verdichten (ganzer Graph)",
   "compact.dissolve": "Gruppe auflösen",
   "compact.done": "{units} Einheiten verdichtet: {props} Eigenschaften in ihre Gruppen, {groups} neue Gruppen, {dups} Kopien von Kombinatoren und Extraktoren",
-  "compact.none": "Keine direkten Eigenschaften zu verdichten",
+  "warn.badgeClick": "Klick: auswählen, der Inspektor sagt es und öffnet die Warnungen",
+  "compact.none": "Nichts zu verdichten: die Eigenschaften jeder Einheit sind schon in ihrer Paradatengruppe, und die Gruppen sind geschlossen",
+  "compact.closed": "{g} Paradatengruppen geschlossen: ihre Eigenschaften waren schon darin",
+  "compact.willClose": "schließt {g} offene Gruppen, deren Eigenschaften schon darin sind",
+  "compact.leftOut": "{n} Eigenschaften bleiben draußen: jede hat mehr als einen Eigentümer und keiner ist als Erbe erklärt («Für jeden Eigentümer duplizieren» im Inspektor)",
   "compact.skipped": "{n} Eigenschaften mit mehreren nicht als Erben erklärten Eigentümern ausgelassen: {names}",
   "compact.dissolved": "{units} Gruppen aufgelöst: {m} Zugehörigkeiten entfernt, {g} leere Gruppen entfernt",
   "compact.owners": "«{p}» hat {n} Eigentümer, und keiner ist als Erbe erklärt: {owners}",
@@ -20341,6 +20355,7 @@ const DE: Dict = {
   "gesture.clickFolder": "Klick auf einen Ordner",
   "ninsp.titleInPage": "Umbenennen auf der Seite: Klick auf die Kapitelüberschrift",
   "ws.notModified": "Dieser Bereich ist unverändert: nichts zurückzusetzen",
+  "win.foldedVerbs": "In der Leiste (kein Platz)",
   "win.moreTitle": "Die Werkzeuge dieses Fensters",
   "nv.export": "Exportieren",
   "menu.document": "Dokument",
@@ -21561,6 +21576,19 @@ const RUNTIME: Record<string, Dict> = {};
 export function setRuntimeStrings(byLang: Record<string, Record<string, string>>): void {
   for (const k of Object.keys(RUNTIME)) delete RUNTIME[k];
   for (const [lang, d] of Object.entries(byLang)) RUNTIME[lang] = { ...d };
+}
+
+/** MICRO-TIL001 · a whole dictionary, read only — for the checks that compare
+ *  two languages (`check-menu-lang.mjs`: an English menu item identical to the
+ *  Italian is a word nobody translated) */
+export function dictionaryOf(code: Locale): Readonly<Record<string, string>> {
+  return DICTS[code] ?? {};
+}
+
+/** MICRO-TIL001 · one key in every language of LOCALES (English where a
+ *  dictionary has none): what a width must hold whatever the language */
+export function tAll(key: string): string[] {
+  return LOCALES.map((l) => DICTS[l.code]?.[key] ?? EN[key] ?? key);
 }
 
 export function t(key: string, vars?: Record<string, string | number>,

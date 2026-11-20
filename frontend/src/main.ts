@@ -296,7 +296,7 @@ import { citedContext, setDocumentContent, setSceneFactory, setSitePicker, type 
 import { documentEmbed as documentEmbedRaw, epochStart, sceneContent, sceneContentLine, tableRows, type TableContext } from "./narrative-embeds";
 import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
-import { carriedPropertyEdges, compactableUnits, compactProperties, dissolveGroups, drawnEdgeKey,
+import { carriedPropertyEdges, compactableUnits, compactPlan, compactProperties, dissolveGroups, drawnEdgeKey,
          propertyBadges } from "./compact";
 import { unitsWithout3d, viewIndex, viewInstances } from "./paradata-view";
 import { applyDelta, askLibrary, libraryValue, readFromProperty, rereadProperty,
@@ -395,6 +395,8 @@ import {
   drawnRmChips,
   drawnAdornmentHits,
   hitAdornmentBadge,
+  hitWarnBadge,
+  drawnWarnBadges,
   hitInstanceBadge,
   hitBandLabel,
   drawnAddPhase,
@@ -521,7 +523,7 @@ import {
   setValidated,
   t,
 } from "./i18n";
-import { setRuntimeStrings, tn } from "./i18n";
+import { setRuntimeStrings, tAll, tn } from "./i18n";
 import type { Locale } from "./i18n";
 import type {
   ExtractResult,
@@ -827,7 +829,7 @@ import { buildGraphsDoc } from "./views/graphs";
 import { buildGraphScene, graphCentres, type GraphAlgorithm } from "./views/graph";
 import { buildLiquidScene, isLiquid, LiquidSim, localNeighbourhood, type LiquidFilter } from "./views/liquid";
 import ForceWorker from "./force-worker.ts?worker&inline";
-import { buildMatrixScene } from "./views/matrix";
+import { buildMatrixScene, seatContinuity } from "./views/matrix";
 import { renderStudyPanel } from "./study-panel";
 import { perfCount, perfRelease, perfSettled, perfTime, perfTimeAsync } from "./perf";
 import {
@@ -2940,6 +2942,8 @@ window.__EM_SCENE__ = () => {
   jumpTo: (id: string) => jumpTo(id),
   // MICRO-BADGE-PD · the groups' chips as drawn (canvas-relative), the context
   pdChips: () => drawnPdChips(),
+  /** MICRO-TIL001 · the «!» of the warnings as drawn (canvas px) */
+  warnBadges: () => drawnWarnBadges().map((b) => ({ ...b })),
   /** MICRO-SOVRAPPOSIZIONI · the overlays of a view (default: the focused
    *  one), and set them; the menu's view */
   overlays: (v?: OverlayView, winId?: string) => {
@@ -6667,11 +6671,15 @@ function updateBreadcrumb(): void {
  *  direct property when none) — ONE undo step, the groups closed after. */
 function runCompact(units?: string[]): void {
   if (!store) return;
-  const r = compactProperties(store, units);
+  // MICRO-TIL001 · the whole graph: the open groups that hold properties close
+  // too, in the same undo step (their properties were already in them)
+  const r = compactProperties(store, units, units ? [] : compactPlan(store.doc).open);
   const nameOf = (id: string): string => String(store!.node(id)?.name || id);
-  if (!r.units) toast(t("compact.none"));
+  if (!r.units && !r.closed) toast(t("compact.none"));
+  else if (!r.units) toast(t("compact.closed", { g: String(r.closed) }));
   else toast(t("compact.done", { units: String(r.units), props: String(r.properties),
-                                 groups: String(r.groupsCreated), dups: String(r.duplicates) }));
+                                 groups: String(r.groupsCreated), dups: String(r.duplicates) })
+             + (r.closed ? " · " + t("compact.closed", { g: String(r.closed) }) : ""));
   if (r.skipped.length)
     toast(t("compact.skipped", { n: String(r.skipped.length),
       names: r.skipped.map((x) => `${nameOf(x.property)} (${x.owners.map(nameOf).join(", ")})`).join("; ") }));
@@ -7587,6 +7595,8 @@ function buildScenesNow(): void {
     // unit, its instances, their cards) moves the block it covers, as in the
     // horizons — but what the hand placed stays where the hand left it
     if (sc) makeRoom(sc, 24, (id) => handPlaced.has(id));   // out of «Funzioni sperimentali» (MICRO-COR11)
+    // MICRO-TIL001 · «fare spazio» moved the units: each rhombus back on its line
+    if (sc) seatContinuity(sc, vdoc);
     markPinnedGroups(sc);
     markNoEpoch(sc);
     return sc;
@@ -15034,7 +15044,10 @@ function liveDropTarget(wx: number, wy: number, alt: boolean, shift = false): Dr
   // box, stays `is_in_activity VAct.04`). The lane under the point is the target
   const t = dropTargetAt(s, wx, wy, { ...dragDropOpts, alt: alt || !shift });
   // MICRO-Q p.1 · a group's drag never takes a lane: it is a move (no lane lit)
-  return t?.kind === "lane" && dragIsGroupMove ? null : t;
+  // MICRO-TIL001 · nor a continuity node's: its epoch is the end's, changed by
+  // «Ends in…» / «Survives until…», never by where the hand drops the rhombus
+  const brDrag = !!dragNodeId && isContinuityType(store?.node(dragNodeId)?.node_type);
+  return t?.kind === "lane" && (dragIsGroupMove || brDrag) ? null : t;
 }
 /** MICRO-V p.2 · what a drop target is compared against: a group with the
  *  group under the press, a lane with the lane under the press */
@@ -25294,6 +25307,15 @@ const smHandlers: StratiMinerHandlers = {
  * absent from the current scene — folded into a group, filtered out by the
  * circles of detail, or simply on the other view — and silently doing nothing
  * would read as a broken button, so say what happened instead. */
+/** MICRO-TIL001 · a click on a node's «!»: the node selected — the Inspector
+ *  opens on its WARNINGS, the entry with its remedy and «Open the warnings
+ *  table →» (the list the status bar's ▲ opens). The table is not forced open:
+ *  its split re-framed the graph and the node left the screen (measured) */
+function openWarningOf(nodeId: string): void {
+  select(nodeId);
+  draw();
+}
+
 function revealFromWarning(nodeId: string): void {
   // FONTE · a click on a warning is a JUMP: the view it leaves is pushed for
   // «Indietro», and a closed group around the node opens
@@ -60543,7 +60565,68 @@ function searchControl(winId: string, hs: HeaderSearch): HTMLElement {
   wrap.appendChild(inp);
   wrap.addEventListener("pointerdown", (e) => e.stopPropagation());
   glyph.addEventListener("click", () => inp.focus());
+  // MICRO-TIL001 · a head too tight even after its verbs went into «⋯»: the
+  // field is a magnifier (`.win-search-icon`, `fitHeader`) that opens, over its
+  // neighbours, at the press or at «/»; empty and left, it closes again
+  inp.addEventListener("focus", () => { if (wrap.classList.contains("win-search-icon")) wrap.classList.add("win-search-open"); });
+  inp.addEventListener("blur", () => { if (!inp.value) wrap.classList.remove("win-search-open"); });
+  glyph.title = hs.placeholder;
   return wrap;
+}
+
+/** MICRO-TIL001 (E.D., 20 Nov 2026) · the head's search field is never cut to
+ *  «S…»: its least width holds the longest placeholder of LOCALES (`uo.search`,
+ *  measured in the field's own font), written once in `--win-search-min`. */
+function measureSearchMin(): void {
+  const probe = document.createElement("input");
+  probe.className = "win-search-q";
+  probe.style.cssText = "position:absolute;visibility:hidden;left:-9999px;top:0";
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe);
+  const ctx = document.createElement("canvas").getContext("2d");
+  let w = 0;
+  if (ctx) {
+    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    for (const s of tAll("uo.search")) w = Math.max(w, ctx.measureText(s).width);
+  }
+  probe.remove();
+  // the glyph's padding at the left, 6 at the right, the border, a breath
+  if (w > 0) document.documentElement.style.setProperty("--win-search-min", `${Math.ceil(w + 18 + 6 + 2 + 4)}px`);
+}
+
+/**
+ * MICRO-TIL001 · a head that does not fit its window. In order: (1) the
+ * window's one-click verbs (`.win-act`, from the right) leave the bar for its
+ * «⋯», which lists them under «In the bar» while they are out; (2) only then
+ * the search field becomes a magnifier. Never a field with its word cut. Run
+ * after every head is built and when an area changes size.
+ */
+function fitHeader(bar: HTMLElement): void {
+  for (const b of bar.querySelectorAll<HTMLElement>("[data-hdr-folded]")) { b.hidden = false; delete b.dataset.hdrFolded; }
+  const search = bar.querySelector<HTMLElement>(":scope > .win-search");
+  search?.classList.remove("win-search-icon");
+  const over = (): boolean => bar.scrollWidth > bar.clientWidth + 1;
+  if (!over() || bar.classList.contains("hz-bar") || bar.classList.contains("win-chain-bar")) return;
+  if (bar.querySelector(":scope > .win-menu")) {
+    // never the ⛶ (it is not a verb of the window's content: it is the window)
+    const verbs = [...bar.querySelectorAll<HTMLElement>(":scope > .win-act")]
+      .filter((v) => hdrRoleOf(v) !== "max" && !v.classList.contains("win-max")).reverse();
+    for (const v of verbs) {
+      v.hidden = true;
+      v.dataset.hdrFolded = "1";
+      if (!over()) return;
+    }
+  }
+  if (search && !search.classList.contains("win-search-open")) search.classList.add("win-search-icon");
+}
+/** the one observer of the heads (a function, not a const: a head can be built
+ *  while this module is still being evaluated — no temporal dead zone) */
+function headerFitObserver(): ResizeObserver | null {
+  const self = headerFitObserver as unknown as { ro?: ResizeObserver | null };
+  if (self.ro === undefined)
+    self.ro = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver((entries) => { for (const e of entries) fitHeader(e.target as HTMLElement); }) : null;
+  return self.ro;
 }
 /** «/» on a window: the focus in its head field */
 function openHeaderSearch(winId: string): boolean {
@@ -60857,6 +60940,25 @@ function buildAreaHeader(win: Win): DocumentFragment {
     // built on OPEN, so ✓ and disabled reasons are current every time
     wireBarDropdown(toggle, list, () => {
       list.innerHTML = "";
+      // MICRO-TIL001 · the bar's verbs that a tight head put away (`fitHeader`)
+      const folded = [...(dd.parentElement?.querySelectorAll<HTMLButtonElement>(":scope > .win-act[data-hdr-folded]") ?? [])];
+      if (folded.length) {
+        const g = document.createElement("div");
+        g.className = "dd-group";
+        g.textContent = t("win.foldedVerbs");
+        list.appendChild(g);
+        for (const v of folded) {
+          const b = document.createElement("button");
+          b.dataset.foldedVerb = v.dataset.act ?? "";
+          // the verb's name (its tooltip's first sentence); the whole tooltip as the item's
+          const full = v.getAttribute("aria-label") || v.title || v.textContent || "";
+          b.textContent = full.split(/ — |: /)[0];
+          b.title = full;
+          if (v.getAttribute("aria-disabled") === "true") b.classList.add("dd-disabled");
+          b.addEventListener("click", () => v.click());
+          list.appendChild(b);
+        }
+      }
       for (const menu of menus) {
         const items = menu.items(win);
         if (!items.length) continue;
@@ -61008,8 +61110,32 @@ function buildAreaHeader(win: Win): DocumentFragment {
     // MICRO-CONTENTS-2 F7 · not in the Chain: the DTC has no properties to
     // compact, and the icon fell off the bar there (x = 1604 on 1600)
     if (winMode(win) !== "dtc") {
-      const why = !store ? t("menu.noGraph") : compactableUnits(store.doc).length ? null : t("compact.none");
-      act("", why ? `${t("compact.cmdAll")} — ${why}` : t("compact.cmdAllTitle"), false, () => {
+      // MICRO-TIL001 · what it would do, and what it leaves out and why — read
+      // NOW (at the hover, at the press): the bar is not redrawn after every
+      // change, and its words went stale (E.D. read «nothing to compact» over an
+      // open group full of properties)
+      const say = (): { why: string | null; tip: string } => {
+        const plan = store ? compactPlan(store.doc) : null;
+        const leftOut = plan?.shared.length ? t("compact.leftOut", { n: String(plan.shared.length) }) : "";
+        const why = !plan ? t("menu.noGraph")
+          : plan.units.length || plan.open.length ? null
+          : [t("compact.none"), leftOut].filter(Boolean).join(" · ");
+        const tip = why ? `${t("compact.cmdAll")} — ${why}`
+          : [t("compact.cmdAllTitle"), plan!.open.length ? t("compact.willClose", { g: String(plan!.open.length) }) : "", leftOut]
+              .filter(Boolean).join(" · ");
+        return { why, tip };
+      };
+      const told = (btn: HTMLButtonElement): string | null => {
+        const { why, tip } = say();
+        btn.title = tip;
+        btn.setAttribute("aria-label", tip);
+        // not available: still reached by Tab, and it says why (aria-disabled)
+        if (why) btn.setAttribute("aria-disabled", "true"); else btn.removeAttribute("aria-disabled");
+        btn.classList.toggle("win-act-off", !!why);
+        return why;
+      };
+      act("", say().tip, false, () => {
+        const why = b ? told(b) : say().why;
         if (why) { toast(why); return; }
         focusThen(win, () => runCompact());
       });
@@ -61017,9 +61143,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
       if (b) {
         b.dataset.act = "compact-all";
         b.innerHTML = WIN_ICON_COMPACT;
-        b.setAttribute("aria-label", b.title);
-        // not available: still reached by Tab, and it says why (aria-disabled)
-        if (why) { b.setAttribute("aria-disabled", "true"); b.classList.add("win-act-off"); }
+        told(b);
+        b.addEventListener("pointerenter", () => told(b));
+        b.addEventListener("focus", () => told(b));
       }
     }
     }
@@ -61744,6 +61870,9 @@ function renderAreaHeaders(): void {
     bar.classList.toggle("win-chain-bar", isChainWin(win));
     bar.appendChild(buildAreaHeader(win));
     if (isDetachedWin(win.id)) bar.appendChild(detachedBarTail(win));
+    // MICRO-TIL001 · a head too tight: verbs into «⋯», then the magnifier
+    fitHeader(bar);
+    headerFitObserver()?.observe(bar);
   }
   if (typing?.el.isConnected) { typing.el.focus(); typing.el.setSelectionRange(typing.a, typing.b); }
   syncGraphLines();
@@ -63020,6 +63149,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     pdDecoratorPending = null;
     instanceBadgePending = null;
     pdChipPending = null;
+    warnBadgePending = null;
     const armChip = (): void => {
       dragMode = "none";
       try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic event */ }
@@ -63093,6 +63223,14 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       // like the PD tag. A click selects the REAL ornament node (a "+N" overflow
       // chip carries the referent). Checked before the node hit-test: the badge
       // sits on the referent's corner and a click there means "edit the ornament".
+      // MICRO-TIL001 · the «!» of a warning: its node selected, and the list of
+      // the warnings (the table the status bar's ▲ opens) brought forward
+      const wb = hitWarnBadge(lx, ly);
+      if (wb) {
+        warnBadgePending = wb;
+        armChip();
+        return;
+      }
       // FONTE · the badge of an instance («from US 12»): a click reaches the master
       const ibadge = hitInstanceBadge(lx, ly);
       if (ibadge) {
@@ -63156,7 +63294,10 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     // group (open in place, or its soloing) IS placed by the hand: its place is
     // written in the group's space; elsewhere it stays a click
     const instMovable = !!hit?.instanceOf && (inContext() || !!s.arrangedIn?.has(hit.id));
-    if (((hit?.instanceOf && !instMovable) || hit?.continuity) && (view === "matrix" || inContext())) {
+    // MICRO-TIL001 · a continuity node is dragged like a unit now (E.D.: «deve
+    // funzionare come per le altre unità»): its place is the hand's, its line
+    // follows it (views/matrix.ts seatContinuity, continuity.ts continuityRoute)
+    if ((hit?.instanceOf && !instMovable) && (view === "matrix" || inContext())) {
       // TOCCARE · a document INSTANCE is drawn by the view in its usage context;
       // it has no position of its own to store and no membership of its own to
       // change (a drop used to hand its scene id to moveToGroup, which wrote an
@@ -63461,6 +63602,22 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     // hover / tooltip
     const s = scene();
     if (!s) return;
+    // MICRO-TIL001 · over a «!»: the warnings of its node, and the click's gesture
+    {
+      const rect = canvas.getBoundingClientRect();
+      const wid = hitWarnBadge(e.clientX - rect.left, e.clientY - rect.top);
+      const said = wid ? warningsByUnit().get(wid) ?? [] : [];
+      if (wid && said.length) {
+        tooltip.innerHTML = `<b></b> <span class="tt-type"></span><br><span class="tt-desc"></span>`;
+        (tooltip.children[0] as HTMLElement).textContent = String(viewNode(wid)?.name ?? wid);
+        (tooltip.children[1] as HTMLElement).textContent = `▲ ${said.length}`;
+        (tooltip.children[3] as HTMLElement).textContent = `${said.join(" · ")} — ${t("warn.badgeClick")}`;
+        placeTooltip(e);
+        tooltip.classList.remove("hidden");
+        canvas.style.cursor = "pointer";
+        return;
+      }
+    }
     // MICRO-BADGE-PD · over a group's chip: what it counts and its two gestures
     {
       const rect = canvas.getBoundingClientRect();
@@ -63629,6 +63786,13 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     }
     // ornament badge click → select the real author/license/embargo node so the
     // Inspector edits it (the badge is only its view representation)
+    // MICRO-TIL001 · a «!» released where it was pressed
+    if (warnBadgePending) {
+      const id = warnBadgePending;
+      warnBadgePending = null;
+      if (!moved && hitWarnBadge(rx, ry) === id) openWarningOf(id);
+      return;
+    }
     if (instanceBadgePending) {
       const id = instanceBadgePending;
       instanceBadgePending = null;
@@ -64124,6 +64288,7 @@ let rightMenuAt = 0;
 const isTrackpadScroll: (e: WheelEvent) => boolean = trackpadClassifier();
 let pdTagPending: string | null = null; // PD tag pressed → enter on click (pointerup)
 let adornmentPending: string | null = null; // ornament badge pressed → select real node
+let warnBadgePending: string | null = null; // MICRO-TIL001 · a «!» pressed
 let instanceBadgePending: string | null = null; // FONTE · an instance's badge pressed → its master
 // MICRO-BADGE-PD · the chip of a unit's paradata group pressed: the group, and
 // whether Shift was down (Shift+click opens it in place, a click solos it)
@@ -65765,6 +65930,9 @@ void wireDesktopDeepLink();
 // static chrome before anything is rendered. Doing it after the first render
 // would show a frame of English (or an LTR frame in Hebrew) and then flip.
 initI18n();
+// MICRO-TIL001 · the head's search field: its least width, once the fonts are in
+measureSearchMin();
+void document.fonts?.ready.then(() => { measureSearchMin(); for (const a of winAreas.values()) { const b = a.querySelector<HTMLElement>(":scope > .tile-bar"); if (b) fitHeader(b); } });
 populateLanguageSelect();
 // MICRO-CRONO-MULTIPLA p.2 · ⌘ (macOS) / Alt: an edit goes to the whole selection
 installMultiKey();

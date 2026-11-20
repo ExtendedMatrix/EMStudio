@@ -39,7 +39,13 @@ for (const [W, H] of SIZES) {
       const type = window.__EM_DRAG__.winType?.(a.dataset.win) ?? null;
       const q = bar?.querySelector("input[data-hdr-search-q]");
       const qr = q?.getBoundingClientRect();
-      const field = q ? { visible: !!q.offsetParent && getComputedStyle(q).display !== "none", w: Math.round(qr.width), ph: q.placeholder } : null;
+      // MICRO-TIL001 · a field whose word is whole, or (a head too tight) the magnifier
+      const cs = q ? getComputedStyle(q) : null;
+      const cx = document.createElement("canvas").getContext("2d");
+      if (cs && cx) cx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      const room = q && cs ? q.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) : 0;
+      const field = q ? { visible: !!q.offsetParent && cs.display !== "none", w: Math.round(qr.width), ph: q.placeholder,
+        icon: q.parentElement.classList.contains("win-search-icon"), whole: room + 0.5 >= (cx?.measureText(q.placeholder).width ?? 0) } : null;
       return { win: a.dataset.win, type, field, roles: els.map((x) => x.dataset.hdr),
         glyphs: Object.fromEntries(els.map((x) => [x.dataset.hdr, (x.querySelector("button") ?? x).textContent.trim()])) };
     }));
@@ -51,8 +57,10 @@ for (const [W, H] of SIZES) {
       for (const [role, g] of Object.entries(GLYPH)) if (h.roles.includes(role)) ok(h.glyphs[role]?.startsWith(g), `${tag} ${h.win}: ${role} is ${g} (got «${h.glyphs[role]}»)`);
       if (h.type && SEARCHABLE.has(h.type)) ok(h.roles.includes("search"), `${tag} ${h.win} (${h.type}): its 🔍 in the head`);
       // MICRO-RITOCCHI-CHIARI p.1 · a FIELD, always there, «Cerca» in grey, never a button alone
-      if (h.type && SEARCHABLE.has(h.type)) ok(h.field && h.field.visible && h.field.w >= 40 && /^(Search|Cerca)$/.test(h.field.ph),
-        `${tag} ${h.win} (${h.type}): the search is a visible field «Cerca» (${JSON.stringify(h.field)})`);
+      // MICRO-TIL001 · …whose word is never cut («S…»): whole, or the head too tight
+      // even after its verbs went into «⋯» and the field is a magnifier that opens
+      if (h.type && SEARCHABLE.has(h.type)) ok(h.field && h.field.visible && /^(Search|Cerca)$/.test(h.field.ph) && (h.field.icon || (h.field.w >= 40 && h.field.whole)),
+        `${tag} ${h.win} (${h.type}): the search is a visible field «Cerca», its word whole, or the magnifier (${JSON.stringify(h.field)})`);
     }
   }
   // «/» on the Outliner and on the Inspector of the Space: their own search opens

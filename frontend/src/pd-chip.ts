@@ -80,7 +80,11 @@ export function drawPdChips(
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  for (const n of nodes) {
+  // MICRO-TIL001 · the smaller boxes first: a member keeps its corner, the
+  // container's chip is the one that moves along the row
+  const rank = new Map(nodes.map((n, i) => [n, i]));
+  const order = nodes.filter((n) => pdChipOf(n)?.group).sort((a, b) => a.w * a.h - b.w * b.h);
+  for (const n of order) {
     const b = pdChipOf(n);
     if (!b || !b.group) continue;
     const r = box ? box(n) : { x: n.x * vp.scale + vp.x, y: n.y * vp.scale + vp.y, w: n.w * vp.scale, h: n.h * vp.scale };
@@ -100,8 +104,18 @@ export function drawPdChips(
     const w = pdW + 2 * r0 + h * 0.2 + (showInst ? 2 * r0 + h * 0.15 : 0) + h * 0.15;
     // the bottom edge straddled, the right edge aligned — the ornament row,
     // mirrored to the bottom
-    const x = r.x + r.w - w;
-    const y = r.y + r.h - h * 0.45;
+    let x = r.x + r.w - w;
+    let y = r.y + r.h - h * 0.45;
+    // MICRO-TIL001 · a container whose last member sits in its bottom-right
+    // corner (GT16: USD003 and RSF005) drew its chip a few pixels off the
+    // member's, the two stacked and overlapping the border: a chip that would
+    // lie on one already drawn joins its row, at its left — one row, no overlap
+    for (let k = 0; k < 8; k++) {
+      const on = hits.find((o) => x < o.x + o.w + 2 && o.x < x + w + 2 && y < o.y + o.h + 2 && o.y < y + h + 2);
+      if (!on) break;
+      y = on.y;
+      x = on.x - w - 3;
+    }
     ctx.beginPath();
     if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, h * 0.3);
     else ctx.rect(x, y, w, h);
@@ -133,7 +147,11 @@ export function drawPdChips(
       ctx.lineWidth = 2;
       ctx.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3);
     }
-    hits.push({ group: b.group, unit: n.id, label: b.label, open: !!b.open, x, y, w, h });
+    hits.push({ group: b.group, unit: n.id, label: b.label, open: !!b.open, x, y, w, h, rank: rank.get(n) ?? 0 } as PdChipHit);
   }
+  // the hits in the nodes' order, as before the placing order (the readers —
+  // the click's hit test, the checks — see the chips as the nodes come)
+  hits.sort((a, b) => ((a as PdChipHit & { rank: number }).rank - (b as PdChipHit & { rank: number }).rank));
+  for (const h of hits) delete (h as Partial<PdChipHit & { rank: number }>).rank;
   ctx.restore();
 }

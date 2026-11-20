@@ -852,6 +852,14 @@ export function buildMatrixScene(
         if (!rootKids.has(root)) rootKids.set(root, []);
         rootKids.get(root)!.push(sn);
       }
+      // MICRO-TIL001 · what this lane's bands carry stays in this lane: a node
+      // with no lane of its own (a document's date, a property, an extractor)
+      // was found by its y here, then the bands moved it, and the re-stack below
+      // looked for its lane AGAIN by the new y — past this lane's em-core rect,
+      // in the next one, and it took that lane's shift (GT16 v11: D.70's
+      // «absolute_time_start», view y 66 in «XX sec», drawn at y 944 in «Post
+      // antiquity», 900 world units from its document)
+      for (const kids of rootKids.values()) for (const k of kids) if (!laneOf.has(k.id)) laneOf.set(k.id, li);
       // No "senza fase" residual band (E.D. 2026-07-18): whenever an epoch has
       // phases, its un-phased units — whether born directly here and left
       // unassigned, or SURVIVING from an earlier epoch (survive_in_epoch), or
@@ -1092,21 +1100,7 @@ export function buildMatrixScene(
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · a continuity node (BR) is drawn as its
   // unit's: straight above it, in the lane of its epoch (continuity.ts), where
   // the lanes are final. Its line is drawn straight (routing.ts, renderer.ts).
-  {
-    const links = continuityLinks(doc.graph.edges, (id) => isContinuityType(nodeById.get(id)?.node_type));
-    for (const [brId, l] of links) {
-      const br = scene.byId.get(brId), unit = scene.byId.get(l.unit);
-      if (!br || !unit || unit.collapsed) continue;
-      const band = l.epoch
-        ? scene.subBands?.find((b) => b.phaseId === l.epoch && !b.residual) ?? scene.lanes.find((x) => x.id === l.epoch) ?? null
-        : null;
-      const at = continuityPlace(unit, br, band);
-      br.x = at.x;
-      br.y = at.y;
-      br.continuity = { unit: unit.id, kind: continuityKind(isVirtualType(unit.node.node_type)),
-        ...(endReasonWritten(br.node.data) ? { reason: endReasonLabel(endReasonOf(br.node.data)) } : {}) };
-    }
-  }
+  seatContinuity(scene, doc);
 
   // ---- container descriptors for the renderer ----
   for (const g of [...outlineNodes, ...containerNodes]) {
@@ -1190,4 +1184,36 @@ export function buildMatrixScene(
     scene.edges.push({ source: e.source, target: e.target, edge: instTarget ? e00 : e });
   }
   return scene;
+}
+
+/**
+ * MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · each continuity node (BR) seated on its
+ * unit's line: centred on the unit, in the lane of its epoch (continuity.ts).
+ *
+ * MICRO-TIL001 · called again by whoever moves the scene's nodes AFTER the build
+ * (main.ts: «fare spazio», `makeRoom`): the unit moved and its rhombus stayed
+ * where the build had put it, so the line, routed from the unit, ended in the
+ * void beside it (GT16, SU019: 78 world units). A BR the hand placed
+ * (`layout.hand_placed`, a drag like any unit's) keeps its place: the line goes
+ * to it, orthogonal (continuityRoute).
+ */
+export function seatContinuity(scene: Scene, doc: EmDocument): void {
+  const nodeById = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  const hand = new Set(doc.layout?.hand_placed ?? []);
+  const links = continuityLinks(doc.graph.edges, (id) => isContinuityType(nodeById.get(id)?.node_type));
+  for (const [brId, l] of links) {
+    const br = scene.byId.get(brId), unit = scene.byId.get(l.unit);
+    if (!br || !unit || unit.collapsed) continue;
+    if (!hand.has(brId)) {
+      const band = l.epoch
+        ? scene.subBands?.find((b) => b.phaseId === l.epoch && !b.residual) ?? scene.lanes.find((x) => x.id === l.epoch) ?? null
+        : null;
+      const at = continuityPlace(unit, br, band);
+      br.x = at.x;
+      br.y = at.y;
+    }
+    br.continuity = { unit: unit.id, kind: continuityKind(isVirtualType(unit.node.node_type)),
+      ...(hand.has(brId) ? { hand: true } : {}),
+      ...(endReasonWritten(br.node.data) ? { reason: endReasonLabel(endReasonOf(br.node.data)) } : {}) };
+  }
 }
