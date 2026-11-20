@@ -3720,6 +3720,49 @@ test("TIL4.ask", "TIL04 · riga T3 del piano tileset: lo Spazio chiede `POST /ge
   return { pass: n0 === 1 && n1 === 1 && n2early === 1 && n2 === 2 && i1 === i0 && i2 === i0 && !!id && !errors.length,
     detail: { n0, n1, n2early, n2, id, i0, i1, i2, errors } };
 });
+test("TIL6.rest", "TIL06 · riga T5 del piano tileset: un tileset che l'epoca non usa più resta caricato (fuori dalla scena, non distrutto): tornando all'epoca le sue tile ci sono subito, senza un nuovo layer; la cache delle tile è UNA per la scena con UN tetto, uguale in tutti i passi (non lo riscrive il layer nato per ultimo); un documento chiuso non lascia layer a riposo", async () => {
+  // tiles.em.json with RM1 (the tileset) in an epoch of its own, «Età antica»
+  const d = fixture("tiles");
+  d.graph.nodes.push({ id: "EP_ANT", node_type: "EpochNode", name: "Età antica", description: "", data: { start_time: 1000, end_time: 1899 } });
+  for (const e of d.graph.edges) if (e.edge_type === "has_representation_model" && e.source === "EP_MOD" && e.target === "RM1") { e.source = "EP_ANT"; e.id = "EP_ANT__has_representation_model__RM1"; }
+  d.graph.nodes.push({ id: "US0", node_type: "US", name: "US 0", description: "", data: {} });
+  d.graph.edges.push({ id: "US0__has_first_epoch__EP_ANT", edge_type: "has_first_epoch", source: "US0", target: "EP_ANT" });
+  const { p, ctx, errors } = await open({ doc: d, ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  await p.waitForSelector("[data-epoch-pick]", { timeout: 20000 });
+  const epochs = await p.evaluate(() => [...document.querySelector("[data-epoch-pick]").options].map((o) => [o.value, o.textContent.trim()]));
+  const ep = (re) => epochs.find(([, t]) => re.test(t))?.[0];
+  const pick = (v) => p.evaluate((v) => { const s = document.querySelector("[data-epoch-pick]"); s.value = v; s.dispatchEvent(new Event("change", { bubbles: true })); }, v);
+  const st = () => p.evaluate(() => { const h = document.querySelector(".scn-host");
+    return { tiles: (h.__spaceTiles?.() ?? []).map((t) => ({ id: t.id, files: t.files.length, max: t.status.maxBytes, visible: t.status.visible })),
+      kept: h.__spaceTilesKept?.() ?? null }; });
+  const until = async (pred, ms = 15000) => { const t0 = Date.now(); let s = await st(); while (Date.now() - t0 < ms && !pred(s)) { await p.waitForTimeout(100); s = await st(); } return { ...s, ms: Date.now() - t0 }; };
+  const rm1 = (s) => s.tiles.find((t) => t.id === "RM1");
+  await pick(ep(/antica/i));
+  const s1 = await until((s) => (rm1(s)?.files ?? 0) > 0 && rm1(s).visible > 0);
+  await p.waitForTimeout(800);
+  await pick(ep(/moderna/i));
+  const s2 = await until((s) => !rm1(s) && (s.kept?.resting ?? []).includes("RM1"), 8000);
+  await p.waitForTimeout(500);
+  await pick(ep(/antica/i));
+  // back: the resting layer's tiles at the first look (no new layer, no root to wait for)
+  const s3 = await until((s) => (rm1(s)?.files ?? 0) > 0 && rm1(s).visible > 0, 8000);
+  const layersBack = s3.kept?.layers;
+  // another document: nothing rests
+  await p.evaluate(() => window.__EM_DRAG__.openAt({ header: {}, graph: { graph_id: "vuoto", nodes: [], edges: [] } }, "/tmp/til6-vuoto.em.json")).catch(() => {});
+  await p.waitForTimeout(1500);
+  const s4 = await st();
+  await ctx.close();
+  const conds = {
+    first: (rm1(s1)?.files ?? 0) > 0,
+    resting: !!s2.kept && s2.kept.resting.includes("RM1") && !rm1(s2),
+    back: (rm1(s3)?.files ?? 0) > 0 && s3.ms <= 1500 && (s3.kept?.resting ?? ["x"]).length === 0,
+    oneCeiling: !!s1.kept && s1.kept.maxBytes > 0 && rm1(s1)?.max === s1.kept.maxBytes && s2.kept?.maxBytes === s1.kept.maxBytes && rm1(s3)?.max === s1.kept.maxBytes,
+    closed: !!s4.kept && s4.kept.resting.length === 0 && s4.kept.layers === 0,
+    errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, epochs, s1, s2, s3, layersBack, s4, errors } };
+});
 
 /** MICRO-TILE-METASHAPE · a `.3tz` with the SHAPE of Metashape 2.3's exports, made here (no data of
  *  the lab): glb tiles whose texture is KTX2 (`KHR_texture_basisu` REQUIRED — the image is the one

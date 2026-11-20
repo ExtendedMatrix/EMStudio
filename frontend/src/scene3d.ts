@@ -791,7 +791,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         let meshes = 0;
         content.traverse((o: any) => { if (o.isMesh || o.isLineSegments || o.isPoints) meshes++; });
         let tileBytes = 0;
-        for (const l of layers.values()) tileBytes += Number(l.layer.status().bytes) || 0;
+        // (the layers of the scene share one cache: its bytes once)
+        const seen = new Set<unknown>();
+        for (const l of layers.values()) { const c = l.layer.cache?.() ?? l; if (seen.has(c)) continue; seen.add(c); tileBytes += Number(l.layer.status().bytes) || 0; }
         return { items: items.length, meshes, layers: layers.size, tileBytes, flowBytes: [...flowBytes.values()].reduce((a, b) => a + b, 0),
           flow: flowState.size, cached: cache.size, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
           chip: tchip.classList.contains("hidden") ? null : tchip.textContent };
@@ -1011,6 +1013,45 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       /** MICRO-DROP-3TZ-GRANDE · the layers already framed on their arrival */
       const framedOnArrival = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
+      // MICRO-TIL06 (T5) · ONE cache of tiles for the scene, its ceiling the
+      // scene's (the Preferences' tiles memory, under the memory guard's
+      // ceiling), set at every rebuild — never by the layer born last, as the
+      // renderer's page-wide cache was (64 MB, 1.00, 1.51, 2.00 GB by birth order)
+      let sceneLru: any = null;
+      const MiB = 1024 * 1024;
+      const sceneCeilingMb = (): number => {
+        const tilesMb = Math.max(64, opts.tilesMemoryMB ?? 512);
+        const m = opts.memory?.();
+        return Math.max(64, m && Number(m.ceilingMb) > 0 ? Math.min(tilesMb, Number(m.ceilingMb)) : tilesMb);
+      };
+      const sceneCeiling = () => {
+        if (!sceneLru) return;
+        const mb = sceneCeilingMb();
+        sceneLru.maxBytesSize = mb * MiB;
+        sceneLru.minBytesSize = Math.round(mb * 0.75) * MiB;
+      };
+      const sceneCache = (): any => {
+        if (!sceneLru && T?.LRUCache) { sceneLru = new T.LRUCache(); sceneCeiling(); }
+        return sceneLru;
+      };
+      // …and a tileset the epoch no longer uses RESTS (out of the scene, still
+      // loaded: the way back costs no download, no parse, no upload) while
+      // there is room: its tiles are the first the cache lets go; the layer
+      // itself goes, the oldest resting first, when the cache is full or more
+      // than RESTING_MAX rest (their trees of tileset.json stay in memory)
+      const RESTING_MAX = 3;
+      const resting = new Map<string, number>();
+      const dropLayer = (u: string, l: Live) => { l.layer.dispose(); l.bar.el.remove(); layers.delete(u); resting.delete(u); };
+      const trimResting = (all = false) => {
+        while (resting.size && (all || resting.size > RESTING_MAX || sceneLru?.isFull?.())) {
+          const [u] = [...resting.entries()].sort((a, b) => a[1] - b[1])[0];
+          const l = layers.get(u);
+          if (l) dropLayer(u, l); else resting.delete(u);
+        }
+      };
+      const restLayer = (u: string, l: Live) => { l.layer.rest(); l.bar.el.remove(); resting.set(u, performance.now()); };
+      (probe as Record<string, unknown>).__spaceTilesKept = () => ({ resting: [...resting.keys()].map((u) => layers.get(u)?.itemId ?? u),
+        bytes: Number(sceneLru?.cachedBytes ?? 0), maxBytes: Number(sceneLru?.maxBytesSize ?? 0), layers: layers.size });
       // MICRO-ERRORE-GEOMETRICO · ONE governor for the scene's tilesets: the
       // frame's draw calls are the scene's, whoever draws them
       const tilesErr = () => opts.tilesError?.() ?? { hardware: "desktop" as Hardware, choice: "auto" as ErrorChoice };
@@ -1040,15 +1081,19 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                                  source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"], memoryMB?: number,
                                  errorScale?: number | "auto", errorChoice?: ErrorChoice): Promise<Live | null> => {
         let live = layers.get(url);
-        if (live) { live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
+        if (live) { resting.delete(url); live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
+        // (a rebuild meanwhile may have opened it)
+        live = layers.get(url);
+        if (live) { resting.delete(url); live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
         // MICRO-TILESET-CONTENITORE · a container's tileset refines by itself
         // (its tiles by the distance): «Manuale» stays one click away on its bar
         // MICRO-ERRORE-GEOMETRICO · the error: the one handed over, else the Preferences'; the governor's now
         const te = tilesErr();
         const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: memoryMB ?? opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}),
           ...(source ? { source } : {}), ...(relocate ? { relocate } : {}), ...(errorScale !== undefined ? { errorScale } : {}),
-          errorChoice: errorChoice ?? te.choice, errorTarget: governor(te.hardware).state().target });
+          errorChoice: errorChoice ?? te.choice, errorTarget: governor(te.hardware).state().target,
+          ...(sceneCache() ? { lruCache: sceneCache() } : {}) });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
         const ready = new Promise<void>((res) => {
@@ -2187,7 +2232,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (live === "held") return;
               if (gen !== generation || disposed) {
                 // …and a layer that came for it, when nobody draws it now, leaves at once
-                if (live && !usedTiles.has(tsUrl)) for (const [u, l] of layers) if (l === live) { l.layer.dispose(); l.bar.el.remove(); layers.delete(u); }
+                if (live && !usedTiles.has(tsUrl)) for (const [u, l] of layers) if (l === live) dropLayer(u, l);
                 return;
               }
               if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
@@ -2446,9 +2491,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh" });
           } else later.push(item);
         }
-        for (const [u, l] of layers) if (!used.has(u)) { l.layer.dispose(); layers.delete(u); }
+        // MICRO-TIL06 (T5) · not used now: resting, not destroyed (a closed or another document: gone)
+        for (const [u, l] of layers) if (!used.has(u) && !resting.has(u)) restLayer(u, l);
         usedTiles = used;
-        if (releaseNext) { releaseNext = false; forgetUnused(); }
+        sceneCeiling();
+        if (releaseNext) { releaseNext = false; trimResting(true); forgetUnused(); }
+        else trimResting();
         // every model has its turn queued: the tilesets go when the last one is decided
         void memTurn.then(() => releaseTiles());
         void Promise.all(pending).then(() => {
@@ -2822,7 +2870,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (tl && which === "models") {
             if (!altHiddenSince.has(gid)) altHiddenSince.set(gid, now);
             if (g.mode === "auto" && !altWarming.has(tl) && altReleaseDue(altHiddenSince.get(gid), now)) {
-              for (const [u, l] of layers) if (l === tl) { l.layer.dispose(); l.bar.el.remove(); layers.delete(u); }
+              for (const [u, l] of layers) if (l === tl) dropLayer(u, l);
               roots.delete(tk);
               const d = drawn.get(tk);
               if (d) drawn.set(tk, { ...d, as: "released" });
@@ -3130,7 +3178,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // a tileset hidden by its container loads nothing (unless it is warming)
         altTick();
         for (const l of live) if (l.layer.object.visible || altWarming.has(l)) l.layer.update();
-        if (live.length && ++frames % 20 === 0) { for (const l of live) { l.bar.refresh(); for (const b of l.extra) b.refresh(); } chipTick(); }
+        if (live.length && ++frames % 20 === 0) { for (const l of live) { l.bar.refresh(); for (const b of l.extra) b.refresh(); } chipTick(); if (resting.size) trimResting(); }
         renderer.render(scene, camera);
         if (live.length) governTick(live);
         if (statsOn) { statFrames++; const n = performance.now(); if (n - statAt >= 500) readStats(n); }

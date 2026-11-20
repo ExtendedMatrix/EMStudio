@@ -194,6 +194,11 @@ export interface TilesLayer {
    *  a second bar of the same tileset, the Inspector's, comes and goes) */
   onChange(cb: () => void): () => void;
   dispose(): void;
+  /** MICRO-TIL06 (T5) · the layer leaves the scene but stays loaded (an epoch
+   *  that does not use it): its tiles become the first the cache lets go */
+  rest(): void;
+  /** …the cache its tiles are counted in (shared by a scene's layers) */
+  cache(): any;
   /** the probes' seam: the content files loaded now (relative to the tileset) */
   loadedFiles(): string[];
   /** …and the world centre of the tile whose content is `uri`, when known */
@@ -242,6 +247,11 @@ export interface TilesOptions {
   mode?: RefineMode;
   /** the memory ceiling of the automatic mode, MB (the preferences) */
   memoryMB?: number;
+  /** MICRO-TIL06 (T5) · the SCENE's cache of tiles (`sceneTilesCache`): every
+   *  layer of a scene shares it, and its ceiling is the scene's — a layer born
+   *  later does not rewrite it. Without it, the renderer's page-wide cache and
+   *  `memoryMB` as its ceiling (as before) */
+  lruCache?: any;
   /** TEMPLU MARE v2 · C1 · `url` is a `.3tz` though it does not say so (a
    *  store URL: the archive's digest); the graph declared it */
   archive?: boolean;
@@ -416,8 +426,14 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   tiles.setCamera(camera);
   tiles.setResolutionFromRenderer(camera, renderer);
   const mb = Math.max(64, opts.memoryMB ?? 400);
-  tiles.lruCache.maxBytesSize = mb * 1024 * 1024;
-  tiles.lruCache.minBytesSize = Math.round(mb * 0.75) * 1024 * 1024;
+  if (opts.lruCache) {
+    // MICRO-TIL06 (T5) · the scene's cache: its ceiling is not this layer's to set
+    opts.lruCache.unloadPriorityCallback ??= tiles.lruCache.unloadPriorityCallback;
+    tiles.lruCache = opts.lruCache;
+  } else {
+    tiles.lruCache.maxBytesSize = mb * 1024 * 1024;
+    tiles.lruCache.minBytesSize = Math.round(mb * 0.75) * 1024 * 1024;
+  }
   // MICRO tileset dritto e nitido · the ancestors are not kept loaded under
   // their children: with it on (the renderer's default) every tile on the way
   // down was downloaded and held — 1.1 GB for 3 tiles of the Basilica
@@ -750,6 +766,15 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       tiles.dispose();
       tiles.group.removeFromParent?.();
     },
+    rest() {
+      // a renderer that is not updated keeps its tiles «used» in the cache for
+      // ever: they are given back as unused, the first to go when room is needed
+      const c = tiles.lruCache;
+      tiles.usedSet?.forEach?.((t: any) => c?.markUnused?.(t));
+      tiles.usedSet?.clear?.();
+      tiles.group.removeFromParent?.();
+    },
+    cache() { return tiles.lruCache; },
     loadedFiles() {
       const out: string[] = [];
       tiles.forEachLoadedModel((_s: any, t: any) => {
@@ -881,10 +906,14 @@ export function governTiles(gov: ErrorGovernor, layers: TilesLayer[], calls: num
   const governed = layers.filter((l) => l.mode() === "auto" && l.errorChoice() === "auto");
   if (!governed.length) return;
   let tileCalls = 0, bytes = 0, maxBytes = 0, busy = false;
+  // MICRO-TIL06 (T5) · layers sharing a cache count its bytes once
+  const counted = new Set<unknown>();
   for (const l of governed) {
     tileCalls += l.drawCalls();
     const s = l.status();
-    bytes += s.bytes; maxBytes += s.maxBytes; busy ||= s.busy;
+    const c = l.cache?.() ?? l;
+    if (!counted.has(c)) { counted.add(c); bytes += s.bytes; maxBytes += s.maxBytes; }
+    busy ||= s.busy;
   }
   const px = gov.sample({ calls, tileCalls, bytes, maxBytes, busy, now });
   const why = gov.state().reason;
