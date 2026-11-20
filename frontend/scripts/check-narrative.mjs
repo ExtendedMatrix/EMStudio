@@ -398,7 +398,7 @@ eq(doc.graph.nodes.filter(
     endorseChapter() {}, pendingIn: () => 0,
     // the optional half of the interface: a stub answers "no" to everything it
     // is asked, which is what an editor without a bridge says anyway
-    canGenerate: () => false, canRegenerate: () => false,
+    canGenerate: () => false,
     undescribedEpochs: () => [], generateDraft() {}, promptOf: () => null,
   };
 
@@ -720,7 +720,7 @@ eq(doc.graph.nodes.filter(
     lanes: () => [], authors: () => [], humanAuthors: () => [], addAuthor() {},
     removeAuthor() {}, setChapterAuthor() {}, signer: () => null, setSigner() {},
     endorse() {}, endorseChapter() {}, pendingIn: () => 0,
-    canGenerate: () => false, canRegenerate: () => false,
+    canGenerate: () => false,
     undescribedEpochs: () => [], generateDraft() {}, promptOf: () => null,
   };
   const sets = [];
@@ -984,7 +984,7 @@ eq(doc.graph.nodes.filter(
     addAuthor() {}, removeAuthor() {}, setChapterAuthor() {},
     signer: () => null, setSigner() {}, endorse() {}, retract() {},
     endorseChapter() {}, pendingIn: () => 0, canGenerate: () => false,
-    canRegenerate: () => false, undescribedEpochs: () => [],
+    undescribedEpochs: () => [],
     generateDraft() {}, promptOf: () => null,
   };
   const render = (editor) => {

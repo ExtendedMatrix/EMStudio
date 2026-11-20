@@ -189,7 +189,7 @@ import { ColoursWindow, screenArea, type SystemWindow } from "./colours-window";
 import { declareVocabularies, isControlled, termOf, termPatch } from "./vocab-terms";
 import { VocabState, linkDialog, valueTermEl, vocabContent, type VocabHost } from "./vocab-ui";
 import { ExtensionsState, declareProfiles, declaredOf, formsOf, formVocabulariesOf, labelIn as extLabelIn, nameOfIri, qualiaOf, redeclareProfiles, stringsOf, typeLabel as packageTypeLabel, type ExtNewer, type OverlayDoc } from "./extensions-state";
-import { extensionsContent, extensionsFilter, newerFlow, type ExtDevHost, type ExtWindowHost } from "./extensions-window";
+import { archiveOfFile, extensionsContent, extensionsFilter, newerFlow, type ExtDevHost, type ExtWindowHost } from "./extensions-window";
 import { NodePluginsState, nodePluginsSection } from "./node-plugins";
 import { VocabMarkCache, vocabMarkOf, type VocabMarkCtx } from "./vocab-marks";
 import {
@@ -532,7 +532,7 @@ import type {
 import { choose, confirmLot, engineChoices, humanBytes, INV_GROUPS, inventoryFromPlan, movePlan, reportOf, toMove,
   toUpload, type EnginePlan, type EngineReport, type HomeView, type InvChoice, type Inventory } from "./room-inventory";
 import { type HostInfo, type LayoutPayload, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
-import { type Access, type ConnectionGestures, type ConnectionState, type NodeApi, type NodeEntry, type Reach, nodeAccessOf, nodeApi,
+import { type Access, type ConnectionGestures, type ConnectionState, type NodeApi, type ServiceSeen, type NodeEntry, type Reach, nodeAccessOf, nodeApi,
   renderMyRooms, renderNodeAccess, renderRoomPanel, renderWhereSection, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase,
   type OrphanAsset, type RoomInfo } from "./connection";
 import { stateBadge, stateSign } from "./state-symbols";
@@ -1724,7 +1724,36 @@ function connectionState(): ConnectionState {
     notice: hostNotice, misaligned, reconnecting: hubReconnecting,
     waitingOps: room ? hubWaitingCount() : 0,
     readOnly: hubReadOnly(), role: hostInfo.role ?? null, sync: room ? roomSyncState() : null,
-    who: connectionWho(), nodes: knownNodes(), appUrl: getSyncUrl() };
+    who: connectionWho(), nodes: knownNodes(), appUrl: getSyncUrl(), service: serviceSeen ?? null };
+}
+/** MICRO-COR05 E10 · who answers this page's service calls: `/health` at the
+ *  bridge's address, asked at start and every 30 s, said in the status bar's
+ *  tooltip and in the chip's «Where you work» — on the page the node serves too,
+ *  where the address is not written anywhere else. */
+// `var`: the status bar is first drawn while the module is still being
+// evaluated, before this line — a `let` would throw there (TDZ)
+var serviceSeen: ServiceSeen | null | undefined;
+async function askServiceSeen(): Promise<void> {
+  const url = await bridgeUrl();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 4000);
+  let next: ServiceSeen;
+  try {
+    const r = await fetch(`${url}/health`, { signal: ctl.signal, cache: "no-store" });
+    const h = r.ok ? await r.json().catch(() => null) as Record<string, unknown> | null : null;
+    const s3d = (h?.s3dgraphy as { version?: unknown } | undefined)?.version;
+    next = h ? { url, reach: "reachable", name: typeof h.service === "string" ? h.service : null,
+                 level: typeof h.bridge_level === "number" ? h.bridge_level : null,
+                 s3dgraphy: typeof s3d === "string" ? s3d : null, sidecar: h.sidecar === true }
+      : { url, reach: "unreachable" };
+  } catch {
+    next = { url, reach: "unreachable" };
+  } finally {
+    clearTimeout(timer);
+  }
+  const changed = JSON.stringify(next) !== JSON.stringify(serviceSeen ?? null);
+  serviceSeen = next;
+  if (changed) renderStatusLine();
 }
 /** MICRO-DOVE-CHI-MENU p.3 · the nodes this computer knows, the active one
  *  first, with what was measured of each (the active one's access is this
@@ -8175,7 +8204,18 @@ function roomOwnsStore(s: DocumentStore): boolean {
 function nodeReadFileOf(s: DocumentStore): OpenFile | null {
   const slot = emtree.slots.find((x) => x.store === s);
   const f = slot ? emtree.fileOf(slot) : null;
-  return f?.nodeRead ? f : null;
+  return readingFile(f) ? f : null;
+}
+/** a source in reading: a room read from a node, or (MICRO-COR05 E11) a
+ *  published study opened from the Catalog */
+function readingFile(f: OpenFile | null | undefined): boolean {
+  return !!f && (!!f.nodeRead || !!f.published?.reading);
+}
+/** MICRO-COR05 E11 · a published study is read; to work on it a room is born
+ *  from it — the engine's «Bring into a room…», offered where it is said */
+function offerRoomFromPublished(say: string): void {
+  logInfo(say);
+  toastAsk(say, [{ label: t("pub.makeRoom"), run: () => void bringIntoRoom() }], 20000);
 }
 
 /** A write into a source in reading, taken back (as in a room that lets this
@@ -8190,9 +8230,12 @@ function takeBackNodeRead(st: DocumentStore): void {
     if (!back) return;
     back.st.takeBack(back.depth);
     const f = nodeReadFileOf(back.st);
-    const say = t("src.readTakenBack", { src: f?.nodeRead?.title ?? f?.name ?? "" });
-    logWarn(say);
-    toast(say);
+    if (f && !f.nodeRead) offerRoomFromPublished(t("pub.readTakenBack", { src: f.name }));
+    else {
+      const say = t("src.readTakenBack", { src: f?.nodeRead?.title ?? f?.name ?? "" });
+      logWarn(say);
+      toast(say);
+    }
     refreshInspector();
   });
 }
@@ -8483,7 +8526,10 @@ async function openStudyFromLink(link: StudyLink): Promise<void> {
   // is cleaned just below (and the desktop never had one), so the live reader's
   // link is made from this, not from `location.search`
   const opened = emtree.activeFile();
-  if (opened) opened.published = publishedOrigin(link, location.href);
+  // MICRO-COR05 E11 · …and it is READ: a published study is a citation, and
+  // editing it in place would change under somebody's feet what they cited
+  // (aprire · entrare · creare). To work on it, a room is born from it.
+  if (opened) opened.published = { ...publishedOrigin(link, location.href), reading: true };
   // …and the parameters come off the address bar, the token first: a reload must
   // not re-fetch the study over whatever has been done since, and a credential
   // in an address bar outlives the tab it was useful in.
@@ -8492,6 +8538,10 @@ async function openStudyFromLink(link: StudyLink): Promise<void> {
           + `${emtree.slots.length} slot(s), active `
           + `${emtree.active() ? slotLabel(emtree.active()!) : "(none)"}`);
   logInfo(t("study.opened", { what: link.study ?? link.url }));
+  if (opened) {
+    refreshEMTree();
+    offerRoomFromPublished(t("pub.openedReading", { what: opened.name }));
+  }
 }
 
 /**
@@ -11220,7 +11270,10 @@ async function acceptPendingInvite(): Promise<void> {
   const pending = pendingJoin();
   if (!pending) return;
   const settings = getSettings();
-  const base = settings.sync.hubUrl;
+  // MICRO-COR05 E8 · a link opened on the page the node serves belongs to THAT
+  // node, also when no node was ever added here (the node's own invitation
+  // carries only `join` and `room`)
+  const base = settings.sync.hubUrl || servingNode();
   if (!base) {
     // SAID, not only logged — measured on 8 September 2026 and it was the mute
     // one of the two guards: an invitation that arrived with no node configured
@@ -11239,12 +11292,22 @@ async function acceptPendingInvite(): Promise<void> {
     toast(why);
     return;
   }
-  if (!hubToken) {
-    // The link opened the door; it does not authenticate. Ask for the identity
-    // the same way joining a room does today.
-    hubToken = (await askText(t("hub.tokenPrompt"))) || null;
+  const auth = hubToken ? null : await loadAuthConfig(base);
+  // (a node that says it runs open — `enforcing: false` — has nobody to sign in as)
+  const signIn = !!auth && auth.enforcing !== false;
+  if (signIn) {
+    // The link opened the door; it does not authenticate. MICRO-COR05 E8 · the
+    // way in is the node's own sign-in, never a raw token to paste: the page
+    // leaves for the node's login with the link still on its address
+    // (`returnTo`), and `completeNodeSignIn` accepts the invitation on the way
+    // back. The desktop opens the system browser and does the same on the answer.
+    logInfo(t("members.joinSignIn"));
+    toast(t("members.joinSignIn"));
+    if (await signIntoNode()) return;
   }
-  if (!hubToken) {
+  // (a node without a sign-in — a local one running open — takes the
+  // invitation with no identity, as before)
+  if (!hubToken && signIn) {
     // the same rule as the study's refusal: name the gesture this session HAS
     const why = `${t("members.joinNeedsIdentity")} ${nextRungInvitation()}`;
     logWarn(why);
@@ -11404,6 +11467,7 @@ async function bringIntoRoom(): Promise<void> {
   if (!store) { toast(t("room.bringNeedsDocument")); return; }
   // MICRO-TESTATA-CLOUD · the author, then the node's login: the chip's menu
   // on the right section, and the gesture resumes once done
+  if (!(await roomImportReachable())) return;
   if (whatBlocksTheGesture(Boolean(currentIdentity()), Boolean(hubToken)) && !needSigner("roomBring", () => void bringIntoRoom())) return;
   const name = await askRoomName(true);
   if (!name) return;
@@ -11457,6 +11521,20 @@ async function assetHomeView(base: string, room: string, digest: string): Promis
   } catch (exc) { return { error: String(exc) }; }
 }
 
+/** MICRO-COR05 E9 · the room import runs where the files are: EMStudio's
+ *  service on this computer (`/room-import`, level 32), which reads them and
+ *  sends them to the node. The node does not serve that route — it cannot read
+ *  this computer's disk — so a page served by the node with no local service
+ *  beside it is TOLD so, before a name is asked, instead of a call that fails. */
+const BRIDGE_LEVEL_ROOM_IMPORT = 32;
+async function roomImportReachable(): Promise<boolean> {
+  if (await bridgeLevelAtLeast(BRIDGE_LEVEL_ROOM_IMPORT)) return true;
+  const why = t(isTauri() ? "room.importNoService" : "room.importNoServiceWeb", { url: await bridgeUrl() });
+  logWarn(why);
+  toastAsk(why, [{ label: "Log", run: () => setLogDrawerOpen(true) }], 20000);
+  return false;
+}
+
 /** What the bridge says of a room import (`GET /room-import`). */
 interface ImportView {
   ok: boolean; state: "planning" | "planned" | "running" | "done" | "failed";
@@ -11498,6 +11576,7 @@ async function followRoomImport(job: string, onView: (v: ImportView) => void): P
 async function openResourceInventory(room: string, src: InvSource = inventorySources()): Promise<void> {
   const base = (src.node || hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");
   if (!base || !room) { toast(t("share.noRoom")); return; }
+  if (!(await roomImportReachable())) return;
   let pop = document.getElementById("inv-pop");
   if (!pop) {
     pop = document.createElement("div");
@@ -12437,6 +12516,10 @@ async function askShelfHome(file: OpenFile): Promise<void> {
 async function saveFile(file: OpenFile): Promise<boolean> {
   // MICRO-PIU-FONTI · a room is live (no Save: its members have every change as
   // it is made); a source in reading has nothing to save — it is copied out
+  if (file.published?.reading) {
+    offerRoomFromPublished(t("pub.readNoSave", { src: file.name }));
+    return true;
+  }
   if (file.nodeRead || (file.room && !file.path)) {
     const say = t(file.nodeRead ? "src.readNoSave" : "src.roomNoSave", { src: file.room?.title ?? file.nodeRead?.title ?? file.name });
     info.textContent = say;
@@ -12496,6 +12579,12 @@ async function saveFileAs(file: OpenFile, defaultPath: string | null = null): Pr
       const doc = fileContainer(file);
       await writeEmJson(path, JSON.stringify(doc, null, 1));
       emtree.setFilePath(file.id, path, baseName(path));
+      // MICRO-COR05 E11 · a published study saved as a file of one's own: the
+      // copy on disk is edited like any file (the study it cites stays as it was)
+      if (file.published?.reading) {
+        file.published = { ...file.published, reading: false };
+        logInfo(t("pub.copyOwn", { file: baseName(path) }));
+      }
       for (const slot of emtree.slotsOf(file.id)) slot.seedSig = undefined;
       currentFilePath = emtree.active()?.path ?? path;
       addRecent({ path, name: baseName(path) }, Date.now());
@@ -13944,7 +14033,7 @@ function unifiedSources(): OutlinerSourceIn[] {
       where: f.nodeRead ? t("src.whereRead", { room: f.nodeRead.room, node: f.nodeRead.node, at: f.nodeRead.takenAt ?? "" })
         : f.room ? `${f.room.title} · ${f.room.node} · ${t("src.whereRoom")}` : f.path ?? t("uo.notOnDisk"),
       // MICRO-PIU-FONTI · a room has no Save (live) and a source in reading nothing to save
-      dirty: kind === "file" && emtree.fileDirty(f.id), readOnly: kind === "node",
+      dirty: kind === "file" && emtree.fileDirty(f.id), readOnly: kind === "node" || readingFile(f),
       color: sourceColor(f.id), graphs: gs.map(graphIn) });
   }
   const loose = emtree.slotsOf(null);
@@ -14080,7 +14169,7 @@ function copyDestinations(): Array<{ slot: GraphSlot; file: OpenFile | null; why
   const act = emtree.activeId;
   return emtree.slots.filter((sl) => sl.id !== act).map((sl) => {
     const file = emtree.fileOf(sl);
-    const why = file?.nodeRead ? t("src.destRead")
+    const why = readingFile(file) ? t("src.destRead")
       : file?.room && (file.room.id !== sync.room || !sync.connected) ? t("src.destRoomAway")
       : file?.room && !sync.canWrite ? t("src.destRoomRead") : undefined;
     return { slot: sl, file, ...(why ? { why } : {}) };
@@ -14391,6 +14480,7 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     columnWords: { arrow: t("s3.arrow"), eye: t("uo.eye"), pin: t("uo.pinHead") },
     // MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · a row dropped on an epoch: moved (or, with Alt, extended)
     epochDrop: (r: URow, epoch: string, extend: boolean) => { if (r.id) void epochGesture(r.id, extend ? "extend" : "move", epoch, r.epochAt || null); },
+    chapterDropLabel: (r: URow, chapter: string) => (r.id && r.slot === emtree.activeId && store?.node(r.id) ? t("uo.dropChapter", { chapter }) : null),
     dropLabel: (r: URow, epoch: string, extend: boolean) => (r.id && r.slot === emtree.activeId ? epochDropLabel(r.id, epoch, extend, r.epochAt || null) : null),
     // p.1 · a container out of step: «Allinea le epoche dei membri…» (MICRO-SPAZIO-CONTAINER's)
     follow: (r: URow) => { if (r.id) followContainer(r.id); },
@@ -19937,6 +20027,9 @@ async function completeNodeSignIn(search?: string): Promise<boolean> {
   if (remembered.then === "rooms" || remembered.then === "space") openWhoMenu("space");
   // FIRMA DELLA NASCITA · back in the room that was left to change person
   if (remembered.rejoin) enterRoom(remembered.rejoin);
+  // MICRO-COR05 E8 · an invitation that sent here to sign in is taken now: the
+  // address with `?join=` came back above
+  else if (pendingJoin()) await acceptPendingInvite();
   return true;
 }
 
@@ -26365,15 +26458,9 @@ function narrativeEditor(narrativeId: string): NarrativeEditor {
   return {
     narrativeId,
     addChapter: () => nedit.addChapter(s, narrativeId),
-    // NARR1 · reintroduce-epoch affordance + the bridge regenerate seam.
+    // NARR1 · reintroduce-epoch affordance
     undescribedEpochs: () => undescribedEpochs(s, narrativeId),
     addEpochChapter: (epochId) => addEpochChapter(s, narrativeId, epochId),
-    // Seam only: the rich s3Dgraphy site_story regeneration needs a bridge
-    // endpoint (build_narrative) that is not exposed yet — declared as a
-    // follow-up, button stays disabled until it exists.
-    canRegenerate: () => false,
-    regenerateViaBridge: () =>
-      toast(t("ai.regenerateUnavailable")),
     renameChapter: (i, t) => nedit.renameChapter(s, narrativeId, i, t),
     renameNarrative: (name) => nedit.renameNarrative(s, narrativeId, name),
     setDescription: (text) => nedit.setNarrativeDescription(s, narrativeId, text),
@@ -32027,6 +32114,17 @@ async function wireDesktopFileDrop(): Promise<void> {
     const w = winAt(ev.position);
     if (ev.type !== "drop") { mark(maybeTileset && isTarget(w) ? winAreas.get(w!.id) ?? null : null); return; }
     mark(null);
+    // MICRO-COR05 E12 · a .zip (or a package's folder) on the Extensions
+    // window: the window installs it, as from its button
+    const pt = toCssPoint(ev.position, window.devicePixelRatio || 1, positionsArePhysical(navigator.userAgent));
+    // (the window's frame carries the same mark as its body: the body listens)
+    const extAt = pt ? (document.elementFromPoint(pt.x, pt.y) as HTMLElement | null)?.closest<HTMLElement>("[data-ext-window]") : null;
+    const extBox = extAt?.matches(".ext-body") ? extAt : extAt?.querySelector<HTMLElement>(".ext-body[data-ext-window]") ?? null;
+    if (extBox && ev.paths.length === 1) {
+      const path = ev.paths[0];
+      extBox.dispatchEvent(new CustomEvent("em-ext-archive", { detail: { path, name: baseName(path) } }));
+      return;
+    }
     void (async () => {
       const items = await Promise.all(ev.paths.map(async (path) => {
         const dir = await pathIsDir(path);
@@ -36166,11 +36264,7 @@ const extWindowHost: ExtWindowHost = {
       input.onchange = () => resolve(input.files?.[0] ?? null);
       input.click();
     });
-    if (!f) return null;
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    let bin = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    return { zip_b64: btoa(bin), name: f.name };
+    return f ? await archiveOfFile(f) : null;
   },
   canPickFolder: () => isTauri(),
   fileName: () => emtree.activeFile()?.name ?? null,
@@ -41317,6 +41411,20 @@ async function annotateShelfEntry(entry: ShelfEntry): Promise<void> {
  */
 const bridgeBlobCache = new Map<string, string>();
 
+/** MICRO-COR05 G · a picture on this computer, for an <img> of the Files
+ *  window: the shared thumbnail (`/fs/thumb`) when a small one is enough, else
+ *  the file — both FETCHED by the page (which the bridge accepts) and handed to
+ *  the <img> as a blob, the Shelf's way (`bridgeBlobUrl`). */
+async function fsPicture(path: string, thumb: boolean): Promise<string> {
+  if (thumb) {
+    try {
+      const res = await fetch(`${await bridgeUrl()}/fs/thumb?path=${encodeURIComponent(path)}`);
+      if (res.ok) return URL.createObjectURL(await res.blob());
+    } catch { /* an older bridge: the file itself */ }
+  }
+  return await bridgeBlobUrl(await fsFileUrl(path));
+}
+
 async function bridgeBlobUrl(url: string): Promise<string> {
   // MICRO-SPAZIO-FIRMATO · the room's store: the same blob, fetched signed
   if (ownedByNode(url)) return await nodeBlobUrl(url);
@@ -43726,14 +43834,20 @@ function filesTile(win: Win, entry: FsEntry, listing: FsListing): HTMLElement {
   const k = browserKindOf(entry);
   im.textContent = k === "dir" ? "📁" : k === "model" ? "◆" : k === "tileset" ? "▦" : k === "document" ? "📄" : k === "gis" ? "🗺" : k === "emjson" ? "◈" : k === "image" ? "" : "•";
   if (k === "image" && !/\.(tiff?|dng|cr2|nef|exr|heic)$/i.test(entry.name) && entry.size < 40 * 1024 * 1024) {
-    void fsFileUrl(entry.path).then((url) => {
-      const img = document.createElement("img");
-      img.loading = "lazy";
-      img.decoding = "async";
-      img.alt = "";
-      img.src = url;
-      im.appendChild(img);
-    }).catch(() => { im.textContent = "🖼"; });
+    // MICRO-COR05 G · never the bridge's /fs/file in an <img>: the browser asks
+    // it without an Origin, the bridge refuses (403 in JSON) and Chromium
+    // blocks the answer (ERR_BLOCKED_BY_ORB). Fetched, as the Shelf does —
+    // and only once the tile is in sight (what `loading="lazy"` did)
+    onFirstVisible(im, () => queueUnitThumb(async () => {
+      try {
+        const url = await fsPicture(entry.path, true);
+        const img = document.createElement("img");
+        img.decoding = "async";
+        img.alt = "";
+        img.src = url;
+        im.appendChild(img);
+      } catch { im.textContent = "🖼"; }
+    }));
   } else if (k === "image") im.textContent = "🖼";
   row.prepend(im);
   return row;
@@ -47059,7 +47173,8 @@ function fileCard(path: string, form: CardForm, opts: { win: Win; entry?: FsEntr
   if (form === "compact" && opts.pic !== false && entry && k === "image" && !/\.(tiff?|dng|cr2|nef|exr|heic)$/i.test(name) && entry.size < 40 * 1024 * 1024) {
     const big = document.createElement("div");
     big.className = "file-card-pic";
-    void fsFileUrl(path).then((url) => { const img = document.createElement("img"); img.alt = ""; img.src = url; big.appendChild(img); }).catch(() => {});
+    // MICRO-COR05 G · fetched, never /fs/file in an <img> (403 → ERR_BLOCKED_BY_ORB)
+    void fsPicture(path, false).then((url) => { const img = document.createElement("img"); img.alt = ""; img.src = url; big.appendChild(img); }).catch(() => {});
     card.insertBefore(big, card.firstChild);
   }
   const stamp = look.status === "stamped" ? look.stamp ?? null : null;
@@ -52782,9 +52897,22 @@ async function masterOp(body: Record<string, unknown>, sayOf: string | ((got: { 
   return true;
 }
 
-/** «Indica tu il file master…» / «Sostituisci il master…»: a path, and why (the DTC says it) */
+/** «Indica tu il file master…» / «Sostituisci il master…»: a file, and why (the DTC says it).
+ * MICRO-COR05 E7 · the file is CHOSEN, never typed: the desktop app asks with the
+ * system's file dialog (as «Find here…» does), the browser with the app's
+ * selector over the folders the bridge serves. */
 async function masterReplaceAsked(model: string, name: string): Promise<void> {
-  const path = await askText(t("al.ver.indicateAsk", { name }), "", { kind: "al-master-path" });
+  const ask = t("al.ver.indicateAsk", { name });
+  const start = fileProjectRoot() || inventorySources().baseDir || undefined;
+  let path: string | null;
+  try {
+    path = isTauri() ? await pickFile(ask, start)
+      : await pickPathInApp({ mode: "file", message: ask, start: start ?? null });
+  } catch (e) {
+    toast(String((e as Error)?.message ?? e));
+    return;
+  }
+  path = path?.trim() || null;
   if (!path) return;
   const why = await askText(t("al.ver.replaceWhy"), "", { kind: "al-master-why" });
   if (why === null) return;
@@ -65643,6 +65771,8 @@ renderWarningsPill();
 renderLogButton(); // SHIFT-A · «Log · n» in the status bar
 // MICRO-INSTALLER-PULSANTE p.3 · which bridge answers: said if it is not the one wanted
 void checkBridgeLevel(30);
+void askServiceSeen();
+setInterval(() => { void askServiceSeen(); }, 30000);
 // EXPERIMENTAL · the site and its door: their seams (site-door.ts); the switch
 // off, nothing of it is wired
 if (EXPERIMENTAL) initSiteDoor({

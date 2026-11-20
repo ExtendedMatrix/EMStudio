@@ -32,8 +32,6 @@ export interface IndexHooks {
    *  the gesture that adds them */
   standardMissing?(): string[];
   onAddStandard?(): void;
-  onRegenerate?(): void;
-  canRegenerate?(): boolean;
   /** fase 5 · the coverage section, drawn by its own module into this host */
   coverage?(host: HTMLElement): void;
   /** NARRATIVE-DESK · the story's find, at the head of the chapters: it

@@ -75,6 +75,32 @@ export interface ConnectionState {
   nodes?: NodeEntry[];
   /** …and the synchronised app's address (`ws://localhost:8788`) */
   appUrl?: string;
+  /** MICRO-COR05 E10 · the service that answers this page's bridge calls (the
+   *  disk, s3Dgraphy, the jobs): its address and what its `/health` says */
+  service?: ServiceSeen | null;
+}
+
+/** E10 · what the service at the bridge's address answered, last time asked */
+export interface ServiceSeen {
+  url: string;
+  reach: Reach;
+  /** `em_bridge`, or another service that answered there */
+  name?: string | null;
+  level?: number | null;
+  /** the s3Dgraphy it imported */
+  s3dgraphy?: string | null;
+  /** the desktop's sidecar, or one started by hand / by the installation */
+  sidecar?: boolean;
+}
+
+/** E10 · one line: who answers the page's service calls, at which address, of
+ *  which version — so a page served by the node says what is behind it. */
+export function serviceLine(v: ServiceSeen): string {
+  if (v.reach !== "reachable") return t("conn.service.none", { url: v.url });
+  if (v.name && v.name !== "em_bridge") return t("conn.service.other", { url: v.url, name: v.name });
+  const version = [v.level != null ? t("conn.service.level", { n: String(v.level) }) : "",
+                   v.s3dgraphy ? `s3Dgraphy ${v.s3dgraphy}` : ""].filter(Boolean).join(" · ");
+  return t(v.sidecar ? "conn.service.sidecar" : "conn.service.at", { url: v.url, version: version || "—" });
 }
 
 /** p.3 · a known node, as «Where you are» lists it. `access` is THIS session's,
@@ -207,6 +233,7 @@ export function whereDetails(s: ConnectionState): string[] {
     out.push(`${shortNode(s.node)} · ${t(`conn.reach.${s.reach}`)}`);
     if (s.mode === "hub") out.push(accessLine(s.access));
   }
+  if (s.service) out.push(serviceLine(s.service));
   return out;
 }
 
@@ -540,6 +567,13 @@ export function renderWhereSection(host: HTMLElement, s: ConnectionState, g: Con
   host.appendChild(head);
   if (s.notice) host.appendChild(el("p", "conn-line conn-warn", s.notice));
   if (s.misaligned) host.appendChild(el("p", "conn-line conn-warn", s.misaligned));
+  if (s.service) {
+    const svc = el("p", "conn-line conn-dim conn-service", serviceLine(s.service));
+    svc.dataset.service = s.service.reach;
+    svc.dataset.url = s.service.url;
+    svc.title = t("conn.service.title");
+    host.appendChild(svc);
+  }
 
   // 1 · the mode
   const modes = el("div", "conn-sect");

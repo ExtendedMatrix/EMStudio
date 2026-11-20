@@ -111,7 +111,9 @@ async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, ini
     } catch { /* private mode */ }
   }, [d, locale, init ?? null]);
   if (hook) await p.addInitScript(hook);
-  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(BRIDGE)}${query}`);
+  // PAGE_HOST · the page on another origin than the bridge's (`em.localhost`, as
+  // a node serves it: MICRO-COR05 G), the bridge told to admit it
+  await p.goto(`http://${process.env.PAGE_HOST ?? "localhost"}:${PORT}/em/studio/?bridge=${encodeURIComponent(BRIDGE)}${query}`);
   if (d) await p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 30000 });
   else await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
   await p.waitForTimeout(500);
@@ -10970,6 +10972,202 @@ test("COR6.reader", "MICRO-COR04 E6 · uno studio aperto dal Catalog (?study=): 
   const want = `http://localhost:${PORT}/em/read/?study=${encodeURIComponent(study)}&narrative=${encodeURIComponent(narr ?? "")}`;
   return { pass: asked.length >= 1 && !/study=/.test(search) && !!narr && url === want && /Catalog/.test(toastDisk) && !errors.length,
     detail: { asked, search, narr, toast, url, want, toastDisk, errors } };
+});
+
+// ── MICRO-COR05 · comportamenti da correggere (E8–E12, G) ──────────────────
+// «pluginChecks before initialization» is red on HEAD in many cases (COR01–04),
+// a TDZ at boot not of these points: these cases count every other page error
+const pageErrors = (errors) => errors.filter((e) => !/Cannot access 'pluginChecks' before initialization/.test(e));
+test("COR5.invite", "MICRO-COR05 E8 · un invito aperto con il link (?join=) senza sessione, sulla pagina servita dal nodo: nessun campo «Access token», la pagina va all'accesso del nodo e al ritorno accetta l'invito da sola (POST /join con il token dell'accesso), poi il link esce dalla barra", async () => {
+  const node = `http://localhost:${PORT}/em`;
+  const seen = { join: null, authz: 0 };
+  const { p, ctx, errors } = await open({ doc: null, query: "&join=tok-cor5&room=sala-cor5", route: { pattern: `${node}/**`, handler: async (route) => {
+    const u = new URL(route.request().url());
+    const json = (b, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(b) });
+    if (u.pathname.endsWith("/v1/auth-config")) return json({ issuer: `${node}/idp`, client_id: "emstudio", authorization_endpoint: `${node}/idp/auth`, token_endpoint: `${node}/idp/token`, enforcing: true });
+    if (u.pathname.endsWith("/idp/auth")) {
+      seen.authz++;
+      const back = new URL(u.searchParams.get("redirect_uri"));
+      back.searchParams.set("code", "c0de"); back.searchParams.set("state", u.searchParams.get("state") ?? "");
+      return route.fulfill({ status: 302, headers: { location: back.href } });
+    }
+    if (u.pathname.endsWith("/idp/token")) return json({ access_token: "tok-access", token_type: "Bearer", expires_in: 300 });
+    if (u.pathname.endsWith("/v1/join")) { seen.join = { auth: route.request().headers().authorization ?? "", body: route.request().postDataJSON() }; return json({ room_id: "sala-cor5", title: "Sala", role: "editor", already_had: false }); }
+    if (u.pathname.endsWith("/v1/whoami")) return json({ orcid: null, name: "dev" });
+    if (u.pathname.startsWith("/em/v1/")) return json({ detail: "not here" }, 404);
+    return route.continue();   // the page itself (/em/studio/) and its modules
+  } } });
+  await p.waitForFunction(() => !/join=/.test(location.search) || !!document.querySelector(".app-dialog"), null, { timeout: 20000 }).catch(() => {});
+  await p.waitForTimeout(1500);
+  const after = await p.evaluate(() => ({ search: location.search, dialog: document.querySelector(".app-dialog .app-dialog-msg")?.textContent ?? "",
+    toast: document.getElementById("toast")?.textContent ?? "" }));
+  await ctx.close();
+  const conds = { signedIn: seen.authz === 1, joined: seen.join?.auth === "Bearer tok-access" && seen.join?.body?.token === "tok-cor5",
+    noTokenField: !/token/i.test(after.dialog), cleaned: !/join=|code=/.test(after.search), noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, seen, after, errors } };
+});
+
+test("COR5.import", "MICRO-COR05 E9 · «Porta in una stanza…» dove non risponde il servizio di EMStudio (il nodo non serve /room-import): un messaggio chiaro prima di chiedere il nome, nessuna chiamata a /room-import", async () => {
+  const asked = [];
+  const { p, ctx, errors } = await open({ doc: "catena", route: { pattern: `${BRIDGE}/**`, handler: (route) => {
+    const u = new URL(route.request().url());
+    if (u.pathname === "/health" || u.pathname === "/room-import") { asked.push(u.pathname); return route.abort(); }
+    return route.continue();
+  } } });
+  await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
+  await p.waitForTimeout(1500);
+  const out = await p.evaluate(() => ({ toast: document.getElementById("toast")?.textContent ?? "", dialog: !!document.querySelector(".app-dialog") }));
+  await ctx.close();
+  const conds = { said: /pagina servita dal nodo/.test(out.toast) && out.toast.includes(BRIDGE), noName: !out.dialog,
+    noImport: !asked.includes("/room-import"), noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, out, asked, errors } };
+});
+
+test("COR5.service", "MICRO-COR05 E10 · la barra di stato (tooltip) e «Dove lavori» dicono quale servizio risponde alla pagina: l'indirizzo, il livello delle rotte e la versione di s3Dgraphy; dove nessuno risponde, lo dicono", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  await p.waitForFunction(() => /Servizio di EMStudio/.test(document.getElementById("mode-indicator")?.title ?? ""), null, { timeout: 10000 }).catch(() => {});
+  const bar = await p.evaluate(() => document.getElementById("mode-indicator")?.title ?? "");
+  await p.click("#mode-indicator");
+  await p.waitForTimeout(600);
+  const menu = await p.evaluate(() => { const e = document.querySelector("#who-menu .conn-service"); return e ? { text: e.textContent, state: e.dataset.service, url: e.dataset.url } : null; });
+  await ctx.close();
+  const dead = await open({ doc: "catena", route: { pattern: `${BRIDGE}/health`, handler: (route) => route.abort() } });
+  await dead.p.waitForFunction(() => /nessuno risponde/.test(document.getElementById("mode-indicator")?.title ?? ""), null, { timeout: 10000 }).catch(() => {});
+  const down = await dead.p.evaluate(() => document.getElementById("mode-indicator")?.title ?? "");
+  await dead.ctx.close();
+  const conds = { bar: bar.includes(`Servizio di EMStudio: ${BRIDGE} · livello `) && /s3Dgraphy \d/.test(bar),
+    menu: menu?.state === "reachable" && menu.url === BRIDGE && menu.text.includes(BRIDGE),
+    down: down.includes(`Servizio di EMStudio: nessuno risponde a ${BRIDGE}`), noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, bar, menu, down, errors } };
+});
+
+test("COR5.reading", "MICRO-COR05 E11 · uno studio pubblicato aperto dal Catalog (?study=) è in lettura: l'offerta «Crea una stanza da qui» all'apertura, una modifica ripresa con la stessa offerta, Salva non salva; l'Outliner lo segna in lettura", async () => {
+  const study = "study:cor5";
+  const { p, ctx, errors } = await open({ doc: null, query: `&study=${encodeURIComponent(study)}`, route: { pattern: "**/catalog/study/**", handler: (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fixture("PortaMarina-lite")) }) } });
+  await p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 30000 });
+  await p.waitForTimeout(800);
+  const toastOf = () => p.evaluate(() => ({ text: document.getElementById("toast")?.textContent ?? "",
+    offer: [...document.querySelectorAll("#toast .toast-action")].map((b) => b.textContent) }));
+  const opened = await toastOf();
+  const src = await p.evaluate(() => window.__EM_DRAG__.sources().find((x) => x.kind !== "none"));
+  const id = await p.evaluate(() => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const gs = d.graphs ? Object.values(d.graphs) : [d.graph];
+    return gs.flatMap((g) => g.nodes ?? []).find((n) => n.name && window.__EM_DRAG__.nodeName(n.id))?.id ?? null; });
+  const name0 = await p.evaluate((i) => window.__EM_DRAG__.nodeName(i), id);
+  await p.evaluate((i) => window.__EM_DRAG__.renameNode(i, "COR5-scritto"), id);
+  await p.waitForTimeout(600);
+  const name1 = await p.evaluate((i) => window.__EM_DRAG__.nodeName(i), id);
+  // (the opening's offer is a question on the toast and stays: what follows
+  // waits behind it, so it is read in the Log, where every one is written)
+  const edited = (await p.evaluate(() => window.__EM_DRAG__.logTail(6))).join("\n");
+  await p.evaluate(() => document.getElementById("btn-save")?.click());
+  await p.waitForTimeout(600);
+  const saved = (await p.evaluate(() => window.__EM_DRAG__.logTail(4))).join("\n");
+  await ctx.close();
+  const conds = { opened: /aperto in lettura/.test(opened.text) && opened.offer.includes("Crea una stanza da qui"),
+    outliner: src?.readOnly === true, takenBack: !!name0 && name1 === name0 && /la modifica è stata ripresa/.test(edited),
+    noSave: /niente da salvare/.test(saved), noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, opened, src, name0, name1, edited, saved, errors } };
+});
+
+test("COR5.chapter", "MICRO-COR05 E12 · una riga dell'Outliner trascinata con il puntatore su un capitolo della Narrativa: il capitolo si accende, l'etichetta dice «Nel capitolo …», e al rilascio il nodo diventa un blocco del capitolo", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  await narrativeSpace(p);
+  await p.waitForSelector("[data-nv-drop]", { timeout: 8000 });
+  if (!(await p.locator('[data-win$=":outliner"] .uo-row[data-id]').count())) {
+    // the Narrativa space has no Outliner: one beside the story, as a person would split and retype
+    await p.evaluate(() => { const w = window.__EM_DRAG__.wins().find((x) => x.type === "narrative");
+      const made = w ? window.__EM_DRAG__.splitDoc(w.id) : null; if (made) window.__EM_DRAG__.retype(made, "outliner"); });
+    await p.waitForTimeout(1200);
+  }
+  await p.waitForSelector(".uo-row[data-id]", { timeout: 8000 });
+  // a stratigraphic unit (an epoch is the chapters' anchor, not a block)
+  const nodeId = await p.evaluate(() => [...document.querySelectorAll(".uo-row[data-id]")].map((r) => r.dataset.id)
+    .find((i) => /^US/.test(i) && window.__EM_DRAG__.nodeName(i) != null) ?? null);
+  const row = p.locator(`.uo-row[data-id="${nodeId}"]`).first();
+  await row.scrollIntoViewIfNeeded();
+  const sec = p.locator("[data-nv-drop]").first();
+  const blocks = () => sec.evaluate((s) => s.querySelectorAll("[data-block]").length);
+  const before = await blocks();
+  // how many times the story cites the node: one more after the drop
+  const refsOf = (i) => p.evaluate((id) => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const gs = d.graphs ? Object.values(d.graphs) : [d.graph];
+    return JSON.stringify(gs.flatMap((g) => g.nodes ?? []).filter((n) => /narrative/i.test(n.node_type))).split(`"${id}"`).length - 1; }, i);
+  const refs0 = await refsOf(nodeId);
+  const a = await row.boundingBox();
+  const b = await sec.boundingBox();
+  await p.mouse.move(a.x + 30, a.y + a.height / 2);
+  await p.mouse.down();
+  await p.mouse.move(a.x + 60, a.y + a.height / 2 + 10, { steps: 4 });
+  await p.mouse.move(b.x + b.width / 2, b.y + Math.min(40, b.height / 2), { steps: 12 });
+  await p.waitForTimeout(200);
+  const over = await p.evaluate(() => ({ lit: !!document.querySelector("[data-nv-drop].nv-drop-over"), tag: document.querySelector("[data-uo-drag]")?.textContent ?? "" }));
+  await p.mouse.up();
+  await p.waitForTimeout(800);
+  const after = await blocks();
+  const refs1 = await refsOf(nodeId);
+  await ctx.close();
+  const conds = { lit: over.lit && /^Nel capitolo /.test(over.tag), embedded: refs1 === refs0 + 1, noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, nodeId, over, before, after, refs0, refs1, errors } };
+});
+
+test("COR5.extdrop", "MICRO-COR05 E12 · un .zip lasciato sulla finestra Estensioni parte come «Installa .zip…» (l'anteprima del pacchetto chiesta al bridge); un file che non è un .zip è detto", async () => {
+  const previews = [];
+  const { p, ctx, errors } = await open({ doc: "catena", route: { pattern: `${BRIDGE}/extensions/preview`, handler: (route) => {
+    previews.push(route.request().postDataJSON()?.name ?? null);
+    return route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ ok: false, error: "not a package (test)" }) });
+  } } });
+  await p.evaluate(() => document.getElementById("btn-tool-extensions")?.click());
+  await p.waitForSelector("[data-ext-window]", { timeout: 8000 });
+  await p.waitForSelector('[data-ext="install-zip"]', { timeout: 8000 });
+  const drop = (name) => p.evaluate((n) => {
+    const box = document.querySelector(".ext-body[data-ext-window]");
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([80, 75, 3, 4])], n, { type: "application/zip" }));
+    let reached = false;
+    const spy = () => { reached = true; };
+    window.addEventListener("drop", spy);
+    box.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    box.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    window.removeEventListener("drop", spy);
+    return reached;
+  }, name);
+  const leaked = await drop("pacchetto.zip");
+  await p.waitForTimeout(1200);
+  const t1 = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  await drop("note.txt");
+  await p.waitForTimeout(500);
+  const t2 = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  await ctx.close();
+  const conds = { preview: previews.length === 1 && previews[0] === "pacchetto.zip" && /not a package/.test(t1), notZip: /non è un \.zip/.test(t2),
+    windowLoader: !leaked, noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, previews, t1, t2, leaked, errors } };
+});
+
+test("COR5.preview", "MICRO-COR05 G · finestra File sul web: le miniature e l'anteprima della scheda Info non mettono /fs/file in un <img> (il bridge risponde 403 senza Origin e Chromium blocca: ERR_BLOCKED_BY_ORB): l'immagine arriva come blob letto dalla pagina, e si vede", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "cor5g");
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  const imgFs = [];
+  const failed = [];
+  p.on("request", (r) => { if (r.resourceType() === "image" && /\/fs\/(file|at)/.test(r.url())) imgFs.push(r.url()); });
+  p.on("requestfailed", (r) => { if (/\/fs\//.test(r.url())) failed.push(`${r.failure()?.errorText} ${r.url().slice(-40)}`); });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/EM/DosCo"]`).first().click();
+  await p.waitForTimeout(1500);
+  await p.click('[data-action="files-view-grid"]');
+  await p.waitForTimeout(2500);
+  const grid = await p.evaluate(() => [...document.querySelectorAll(".files-tile .files-tile-im img")].map((i) => ({ blob: i.src.startsWith("blob:"), ok: i.complete && i.naturalWidth > 0 })));
+  await p.click('[data-action="files-view-list"]');
+  await p.waitForTimeout(600);
+  await p.click('.files-tab[data-tab="info"]');
+  await storageClick(p, "D.02.png");
+  await p.waitForTimeout(2000);
+  const pic = await p.evaluate(() => { const i = document.querySelector(".files-tab-info .file-card-pic img"); return i ? { blob: i.src.startsWith("blob:"), ok: i.complete && i.naturalWidth > 0 } : null; });
+  await ctx.close();
+  const conds = { grid: grid.length >= 3 && grid.every((g) => g.blob && g.ok), info: !!pic && pic.blob && pic.ok,
+    noImgOnFs: !imgFs.length, noBlocked: !failed.length, noErrors: !pageErrors(errors).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, grid, pic, imgFs, failed, errors } };
 });
 
 test("TD2.pair", "tileset trascinato · la forma RealityScan (X/ dallo Storage, X.json accanto) sul Viewer: riconosciuta e detta, la posizione avvisa «geocentriche», centrata solo per la vista, le tile si vedono", async () => {

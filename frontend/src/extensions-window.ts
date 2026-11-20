@@ -201,6 +201,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
       top.append(" ", btn(t("ext.installFolder"), "install-folder", () => void installFlow(doc, host, state, true, repaint), t("ext.installFolderHint")));
     box.appendChild(top);
     box.appendChild(el("p", "cw-hint", t("ext.phase1")));
+    dropToInstall(doc, box, host, state, repaint);
   }
   // MICRO-PL27 (X7) · on the web, the plugins of the node (the host draws them: node-plugins.ts)
   const nodePlugins = (): void => {
@@ -899,13 +900,52 @@ export function confirmButtons(pv: ExtPreview, t: ExtWindowHost["t"]): { ok: str
   return { ok: t("ext.install"), choices: [] };
 }
 
+/** MICRO-COR05 E12 · the archive chosen in the page, as the bridge reads it:
+ *  its bytes in base64, with its name */
+export async function archiveOfFile(f: File): Promise<ExtArchive> {
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { zip_b64: btoa(bin), name: f.name };
+}
+
+/** MICRO-COR05 E12 · an archive DROPPED on the window installs as «Install
+ *  .zip…» does (preview, confirmation, install). In a browser the page's own
+ *  drop gives the file; on the desktop the system's drop gives a path, and the
+ *  shell hands it to the window as `em-ext-archive` (main.ts). */
+function dropToInstall(doc: Document, box: HTMLElement, host: ExtWindowHost, state: ExtensionsState, repaint: () => void): void {
+  const take = (a: ExtArchive): void => { void installArchive(doc, host, state, a, repaint); };
+  box.addEventListener("dragover", (e) => {
+    if (!(e.dataTransfer?.types ?? []).includes("Files")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    box.classList.add("drop-target");
+  });
+  box.addEventListener("dragleave", () => box.classList.remove("drop-target"));
+  box.addEventListener("drop", (e) => {
+    box.classList.remove("drop-target");
+    const f = e.dataTransfer?.files?.[0];
+    if (!f) return;
+    // the window took it: the page's loader must not read it as an em.json
+    e.preventDefault();
+    e.stopPropagation();
+    if (!/\.zip$/i.test(f.name)) { host.toast(host.t("ext.dropNotZip", { name: f.name })); return; }
+    void archiveOfFile(f).then(take);
+  });
+  box.addEventListener("em-ext-archive", (e) => {
+    const a = (e as CustomEvent<ExtArchive>).detail;
+    if (a) take(a);
+  });
+}
+
 async function installFlow(doc: Document, host: ExtWindowHost, state: ExtensionsState, folder: boolean, repaint: () => void): Promise<void> {
   const a = await host.pickArchive(doc, folder);
   if (!a) return;
   await installArchive(doc, host, state, a, repaint);
 }
 
-/** preview → confirmation → install (exported: the drop of an archive on the window) */
+/** preview → confirmation → install (the buttons, and an archive dropped on the window) */
 export async function installArchive(doc: Document, host: ExtWindowHost, state: ExtensionsState, a: ExtArchive, repaint: () => void): Promise<InstallAnswer> {
   const t = host.t, lang = host.lang();
   const pv = await state.preview(a);

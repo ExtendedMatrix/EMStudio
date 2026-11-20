@@ -265,8 +265,12 @@ export interface OpenFile {
    */
   nodeRead?: { node: string; room: string; title: string; cursor: string | null; takenAt: string | null } | null;
   /** MICRO-COR04 E6 · the Catalog study this file was opened from (its
-   *  container's address, the study id): what the live reader's link is made of */
-  published?: { url: string; study: string | null } | null;
+   *  container's address, the study id): what the live reader's link is made of.
+   *  MICRO-COR05 E11 · `reading`: a published study is READ, not edited in place
+   *  (aprire · entrare · creare) — an edit is taken back, there is no Save; to
+   *  work on it a room is born from it, and Save As on the desktop takes a copy
+   *  of one's own (the copy is then a file like any other). */
+  published?: { url: string; study: string | null; reading?: boolean } | null;
   /** MICRO-T · the file's presentation (its colour schemes, and the one each
    *  graph uses): read with it, written back with it (presentation.ts) */
   presentation?: Presentation | null;

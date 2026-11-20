@@ -920,15 +920,14 @@ export interface NarrativeEditor {
   /** Lanes a chapter may be anchored to: epochs and activities. */
   lanes(): { id: string; label: string }[];
   // — NARR1 · scaffold-from-graph affordances (all optional: the editor works
-  //   without them, they only add the "reintroduce epoch" + regenerate seam) —
+  //   without them, they only add the "reintroduce epoch" affordance) —
   /** Top-level epochs not yet described by a chapter (the reintroduce chips). */
   undescribedEpochs?(): { id: string; name: string }[];
   /** Append a chapter anchored to `epochId` (default embed) — reintroduce. */
   addEpochChapter?(epochId: string): void;
-  /** Seam: rebuild the draft from s3Dgraphy site_story via the bridge. */
-  regenerateViaBridge?(): void;
-  /** Whether the bridge regenerate is available (else the button is disabled). */
-  canRegenerate?(): boolean;
+  // MICRO-COR05 E12 · «Regenerate the whole draft» (a seam towards a bridge
+  // route rebuilding the draft from s3Dgraphy's site_story) is gone: no button
+  // drew it, and the route never existed. A chapter is generated one at a time.
 
   // — authorship, generation, endorsement (N6) —
   /** Everyone the graph knows as an author, models included. */
@@ -1617,6 +1616,15 @@ export function renderNarrativeView(
       });
       section.addEventListener("dragleave", () =>
         section.classList.remove("nv-drop-over"));
+      // MICRO-COR05 E12 · …and a row of the Outliner, dragged with the POINTER
+      // (the one Outliner never uses HTML5 drag and drop, which the desktop
+      // shell keeps for the Finder's files): the Outliner finds the chapter by
+      // `data-nv-drop` and hands the node over with `em-node-drop`
+      section.dataset.nvDrop = chapter.title || "(untitled)";
+      section.addEventListener("em-node-drop", (e) => {
+        const id = (e as CustomEvent<{ id?: string }>).detail?.id;
+        if (id) editor.addEmbed(ci, id);
+      });
       section.addEventListener("drop", (e) => {
         section.classList.remove("nv-drop-over");
         const ref = e.dataTransfer?.getData(NODE_MIME);

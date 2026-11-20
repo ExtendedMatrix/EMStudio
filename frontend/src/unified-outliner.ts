@@ -51,6 +51,9 @@ export interface UnifiedDeps {
    *  drop) or EXTEND (with Alt); `dropLabel` says which, while dragging */
   epochDrop?: (row: URow, epoch: string, extend: boolean) => void;
   dropLabel?: (row: URow, epoch: string, extend: boolean) => string | null;
+  /** MICRO-COR05 E12 · the words for a row carried onto a story's chapter
+   *  (null: it cannot go there — a node of another source) */
+  chapterDropLabel?: (r: URow, chapter: string) => string | null;
   /** p.1 · the ⚠ of a container out of step: its menu («allinea…») */
   warnMenu?: (row: URow, at: { x: number; y: number }) => void;
   /** MICRO-TESTATE-COERENTI p.11 · «Segui il container»: the member drops its own epoch */
@@ -537,12 +540,16 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   // and a label by the pointer say which of the two will happen; Esc cancels.
   let dragEnded = 0;
   layer.addEventListener("pointerdown", (e0) => {
-    if (e0.button !== 0 || !d.epochDrop) return;
+    if (e0.button !== 0) return;
     const r = rowOf(e0.target);
-    if (!r || r.epochAt === undefined || !r.id || r.version || (e0.target as HTMLElement).closest("button,[data-tw]")) return;
+    if (!r || !r.id || r.version || (e0.target as HTMLElement).closest("button,[data-tw]")) return;
+    // MICRO-COR05 E12 · any node's row may also go onto a chapter of a story
+    // open beside (`[data-nv-drop]`, narrative.ts): it becomes a block there
+    const epochable = !!d.epochDrop && r.epochAt !== undefined;
     const x0 = e0.clientX, y0 = e0.clientY;
     let on = false;
     let target: { el: HTMLElement; epoch: string; group?: string } | null = null;
+    let chapter: HTMLElement | null = null;
     // MICRO-TESTATE-COERENTI p.10a · the container the row is listed in (a member's key)
     const fromGroup = /\/grp\/([^/]+)\/m\/[^/]+$/.exec(r.key)?.[1] ?? null;
     const isModel = /^representation_model|^RepresentationModelNodeGroup$/.test(String(r.glyph ?? ""));
@@ -550,18 +557,28 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     let tag: HTMLElement | null = null;
     let lx = x0, ly = y0;
     let auto = 0;
-    const clear = () => { target?.el.classList.remove("uo-drop", "uo-drop-extend"); target = null; };
+    const clear = () => {
+      target?.el.classList.remove("uo-drop", "uo-drop-extend"); target = null;
+      chapter?.classList.remove("nv-drop-over"); chapter = null;
+    };
     const say = () => {
       if (!tag) return;
-      const txt = target ? (target.group !== undefined ? d.containerDropLabel?.(r, target.group, fromGroup, alt) ?? null : d.dropLabel?.(r, target.epoch, alt) ?? null) : null;
+      const txt = chapter ? d.chapterDropLabel?.(r, chapter.dataset.nvDrop ?? "") ?? null
+        : target ? (target.group !== undefined ? d.containerDropLabel?.(r, target.group, fromGroup, alt) ?? null : d.dropLabel?.(r, target.epoch, alt) ?? null) : null;
       tag.textContent = txt ?? r.label;
       tag.classList.toggle("uo-dragtag-none", !txt);
       tag.classList.toggle("uo-dragtag-extend", !!txt && alt);
       tag.style.left = `${lx + 14}px`;
       tag.style.top = `${ly + 10}px`;
       if (target) { target.el.classList.add("uo-drop"); target.el.classList.toggle("uo-drop-extend", alt); }
+      chapter?.classList.add("nv-drop-over");
     };
     const find = () => {
+      const onCh = document.elementFromPoint(lx, ly)?.closest<HTMLElement>("[data-nv-drop]") ?? null;
+      const ch = onCh && d.chapterDropLabel?.(r, onCh.dataset.nvDrop ?? "") ? onCh : null;
+      if (ch !== chapter) clear();
+      if (ch) { chapter = ch; say(); return; }
+      if (!epochable) { say(); return; }
       const under = document.elementFromPoint(lx, ly)?.closest<HTMLElement>(".uo-row");
       const tr = under && layer.contains(under) ? rows[Number(under.dataset.i ?? -1)] : null;
       const ep = tr && tr.id && tr.glyph === "EpochNode" ? tr.id : null;
@@ -589,7 +606,9 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       e.preventDefault();
       const b = scroll.getBoundingClientRect();
       cancelAnimationFrame(auto);
-      const edge = ly < b.top + 24 ? -1 : ly > b.bottom - 24 ? 1 : 0;
+      // (only over the list: a row carried to a chapter in another window
+      // must not scroll it on the way)
+      const edge = lx < b.left || lx > b.right ? 0 : ly < b.top + 24 ? -1 : ly > b.bottom - 24 ? 1 : 0;
       if (edge) {
         const step = () => { scroll.scrollTop += edge * 12; paint(); find(); auto = requestAnimationFrame(step); };
         auto = requestAnimationFrame(step);
@@ -609,8 +628,10 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       root.classList.remove("uo-dragging");
       tag?.remove();
       const t2 = target;
+      const ch = chapter;
       clear();
       if (on) dragEnded = Date.now();
+      if (drop && on && ch) { ch.dispatchEvent(new CustomEvent("em-node-drop", { detail: { id: r.id } })); return; }
       if (drop && on && t2) {
         if (t2.group !== undefined) d.containerDrop?.(r, t2.group, fromGroup, alt);
         else d.epochDrop!(r, t2.epoch, alt);
