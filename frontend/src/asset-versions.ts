@@ -277,3 +277,37 @@ export function chooseForHardware(entries: HardwareEntry[], hw: Hardware): Hardw
   if (!master) return { entry: null, reason: "none", profile: pid, note: "nothing to load" };
   return { entry: master, reason: "master", profile: pid, note: `no version for ${pid}: the master is loaded` };
 }
+
+/**
+ * MICRO-TIL05 (row T4 of the tileset plan, 20 Nov 2026) · the versions the
+ * distance may ask on a hardware profile, for the Space's flow of LOD.
+ * Desktop: all. Web and mobile: those within the profile's band of triangles
+ * per object (and not `heavy`); when none is — the bands sit under every
+ * version EM Tools prepares (mobile_ar = a quarter of the whole) — the flow
+ * goes UP TO the version `chooseForHardware` gives (made for the profile, else
+ * the lightest there is): that version and the lighter ones, never all. Before,
+ * every version stayed, and the distance took the whole model (the 9 models of
+ * Survey2015 in Templu Mare: 4.43 M triangles on a phone). Lighter = fewer
+ * triangles when both say them, else fewer bytes. `noLight`: nothing within
+ * the band and nothing made for the profile — the interface says it.
+ */
+export function flowForHardware<T extends HardwareEntry>(entries: T[], hw: Hardware, heavy: (e: T) => boolean = () => false): { entries: T[]; noLight: boolean } {
+  const all = (entries || []).filter((e) => e && !e.master);
+  const h = HARDWARE[hw];
+  if (!h) throw new Error(`hardware must be one of ${Object.keys(HARDWARE).join(", ")}, got ${hw}`);
+  if (hw === "desktop" || !all.length) return { entries: all, noLight: false };
+  const light = all.filter((e) => { const tr = trisOf(e); return !heavy(e) && !(h.band != null && tr != null && tr > h.band); });
+  if (light.length) return { entries: light, noLight: false };
+  const ch = chooseForHardware(all, hw);
+  const top = ch?.entry ? all.find((e) => e.id === ch.entry!.id) : undefined;
+  if (!ch || !top) return { entries: all, noLight: false };
+  const capT = trisOf(top);
+  const capB = typeof top.size_bytes === "number" ? top.size_bytes : null;
+  const kept = all.filter((e) => {
+    if (e === top) return true;
+    const tr = trisOf(e);
+    if (capT != null && tr != null) return tr <= capT;
+    return capB != null && typeof e.size_bytes === "number" && e.size_bytes <= capB;
+  });
+  return { entries: kept, noLight: ch.reason === "lightest" };
+}

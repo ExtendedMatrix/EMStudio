@@ -49,6 +49,42 @@ for (const c of table.cases) {
   assert.throws(() => M.chooseForHardware([], "tablet")); n++;
 }
 
+// 1c · MICRO-TIL05 (row T4 of the tileset plan) · the flow of LOD on a profile
+//      (`flowForHardware`): the bands (mobile 10k, web 50k triangles per object)
+//      sit under every version EM Tools prepares — OB_PODIO of Templu Mare's
+//      Survey2015: whole 448 723 (aton, heriverse), lod1 224 317 (realtime,
+//      web), lod2 112 067 (mobile_ar). Before: no version in the band → ALL of
+//      them, and the distance took the whole model on a phone.
+{
+  const podio = [
+    { id: "m", master: true, use: [] },
+    { id: "w0", use: ["aton", "heriverse"], primitives: { triangles: 448723 }, size_bytes: 16467782 },
+    { id: "w1", use: ["realtime", "web"], primitives: { triangles: 224317 }, size_bytes: 2380884 },
+    { id: "w2", use: ["mobile_ar"], primitives: { triangles: 112067 }, size_bytes: 894028 },
+  ];
+  const ids = (r) => [r.entries.map((e) => e.id).sort(), r.noLight];
+  eq(ids(M.flowForHardware(podio, "mobile")), [["w2"], false], "mobile: up to the mobile_ar version, never the whole");
+  eq(ids(M.flowForHardware(podio, "web")), [["w1", "w2"], false], "web: up to the lightest made for webXR (realtime-web), and the lighter ones");
+  eq(ids(M.flowForHardware(podio, "desktop")), [["w0", "w1", "w2"], false], "desktop: every version, as before");
+  // nothing made for the profile, nothing in the band: the lightest and the lighter, said
+  const noMobile = podio.filter((e) => e.id !== "w2");
+  eq(ids(M.flowForHardware(noMobile, "mobile")), [["w1"], true], "mobile, no mobile version: the lightest only, and «no light version»");
+  // a version within the band: the band decides, as before
+  const small = [...podio, { id: "w3", use: [], primitives: { triangles: 8000 }, size_bytes: 90000 }];
+  eq(ids(M.flowForHardware(small, "mobile")), [["w3"], false], "mobile, a version within 10k: that one");
+  eq(ids(M.flowForHardware(small, "web")), [["w3"], false], "web, a version within 50k: that one");
+  // heavy ones never in the band; triangles unknown → the bytes decide the ceiling
+  eq(ids(M.flowForHardware([{ id: "a", use: ["mobile_ar"], size_bytes: 500 }, { id: "b", use: [], size_bytes: 300 }], "mobile")),
+     [["a", "b"], false], "triangles unknown: the band cannot judge them, they stay (as before)");
+  eq(ids(M.flowForHardware([{ id: "a", use: ["mobile_ar"], size_bytes: 500 }, { id: "b", use: [], primitives: { triangles: 60000 }, size_bytes: 300 },
+    { id: "c", use: [], primitives: { triangles: 90000 }, size_bytes: 900 }], "mobile", (e) => e.id === "a")),
+     [["a", "b"], false], "the mobile version heavy and without triangles: its bytes are the ceiling");
+  eq(ids(M.flowForHardware([{ id: "s", use: [], primitives: { triangles: 5000 }, size_bytes: 10 }, { id: "t", use: ["mobile_ar"], primitives: { triangles: 60000 } }], "mobile", (e) => e.id === "s")),
+     [["s", "t"], false], "a heavy version is never «in the band»; it stays when lighter than the mobile version");
+  eq(ids(M.flowForHardware([podio[0]], "mobile")), [[], false], "only the master: nothing in the flow");
+  assert.throws(() => M.flowForHardware(podio, "tablet")); n++;
+}
+
 // 2 · the chain
 const sum = (c) => "sha256:" + c.repeat(64);
 const nodes = [

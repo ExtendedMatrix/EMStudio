@@ -270,6 +270,7 @@ const EN: Dict = {
   "ver.drawn": "Drawn: {lod} · uses {uses} · {mb} MB",
   "ver.none": "No version drawn",
   "ver.flowTitle": "Versions by distance",
+  "ver.flowNoLight": "{n} with no light version for this profile: the lightest drawn",
   // MICRO-PROVA-DEV47 p.3 · the levels of detail: the author's, the whole, the recipe's
   "lod.title": "Level of detail",
   "lod.whole": "whole",
@@ -9301,6 +9302,7 @@ const IT: Dict = {
   "ver.drawn": "Disegnata: {lod} · usi {uses} · {mb} MB",
   "ver.none": "Nessuna versione disegnata",
   "ver.flowTitle": "Versioni per distanza",
+  "ver.flowNoLight": "{n} senza versioni leggere per questo profilo: si disegna la più leggera",
   // MICRO-PROVA-DEV47 p.3 · i livelli di dettaglio: dell'autore, l'intero, le derivate della ricetta
   "lod.title": "Livello di dettaglio",
   "lod.whole": "intero",

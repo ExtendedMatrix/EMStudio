@@ -309,7 +309,7 @@ import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
 import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type Probes } from "./load-failure";
-import { chooseForHardware, chooseVersion, HARDWARE, SCENE_USES, USES, type Hardware, type HardwareEntry } from "./asset-versions";
+import { chooseForHardware, chooseVersion, flowForHardware, SCENE_USES, USES, type Hardware, type HardwareEntry } from "./asset-versions";
 import { ERROR_MANUAL_MIN, ERROR_PROFILES, normaliseErrorChoice, type ErrorChoice } from "./tiles-error";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { mountGisSpace, type GisDocumentAsk, type GisSpace, type GisSpaceDeps } from "./gis-space";
@@ -27518,7 +27518,7 @@ function narrativeSceneItems(node: EmNode): SceneItem[] {
     const pv = plan.versionId ? r.versions?.find((v) => v.id === plan.versionId) : undefined;
     items.push({ kind: "rm", id: r.id, label: r.name, state: pv?.resource?.state ?? r.resource?.state ?? "missing",
       url: plan.url ?? spaceFileUrl(r.resource), resourceId: pv?.resource?.id ?? r.resource?.id, ...(plan.obj ? { obj: plan.obj } : {}),
-      ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}),
+      ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart, ...(flowNoLight(r) ? { noLight: true } : {}) } : {}),
       ...(alt ? { alt: { group: alt.group, role: alt.role, err: 10, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group } } : {}),
       tiles: r.resource?.tiles || undefined, edge: placementColour(r.genre) ?? undefined,
       pose: isTiles ? undefined : poseOfNode(r.id), tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined, frameMatrix: isTiles ? undefined : spaceFrameMatrix(r),
@@ -34178,17 +34178,16 @@ function rmFlow(rm: SpaceRM): FlowVersion[] {
   // mobile profile, a version over the profile's band nor a big one (a lod0 of
   // 223 MB on a phone); on the desktop the flow is as it was
   const hw = hardwareProfile();
-  const band = HARDWARE[hw].band;
-  const vs0 = drawableVersions(rm).filter((v) => v.format !== "tiles" && !v.master);
-  const light = hw === "desktop" ? vs0 : vs0.filter((v) => !isHeavy(v) && !(band != null && typeof v.tris === "number" && v.tris > band));
-  const vs = light.length ? light : vs0;
+  const vs = flowPool(rm, hw).vs;
   const authors = vs.filter((v) => lv.get(v.id)?.origin === "author");
   const finest = authors.length > 1 ? authors.reduce((a, b) => ((lv.get(a.id)?.authorOrd ?? 99) <= (lv.get(b.id)?.authorOrd ?? 99) ? a : b)) : null;
   return buildChain(vs.map((v) => {
     const l = lv.get(v.id);
     const fp = versionFingerprint(v);
     flowUrlPrint.set(v.fetch, fp);
-    return { id: v.id, url: v.fetch, rank: l?.rank ?? 99, name: autoLevelName(rm, v), data: (v.data ?? {}) as Record<string, unknown>,
+    // MICRO-TIL05 · on web and mobile the strip says what the version was made for («derivata lod0 (mobile_ar) 9»)
+    const nm = autoLevelName(rm, v);
+    return { id: v.id, url: v.fetch, rank: l?.rank ?? 99, name: hw !== "desktop" && v.uses?.length ? `${nm} (${v.uses.join(", ")})` : nm, data: (v.data ?? {}) as Record<string, unknown>,
       measured: v.tris ? null : getMeasure(fp)?.tris ?? null,
       base: l?.origin === "recipe" && !l.whole ? l.base : null, ratio: l?.origin === "recipe" && !l.whole ? l.ratio : null,
       bytes: v.bytes ?? null, format: v.format, uses: v.uses ?? [],
@@ -34196,6 +34195,17 @@ function rmFlow(rm: SpaceRM): FlowVersion[] {
       ...(v === finest || isHeavy(v) ? { big: true } : {}) };
   }));
 }
+/** MICRO-TIL05 (row T4 of the tileset plan) · the versions the distance may ask
+ *  on a profile (`flowForHardware`): on web and mobile never all of them, at
+ *  most the version made for the profile; `noLight` for the strip */
+function flowPool(rm: SpaceRM, hw: Hardware): { vs: ReturnType<typeof drawableVersions>; noLight: boolean } {
+  const vs0 = drawableVersions(rm).filter((v) => v.format !== "tiles" && !v.master);
+  const byId = new Map(vs0.map((v) => [v.id, v] as const));
+  const r = flowForHardware(vs0.map(hardwareEntry), hw, (e) => { const v = byId.get(String(e.id)); return !!v && isHeavy(v); });
+  return { vs: r.entries.map((e) => byId.get(String(e.id))!).filter(Boolean), noLight: r.noLight };
+}
+/** MICRO-TIL05 · a model of the flow with no light version on this profile (the strip says it) */
+const flowNoLight = (rm: SpaceRM): boolean => flowPool(rm, hardwareProfile()).noLight;
 /** MICRO-PROVA-DEV48 p.3 · a level as the automatic mode names it: «LOD0», «intero»,
  *  «derivata lod4» (a recipe's version with the chain's own number, to tell two apart) */
 function autoLevelName(rm: SpaceRM, v: RmVersion): string {
@@ -36647,7 +36657,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     },
     snapAlign: () => space3dPrefs().snapAlign === true,
     glyph: (k) => typeIconElement(k),
-    flowTitle: t("ver.flowTitle"),
+    flowTitle: t("ver.flowTitle"), flowNoLight: (n) => t("ver.flowNoLight", { n: String(n) }),
     // MICRO-PROVA-DEV48 p.5 · what a file holds, counted at its load: the measures' cache
     onMeasured: (url, m) => { keepMeasure(url, m); modelsSheetLater(); },
     // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
@@ -37898,7 +37908,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       const pv = plan.versionId ? r.versions?.find((v) => v.id === plan.versionId) : undefined;
       items.push({ kind: "rm", id: r.id, label: nmS && nmS.shown !== nmS.technical ? `${nmS.shown}${nmS.level ? ` · ${nmS.level}` : ""}` : r.name, state: pv?.resource?.state ?? r.resource?.state ?? "missing",
         url: plan.url ?? spaceFileUrl(r.resource), resourceId: pv?.resource?.id ?? r.resource?.id, ...(plan.obj ? { obj: plan.obj } : {}),
-        ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}),
+        ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart, ...(flowNoLight(r) ? { noLight: true } : {}) } : {}),
         // MICRO-TILESET-CONTENITORE · every mode: the scene says what the container draws
         ...(alt ? { alt: { group: alt.group, role: alt.role, err: alt.err, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group,
           ...(alt.role === "models" && nmS?.level ? { level: nmS.level } : {}) } } : {}), tiles: r.resource?.tiles || undefined,
@@ -58624,7 +58634,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
       num: (v, d) => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false }),
     },
     glyph: (k) => typeIconElement(k),
-    flowTitle: t("ver.flowTitle"),
+    flowTitle: t("ver.flowTitle"), flowNoLight: (n) => t("ver.flowNoLight", { n: String(n) }),
     onMeasured: (url, m) => {
       keepMeasure(url, m);
       slot.events.push({ t: Math.round(performance.now() - slot.t0), what: "drawn", url });

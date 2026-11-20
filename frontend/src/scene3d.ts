@@ -124,6 +124,10 @@ export interface SceneItem {
    *  starting from `flowStart` (the lightest) */
   flow?: FlowVersion[];
   flowStart?: string;
+  /** MICRO-TIL05 (row T4) · on a web or mobile profile the model has no version
+   *  within the profile's band and none made for the profile: the flow draws
+   *  its lightest, and the strip says so */
+  noLight?: boolean;
   /** MICRO-SPAZIO-3D-3 p.12 · a container and its tileset, one or the other by
    *  the distance: the group, which side this item is, the tileset's error (m) */
   alt?: { group: string; role: "tileset" | "models"; err: number;
@@ -511,6 +515,8 @@ export interface SpaceSceneOptions {
   onMeasured?: (url: string, m: { tris: number; verts: number; box: [[number, number, number], [number, number, number]] | null }) => void;
   /** the flow's words: «Versioni automatiche», and its line (levels · MB) */
   flowTitle?: string;
+  /** MICRO-TIL05 · the strip's words for the models of the flow with no light version */
+  flowNoLight?: (n: number) => string;
   /** MICRO-SPAZIO-3D-3 p.14 · a datamodel glyph (2d_glyphs) for a label's decorator */
   glyph?: (kind: string) => HTMLElement;
   /** MICRO-SPAZIO-3D-3 p.9 · a floating panel reduced to its title (the person's, per view) */
@@ -2923,11 +2929,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // p.3: «LOD 3–4» were the chain's numbers, not the levels), and the MB
         const by = new Map<string, number>();
         let any = false;
+        let noLight = 0;
         const order: Array<[string, number]> = [];
         for (const [, st] of flowState) {
           const v = st.item.flow?.find((x) => x.id === st.current);
           if (!v) continue;
           any = true;
+          if (st.item.noLight) noLight++;
           const nm = v.name ?? `LOD ${v.ord}`;
           if (!by.has(nm)) order.push([nm, v.ord]);
           by.set(nm, (by.get(nm) ?? 0) + 1);
@@ -2937,7 +2945,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (any) {
           const mb = (flowUsed() / 1048576).toFixed(1);
           const parts = order.sort((a, b) => a[1] - b[1]).map(([nm]) => (by.size > 1 || flowState.size > 1 ? `${nm} ${by.get(nm)}` : nm));
-          const txt = `${opts.flowTitle ?? "Versions by distance"} · ${flowState.size} · ${parts.join(" · ")} · ${mb} MB`;
+          const txt = `${opts.flowTitle ?? "Versions by distance"} · ${flowState.size} · ${parts.join(" · ")} · ${mb} MB`
+            + (noLight ? ` · ${opts.flowNoLight?.(noLight) ?? `${noLight} with no light version`}` : "");
           if (flowStrip.textContent !== txt) flowStrip.textContent = txt;
         }
       };
