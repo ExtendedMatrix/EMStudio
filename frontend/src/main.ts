@@ -66335,7 +66335,7 @@ const scriptHost: ScriptHost = {
     }
   },
   ask: (prompt, initial) => askText(prompt, initial, { kind: "script-name" }),
-  confirm: (message) => askConfirm(message),
+  askConfirm: (message, ok) => askConfirm(message, { kind: "script-confirm", ok }),
   // the title follows (● / the name), and the window remembers its file
   changed: (buf) => {
     for (const [id, b] of scriptBuffers) {

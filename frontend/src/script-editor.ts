@@ -38,7 +38,9 @@ export interface ScriptHost {
   run(code: string, name: string, opts: { dryRun?: boolean }): Promise<void>;
   /** the app's dialogs (no `prompt`: the desktop's WKWebView opens nothing) */
   ask(prompt: string, initial: string): Promise<string | null>;
-  confirm(message: string): Promise<boolean>;
+  /** a yes/no of the app (app-dialog), `ok` the word of its button — never the
+   *  native `confirm`, which the desktop's WKWebView does not show */
+  askConfirm(message: string, ok: string): Promise<boolean>;
   /** the name or the «modified» mark changed: the window's title follows */
   changed(buf: ScriptBuffer): void;
   toast?(message: string): void;
@@ -334,7 +336,7 @@ export function mountScriptEditor(doc: Document, host: ScriptHost, buf: ScriptBu
   doc.addEventListener("pointerdown", outside, true);
 
   /** Leave the buffer? (asked when it holds unsaved changes) */
-  const mayLeave = async (): Promise<boolean> => !isModified(buf) || host.confirm(t("sce.discard", { name: buf.name ?? t("sce.untitled") }));
+  const mayLeave = async (): Promise<boolean> => !isModified(buf) || host.askConfirm(t("sce.discard", { name: buf.name ?? t("sce.untitled") }), t("sce.discardOk"));
 
   async function fresh(): Promise<void> {
     if (!(await mayLeave())) return;
@@ -386,7 +388,7 @@ export function mountScriptEditor(doc: Document, host: ScriptHost, buf: ScriptBu
       if (name !== buf.name) {
         let taken: string[] = [];
         try { taken = await host.list(); } catch { taken = []; }
-        if (taken.includes(name) && !(await host.confirm(t("sce.overwrite", { name })))) return false;
+        if (taken.includes(name) && !(await host.askConfirm(t("sce.overwrite", { name }), t("sce.overwriteOk")))) return false;
       }
     }
     const text = buf.text;
