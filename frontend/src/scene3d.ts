@@ -1212,7 +1212,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         more.className = "scn-more";
         el.appendChild(more);
         labels.appendChild(el);
-        anchors.push({ el, p: at.clone() });
+        const a = { el, p: at.clone() };
+        anchors.push(a);
+        return a;
       };
       const translucent = (item: SceneItem) => {
         const c = new THREE.Color();
@@ -2163,6 +2165,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // a model that changed version (its mode, the hardware profile, a level
         // chosen) gives the file it drew back to the GPU when nothing else draws it
         releaseReplaced();
+        // MICRO-TIL08 (T9) · where the scene was: the labels said at once stand there until the scene is drawn
+        const wasAt = content.children.length ? extent() : null;
         giveBack(content);
         content.clear();
         labels.textContent = "";
@@ -2262,8 +2266,29 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                   opts.onTileError?.(key, item.label, tsUrl, { ...s.tileError, count: s.missing.length });
                 });
               }
-              await live.ready;
+              // MICRO-TIL08 (T9) · a tileset that loads nothing now — a container's,
+              // hidden behind its members drawn and not warming — has no root to
+              // wait for: the tick never updates it, and its `ready` held the
+              // whole scene «in arrivo» for the 8 s of the timeout (measured on
+              // Templu Mare: rmgroup_Survey2015 born again on the way back to
+              // 2015, every label of a missing file 8.0 s late). Its label and
+              // its outcome come with its root, if the distance ever asks for it
+              const idle = !live.layer.rootReady() && !live.layer.object.visible && !altWarming.has(live);
+              if (!idle) await live.ready;
               if (gen !== generation || disposed) return;
+              if (idle && !live.layer.rootReady()) {
+                const l = live.layer, g0 = gen;
+                const off = l.onChange(() => {
+                  if (!l.rootReady()) return;
+                  queueMicrotask(off);
+                  if (g0 !== generation || disposed) return;
+                  opts.onLoadOutcome?.(key, item.label, tsUrl, null);
+                  const b = l.bounds();
+                  if (b) addLabel(item.label, new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y, (b.min.z + b.max.z) / 2), `rm k-rm${selCls(item)}`, item.id);
+                });
+                drawn.set(key, { item, as: "tiles", url: tsUrl });
+                return;
+              }
               // MICRO-WINDOWS-MODELLI p.1 · a tileset whose root did not come says so
               const tst = live.layer.status();
               // (the renderer does not always say it: a refused tileset.json left
@@ -2499,6 +2524,27 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         else trimResting();
         // every model has its turn queued: the tilesets go when the last one is decided
         void memTurn.then(() => releaseTiles());
+        // MICRO-TIL08 (T9) · a model with no file to draw is said AT ONCE, not
+        // after every model and tileset of the epoch has come (its label waited
+        // for them all: 1 s on Templu Mare's 2015, 8 s behind a tileset's root
+        // timeout); it stands over the scene as it was and moves over the scene
+        // drawn when the last one has come
+        const early = new Map<string, { p: any }>();
+        {
+          const b0 = wasAt ?? extent();
+          let k0 = 0;
+          for (const item of later) {
+            const key = `${item.kind}:${item.id}`;
+            if (item.state === "reference") { k0++; continue; }
+            if (drawn.get(key)?.as === "gated") continue;
+            const at = b0.getCenter(new THREE.Vector3());
+            at.y = b0.max.y + 0.2 + 0.25 * k0++;
+            const refused = item.state === "refused";
+            early.set(key, addLabel(refused ? opts.texts.refused(item.label) : opts.texts.missing(item.label, item.resourceId), at,
+              `${refused ? "miss refused" : "miss"} k-${item.kind}`, item.id));
+            drawn.set(key, { item, as: "label" });
+          }
+        }
         void Promise.all(pending).then(() => {
           if (gen !== generation || disposed) return;
           const b = extent();
@@ -2524,6 +2570,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             } else {
               const at = b.getCenter(new THREE.Vector3());
               at.y = b.max.y + 0.2 + 0.25 * k++;
+              // (said at once: it moves over the scene drawn)
+              const said = early.get(key);
+              if (said) { said.p.copy(at); continue; }
               // MICRO-3DTILES · held back by the threshold: its label says so
               const gated = drawn.get(key)?.as === "gated";
               const refused = item.state === "refused";

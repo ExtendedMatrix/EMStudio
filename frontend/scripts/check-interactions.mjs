@@ -3764,6 +3764,45 @@ test("TIL6.rest", "TIL06 · riga T5 del piano tileset: un tileset che l'epoca no
   return { pass: Object.values(conds).every(Boolean), detail: { conds, epochs, s1, s2, s3, layersBack, s4, errors } };
 });
 
+test("TIL8.say", "TIL08 · riga T9 del piano tileset: un modello senza file da disegnare si dice SUBITO (la sua etichetta «file assente»), non dopo che è arrivato tutto il resto dell'epoca: qui la radice del tileset arriva 3 s dopo, e l'etichetta c'è prima; poi l'etichetta si sposta sopra la scena disegnata", async () => {
+  // tiles.em.json plus RM4: a model whose only file is not there
+  const d = fixture("tiles");
+  d.graph.nodes.push({ id: "RM4", node_type: "representation_model", name: "Modello senza file", description: "", data: {} });
+  d.graph.nodes.push({ id: "D5", node_type: "document", name: "D5", description: "", data: { geometry: "reality_based" } });
+  d.graph.nodes.push({ id: "RES_NO", node_type: "resource", name: "senza-file.glb", description: "", data: { url: "/em/studio/testdata/lod/til8-non-esiste.glb", url_type: "3d_model", residency: "resident" } });
+  d.graph.edges.push({ id: "EP_MOD__has_representation_model__RM4", edge_type: "has_representation_model", source: "EP_MOD", target: "RM4" },
+    { id: "D5__has_representation_model__RM4", edge_type: "has_representation_model", source: "D5", target: "RM4" },
+    { id: "D5__has_linked_resource__RES_NO", edge_type: "has_linked_resource", source: "D5", target: "RES_NO" },
+    { id: "RM4__has_linked_resource__RES_NO", edge_type: "has_linked_resource", source: "RM4", target: "RES_NO" });
+  // the root of the tileset (RM1) 3 s late: the scene stays «in arrivo» meanwhile
+  const route = { pattern: "**/testdata/tiles-prova/tileset.json*", handler: (r) => setTimeout(() => r.continue().catch(() => {}), 3000) };
+  const { p, ctx, errors } = await open({ doc: d, ws: "space", route });
+  const t0 = Date.now();
+  const look = () => p.evaluate(() => { const h = document.querySelector(".scn-host");
+    const s = h?.__space?.() ?? [];
+    const lab = [...document.querySelectorAll(".scn-label.miss")].find((e) => e.dataset.id === "RM4");
+    return { rm4: s.find((x) => x.id === "RM4")?.as ?? null, rm1: s.find((x) => x.id === "RM1")?.as ?? null, label: lab?.textContent ?? null,
+      at: lab ? [lab.style.left, lab.style.top] : null, ready: h?.dataset.ready ?? null }; });
+  let first = null, said = null;
+  while (Date.now() - t0 < 20000) {
+    const s = await look();
+    if (!said && s.label) said = { ...s, ms: Date.now() - t0 };
+    if (s.rm1 === "tiles" && s.ready === "1") { first = { ...s, ms: Date.now() - t0 }; break; }
+    await p.waitForTimeout(50);
+  }
+  await p.waitForTimeout(600);
+  const end = await look();
+  const nLabels = await p.evaluate(() => [...document.querySelectorAll(".scn-label")].filter((e) => e.dataset.id === "RM4").length);
+  await ctx.close();
+  const conds = {
+    saidEarly: !!said && !!first && said.ms < first.ms - 1500 && said.rm1 === "pending",
+    label: end.rm4 === "label" && !!end.label,
+    once: nLabels === 1,
+    errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, said, first, end, nLabels, errors } };
+});
+
 /** MICRO-TILE-METASHAPE · a `.3tz` with the SHAPE of Metashape 2.3's exports, made here (no data of
  *  the lab): glb tiles whose texture is KTX2 (`KHR_texture_basisu` REQUIRED — the image is the one
  *  of `testdata/variant-meshopt-ktx2.glb`, a synthetic cube's), Z-up box volumes, REPLACE, and a
