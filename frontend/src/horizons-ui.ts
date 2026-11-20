@@ -17,6 +17,7 @@
  */
 import { askConfirm, askText } from "./app-dialog";
 import { t } from "./i18n";
+import { betaMark } from "./beta";
 import type { Periodization } from "./horizons";
 
 export interface HorizonsPanelData {
@@ -67,6 +68,7 @@ export function renderHorizonsPanel(host: HTMLElement, d: HorizonsPanelData, h: 
   box.dataset.hzPanel = "1";
   const head = el("div", "hz-head");
   head.appendChild(el("strong", "hz-title", t("hz.title")));
+  head.appendChild(betaMark());   // MICRO-COR11 · a young function, for everyone
   head.title = t("hz.tip");
   box.appendChild(head);
 

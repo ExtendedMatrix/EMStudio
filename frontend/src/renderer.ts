@@ -3,7 +3,6 @@
 // metadata (palette.ts ← em_visual_rules.json). Edges are routed
 // orthogonally with crossing bridges (routing.ts), yEd-style.
 import { cardRuns } from "./scene-overlaps";
-import { EXPERIMENTAL } from "./experimental";
 import { crispImage, dtcGlyphUrl, ICON_NODE_TYPES, imageFor, imageForUrl } from "./icons";
 import { dtcGlyphName, propertyLabel, reasoningText, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { documentVariant, edgeInk, edgeStyle, nodeStyle } from "./palette";
@@ -1920,8 +1919,8 @@ export function render(
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const ovInstance = ov("instance_badge"), ovTrace = ov("trace");
-  // EXPERIMENTAL · the «+n» runs and the cut cards (the switch off: as before)
-  const cards = EXPERIMENTAL ? cardRuns(scene) : new Map<string, { show: boolean; more: number }>();
+  // MICRO-LAB bande-2 · the «+n» runs and the cut cards (out of «Funzioni sperimentali», MICRO-COR11)
+  const cards = cardRuns(scene);
   for (const n of shown) {
     if (!(n.instanceBadge && ovInstance) && !(n.trace && ovTrace)) continue;
     if (glyphsOff(n)) continue;
@@ -1940,8 +1939,8 @@ export function render(
       // never wider than its box (from the card's left), cut with «…»
       const more = run?.more ? ` +${run.more}` : "";
       let text = reasoningText("instance_badge", "label", { owner: n.instanceBadge.ownerName }) + more;
-      const maxW = EXPERIMENTAL ? Math.max(r.w + badgePx * 0.25, badgePx * 4) : Infinity;
-      if (EXPERIMENTAL && ctx.measureText(text).width + fpx * 1.1 > maxW) {
+      const maxW = Math.max(r.w + badgePx * 0.25, badgePx * 4);
+      if (ctx.measureText(text).width + fpx * 1.1 > maxW) {
         const base = text.slice(0, text.length - more.length);
         let k = base.length;
         while (k > 1 && ctx.measureText(`${base.slice(0, k)}…${more}`).width + fpx * 1.1 > maxW) k--;
@@ -2164,7 +2163,7 @@ export function render(
     // lane (MICRO-LAB bande-3: a short top band, scrolled half out, laid its
     // chip on the next band's — measured on CronoFilter, Ottoman over Late
     // Byzantine, when the bar of the window took two rows)
-    const ty = EXPERIMENTAL ? Math.max(sy + 4, Math.min(4, sy + sh - chipH)) : Math.max(sy + 4, 4);
+    const ty = Math.max(sy + 4, Math.min(4, sy + sh - chipH));   // out of «Funzioni sperimentali» (MICRO-COR11)
     const selectedLane = lane.id === state.selectedId;
     laneChipHits.push({ id: lane.id, x: chipX, y: ty - 2, w: chipW, h: chipH });
     // fill = the epoch's semantic colour (falls back to the neutral chip when

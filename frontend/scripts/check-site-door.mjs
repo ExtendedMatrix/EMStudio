@@ -1,9 +1,8 @@
 // EXPERIMENTAL (born in the lab, 30 Oct 2026) · the site, its footprint, its
-// layers, the door (`site-model.ts`), in node, on a SYNTHETIC document: the site found by the datamodel's own fields, the
+// layers (`site-model.ts`; the lab's door went with MICRO-COR11), in node, on a SYNTHETIC document: the site found by the datamodel's own fields, the
 // footprint's WKT read FOR DRAWING (POLYGON / MULTIPOLYGON, 2D / Z, its CRS),
 // the layers of the site and their frame, the grid → scene conversion (the
-// shift, the rotation undone, three's axes), what the door recognises by the
-// name, and the site's glyph (the datamodel's `site` data glyph, vendored).
+// shift, the rotation undone, three's axes) and the site's glyph (the datamodel's `site` data glyph, vendored).
 //
 //   node scripts/check-site-door.mjs
 import * as esbuild from "esbuild";
@@ -77,12 +76,6 @@ eq([p[0], p[1], p[2]], [10, 493, -10], "east is +X, north is −Z (Y up)");
 const r = L.gridToThree({ ...a, rotation: 90 }, [500000 + 10, 450000, 0]);
 near(r[0], 0, 1e-9, "rotation 90° clockwise from north: an eastern point");
 near(r[2], -10, 1e-9, "…lies on the scene's local +Y (three −Z), as georef.localToCrs says");
-
-// ── the door ────────────────────────────────────────────────────────────────
-eq(["points.shp", "points.dbf", "tileset.json", "x.3tz", "SU001.glb", "a.gpkg", "dem.tif", "b.geojson", "note.pdf"].map((n) => L.doorKindOf(n)),
-   ["gis_layer", "gis_layer", "tileset", "tileset", "model", "gis_layer", "gis_layer", "gis_layer", "unknown"],
-   "what the door recognises: the four formats of the public GIS are layers");
-eq(L.doorKindOf("RB", true), "tileset", "a folder is a tileset's door");
 
 // ── the glyph comes from the datamodel ──────────────────────────────────────
 eq(G.dataGlyphKey("LocationNodeGroup", { level: "sito" }), "site", "the site's data glyph (visual rules 1.6.41)");

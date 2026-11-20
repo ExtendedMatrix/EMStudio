@@ -1,19 +1,17 @@
 /**
  * EXPERIMENTAL («Funzioni sperimentali», `experimental.ts`) · THE SITE AND ITS
- * DOOR. Nothing here runs with the switch off: main.ts calls `initSiteDoor`
- * only when it is on, and every export answers nothing without it.
+ * FOOTPRINT — the Landscape Graph, under embargo until its preprint, the only
+ * content of the switch since MICRO-COR11 (20 Nov 2026). Nothing here runs with
+ * the switch off: main.ts calls `initSiteDoor` only when it is on, and every
+ * export answers nothing without it.
  *
- * On the decisions of the Landscape Graph (D-LG4/5) and of «la griglia di
- * ingestion» (25 Oct 2026):
+ * On the decisions of the Landscape Graph (D-LG4/5):
  *
- *  - THE DOOR: one way in for a file of the Storage (or dropped from it) — a
- *    3D model, a tileset, a GIS layer. A dialog says what was recognised, the
- *    resource it becomes, its frame, its stamp and the node it hangs from. A GIS
- *    layer is read and written by the PUBLIC GIS roads (`/gis/inspect`,
- *    `/graph/gis-ingest`: s3Dgraphy's `inspect_layer` and `add_gis_layer`), the
- *    site made in the same delta when the graph has none: one undo step. A model
- *    and a tileset go on along the roads that already exist (the stamp
- *    composer, the tileset bar).
+ *  - (THE DOOR of the lab — a file of the Storage dropped on a graph, «Bring
+ *    into the graph…» — is gone with MICRO-COR11: «Porta dentro…» is the one
+ *    door, and it does what this one did for a GIS layer — the frame, the
+ *    survey that stamps it, and with the switch on the site made in the same
+ *    step and the sheets hanging from it.)
  *  - THE SITE: the LocationNodeGroup of level `sito` (s3Dgraphy's
  *    `make_site_place`), with its glyph (the datamodel's `site` data glyph) as a
  *    chip in the bar of the Matrix and of the Graph — the Matrix draws no place
@@ -31,8 +29,7 @@ import type { EmDocument, EmNode } from "./types";
 import { glyphFor } from "./glyphs";
 import { glyphElement } from "./type-icons";
 import type { SceneMark } from "./scene3d";
-import { basename } from "./paths";
-import { anchorOf, doorKindOf, footprintOf, gridToThree, layersOf, siteOf } from "./site-model";
+import { anchorOf, footprintOf, gridToThree, layersOf, siteOf } from "./site-model";
 
 export * from "./site-model";
 
@@ -42,32 +39,16 @@ const dataOf = (n: EmNode | undefined): Record<string, unknown> => (n?.data ?? {
 
 // ── the module's state and its seams ────────────────────────────────────
 
-export interface GisIngestAsk {
-  path: string;
-  featureKey: string | null;
-  zField: string | null;
-  /** the graph has no site: made with this name in the same delta */
-  siteName: string | null;
-  acquisition: { dtc_kind: string; name: string } | null;
-}
-
 export interface SiteDoorDeps {
   t: T;
   doc: () => EmDocument | null;
-  bridge: () => Promise<string>;
   toast: (s: string) => void;
-  /** the public GIS ingest (`/graph/gis-ingest`), applied as ONE undo step;
-   *  a string is the reason it did not happen */
-  ingest: (ask: GisIngestAsk) => Promise<{ error?: string; siteName?: string; warnings?: string[] }>;
   /** the footprint of the site from the proxies of these units (`/graph/site-footprint`) */
   footprint: (siteId: string, units: string[]) => Promise<{ error?: string; vertices?: number; crs?: string; bbox?: number[] }>;
   /** the node shown in the Inspector (and revealed where it is drawn) */
   select: (id: string) => void;
   /** the scenes repaint their marks, the bars are drawn again */
   redraw: () => void;
-  /** the roads that exist: a tileset to the tileset bar, a model to the stamp composer */
-  tileset: (path: string) => void;
-  model: (path: string) => void;
   readOnly: () => boolean;
 }
 
@@ -223,7 +204,7 @@ export function spaceButtons(winId: string): HTMLElement[] {
   return [tg];
 }
 
-// ── DOM: THE DOOR ───────────────────────────────────────────────────────
+// ── DOM: the dialog of the footprint ────────────────────────────────────
 
 function button(label: string, act: string, run?: () => void): HTMLButtonElement {
   const b = document.createElement("button");
@@ -252,192 +233,6 @@ function dialog(title: string, name: string) {
   const close = () => modal.remove();
   modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
   return { modal, body, foot, close };
-}
-
-function row(dl: HTMLElement, k: string, v: string, attr?: string): void {
-  const dt = document.createElement("dt");
-  dt.textContent = k;
-  const dd = document.createElement("dd");
-  dd.textContent = v;
-  if (attr) dd.dataset.door = attr;
-  dl.append(dt, dd);
-}
-
-/** what the public `/gis/inspect` says of a file (s3Dgraphy `inspect_layer`) */
-interface Inspected {
-  ok: boolean; error?: string; path?: string; gis_format?: string; crs?: string | null;
-  geometry_type?: string | null; feature_count?: number | null; z_range?: number[] | null;
-  fields?: string[]; feature_key?: string | null; z_field?: string | null; companions?: string[];
-  raster?: { kind?: string } | null;
-}
-
-/** «stessa griglia» as the GIS draws it: the same CRS, or the one family
- *  s3Dgraphy declares (`gis.same_grid`: EPSG:31700 ↔ EPSG:3844) */
-const SAME_GRID: string[][] = [["EPSG:31700", "EPSG:3844"]];
-function sameGrid(a: string, b: string): boolean {
-  return a === b || SAME_GRID.some((f) => f.includes(a) && f.includes(b));
-}
-
-/** The door: a file of the Storage (or dropped from it) into the graph. */
-export async function openDoor(path: string, isDir = false): Promise<void> {
-  if (!deps) return;
-  const t = deps.t;
-  const name = basename(path) || path;
-  const kind = doorKindOf(name, isDir);
-  const { modal, body, foot, close } = dialog(t("labsite.doorTitle", { name }), "site-door");
-  modal.dataset.kind = kind;
-  const dl = document.createElement("dl");
-  dl.className = "site-door-facts";
-  body.appendChild(dl);
-  const say = document.createElement("p");
-  say.className = "conn-line";
-  const steps = document.createElement("p");
-  steps.className = "site-door-steps";
-  steps.textContent = t("labsite.doorSteps");
-  row(dl, t("labsite.doorKind"), t(`labsite.kind.${kind}`), "kind");
-  document.body.appendChild(modal);
-  const cancel = button(t("common.cancel"), "cancel", close);
-
-  if (kind === "tileset" || kind === "model") {
-    row(dl, t("labsite.doorResource"), t(kind === "tileset" ? "labsite.resTileset" : "labsite.resModel"), "resource");
-    row(dl, t("labsite.doorNode"), t(kind === "tileset" ? "labsite.nodeTileset" : "labsite.nodeModel"), "node");
-    body.append(steps);
-    const go = button(t(kind === "tileset" ? "labsite.goTileset" : "labsite.goModel"), "door-go", () => {
-      close();
-      if (kind === "tileset") deps!.tileset(path); else deps!.model(path);
-    });
-    foot.append(cancel, go);
-    return;
-  }
-  if (kind !== "gis_layer") {
-    body.append(say);
-    say.textContent = t("labsite.unknownKind");
-    foot.append(button(t("labsite.close"), "close", close));
-    return;
-  }
-  // a GIS layer: the bridge reads it (s3Dgraphy), the door says what it found
-  say.textContent = "…";
-  body.append(say);
-  foot.append(cancel);
-  let ins: Inspected;
-  try {
-    const base = await deps.bridge();
-    const r = await fetch(`${base}/gis/inspect?${new URLSearchParams({ path })}`);
-    ins = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` })) as Inspected;
-    if (r.status === 404 && !ins.error) ins = { ok: false, error: t("labsite.bridgeOld") };
-  } catch {
-    ins = { ok: false, error: t("geo.noBridgeShort") };
-  }
-  if (!ins.ok) {
-    say.textContent = ins.error ?? "—";
-    say.classList.add("conn-err");
-    return;
-  }
-  say.textContent = "";
-  const doc = deps.doc();
-  const site = siteOf(doc);
-  const a = anchorOf(doc);
-  const graphCrs = a?.epsg != null ? `EPSG:${a.epsg}` : null;
-  const crs = ins.crs ?? null;
-  const files = ins.companions ?? [];
-  row(dl, t("labsite.doorResource"), t("labsite.resLayer", { fmt: String(ins.gis_format ?? ""), n: files.length, files: files.join(", ") }), "resource");
-  if (ins.raster) {
-    row(dl, t("labsite.doorContent"), t("labsite.contentRaster", { kind: String(ins.raster.kind ?? "") }), "content");
-  } else {
-    row(dl, t("labsite.doorContent"), t("labsite.content", { type: String(ins.geometry_type ?? "—"), n: ins.feature_count ?? 0,
-      z: ins.z_range ? `${ins.z_range[0].toFixed(1)}–${ins.z_range[1].toFixed(1)} m` : "—" }), "content");
-  }
-  const same = !!(crs && graphCrs && sameGrid(crs, graphCrs));
-  const gridLine = !crs ? t("labsite.noCrs")
-    : !graphCrs ? t("labsite.graphNoCrs", { crs })
-    : same ? (crs === graphCrs ? t("labsite.sameCrs", { crs }) : t("labsite.sameGrid", { crs, graph: graphCrs }))
-    : t("labsite.otherGrid", { crs, graph: graphCrs });
-  row(dl, t("labsite.doorFrame"), gridLine, "frame");
-  // the stamp: the capture that produced the layer
-  const stampLab = document.createElement("label");
-  stampLab.textContent = t("labsite.doorStamp");
-  const stampIn = document.createElement("input");
-  stampIn.type = "text";
-  stampIn.dataset.field = "acquisition";
-  stampIn.value = t("labsite.stampDefault");
-  stampLab.appendChild(stampIn);
-  // the node: the site (or a new one)
-  const siteLab = document.createElement("label");
-  let siteIn: HTMLInputElement | null = null;
-  if (site) {
-    siteLab.textContent = t("labsite.doorSite", { site: String(site.name ?? site.id) });
-    siteLab.dataset.door = "node";
-  } else {
-    siteLab.textContent = t("labsite.doorNewSite");
-    siteIn = document.createElement("input");
-    siteIn.type = "text";
-    siteIn.dataset.field = "site";
-    siteIn.placeholder = t("labsite.siteName");
-    siteLab.appendChild(siteIn);
-  }
-  body.insertBefore(steps, say);
-  body.insertBefore(stampLab, say);
-  body.insertBefore(siteLab, say);
-  // the fields (a vector layer): which names the feature, which holds the height
-  const fields = ins.raster ? [] : ins.fields ?? [];
-  const keySel = document.createElement("select");
-  keySel.dataset.field = "feature_key";
-  const zSel = document.createElement("select");
-  zSel.dataset.field = "z_field";
-  if (fields.length) {
-    const keyLab = document.createElement("label");
-    keyLab.textContent = t("labsite.featureKey");
-    const zLab = document.createElement("label");
-    zLab.textContent = t("labsite.zField");
-    const none = document.createElement("option");
-    none.value = "";
-    none.textContent = "—";
-    zSel.appendChild(none);
-    for (const f of fields) {
-      const o1 = document.createElement("option"); o1.value = f; o1.textContent = f; o1.selected = f === ins.feature_key; keySel.appendChild(o1);
-      const o2 = document.createElement("option"); o2.value = f; o2.textContent = f; o2.selected = f === ins.z_field; zSel.appendChild(o2);
-    }
-    keyLab.appendChild(keySel);
-    zLab.appendChild(zSel);
-    body.insertBefore(keyLab, say);
-    body.insertBefore(zLab, say);
-  }
-  const go = button(t("labsite.goLayer"), "door-go");
-  if (deps.readOnly()) { go.disabled = true; go.title = t("labsite.readOnly"); }
-  if (crs && graphCrs && !same) say.textContent = t("labsite.otherGridWarn");
-  go.onclick = async () => {
-    if (siteIn && !siteIn.value.trim()) { siteIn.focus(); say.textContent = t("labsite.siteName"); return; }
-    go.disabled = true;
-    say.textContent = "…";
-    const r = await deps!.ingest({
-      path: String(ins.path ?? path),
-      featureKey: fields.length ? keySel.value || null : null,
-      zField: fields.length ? zSel.value || null : null,
-      siteName: site ? null : siteIn?.value.trim() ?? null,
-      acquisition: { dtc_kind: "topographic", name: stampIn.value.trim() || t("labsite.stampDefault") },
-    }).catch((e: Error) => ({ error: e.message }) as { error: string; siteName?: string; warnings?: string[] });
-    if (r.error) {
-      say.textContent = r.error;
-      say.classList.add("conn-err");
-      go.disabled = false;
-      return;
-    }
-    close();
-    deps!.toast(t("labsite.layerDone", { name, site: r.siteName ?? String(site?.name ?? "") }));
-    for (const w of r.warnings ?? []) deps!.toast(w);
-    deps!.redraw();
-  };
-  foot.appendChild(go);
-}
-
-/** A Storage row dropped on a Graph, a Matrix or a Space: the door, for a GIS
- *  file (a tileset keeps its own drop on the Space). True when it was ours. */
-export function doorDrop(winType: string, payload: { path: string; name: string; type: string } | null): boolean {
-  if (!deps || !payload || payload.type !== "file") return false;
-  if (!["graph", "scene"].includes(winType)) return false;
-  if (doorKindOf(payload.name) !== "gis_layer") return false;
-  void openDoor(payload.path);
-  return true;
 }
 
 /** Probes' seam (the checks read the state, never the pixels). */

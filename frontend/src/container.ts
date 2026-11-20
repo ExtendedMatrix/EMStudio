@@ -37,15 +37,15 @@ import type { EmDocument } from "./types";
 import { sha256Hex } from "./sha256";
 import { contentSignature, mergePayloads } from "./crdt";
 import { isPeriodizationsSection, PERIODIZATIONS_MEMBER_ID } from "./horizons";
-import { EXPERIMENTAL } from "./experimental";
 import { PRESENTATION_KEY, presentationSection, readPresentation, type Presentation } from "./presentation";
 import { VOCABULARIES_KEY, readVocabularies, type VocabSection } from "./vocab-terms";
 
-/** EXPERIMENTAL · the Periodizations member read apart, by its marker, like the
- *  shelf and the DTC corpus (reading rule 5, §3). Off — the default, the switch
- *  «Funzioni sperimentali» off — it opens as a study graph, as before, and is
- *  written back as it was. A check sets it by hand (`setPeriodizationsApart`). */
-let periodizationsApart = EXPERIMENTAL;
+/** The Periodizations member read apart, by its marker, like the shelf and the
+ *  DTC corpus (reading rule 5, §3). Behind «Funzioni sperimentali» until
+ *  MICRO-COR11 (20 Nov 2026), now always; a file without it is written byte for
+ *  byte as before (scripts/check-periodizations-off.mjs, which sets it by hand
+ *  with `setPeriodizationsApart` to compare the two readings). */
+let periodizationsApart = true;
 export function setPeriodizationsApart(on: boolean): void { periodizationsApart = on; }
 
 // P4.1 · re-exported so a caller that has the container has the algebra too:
@@ -114,7 +114,7 @@ export interface ParsedContainer {
    *  study's graphs must not meet it, and the bug that would cause is a
    *  provenance forest drawn as a stratigraphic matrix. */
   corpus: GraphSection | null;
-  /** EXPERIMENTAL · the HORIZONS member (periodizations), when the
+  /** the HORIZONS member (periodizations), when the
    *  container carries one and it is read apart (`setPeriodizationsApart`) */
   periodizations?: GraphSection | null;
   activeGraphId: string | null;

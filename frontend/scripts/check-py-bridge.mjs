@@ -74,7 +74,7 @@ ok(/em_py\.take_token\(\)/.test(bridge) && /llm_provider\.take_env_key\(\)/.test
 ok(/def take_env_key/.test(llm) && /return _SESSION_KEY or _env_key\(\)/.test(llm), "llm_provider keeps the key in memory");
 for (const k of ["py.noToken", "py.stale", "py.busy", "py.step", "py.stepProposal", "py.partial", "py.noView", "py.noSpace", "py.noCommand", "py.pickNone"])
   eq((i18n.match(new RegExp(`"${k.replace(".", "\\.")}":`, "g")) ?? []).length, 2, `${k}: EN and IT`);
-ok(/if \(EXPERIMENTAL\)\s*\(window as unknown as \{ __EM_PY__/.test(main), "the hook only behind «Funzioni sperimentali»");
+ok(/\/\/ the tests' hook on the Python session \(and the console\)\n\(window as unknown as \{ __EM_PY__/.test(main), "the hook for the tests, with no switch (MICRO-COR11)");
 ok(/pyNudge\("selection-changed"\)/.test(main) && /onLocaleChange\(\(\) => pyNudge\("locale-changed"\)\)/.test(main), "the page's events reach the listeners");
 
 // ── a real bridge ───────────────────────────────────────────────────────────

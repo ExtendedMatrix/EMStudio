@@ -118,8 +118,8 @@ const i18n = read("frontend/src/i18n.ts"), menuUi = read("frontend/src/menu-ui.t
   ok(lv[0] >= 84 && lv.every((x) => x === lv[0]), "level 84 or later, the same in the page, the bridge, em_py");
 }
 ok(/"\/py\/plugins\/dev", "\/py\/plugins\/reload"/.test(bridge), "the two routes in the table of routes");
-ok(/dev: \(\) => EXPERIMENTAL \? devHost\(\) : null/.test(main), "the section only with «Funzioni sperimentali»");
-ok(/\{ dev: EXPERIMENTAL \}/.test(main), "/py/plugins says the switch (the folder counts only with it)");
+ok(/dev: \(\) => devHost\(\)/.test(main), "the section for everyone (MICRO-COR11: out of «Funzioni sperimentali»)");
+ok(/\{ dev: true \}/.test(main), "/py/plugins: the development folder counts (MICRO-COR11)");
 ok((main.match(/badgeOf\(/g) ?? []).length >= 3, "the mark in the run rows, Tools ▸ Plugins and the context menus");
 ok(/row\.badge \? `\$\{row\.text\} \(\$\{row\.badge\}\)`/.test(menuUi) && /dd-badge plg-badge/.test(menuUi), "…in the page's menus and in the system's (words)");
 const keys = [...new Set([...read("frontend/src/extensions-window.ts").matchAll(/t\(`?"?(ext\.dev[A-Za-z]*|ext\.trustKept)/g)].map((m) => m[1]))]

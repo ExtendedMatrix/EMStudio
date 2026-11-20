@@ -12343,3 +12343,8 @@ button.uo-col { cursor: pointer; }
 th.plg-col { font-style: italic; }
 td.plg-col { color: var(--muted, #888); }
 .sb-plugins { margin-left: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted, #888); }
+
+/* MICRO-COR11 · «beta», the mark of a young function (beta.ts) */
+.beta-mark { display: inline-block; margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 0.68rem; font-weight: 500; line-height: 1.35; letter-spacing: 0.02em; text-transform: lowercase;
+  color: var(--text-muted); background: var(--bg-sunken); vertical-align: middle; cursor: help; }

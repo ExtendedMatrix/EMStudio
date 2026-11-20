@@ -147,10 +147,9 @@ export const EDGE_FAMILIES: Family[] = EDGE_FAMILY_TABLE.map((f) => ({
  *  `attributes.original_edge_id` (the GraphML importer) → imported; nothing →
  *  `unmarked`, which is not «the user's». */
 export type EdgeOrigin = "derived" | "user" | "imported" | "unmarked";
-export function edgeOrigin(e: { attributes?: unknown; [k: string]: unknown }, readMark = true): EdgeOrigin {
+export function edgeOrigin(e: { attributes?: unknown; [k: string]: unknown }): EdgeOrigin {
   const a = (e.attributes ?? {}) as Record<string, unknown>;
-  // `readMark` false (the switch «Funzioni sperimentali» off): the old signs only
-  if (readMark && (a.origin === "derived" || a.origin === "user" || a.origin === "imported")) return a.origin;
+  if ((a.origin === "derived" || a.origin === "user" || a.origin === "imported")) return a.origin;
   if (a.derived === true || a.derived === "true") return "derived";
   if (a.original_edge_id != null && a.original_edge_id !== "") return "imported";
   return "unmarked";

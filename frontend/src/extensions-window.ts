@@ -28,7 +28,8 @@
  * only, and again only when its permissions, capabilities or source changed
  * since the last trust (SPEC-plugin §17.3): an update that keeps them shows
  * «codice aggiornato 0.1.0 → 0.2.0 · nessuna nuova domanda» instead of the
- * question. With «Funzioni sperimentali» on, a section «Cartella di sviluppo»
+ * question. A section «Cartella di sviluppo» (beta; behind «Funzioni sperimentali»
+ * until MICRO-COR11)
  * (`plugins_dev_dir`): the folder of this machine whose plugins load where they
  * are — never installed, never asked, marked «sviluppo, non verificato» — and
  * «Ricarica» for one whose files changed.
@@ -94,7 +95,7 @@ export interface ExtWindowHost {
   importScheme?(name: string, emc: unknown): void;
   /** the forms of the packages added to the sheets (their ids) */
   formsAdded?(): ReadonlySet<string>;
-  /** MICRO-PL18 (W15a) · the plugins' development folder; absent or null with «Funzioni sperimentali» off */
+  /** MICRO-PL18 (W15a) · the plugins' development folder; absent or null: no section */
   dev?(): ExtDevHost | null;
   /** MICRO-PL22 · a folder chosen on the desktop (a repository on a NAS); absent on the web */
   pickRepoFolder?(): Promise<string | null>;
@@ -692,7 +693,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     repaint();
   }
 
-  /** MICRO-PL18 (W15a) · «Cartella di sviluppo» — only with «Funzioni sperimentali» */
+  /** MICRO-PL18 (W15a) · «Cartella di sviluppo» · beta */
   function devSection(dev: ExtDevHost): HTMLElement {
     const sec = el("div", "ext-dev");
     sec.dataset.extDev = "1";

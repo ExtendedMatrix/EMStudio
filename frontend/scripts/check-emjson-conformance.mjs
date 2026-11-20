@@ -32,24 +32,17 @@ if (!existsSync(SUITE)) {
   process.exit(0);
 }
 
-// EXPERIMENTAL · with «Funzioni sperimentali» on (EMSTUDIO_EXPERIMENTAL=1)
-// container.ts reads the Periodizations member by its marker, as the shelf and
-// the DTC corpus: the gap below is closed. Off — as for everyone — it is open.
-const EXPERIMENTAL_ON = process.env.EMSTUDIO_EXPERIMENTAL === "1";
-const KNOWN_GAPS = EXPERIMENTAL_ON ? {} : {
-  // container.ts recognises the shelf and the DTC corpus by their marker, not
-  // yet the Periodizations member (s3Dgraphy 1.6.47): it opens as a study graph.
-  // Nothing is lost — the member is written back as it was, marker included —
-  // but the reading rule 5 (§3) is not met.
-  "04-horizons.em.json:periodizations": "the Periodizations member is read as a study graph",
-};
+// The Periodizations member is read apart by its marker, as the shelf and the
+// DTC corpus (reading rule 5, §3) — for everyone since MICRO-COR11 (it was
+// behind «Funzioni sperimentali»): the gap «04-horizons.em.json:periodizations»
+// is closed.
+const KNOWN_GAPS = {};
 
 const bundle = await esbuild.build({
   entryPoints: [`${SRC}container.ts`], bundle: true, format: "esm", write: false,
 });
 const C = await import("data:text/javascript;base64," +
   Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-C.setPeriodizationsApart(EXPERIMENTAL_ON);
 
 // ── a validator for the subset of JSON Schema the em.json schemas use ─────────
 function validator(schema) {

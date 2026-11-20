@@ -1,4 +1,4 @@
-// EXPERIMENTAL · the site and its door in the browser (site-door.ts), registered
+// EXPERIMENTAL · the site and its footprint in the browser (site-door.ts), registered
 // by check-interactions.mjs only with the switch on:
 //
 //   EMSTUDIO_EXPERIMENTAL=1 node scripts/suite-bench.mjs SD
@@ -8,11 +8,12 @@
 // point layers written around the study's anchor (EPSG:3844, the graph's own
 // grid): no survey of the site is read.
 //
-// SD.door      — from the Storage row's menu the GeoJSON is recognised (12
-//                points, the graph's CRS), the site is made, the layer is a
-//                gis_layer resource stamped by its capture; ⌘Z takes the whole
-//                act back; the second layer by a drop on the Matrix finds the
-//                site; the site's chip in the Matrix bar with its glyph
+// SD.door      — MICRO-COR11: the lab's door is gone (no row menu entry, no
+//                drop on the graph); «Porta dentro…» takes the GeoJSON (12
+//                points, the graph's CRS), the survey stamps its layer, the
+//                site is made in the same step and the layer hangs from it;
+//                ⌘Z takes the whole act back; the second file finds the site;
+//                the site's chip in the Matrix bar with its glyph
 // SD.footprint — the footprint from the proxies of SU001–SU004: a POLYGON Z in
 //                EPSG:3844 on the site, its chain (extractor extracted_from the
 //                four geometry properties)
@@ -48,32 +49,45 @@ export function register({ test, browser, PORT, benchFile, workspace, readFileSy
   const graphOf = (d) => d.graph ?? Object.values(d.graphs ?? {}).find((g) => (g.nodes ?? []).length > 50) ?? Object.values(d.graphs ?? {})[0];
   const site = (p) => p.evaluate(() => window.__siteDoor());
 
-  test("SD.door", "Sito (sperimentale) · la porta: dallo Storage un GeoJSON sintetico riconosciuto (12 punti, il CRS del grafo), il sito creato, il layer gis_layer timbrato dal rilievo, ⌘Z toglie l'atto intero; il secondo per drop sulla Matrix trova il sito; il chip del sito col glifo nella barra della Matrix", async () => {
+  test("SD.door", "Sito (sperimentale) · la porta è «Porta dentro…» (MICRO-COR11: la porta del lab tolta): un GeoJSON sintetico (12 punti, il CRS del grafo) con il rilievo che lo timbra e il sito creato nello stesso passo, lo strato gis_layer appeso al sito, ⌘Z toglie l'atto intero; il secondo file trova il sito; il chip del sito col glifo nella barra della Matrix; nessuna voce «Porta nel grafo…» né drop sul grafo", async () => {
     if (!existsSync(V4)) return { pass: false, detail: { missing: V4 } };
     const { p, errors } = await page();
     const out = {};
+    // the lab's door is gone: no row menu entry «Bring into the graph…»
     await workspace(p, "assets");
     await p.evaluate((dir) => window.__EM_DRAG__.storageGo(dir), GIS);
     await p.waitForTimeout(1200);
     const row = p.locator(".storage-row", { has: p.locator(".storage-name", { hasText: /^points_a\.geojson$/ }) }).first();
     await row.click({ button: "right" });
-    await p.click('.storage-row-menu button[data-act="site-door"]');
-    await p.waitForSelector('.modal[data-dialog="site-door"] [data-door="frame"]', { timeout: 20000 });
-    out.dialog = await p.evaluate(() => {
-      const m = document.querySelector('.modal[data-dialog="site-door"]');
-      const dd = (k) => m.querySelector(`[data-door="${k}"]`)?.textContent ?? "";
-      return { kind: dd("kind"), resource: dd("resource"), content: dd("content"), frame: dd("frame"),
-        key: m.querySelector('select[data-field="feature_key"]')?.value, newSite: !!m.querySelector('input[data-field="site"]') };
-    });
-    await p.fill('.modal[data-dialog="site-door"] input[data-field="site"]', "Site A");
+    out.oldMenu = await p.locator('.storage-row-menu button[data-act="site-door"]').count();
+    await p.keyboard.press("Escape");
+    await workspace(p, "canvas");
+    const door = async (name) => {
+      await p.evaluate((f) => { void window.__EM_DRAG__.portaDentro([f]); }, { path: `${GIS}/${name}`, name });
+      await p.waitForSelector('[data-app-dialog="door"] [data-door-survey]', { timeout: 20000 });
+      return p.evaluate(() => {
+        const d = document.querySelector('[data-app-dialog="door"]');
+        const shown = (sel) => { const r = d.querySelector(sel)?.closest(".door-row"); return !!r && !r.classList.contains("hidden"); };
+        const sr = d.querySelector("[data-door-site-name]")?.closest(".door-row") ?? d.querySelector(".door-row[data-door-site]");
+        return { survey: shown("[data-door-survey]"), siteRow: !!sr && !sr.classList.contains("hidden"),
+          newSite: !!d.querySelector("[data-door-site-name]"), siteText: sr?.textContent ?? "" };
+      });
+    };
+    const fillGo = (vals) => p.evaluate((v) => {
+      const d = document.querySelector('[data-app-dialog="door"]');
+      for (const [sel, x] of Object.entries(v)) { const f = d.querySelector(sel); if (f) { f.value = x; f.dispatchEvent(new Event("input", { bubbles: true })); } }
+      d.querySelector("[data-dialog-ok]")?.click();
+    }, vals);
+    out.dialog = await door("points_a.geojson");
     const nBefore = graphOf(await doc(p)).nodes.length;
-    await p.click('.modal[data-dialog="site-door"] button[data-act="door-go"]');
-    await p.waitForFunction(() => window.__siteDoor()?.layers?.length === 1, null, { timeout: 20000 });
+    await fillGo({ "[data-door-survey]": "Topographic survey", "[data-door-site-name]": "Site A", "[data-dialog-input]": "2024" });
+    await p.waitForFunction(() => window.__siteDoor()?.site && (window.__siteDoor()?.layers?.length ?? 0) >= 1, null, { timeout: 30000 });
     let g = graphOf(await doc(p));
     const s = g.nodes.find((n) => n.node_type === "LocationNodeGroup" && n.data?.level === "sito");
     const layer = g.nodes.find((n) => n.node_type === "resource" && n.data?.url_type === "gis_layer");
+    const sheet = layer && g.nodes.find((n) => g.edges.some((e) => e.source === layer.id && e.target === n.id && e.edge_type === "has_file"));
     out.site = s && { name: s.name, kind: s.data.kind };
-    out.layer = layer && { crs: layer.data.crs, format: layer.data.gis_format, count: layer.data.feature_count };
+    out.sheet = sheet && { crs: sheet.data?.crs, format: sheet.data?.gis_format, count: sheet.data?.feature_count };
     out.link = g.edges.filter((e) => e.source === s?.id && e.target === layer?.id).map((e) => e.edge_type);
     out.capture = g.edges.filter((e) => e.target === layer?.id && e.edge_type === "dtc_had_output")
       .map((e) => g.nodes.find((n) => n.id === e.source)?.data?.dtc_kind);
@@ -85,34 +99,34 @@ export function register({ test, browser, PORT, benchFile, workspace, readFileSy
     await p.evaluate(() => window.__EM_DRAG__.redo());
     await p.waitForTimeout(500);
     out.afterRedo = graphOf(await doc(p)).nodes.length - nBefore;
-    // the second layer dragged from the Storage onto the Matrix → the door, the site found
-    await workspace(p, "canvas");
-    await p.evaluate((path) => {
+    // a Storage file dragged onto the Matrix: no door any more (the graph is not a drop target)
+    out.graphDrop = await p.evaluate((path) => {
       const area = [...document.querySelectorAll(".tile-area")].find((a) => a.querySelector("canvas")) ?? document.querySelector(".tile-area");
       const dt = new DataTransfer();
       dt.setData("application/x-em-storage-entry", JSON.stringify({ path, type: "file", name: "points_b.geojson", ext: "geojson" }));
-      area.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const ev = new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt });
+      area.dispatchEvent(ev);
       area.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return { accepted: ev.defaultPrevented };
     }, `${GIS}/points_b.geojson`);
-    const dropped = await p.waitForSelector('.modal[data-dialog="site-door"] button[data-act="door-go"]', { timeout: 20000 }).then(() => true, () => false);
-    out.drop = dropped;
-    if (!dropped) await p.evaluate((path) => window.__openDoor(path), `${GIS}/points_b.geojson`);
-    await p.waitForSelector('.modal[data-dialog="site-door"] [data-door="node"]', { timeout: 20000 });
-    out.secondFindsSite = await p.evaluate(() => document.querySelector('.modal[data-dialog="site-door"] [data-door="node"]')?.textContent ?? "");
-    await p.click('.modal[data-dialog="site-door"] button[data-act="door-go"]');
-    await p.waitForFunction(() => window.__siteDoor()?.layers?.length === 2, null, { timeout: 20000 });
+    await p.waitForTimeout(800);
+    out.graphDrop.dialog = await p.locator('[data-app-dialog="door"]').count();
+    // the second file through «Porta dentro…»: the site found
+    out.second = await door("points_b.geojson");
+    await fillGo({ "[data-door-survey]": "Topographic survey", "[data-dialog-input]": "2024" });
+    await p.waitForFunction(() => window.__siteDoor()?.layers?.length === 2, null, { timeout: 30000 });
     await p.waitForTimeout(600);
     out.chip = await p.evaluate(() => { const c = document.querySelector(".site-chip");
       return c ? { text: c.textContent, glyph: !!c.querySelector(".site-glyph") } : null; });
     const conds = {
-      recognised: /GIS layer/i.test(out.dialog.kind) && /geojson/i.test(out.dialog.resource) && /12 features/.test(out.dialog.content)
-        && /EPSG:3844, the graph's/.test(out.dialog.frame) && out.dialog.key === "code" && out.dialog.newSite,
+      oldDoorGone: out.oldMenu === 0 && !out.graphDrop.accepted && out.graphDrop.dialog === 0,
+      asked: out.dialog.survey && out.dialog.siteRow && out.dialog.newSite,
       site: out.site?.name === "Site A" && out.site.kind === "toponym",
-      layer: out.layer?.crs === "EPSG:3844" && out.layer.format === "geojson" && out.layer.count === 12,
+      sheet: out.sheet?.crs === "EPSG:3844" && out.sheet.format === "geojson" && out.sheet.count === 12,
       link: out.link.length === 1 && out.link[0] === "has_linked_resource",
       stamped: out.capture.length === 1 && out.capture[0] === "topographic",
       oneStep: out.added > 2 && out.afterUndo === 0 && out.afterRedo === out.added,
-      second: out.drop && /Site A/.test(out.secondFindsSite),
+      second: out.second.siteRow && !out.second.newSite && /Site A/.test(out.second.siteText),
       chip: !!out.chip && /Site A/.test(out.chip.text) && out.chip.glyph && /2 layers/.test(out.chip.text),
       noErrors: !errors.length,
     };

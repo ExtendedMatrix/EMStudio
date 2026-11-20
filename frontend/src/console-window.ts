@@ -1,8 +1,8 @@
 /**
  * MICRO-PL16-CONSOLE (W13, E.D. 18 Nov 2026) · the Python console.
  *
- * *Strumenti ▸ Console Python…*, only with «Funzioni sperimentali» on (D-7,
- * W-12): off, there is no button and no word of it. A floating window like
+ * *Strumenti ▸ Console Python…* · beta (behind «Funzioni sperimentali» until
+ * MICRO-COR11, 20 Nov 2026; now there for everyone). A floating window like
  * «Estensioni» and «Vocabolari», detachable like them (SPEC-plugin §9).
  *
  * What is inside: `em` imported, `g = em.graph`, `sel = em.app.selection()` —
@@ -250,7 +250,8 @@ export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleS
 
   const head = el("div", "pyc-head");
   const where = el("span", "pyc-where", host.docName() ? t("pyc.on", { doc: host.docName()! }) : t("pyc.noDoc"));
-  const note = el("span", "pyc-note", t("pyc.experimental"));
+  const note = el("span", "pyc-note beta-mark", t("ui.beta"));
+  note.title = t("ui.betaTip");
   head.append(where, note);
 
   const out = el("div", "pyc-out");

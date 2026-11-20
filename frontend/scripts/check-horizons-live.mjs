@@ -12,9 +12,7 @@
 // like a graph (G1: `graph_id` in the envelope, and back to this store).
 import assert from "node:assert/strict";
 import { readFileSync, mkdirSync } from "node:fs";
-// EXPERIMENTAL · the horizons are behind «Funzioni sperimentali»: this check turns
-// the switch on in its own browser (experimental-env.mjs), whatever the shell says
-import { withExperimental } from "./experimental-env.mjs";
+// (the horizons left «Funzioni sperimentali» with MICRO-COR11: no switch to turn on)
 
 const PORT = process.env.PORT ?? "5180";
 const BRIDGE = process.env.BRIDGE ?? "http://127.0.0.1:8780";
@@ -28,7 +26,7 @@ const chromium = pw.chromium ?? pw.default?.chromium;
 
 let checks = 0;
 const ok = (c, what) => { assert.ok(c, what); checks++; console.log(`  ✓ ${what}`); };
-const browser = withExperimental(await chromium.launch({ executablePath: CHR }), true);
+const browser = await chromium.launch({ executablePath: CHR });
 const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));

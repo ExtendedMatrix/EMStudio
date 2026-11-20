@@ -884,13 +884,27 @@
               <span data-i18n="settings.showIds">Show node UUIDs (inspector) — off by default</span>
             </label>
           </section>
+          <!-- MICRO-COR11 · out of «Funzioni sperimentali», each with its own switch, off by default -->
+          <section data-settings-tab="advanced" class="settings-sect" id="settings-sect-own-switches">
+            <h4 data-i18n="settings.ownSwitches">Functions with a switch of their own</h4>
+            <label class="settings-check">
+              <input id="set-own-tiles" type="checkbox" />
+              <span data-i18n="settings.ownTiles">A tileset (3D Tiles) from a textured mesh · beta — off by default</span>
+            </label>
+            <p class="settings-hint" data-i18n="settings.ownTilesHint">In Archive ▸ Files ▸ Optimize, «Tileset (3D Tiles)» joins the destinations: a textured OBJ cut into tiles by Obj2Tiles, validated, packed as .3tz, stamped and registered as a version of the model — the Space then loads a large model a piece at a time.</p>
+            <label class="settings-check">
+              <input id="set-own-blender" type="checkbox" />
+              <span data-i18n="settings.ownBlender">Blender launched from EMStudio · beta — off by default</span>
+            </label>
+            <p class="settings-hint" data-i18n="settings.ownBlenderHint">In Archive ▸ Files ▸ Optimize, the section «Blender (the second way)»: EMStudio finds the Blender of this computer, asks what it has (EM Tools, 3D Survey Collection) and runs it in the background — an atlas re-baked, a LOD set from a .blend, «Prepare for a use». It needs EMStudio's service on this computer.</p>
+          </section>
           <section data-settings-tab="advanced" class="settings-sect" id="settings-sect-experimental">
             <h4 data-i18n="settings.experimental">Experimental functions</h4>
             <label class="settings-check">
               <input id="set-experimental" type="checkbox" />
               <span data-i18n="settings.experimentalOn">Turn on the experimental functions on this machine — off by default</span>
             </label>
-            <p class="settings-hint" data-i18n="settings.experimentalHint">Functions still being tried. Read when EMStudio starts: a change takes effect after a reload.</p>
+            <p class="settings-hint" data-i18n="settings.experimentalHint">Today they hold only the site and its footprint (the Landscape Graph, under embargo until its preprint). Read when EMStudio starts: a change takes effect after a reload.</p>
           </section>
         </div>
         <div class="modal-foot">

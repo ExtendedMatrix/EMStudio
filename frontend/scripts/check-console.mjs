@@ -88,13 +88,16 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const main = read("frontend/src/main.ts"), html = read("frontend/index.html"), i18n = read("frontend/src/i18n.ts");
 const bridge = read("tools/em_bridge.py"), emPy = read("tools/em_py.py"), css = read("frontend/src/style.css");
 ok(!/btn-tool-console|Console Python|Python console/i.test(html), "index.html has no word of the console (off: nothing)");
-ok(/if \(EXPERIMENTAL\) \{\s*\/\/ made only with the switch on[\s\S]{0,300}b\.id = "btn-tool-console"/.test(main), "the button made only behind «Funzioni sperimentali»");
-ok(/function openConsoleWindow\(\): void \{\s*if \(!EXPERIMENTAL\) return;/.test(main), "…and the window opens only with it");
+// MICRO-COR11 · out of «Funzioni sperimentali»: the button for everyone, marked «beta»
+ok(/\{\s*\/\/ Strumenti ▸ Console Python… · beta[\s\S]{0,300}b\.id = "btn-tool-console"/.test(main), "the button made for everyone (MICRO-COR11)");
+ok(/function openConsoleWindow\(\): void \{\s*consoleWindow\.open\(\);/.test(main) && !/pyc\.off/.test(main), "…and the window opens with no switch");
+ok(/"tools\.console": "Python console… · beta"/.test(i18n) && /"tools\.console": "Console Python… · beta"/.test(i18n), "the entry says «beta» (EN + IT)");
+ok(/t\("ui\.beta"\)/.test(read("frontend/src/console-window.ts")), "the window's head says «beta»");
 ok(/new ColoursWindow\(coloursWindowHostForVocab\(\), document, \{\s*prefKey: "emstudio\.console\.window\.v1"/.test(main), "a floating window like «Estensioni» (detachable)");
 ok(/sig: \(\) => getLocale\(\)/.test(main), "…rebuilt only by the language");
 ok(/console: \(\) => openConsoleWindow\(\)/.test(main), "the hook opens it");
 const keys = [...new Set([...i18n.matchAll(/"(pyc\.[A-Za-z]+|tools\.console(?:Title)?)":/g)].map((m) => m[1]))];
-ok(keys.length >= 28, `the console's words (${keys.length})`);
+ok(keys.length >= 26, `the console's words (${keys.length})`);   // MICRO-COR11: pyc.off, pyc.experimental gone (ui.beta)
 for (const k of keys) eq((i18n.match(new RegExp(`"${k.replace(".", "\\.")}":`, "g")) ?? []).length, 2, `${k}: EN and IT`);
 const used = [...read("frontend/src/console-window.ts").matchAll(/t\("(pyc\.[A-Za-z]+)"/g)].map((m) => m[1]);
 for (const k of new Set(used)) ok(keys.includes(k), `${k} used and translated`);

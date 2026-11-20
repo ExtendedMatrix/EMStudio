@@ -121,16 +121,3 @@ export function gridToThree(a: Anchor, p: number[]): V3 {
   const x = dx * c - dy * s, y = dx * s + dy * c;
   return blenderToThree([x, y, (p[2] ?? a.z) - a.z]);
 }
-
-/** What the door recognises by the name (the bridge confirms by reading). */
-export type DoorKind = "gis_layer" | "tileset" | "model" | "unknown";
-export function doorKindOf(name: string, isDir = false): DoorKind {
-  const n = name.toLowerCase();
-  if (isDir || n === "tileset.json" || /\.(3tz|3dtiles)$/.test(n)) return "tileset";
-  // the four formats of the public GIS (MICRO-GIS-BASE): a shapefile by any
-  // of its companions, a GeoPackage, a GeoJSON, a GeoTIFF
-  if (/\.(shp|dbf|shx|prj|qpj|cpg|gpkg|geojson|tiff?)$/.test(n)) return "gis_layer";
-  if (/\.(glb|gltf|obj|ply|fbx|stl|blend|e57|las|laz)$/.test(n)) return "model";
-  return "unknown";
-}
-

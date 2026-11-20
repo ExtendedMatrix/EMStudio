@@ -17,7 +17,7 @@ const load = async (entry) => {
 };
 const H = await load("horizons.ts");
 const C = await load("container.ts");
-C.setPeriodizationsApart(true);   // EXPERIMENTAL · the member read apart (the switch on)
+C.setPeriodizationsApart(true);   // the member read apart (as for everyone since MICRO-COR11)
 
 let checks = 0;
 const ok = (cond, what) => { assert.ok(cond, what); checks++; };
