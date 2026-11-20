@@ -159,6 +159,8 @@ export const MENUS: MenuDef[] = [
       cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint" }),
       // MICRO-GEO09 · a folder (a stack of slices): read by a plugin's reader of folders (door.reader@2)
       cmd("doorFolder", "door.folderMenu", "btn-porta-dentro-cartella", { title: "door.folderMenuHint" }),  // ALLOW-IT: an element id (as btn-porta-dentro), not words on screen
+      // MICRO-COR06 · a DosCo folder: each file with an EM id the document of that id (the «Resources» window absorbed)
+      cmd("doorDosco", "door.doscoMenu", "btn-door-dosco", { title: "door.doscoMenuHint" }),
       // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione»: each graph its system
       cmd("georef", "gr.menu", "btn-georef", { title: "gr.menuTitle" }),
       { kind: "sub", id: "import", label: "toolbar.import", slot: "menu.file.import@1", rows: [

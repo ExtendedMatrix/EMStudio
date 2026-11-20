@@ -260,6 +260,20 @@ eq(L.legendRowsShown(Array.from({ length: 14 }, (_, i) => i), true).more, 0, "op
   L.saveLegendPref("space:1", { corner: "tr", w: 300, h: 200, folded: true, all: false }, st2);
   eq([L.loadLegendPref("space:1", st2).corner, L.loadLegendPref("space:1", st2).folded, L.loadLegendPref("space:2", st2).corner], ["tr", true, "bl"], "kept per view");
 }
+// MICRO-COR06 · the legend by degrees with the room of its scene, a swatch a switch
+eq([L.legendForm(1200, 800), L.legendForm(793, 455), L.legendForm(640, 400), L.legendForm(680, 390), L.legendForm(506, 293), L.legendForm(400, 300), L.legendForm(600, 250), L.legendForm(381, 203), L.legendForm(0, 0)],
+  ["full", "full", "full", "swatches", "swatches", "chip", "chip", "chip", "full"], "full · swatches (E.D.'s window of 680×420, its scene 680×390) · one label; not measured yet: full");
+eq([L.boxesMeet({ left: 0, top: 0, right: 10, bottom: 10 }, { left: 5, top: 5, right: 20, bottom: 20 }),
+  L.boxesMeet({ left: 0, top: 0, right: 10, bottom: 10 }, { left: 10, top: 0, right: 20, bottom: 10 })], [true, false], "a measure's label on the legend: met; beside it: not");
+{
+  const keys = ["a", "b", "c"];
+  const s0 = { ...C.defaultColourState(), mode: "property", property: "p", isolated: null, hidden: [] };
+  const s1 = C.legendToggle(s0, "b", keys);
+  eq(s1.hidden, ["b"], "a swatch hides its class");
+  eq(C.legendToggle(s1, "b", keys).hidden, [], "…and shows it again");
+  const s2 = C.legendToggle({ ...s0, isolated: "a" }, "c", keys);
+  eq([s2.isolated, s2.hidden], [null, ["b"]], "out of an isolation: what was shown stays shown, the swatch's class joins it");
+}
 
 // ── 5 · TempluMare v10 (a copy) ─────────────────────────────────────────────
 const V10 = process.env.V10 || "/tmp/microS/T/EM/TempluMare_v10.em.json";

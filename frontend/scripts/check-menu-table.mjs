@@ -89,7 +89,9 @@ const MAIN = readFileSync(`${SRC}main.ts`, "utf8");
 const FILE_ORDER = ["new", "newProject", "openProject", "reorderProject", "closeProject", "revealDoc", "open", "openRecent▸", "openReplace", "close", "—",
   "save", "saveAs", "saveAll", "pin", "—",
   // MICRO-E p.1 · «Porta dentro…», the one door, before Import
-  "door", "doorFolder", "georef",
+  "door", "doorFolder",
+  // MICRO-COR06 · «Read as DosCo…»: a DosCo folder through the door (the «Resources» window absorbed)
+  "doorDosco", "georef",
   "import▸", "import/importGraphml", "import/importMapping",
   "export▸", "export/exportSvg", "export/exportTtl",
   // MICRO-PL002 · «Stampa schede…», after Export

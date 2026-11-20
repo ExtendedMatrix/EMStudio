@@ -65,3 +65,30 @@ export function legendRowsShown<T>(rows: T[], all: boolean, max = LEGEND_ROWS): 
   if (all || rows.length <= max + 1) return { shown: rows, more: 0 };
   return { shown: rows.slice(0, max), more: rows.length - max };
 }
+
+/**
+ * MICRO-COR06 (E.D., 19 Nov 2026: in a Space of ~680×420 the legend covered
+ * half the scene, its labels cut, the measure's label over it) · the legend
+ * comes down BY DEGREES with the room of its scene:
+ *  - `full`: the rows, colour · value · number (above `LEGEND_FULL`);
+ *  - `swatches`: the colours and their numbers only, the value on hover
+ *    (above `LEGEND_SWATCHES`);
+ *  - `chip`: one label «Legend (n)», which opens the full legend with a click.
+ * In every form a SWATCH is a switch (shows / hides its class) and the whole
+ * text of a value lives in its tooltip.
+ */
+export type LegendForm = "full" | "swatches" | "chip";
+export const LEGEND_FULL = { w: 640, h: 400 };
+export const LEGEND_SWATCHES = { w: 420, h: 260 };
+/** the form of the legend for a scene of w × h pixels (0 × 0: not measured yet, full) */
+export function legendForm(w: number, h: number): LegendForm {
+  if (!(w > 0 && h > 0)) return "full";
+  if (w >= LEGEND_FULL.w && h >= LEGEND_FULL.h) return "full";
+  if (w >= LEGEND_SWATCHES.w && h >= LEGEND_SWATCHES.h) return "swatches";
+  return "chip";
+}
+/** do two boxes (left, top, right, bottom) overlap? (the legend and a measure's label) */
+export function boxesMeet(a: { left: number; top: number; right: number; bottom: number },
+                          b: { left: number; top: number; right: number; bottom: number }): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}

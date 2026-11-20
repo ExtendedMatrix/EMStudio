@@ -202,7 +202,9 @@ ok(!/\.(innerHTML|outerHTML)\s*=|insertAdjacentHTML/.test(surfaces), "the drawer
   ok(/const panel = c\.panel \? panelNamed\(plugins\(\), c\.panel\) : null;/.test(main) && /\[pathSlotOf\(c\)\]: path/.test(main) && /openPluginPanel\(panel\);/.test(main),
     "a reader with a panel: the panel opens with the path in its field");
   ok(/!typedPath\(x\.name\)/.test(main), "a path already in a panel's field asks no file picker");
-  for (const k of ["door.folderMenu", "door.folderMenuHint", "door.folderPickTitle", "door.noFolderReader", "door.pickReader", "door.readerPanel", "door.readAs", "door.readAsHost"])
+  // MICRO-COR06 · no «No add-on reads a folder» any more: without one, the folder is read as DosCo
+  ok(/if \(c === "dosco"\) await openDoscoDoor\(f\.path!\)/.test(main), "a folder with no reader of folders: read as DosCo");
+  for (const k of ["door.folderMenu", "door.folderMenuHint", "door.folderPickTitle", "door.pickReader", "door.readerPanel", "door.readAs", "door.readAsHost", "door.doscoMenu"])
     ok((i18n.match(new RegExp(`"${k.replace(".", "\\.")}":`, "g")) ?? []).length === 2, `${k}: EN + IT`);
 }
 const keys = [...new Set([...main.matchAll(/t\("(plg\.[A-Za-z]+)"/g), ...surfaces.matchAll(/t\("(plg\.[A-Za-z]+)"/g)].map((m) => m[1]))];

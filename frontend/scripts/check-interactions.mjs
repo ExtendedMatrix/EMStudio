@@ -4578,31 +4578,47 @@ test("V4.storage", "Storage: il percorso si legge (la coda, e intero al passaggi
     detail: { held, selection, crumb, card, errors } };
 });
 
-test("V6.resources", "Strumenti ▸ Risorse: due file con lo stesso id (D.04) avvisano, un file senza id è nominato, e i documenti «/DosCo/…» non restano «assenti» dopo lo scan della cartella", async () => {
+/** MICRO-COR06 · a case that opens its graph AFTER the page started (openAt):
+ *  a graph handed at the start (__EM_TEST_DATA__) meets the «pluginChecks
+ *  before initialization» of HEAD for some fixtures (dev29-segni-lite) */
+async function openLate(doc, opts = {}) {
+  const d = typeof doc === "string" ? fixture(doc) : doc;
+  const o = await open({ ...opts, doc: null });
+  await o.p.waitForFunction(() => !!window.__EM_DRAG__?.openAt, null, { timeout: 30000 });
+  await o.p.evaluate(([x, at]) => window.__EM_DRAG__.openAt(x, at), [d, opts.at ?? "/tmp/cor06-case.em.json"]);
+  await o.p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 30000 });
+  await o.p.waitForTimeout(500);
+  return o;
+}
+/** MICRO-COR06 · the DosCo door of a page: its notes, rows and documents */
+const doscoDoor = (p) => p.evaluate(() => {
+  const d = document.querySelector('[data-app-dialog="door-dosco"]');
+  if (!d) return null;
+  return { title: d.querySelector(".app-dialog-title, h3, .modal-head")?.textContent ?? "",
+    dups: [...d.querySelectorAll(".res-note[data-dup-id]")].map((n) => n.dataset.dupId).sort(),
+    noId: Number(d.querySelector(".res-note[data-no-id]")?.dataset.noId ?? 0),
+    notes: [...d.querySelectorAll(".res-note")].map((n) => n.textContent),
+    rows: [...d.querySelectorAll("tr[data-dosco-row]")].map((r) => ({ file: r.dataset.doscoRow, key: r.dataset.doscoKey, nodate: r.classList.contains("door-nodate") })) };
+});
+
+test("V6.resources", "MICRO-COR06 · «Leggi come DosCo»: due file con lo stesso id (D.04) sono un documento solo e lo dice, un file senza id è nominato e resta fuori, i documenti già nel grafo (D.02, D.33) non tornano; la finestra «Risorse» non c'è più", async () => {
   const root = FS_ROOT ?? (await rootPath());
   const dir = `${root}/dev29/DosCo`;
   mkdirSync(dir, { recursive: true });
-  // a 1×1 JPEG: the thumbnail decodes, the test is about RESOLVING the file
+  // a 1×1 JPEG
   const jpg = Buffer.from("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=", "base64");
   for (const f of ["D.02.jpg", "D.33.jpg", "D.04_Frammento.JPG", "D.04_Pilastrino.JPG", "photo_2022-02-07_11-47-54.jpg"]) writeFileSync(`${dir}/${f}`, jpg);
-  const { p, ctx, errors } = await open({ doc: "dev29-segni-lite", locale: "en" });
-  await p.evaluate(() => document.getElementById("btn-resources").click());
-  await p.fill("#res-folder", dir);
-  await p.click("#res-scan");
-  await p.waitForTimeout(2500);
-  const notes = await p.evaluate(() => [...document.querySelectorAll("#res-shelf .res-note")].map((n) => ({ dup: n.dataset.dupId ?? null, noId: n.dataset.noId ?? null, txt: n.textContent })));
-  // the Documents section re-asks its previews with the folder now set
-  await p.evaluate(() => { document.getElementById("resources-done").click(); document.getElementById("btn-resources").click(); });
-  await p.waitForTimeout(500);
-  await p.evaluate(() => document.getElementById("res-docs")?.scrollIntoView());
-  await p.waitForTimeout(2500);
-  const docs = await p.evaluate(() => [...document.querySelectorAll("#res-docs .res-row")].map((r) => ({ name: r.querySelector(".res-row-title")?.textContent, missing: !!r.querySelector(".rp-missing") })));
-  await p.screenshot({ path: SHOT("v6-risorse-dosco") }).catch(() => {});
+  const { p, ctx, errors } = await openLate("dev29-segni-lite", { locale: "en" });
+  const gone = await p.evaluate(() => !document.getElementById("resources-modal") && !document.getElementById("btn-resources") && !!document.getElementById("btn-door-dosco-tools"));
+  await p.evaluate((d) => { void window.__EM_DRAG__.doorDosco(d); }, dir);
+  await p.waitForSelector('[data-app-dialog="door-dosco"]', { timeout: 15000 }).catch(() => {});
+  const door = await doscoDoor(p);
+  await p.screenshot({ path: SHOT("v6-leggi-come-dosco") }).catch(() => {});
   await ctx.close();
-  return { pass: notes.some((n) => n.dup === "D.04" && /D\.04_Frammento/.test(n.txt) && /D\.04_Pilastrino/.test(n.txt))
-      && notes.some((n) => n.noId === "1" && /photo_2022-02-07_11-47-54\.jpg/.test(n.txt))
-      && docs.length === 3 && docs.every((d) => !d.missing) && !errors.length,
-    detail: { notes, docs, errors } };
+  return { pass: gone && !!door && JSON.stringify(door.dups) === JSON.stringify(["D.04"]) && door.notes.some((n) => /D\.04_Frammento/.test(n) && /D\.04_Pilastrino/.test(n) && /one document/.test(n))
+      && door.noId === 1 && door.notes.some((n) => /photo_2022-02-07_11-47-54\.jpg/.test(n))
+      && JSON.stringify(door.rows.map((r) => r.key)) === JSON.stringify(["D.04", "D.04"]) && door.rows[0].nodate && !errors.length,
+    detail: { gone, door, errors } };
 });
 
 test("V7.mapping", "Mapping editor: il primo clic su «Leggi i campi» funziona; il template sourcelist di EM è riconosciuto (em_sourcelist_it, riga 2); «Una mappa registrata» mostra l'elenco; l'errore si legge nella finestra; il primo clic su «Applica» funziona", async () => {
@@ -4797,23 +4813,23 @@ test("W06.sources", "U6 · la finestra del grafo di Fonti si apre sulla Matrix, 
   return { pass: mode === "matrix" && !errors.length, detail: { mode, errors } };
 });
 
-test("W07.scan", "U7 · «Scansiona come DosCo…» è sulla cartella dello Storage e sullo shelf vuoto, e apre le Risorse con la scansione fatta", async () => {
+test("W07.scan", "U7 · MICRO-COR06 · «Leggi questa cartella come DosCo…» è sulla cartella dello Storage e sullo shelf vuoto, e apre la porta «Leggi come DosCo» su quella cartella", async () => {
   const root = FS_ROOT ?? (await rootPath());
   const dir = `${root}/dev30/DosCo`;
   mkdirSync(dir, { recursive: true });
   for (const f of ["D.02.jpg", "D.04_a.JPG", "D.04_b.JPG"]) writeFileSync(`${dir}/${f}`, PNG1);
-  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", ws: "assets" });
+  const { p, ctx, errors } = await openLate(LITE(), { locale: "en", ws: "assets" });
+  await workspace(p, "assets");
   await storageInto(p, [root.split("/").pop(), "dev30", "DosCo"]);
   const onShelf = await p.locator('.viewer-empty [data-action="scan-dosco"]').count();
   // MICRO-ARCHIVIO-2 · the folder's gestures are in the Info tab of the panel (nothing chosen)
   await p.locator('.files-folder-gestures [data-action="scan-dosco"]').first().click();
-  await p.waitForTimeout(2500);
-  const r = await p.evaluate(() => ({ open: !document.getElementById("resources-modal")?.classList.contains("hidden"),
-    folder: document.getElementById("res-folder").value, dup: [...document.querySelectorAll("#res-shelf .res-note")].some((n) => n.dataset.dupId === "D.04") }));
-  await p.screenshot({ path: SHOT("w07-scansiona-dosco") }).catch(() => {});
+  await p.waitForSelector('[data-app-dialog="door-dosco"]', { timeout: 15000 }).catch(() => {});
+  const door = await doscoDoor(p);
+  await p.screenshot({ path: SHOT("w07-leggi-come-dosco") }).catch(() => {});
   await ctx.close();
-  // the folder as the bridge names it: /tmp is /private/tmp on macOS
-  return { pass: onShelf === 1 && r.open && [dir, realpathSync(dir)].includes(r.folder) && r.dup && !errors.length, detail: { onShelf, r, errors } };
+  return { pass: onShelf === 1 && !!door && /DosCo/.test(door.title) && door.dups.includes("D.04") && door.rows.some((r) => r.key === "D.04") && !errors.length,
+    detail: { onShelf, door, errors } };
 });
 
 test("W08.save", "U8 · nel desktop, dopo «Salva come» e un cambio di grafo, «Salva» scrive sul file aperto senza riaprire il dialogo", async () => {
@@ -5852,37 +5868,23 @@ test("B1.near", "B1 → PULIZIA p.1 → CHIP-UNICO p.2 · «Publish…» grigio 
     detail: { title, r, errors } };
 });
 
-test("TC2.scan", "T-C2 · Tempio (copia sotto la radice del bridge), scan di EM/DosCo: ID doppi D.04 e D.11, un file senza ID; Documents: D.02, D.32 e D.33 tutti presenti (nessun «absent»), con la miniatura; ogni orfano ha la miniatura, o dice «empty copy» se i suoi byte sono zeri", async () => {
+test("TC2.scan", "T-C2 · MICRO-COR06 · Tempio (copia sotto la radice del bridge), «Leggi come DosCo» su EM/DosCo: ID doppi D.04 e D.11 detti (un documento ciascuno), un file senza ID detto; i documenti già nel grafo non sono righe", async () => {
   if (!FS_ROOT) return { pass: false, detail: { why: "FS_ROOT not set" } };
   const em = `${FS_ROOT}/dev33/tempio/EM`;
   if (!existsSync(`${em}/Tempio_Giunone_Moneta.em.json`)) return { pass: false, detail: { missing: em } };
   const { p, ctx, errors } = await open({ doc: null, locale: "en", ws: "assets" });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
-  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(`${em}/Tempio_Giunone_Moneta.em.json`, "utf8")), `${em}/Tempio_Giunone_Moneta.em.json`]);
+  const doc = JSON.parse(readFileSync(`${em}/Tempio_Giunone_Moneta.em.json`, "utf8"));
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [doc, `${em}/Tempio_Giunone_Moneta.em.json`]);
   await p.waitForTimeout(2500);
-  await p.evaluate(() => document.getElementById("btn-resources").click());
-  await p.waitForTimeout(500);
-  await p.fill("#res-folder", `${em}/DosCo`);
-  await p.click("#res-scan");
-  await p.waitForFunction(() => document.querySelectorAll("#res-shelf .res-row").length > 0, null, { timeout: 30000 }).catch(() => {});
-  await p.waitForTimeout(6000);
-  const r = await p.evaluate(() => ({
-    dups: [...document.querySelectorAll("#res-shelf .res-note[data-dup-id]")].map((n) => n.dataset.dupId).sort(),
-    noId: Number(document.querySelector("#res-shelf .res-note[data-no-id]")?.dataset.noId ?? 0),
-    docs: [...document.querySelectorAll("#res-docs .res-row")].map((row) => ({ name: row.querySelector(".res-row-main")?.textContent.trim().split(/\s/)[0],
-      missing: !!row.querySelector(".rp-missing"), img: !!row.querySelector("img.rp-img") })),
-    orphans: [...document.querySelectorAll("#res-shelf .res-row")].length,
-    orphanImgs: [...document.querySelectorAll("#res-shelf .res-row img.rp-img")].length,
-    orphanBoxes: [...document.querySelectorAll("#res-shelf .res-row")].slice(0, 10).map((row) => {
-      const th = row.firstElementChild;
-      return { img: !!th?.querySelector("img.rp-img"), text: th?.textContent ?? "", title: th?.title ?? "" };
-    }),
-  }));
+  await p.evaluate((d) => { void window.__EM_DRAG__.doorDosco(d); }, `${em}/DosCo`);
+  await p.waitForSelector('[data-app-dialog="door-dosco"]', { timeout: 30000 }).catch(() => {});
+  const door = await doscoDoor(p);
+  const names = new Set(Object.values(doc.graphs ?? { g: doc.graph }).flatMap((g) => g.nodes).filter((n) => n.node_type === "document").map((n) => String(n.name)));
   await ctx.close();
-  return { pass: JSON.stringify(r.dups) === JSON.stringify(["D.04", "D.11"]) && r.noId === 1 && r.docs.length === 3
-      && r.docs.every((d) => !d.missing && d.img) && r.orphanImgs > 0
-      && r.orphanBoxes.every((b) => b.img || /empty copy/.test(b.text)) && !r.orphanBoxes.some((b) => /does not decode/.test(b.title)) && !errors.length,
-    detail: { ...r, errors } };
+  return { pass: !!door && JSON.stringify(door.dups) === JSON.stringify(["D.04", "D.11"]) && door.noId === 1 && door.rows.length > 0
+      && door.rows.every((r) => !names.has(r.key)) && !errors.length,
+    detail: { door, errors } };
 });
 
 test("S6.frame", "S6 · Tempio (copia), Fonti › «Show in the Matrix» su D.02: nella finestra bassa sotto il visore il documento e i nodi del suo gruppo (D.02.01, «existence») stanno dentro il riquadro, con margine per le etichette", async () => {
@@ -11168,6 +11170,90 @@ test("COR5.preview", "MICRO-COR05 G · finestra File sul web: le miniature e l'a
   const conds = { grid: grid.length >= 3 && grid.every((g) => g.blob && g.ok), info: !!pic && pic.blob && pic.ok,
     noImgOnFs: !imgFs.length, noBlocked: !failed.length, noErrors: !pageErrors(errors).length };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, grid, pic, imgFs, failed, errors } };
+});
+
+test("COR6.dosco", "MICRO-COR06 · «Leggi come DosCo» porta dentro una cartella di prova: D.07 (due file) e D.08 diventano documenti con l'id stabile del file (quello del manifest della cartella), la data e la licenza date in blocco; senza data la porta resta aperta e nulla entra; un passo di annullamento", async () => {
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/cor06/DosCo`;
+  mkdirSync(dir, { recursive: true });
+  for (const f of ["D.07_pianta.png", "D.07_sezione.png", "D.08.png"]) writeFileSync(`${dir}/${f}`, PNG1);
+  const { p, ctx, errors } = await openLate(LITE(), { locale: "en" });
+  const docsBefore = await p.evaluate(() => window.__EM_DRAG__.idsOfType("document").length);
+  await p.evaluate((d) => { void window.__EM_DRAG__.doorDosco(d); }, dir);
+  await p.waitForSelector('[data-app-dialog="door-dosco"]', { timeout: 15000 });
+  const door = await doscoDoor(p);
+  // OK with no date: refused, the door stays open, nothing comes in
+  await p.click('[data-app-dialog="door-dosco"] [data-dialog-ok]');
+  await p.waitForTimeout(400);
+  const refused = await p.evaluate(() => ({ open: !!document.querySelector('[data-app-dialog="door-dosco"]'),
+    marked: !!document.querySelector('[data-app-dialog="door-dosco"] [data-dosco-date].app-dialog-invalid') }));
+  const docsRefused = await p.evaluate(() => window.__EM_DRAG__.idsOfType("document").length);
+  // the date and the licence for every document at once
+  await p.evaluate(() => {
+    const d = document.querySelector('[data-app-dialog="door-dosco"]');
+    const dt = d.querySelector("[data-dosco-all-date]"); dt.value = "2019-05-03";
+    const lc = d.querySelector("[data-dosco-all-license]"); lc.value = "CC-BY-4.0";
+    d.querySelector("[data-dosco-all]").click();
+  });
+  await p.screenshot({ path: SHOT("cor6-dosco-porta") }).catch(() => {});
+  await p.click('[data-app-dialog="door-dosco"] [data-dialog-ok]');
+  await p.waitForFunction((n) => window.__EM_DRAG__.idsOfType("document").length > n, docsBefore, { timeout: 15000 }).catch(() => {});
+  const manifest = JSON.parse(readFileSync(`${dir}/.em_resources_manifest.json`, "utf8"));
+  const idOf = Object.fromEntries((manifest.entries ?? manifest.resources ?? []).map((e) => [e.rel_path ?? e.path, e.id ?? e.resource_id]));
+  const got = await p.evaluate(() => {
+    const D = window.__EM_DRAG__;
+    const doc = JSON.parse(D.docJson());
+    const g = Object.values(doc.graphs ?? { g: doc.graph })[0];
+    const lic = (id) => { const e = g.edges.find((x) => x.source === id && x.edge_type === "has_license"); const n = e && g.nodes.find((x) => x.id === e.target); return n?.data?.license_type ?? null; };
+    const files = (id) => g.edges.filter((x) => x.source === id && x.edge_type === "has_linked_resource").length;
+    return g.nodes.filter((n) => n.node_type === "document" && ["D.07", "D.08"].includes(n.name))
+      .map((n) => ({ id: n.id, name: n.name, date: n.data?.absolute_time_start ?? null, lic: lic(n.id), files: files(n.id) }));
+  });
+  await p.keyboard.press("Meta+z");
+  await p.waitForTimeout(500);
+  const afterUndo = await p.evaluate(() => window.__EM_DRAG__.idsOfType("document").length);
+  await ctx.close();
+  const d7 = got.find((x) => x.name === "D.07"), d8 = got.find((x) => x.name === "D.08");
+  return { pass: !!door && door.rows.length === 3 && refused.open && refused.marked && docsRefused === docsBefore
+      && !!d7 && d7.id === idOf["D.07_pianta.png"] && d7.date === "2019-05-03" && d7.lic === "CC-BY-4.0" && d7.files === 2
+      && !!d8 && d8.id === idOf["D.08.png"] && d8.date === "2019-05-03" && d8.lic === "CC-BY-4.0" && d8.files === 1
+      && afterUndo === docsBefore && !errors.length,
+    detail: { door, refused, docsBefore, docsRefused, got, idOf, afterUndo, errors } };
+});
+
+test("COR6.graphgeo", "MICRO-COR06 · dal connettore del nodo del grafo (↓) il menu offre «Posizione geografica»: crea il gruppo dei paradati del grafo e il geo_position dentro (nessun arco nuovo: is_in_paradata_nodegroup), un passo di annullamento, e apre l'Inspector del grafo sulla Georeferenziazione", async () => {
+  // a graph with its own node (as «untitled graph» has it), no georeference
+  const doc = LITE();
+  doc.graph.nodes = doc.graph.nodes.filter((n) => n.node_type !== "geo_position");
+  doc.graph.nodes.push({ id: "cor6_graphroot", name: "Graph", node_type: "graph", description: "" });
+  { const ids = new Set(doc.graph.nodes.map((n) => n.id)); doc.graph.edges = doc.graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target)); }
+  const { p, ctx, errors } = await openLate(doc, { locale: "en" });
+  const gid = await p.evaluate(() => window.__EM_DRAG__.idsOfType("graph")[0] ?? null);
+  const geo0 = await p.evaluate(() => window.__EM_DRAG__.idsOfType("geo_position").length);
+  if (!gid) { await ctx.close(); return { pass: false, detail: { why: "no GraphNode in the lite doc" } }; }
+  await p.evaluate((id) => window.__EM_DRAG__.handleMenu(id, "down"), gid);
+  await p.waitForTimeout(400);
+  const entry = await p.evaluate(() => { const e = document.querySelector('.addm-item[data-key="graph-geo-position"]'); return e ? e.textContent : null; });
+  await p.screenshot({ path: SHOT("cor6-grafo-posizione") }).catch(() => {});
+  await p.evaluate(() => document.querySelector('.addm-item[data-key="graph-geo-position"]')?.click());
+  await p.waitForTimeout(900);
+  const r = await p.evaluate((id) => {
+    const D = window.__EM_DRAG__;
+    const geo = D.idsOfType("geo_position");
+    const pdg = D.edgesOf("has_paradata_nodegroup").find((e) => e.source === id)?.target ?? null;
+    const inside = geo.length ? D.edgesOf("is_in_paradata_nodegroup").some((e) => e.source === geo[0] && e.target === pdg) : false;
+    const direct = D.edgesOf("has_geoposition").some((e) => e.source === id);
+    const sec = [...document.querySelectorAll('.georef-sec[data-section="georef"]')].find((x) => x.offsetParent !== null);
+    return { geo: geo.length, pdg, inside, direct, selected: D.selected(), section: !!sec };
+  }, gid);
+  await p.screenshot({ path: SHOT("cor6-grafo-georef") }).catch(() => {});
+  await p.keyboard.press("Meta+z");
+  await p.waitForTimeout(500);
+  const undone = await p.evaluate(() => window.__EM_DRAG__.idsOfType("geo_position").length);
+  await ctx.close();
+  return { pass: geo0 === 0 && /Geographic position/.test(entry ?? "") && r.geo === 1 && !!r.pdg && r.inside && !r.direct
+      && r.selected.includes(gid) && r.section && undone === 0 && !errors.length,
+    detail: { entry, geo0, r, undone, errors } };
 });
 
 test("TD2.pair", "tileset trascinato · la forma RealityScan (X/ dallo Storage, X.json accanto) sul Viewer: riconosciuta e detta, la posizione avvisa «geocentriche», centrata solo per la vista, le tile si vedono", async () => {

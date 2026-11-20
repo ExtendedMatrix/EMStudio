@@ -100,7 +100,8 @@
           <!-- MICRO-PL09 (W6) · the extensions of this computer: community packages, plugins -->
           <button id="btn-tool-extensions" data-i18n="tools.extensions" data-i18n-title="tools.extensionsTitle" title="The extensions of this computer — community packages and plugins: install from disk, enable, remove">Extensions…</button>
           <button id="btn-tool-chronology" data-i18n="chr.checkEllipsis" data-i18n-title="chr.checkTitle" title="Check the chronology: the epochs on a time axis, the overlaps with their delta and their remedies">Check the chronology…</button>
-          <button id="btn-resources" data-i18n-title="menu.resourcesTitle" title="Read a DosCo folder against the active graph's documents" data-i18n="toolbar.resources">Resources</button>
+          <!-- MICRO-COR06 · it was «Resources»: a DosCo folder now comes in through «Porta dentro…» -->
+          <button id="btn-door-dosco-tools" data-i18n-title="door.doscoMenuHint" title="Porta dentro a DosCo folder: each file with an EM id becomes the document of that id — its date, its licence, its role asked in one block" data-i18n="door.doscoMenu">Read as DosCo…</button>
         </div>
       </div>
       <div class="dropdown" id="dd-help">
@@ -925,55 +926,6 @@
         <div class="modal-foot">
           <button id="shelf-promote-cancel" type="button" data-i18n="shelf.promoteCancel">Annulla</button>
           <button id="shelf-promote-go" type="button" data-i18n="shelf.promoteGo">Promuovi</button>
-        </div>
-      </div>
-    </div>
-    <div id="resources-modal" class="modal hidden">
-      <div class="modal-card">
-        <div class="modal-head">
-          <span data-i18n="res.modalTitle">Resources</span>
-          <button id="resources-close" class="modal-x" title="Close" data-i18n-title="res.modalClose">✕</button>
-        </div>
-        <div class="modal-body">
-          <!-- MICRO-CONTENTS-3 D39 · in the reader's language, without the two
-               placeholder sections (Representation Models, DTC: «follow-up») -->
-          <p class="settings-hint" data-i18n="res.modalIntro">
-            Read a DosCo folder against the documents of the graph named above.
-          </p>
-          <section class="settings-sect">
-            <label
-              ><span data-i18n="res.folderLabel">DosCo folder</span>
-              <input
-                id="res-folder"
-                type="text"
-                placeholder="/absolute/path/to/folder"
-                data-i18n-placeholder="res.folderPh"
-              />
-            </label>
-            <div class="res-scan-row">
-              <button id="res-scan" class="primary" data-i18n="res.scanBtn">Read the folder</button>
-              <span id="res-status" class="settings-hint"></span>
-            </div>
-          </section>
-          <section class="settings-sect">
-            <h4><span data-i18n="res.orphans">Files not yet a document</span> <span class="res-count" id="res-shelf-count"></span></h4>
-            <p class="settings-hint" data-i18n="res.orphansHint">Files of the folder that are not a document of the graph yet.</p>
-            <div id="res-shelf" class="res-list"></div>
-          </section>
-          <section class="settings-sect">
-            <h4><span data-i18n="res.docsTitle">Documents of the graph</span> <span class="res-count" id="res-docs-count"></span></h4>
-            <div id="res-docs" class="res-list"></div>
-          </section>
-          <section class="settings-sect">
-            <h4><span data-i18n="res.linksTitle">Resources of the graph</span> <span class="res-count" id="res-links-count"></span></h4>
-            <p class="settings-hint" data-i18n="res.linksHint">
-              The graph's resources (its link nodes).
-            </p>
-            <div id="res-links" class="res-list"></div>
-          </section>
-        </div>
-        <div class="modal-foot">
-          <button id="resources-done" class="primary" data-i18n="res.modalDone">Done</button>
         </div>
       </div>
     </div>

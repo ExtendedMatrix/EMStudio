@@ -182,7 +182,7 @@ import {
 } from "./logpanel";
 import { DocumentStore, editorHand, setRoomAuthor, stripYedDrawing } from "./model";
 import { presenceIndex } from "./epoch-presence";
-import { RAMPS, applyRamp, colourPlan, emcOfState, emcRead, hexToLinear, legendClick, legendShows, loadColourState, mix as colourMix,
+import { RAMPS, applyRamp, colourPlan, emcOfState, emcRead, hexToLinear, legendClick, legendShows, legendToggle, loadColourState, mix as colourMix,
          propertyNames, propertyValues, saveColourState, startProperty, defaultColourState, type ColourPlan, type ColourState, type RampType } from "./space-colours";
 import { ColoursWindow, screenArea, type SystemWindow } from "./colours-window";
 // MICRO-U · vocabularies installed like fonts, the double value, «Collega a vocabolario…»
@@ -249,7 +249,6 @@ import { buildDiscLegend, buildLegendPanel, discLegendContent, legendContent, sh
 import { datamodelPhraseBook, linkedPhrase, phraseDirFor } from "./phrases";
 import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json";
 import datamodelTranslations from "./assets/datamodel_translations.json";
-import { createResourceThumb } from "./resource-preview";
 import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile, revealProjectRoot, guessProjectRoot,
          fileProjectRoot, describeFile, filesOfDocument, fileStateOf, fileStates, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
          freePlanOf, freeLocal, freeUi, fileRows, listFilter, bucketRows,
@@ -325,7 +324,7 @@ import { closeIngress, ingressIsOpen, openIngress } from "./ingress-ui";
 import { proposalNow, proposeConversion, renderGeorefSection, renderSitePinProposal, type GeorefDeps } from "./georef-panel";
 import { cardModelsOf, chooseGraph, geoObjectOf, modelStateWords, renderGeorefCard, renderGeorefInspector, renderGeorefProvRow, renderObjectGeoref,
   type CardModel, type GeorefCardDeps, type GeorefGraph } from "./georef-card";
-import { LEGEND_ROWS, legendRowsShown, loadLegendPref, nearestCorner, saveLegendPref, type LegendPref } from "./space-legend";
+import { LEGEND_ROWS, boxesMeet, legendForm, legendRowsShown, loadLegendPref, nearestCorner, saveLegendPref, type LegendForm, type LegendPref } from "./space-legend";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
@@ -2880,6 +2879,13 @@ window.__EM_SCENE__ = () => {
     };
   },
   /** SHIFT-A · the ids of the nodes of one type, in document order */
+  // MICRO-COR06 · the menu of a node's connector, as a handle released in the
+  // void opens it; «Read as DosCo» on a folder
+  handleMenu: (id: string, dir: HandleDir = "down", x = 500, y = 300) => {
+    const w = windowsOf().find((x0) => x0.type === "graph");
+    if (w) openAddMenu(w, x, y, { fromId: id, dir });
+  },
+  doorDosco: (folder: string) => openDoscoDoor(folder),
   idsOfType: (type: string) =>
     (store?.doc.graph.nodes ?? []).filter((n) => n.node_type === type).map((n) => n.id),
   /** SHIFT-A · the scene's groups (world boxes), for aiming at a body */
@@ -17235,6 +17241,11 @@ function openAddMenu(
     const newMatches = (e: AddMenuEntry, q: string): boolean =>
       matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q);
     const exKeys = new Set(ex.flat.map((e) => e.key));
+    // MICRO-COR06 · from the GRAPH's own node: «Geographic position», a shortcut
+    // to the georeference of the graph (it lives in the graph's paradata group,
+    // no edge of its own: the datamodel has no GraphNode → geo_position)
+    const graphExtra: AddMenuEntry[] = src && src.node_type === (nodeTypeForClass("GraphNode") ?? "graph") && storeOfNode(opts.fromId)
+      ? [graphGeoEntry(storeOfNode(opts.fromId)!, src.id)] : [];
     showAddMenu({
       title: opts.dir
         ? t(opts.dir === "up" ? "handle.menuUp" : "handle.menuDown", { name: String(src?.name ?? src?.node_type ?? "") })
@@ -17252,8 +17263,9 @@ function openAddMenu(
         more: (n) => t("link.more", { n }),
         none: t("link.none"),
       },
-      extra: [],
-      searchable: [...entries, ...ex.flat],
+      extra: graphExtra,
+      extraFirst: graphExtra.length > 0,
+      searchable: [...entries, ...ex.flat, ...graphExtra],
       matches: (e, q) => (exKeys.has(e.key) ? existingMatches(e, q) : newMatches(e, q)),
       footNote: entries.length || ex.flat.length ? undefined : t("add.noTarget"),
       count: `${t("add.count", { n: entries.length })} · ${t("link.count", { n: ex.flat.length })}`,
@@ -17380,6 +17392,54 @@ function openAddMenu(
 }
 
 const IS_IN_PDG = "is_in_paradata_nodegroup";
+
+/** MICRO-COR06 (E.D., 19 Nov 2026: «chi vuole georeferenziare il grafo dal grafo
+ *  non trova la strada») · «Geographic position» in the menu of the graph's
+ *  connector: the graph's geo_position made when missing — its paradata group
+ *  too, the store's `setGeoreference` (ONE undo step) —, or put in that group
+ *  when it lives outside; then the graph's Inspector opens on its
+ *  «Georeferencing», where the georeference is edited. No new edge. */
+function graphGeoEntry(st: DocumentStore, graphNodeId: string): AddMenuEntry {
+  const has = !!st.geoPositionNode();
+  return {
+    key: "graph-geo-position",
+    label: t("graph.geoPosition"),
+    alias: "geo_position",
+    detail: t(has ? "graph.geoPositionOpen" : "graph.geoPositionMake"),
+    description: t("graph.geoPositionHint"),
+    run: () => openGraphGeoPosition(st, graphNodeId),
+  };
+}
+function openGraphGeoPosition(st: DocumentStore, graphNodeId: string): void {
+  if (refuseReadOnly()) return;
+  const slot = emtree.slots.find((sl) => sl.store === st);
+  const name = slot ? slotLabel(slot) : String(st.node(graphNodeId)?.name ?? "");
+  if (!st.geoPositionNode()) {
+    const n = st.setGeoreference({});
+    const msg = t("gr.created", { name });
+    logInfo(msg, [n.id]);
+    toastUndo(msg, st);
+  } else if (st.geoOutsideGraphParadata()) {
+    st.batch(() => st.putGeoInGraphParadata());
+    const msg = t("graph.geoPositionMoved", { name });
+    logInfo(msg, [st.geoPositionNode()!.id]);
+    toastUndo(msg, st);
+  }
+  if (slot && emtree.active()?.id !== slot.id) activateSlot(slot.id);
+  select(graphNodeId);
+  ensureInspectorWin();
+  refreshInspector();
+  draw();
+  // the graph's Inspector on its «Georeferencing» (the section the panel draws)
+  requestAnimationFrame(() => {
+    const sec = [...document.querySelectorAll<HTMLElement>('.georef-sec[data-section="georef"]')].find((x) => x.offsetParent !== null)
+      ?? document.querySelector<HTMLElement>('.georef-sec[data-section="georef"]');
+    if (!sec) return;
+    sec.scrollIntoView({ block: "start" });
+    sec.classList.add("gr-flash");
+    setTimeout(() => sec.classList.remove("gr-flash"), 1600);
+  });
+}
 
 /** MICRO-PROPRIETA-PARADATI p.4 · the paradata group an «Add» belongs to: the
  *  group the canvas is inside (its soloing), else the selected group, else the
@@ -18249,6 +18309,7 @@ document.getElementById("btn-reveal-doc")?.addEventListener("click", () => { voi
 document.getElementById("btn-porta-dentro")?.addEventListener("click", () => { void doorFromMenu(); });
 // MICRO-GEO09 · File ▸ Porta dentro una cartella… (a stack of slices: read by a plugin's reader of folders)
 document.getElementById("btn-porta-dentro-cartella")?.addEventListener("click", () => { void doorFolderFromMenu(); });  // ALLOW-IT: an element id (as btn-porta-dentro), not words on screen
+document.getElementById("btn-door-dosco")?.addEventListener("click", () => { void doorDoscoFromMenu(); });
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");
@@ -18328,7 +18389,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 90;   // 90 = GET /py/layer-image, the pictures of a plugin's layer of the Space (space.layer@1) served only from its own data folder (MICRO-GEO11); 89 = /extensions/repos/add|update take keys (a repository's minisign public keys: its index and archives signed or refused), the answers carry signed, signed_by, signature — the signature of a repository (MICRO-PL28); 88 = /py/compute, the values of the slots of phase 2 — an Inspector section, a column of the Tabular, the status bar, a declarative panel; /py/plugins carries the panels and the tools (MICRO-PL25); 87 = /extensions/repos/add|update take trust_reviews («Fidati delle revisioni di questo repository»), the answers carry verified and reviewed — the list of the reviewed (MICRO-PL24); 86 = /extensions/versions, /extensions/updates, /extensions/update-all, /extensions/use, /extensions/prune, /extensions/leftovers, /extensions/clean, /profiles/redeclare, /profiles/overlay's newer — the updates in «Estensioni» (MICRO-PL23); 85 = /extensions/repos*, /extensions/available, /extensions/online — the repositories of this machine in «Estensioni» (MICRO-PL22); 84 = /py/plugins {dev}, /py/plugins/dev, /py/plugins/reload — the plugins' development folder behind «Funzioni sperimentali» (MICRO-PL18); 83 = /py/plugins, /py/invoke, /py/checks — the plugins loaded from disk and their commands (MICRO-PL17); 82 = /py/history, the console's history of this machine, and a run's proofs (MICRO-PL16); 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 91;   // 91 = POST /graph/door-dosco, a DosCo folder through «Porta dentro…»: its rows planned, then brought in (s3Dgraphy door.dosco_plan / bring_in_dosco) (MICRO-COR06); 90 = GET /py/layer-image, the pictures of a plugin's layer of the Space (space.layer@1) served only from its own data folder (MICRO-GEO11); 89 = /extensions/repos/add|update take keys (a repository's minisign public keys: its index and archives signed or refused), the answers carry signed, signed_by, signature — the signature of a repository (MICRO-PL28); 88 = /py/compute, the values of the slots of phase 2 — an Inspector section, a column of the Tabular, the status bar, a declarative panel; /py/plugins carries the panels and the tools (MICRO-PL25); 87 = /extensions/repos/add|update take trust_reviews («Fidati delle revisioni di questo repository»), the answers carry verified and reviewed — the list of the reviewed (MICRO-PL24); 86 = /extensions/versions, /extensions/updates, /extensions/update-all, /extensions/use, /extensions/prune, /extensions/leftovers, /extensions/clean, /profiles/redeclare, /profiles/overlay's newer — the updates in «Estensioni» (MICRO-PL23); 85 = /extensions/repos*, /extensions/available, /extensions/online — the repositories of this machine in «Estensioni» (MICRO-PL22); 84 = /py/plugins {dev}, /py/plugins/dev, /py/plugins/reload — the plugins' development folder behind «Funzioni sperimentali» (MICRO-PL18); 83 = /py/plugins, /py/invoke, /py/checks — the plugins loaded from disk and their commands (MICRO-PL17); 82 = /py/history, the console's history of this machine, and a run's proofs (MICRO-PL16); 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -21716,421 +21777,173 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// ── Resources panel (R5): the EMStudio face of the shared Resource layer, over
-// the em-bridge (single connector). Sections Documents · RM · DTC · Shelf.
-// Shelf = the orphans from /scan-resources on a chosen library/DosCo folder;
-// hatting one creates a Document whose node_id ADOPTS the FS stable ID (mirror
-// R4). Per-graph view; canvas/palette untouched (additive).
-/** SHELF1 · a candidate from the ORPHAN SCAN of a folder — Model B.
- *
- * Renamed from `ShelfEntry`, because it is not the shelf: the design note is
- * explicit that the orphan scan is an ENTRANCE to the shelf, not the shelf
- * itself. Keeping the old name meant two different things called the same word
- * in one file, and the one that was NOT the shelf held the name.
- */
-interface OrphanEntry {
-  resource_id: string;
-  key_id: string;
-  filename: string;
-  rel_path: string;
-}
-interface ResourceRow {
-  id: string;
-  name: string;
-  locator: string;
-  kind: string;
-}
-// The Document node_type comes from the datamodel (no hardcoded string).
-const RES_DOC_TYPE = nodeTypeForClass("DocumentNode") ?? "document";
-// The resource (link) node_type — datamodel-driven, not hardcoded.
-const RES_LINK_TYPE = nodeTypeForClass("ResourceNode") ?? "resource";
-const resourcesModal = document.getElementById("resources-modal")!;
-const resFolderInp = document.getElementById("res-folder") as HTMLInputElement;
-const resStatus = document.getElementById("res-status")!;
-const resShelf = document.getElementById("res-shelf")!;
-const resShelfCount = document.getElementById("res-shelf-count")!;
-const resDocs = document.getElementById("res-docs")!;
-const resDocsCount = document.getElementById("res-docs-count")!;
-const resLinks = document.getElementById("res-links")!;
-const resLinksCount = document.getElementById("res-links-count")!;
-let resLastShelf: OrphanEntry[] = [];
-/** DEV29 B6 · what the scan does NOT put on the Shelf, said: files without an
- *  EM id (the DosCo convention ignores them) and ids carried by two files */
-let resLastNotes: { noId: string[]; dup: Record<string, string[]> } = { noId: [], dup: {} };
+// ── MICRO-COR06 (E.D., 19 Nov 2026) · «Read as DosCo»: a DosCo folder through
+// «Porta dentro…». The «Resources» window that read it is gone: its «→ Document»
+// made a document WITHOUT a date, a second door around the first one's rules.
+// Now the files of the folder with an EM id (D.12_pianta.jpg → D.12) that are
+// not documents yet are the rows of ONE table — the door's questions in a block,
+// as for Tropy: the date always, the licence, the role of a model — and each
+// becomes (part of) the document of its id, which adopts the file's stable id
+// (s3Dgraphy door.dosco_plan / bring_in_dosco through the bridge, one undo).
+// The graph's documents are in the Outliner and Archive; its resources and
+// «Copy on the server» in Archive ▸ Files.
+interface DoscoRow { key_id: string; resource_id: string; filename: string; rel_path: string; kind: DoorKind;
+  roles: DoorRole[]; first: boolean }
 
-/**
- * DEV30 U7 · «Scan as DosCo»: the Resources panel, with the folder filled in and
- * the scan already running. Measured on dev.15: the scan (DEV29 B6) lived only
- * in Tools ▸ Resources, and E.D. looked for it on the DosCo folder in the
- * Storage and in the shelf of resources — neither said it existed.
- */
+/** the button on a folder (Archive ▸ Files ▸ Info, the empty Shelf): that folder read as DosCo */
 function scanDoscoButton(folder: string | null): HTMLElement {
   const box = document.createElement("div");
   box.className = "stamp-report-ask";
   const b = document.createElement("button");
   b.className = "ghost";
   b.dataset.action = "scan-dosco";
-  b.textContent = t("res.scanHere");
-  // MICRO-CONTENTS-1 D26 · against WHICH graph's documents
-  b.title = folder ? t("res.scanHereHintOf", { folder, graph: activeGraphName() }) : t("res.scanPick");
-  b.onclick = () => scanDosco(folder);
+  b.textContent = t("door.doscoHere");
+  // MICRO-CONTENTS-1 D26 · into WHICH graph
+  b.title = folder ? t("door.doscoHereHintOf", { folder, graph: activeGraphName() }) : t("door.doscoMenuHint");
+  b.onclick = () => { if (folder) void openDoscoDoor(folder); else void doorDoscoFromMenu(); };
   box.appendChild(b);
-  // MICRO-CONTENTS-1 C9 · with no document the scan has nothing to read against:
-  // the button is off, and says why (it used to toast «Open a document first»)
+  // MICRO-CONTENTS-1 C9 · with no graph open there is nothing to bring the files into
   if (!store) {
     b.disabled = true;
-    b.title = t("res.scanNoGraph");
+    b.title = t("door.doscoNoGraph");
     const why = document.createElement("span");
     why.className = "insp-hint res-scan-why";
-    why.textContent = t("res.scanNoGraph");
+    why.textContent = t("door.doscoNoGraph");
     box.appendChild(why);
   }
   return box;
 }
-function scanDosco(folder: string | null): void {
-  openResources();
-  if (!store) return;
-  if (folder) {
-    resFolderInp.value = folder;
-    void scanResources();
-  } else resFolderInp.focus();
+
+/** «Read as DosCo…» of the menus: a folder chosen (the study's DosCo proposed) */
+async function doorDoscoFromMenu(): Promise<void> {
+  if (!store) { toast(t("door.doscoNoGraph")); return; }
+  const dir0 = studyDir();
+  const start = dir0 ? `${dir0}/DosCo` : currentFilePath ? paths.dirname(currentFilePath) : undefined;
+  const dir = isTauri() ? await pickFolder(start)
+    : await pickPathInApp({ mode: "folder", title: t("door.doscoPickTitle"), start: start ?? null });
+  if (dir) await openDoscoDoor(dir);
 }
 
-function openResources(): void {
-  if (!store) {
-    toast(t("res.scanNoGraph"));
-    return;
+/** the folder read, its rows asked in one block, brought in through the door */
+async function openDoscoDoor(folder: string): Promise<void> {
+  const st = store;
+  if (!st) { toast(t("door.doscoNoGraph")); return; }
+  if (refuseReadOnly()) return;
+  const plan = await postGraph<{ rows?: DoscoRow[]; no_id?: string[]; duplicate_ids?: Record<string, string[]> }>("/graph/door-dosco", {
+    doc: st.doc, doc_path: currentFilePath ?? "", folder, plan: true });
+  if (!plan.ok) { toast(t("door.failed", { why: String(plan.error ?? plan.status) })); return; }
+  if (store !== st) return;
+  const rows = plan.rows ?? [];
+  // DEV29 B6 · what the folder holds and does not come in, said: files without an
+  // EM id; MICRO-CONTENTS-3 D39 · a stamp's file is not one of them
+  const noId = (plan.no_id ?? []).filter((f) => !/\.stamp\.json$/i.test(f));
+  const notes = document.createElement("div");
+  notes.className = "res-notes";
+  for (const [id, files] of Object.entries(plan.duplicate_ids ?? {})) {
+    const d = document.createElement("div");
+    d.className = "res-note";
+    d.dataset.dupId = id;
+    d.textContent = t("door.doscoDup", { id, n: String(files.length), files: files.join(" · ") });
+    notes.appendChild(d);
   }
-  renderResDocuments();
-  void renderResLinks();
-  // MICRO-CONTENTS-1 D39 · the scan reads AGAINST a graph, and «→ Documento»
-  // writes INTO it: the modal says which, and its ▾ changes it
-  {
-    // in the HEAD, beside the title: the body's height is the scan's (its rows'
-    // thumbnails load as they come into view — measured, a line on top of the
-    // body pushed the tenth out of it)
-    const head = resourcesModal.querySelector<HTMLElement>(".modal-head");
-    let line = head?.querySelector<HTMLElement>(":scope > .res-graphline") ?? null;
-    if (head && !line) {
-      line = document.createElement("div");
-      line.className = "win-graphline res-graphline";
-      head.querySelector(":scope > span")?.after(line);
-    }
-    if (line) paintGraphLine(line);
+  if (noId.length) {
+    const d = document.createElement("div");
+    d.className = "res-note";
+    d.dataset.noId = String(noId.length);
+    d.textContent = tn("door.doscoNoIdN", noId.length, { files: noId.join(" · ") });
+    notes.appendChild(d);
   }
-  resStatus.textContent = resFolderInp.value.trim()
-    ? t("res.statusRescan")
-    : t("res.statusNeedFolder");
-  resourcesModal.classList.remove("hidden");
-}
-function closeResources(): void {
-  resourcesModal.classList.add("hidden");
-}
-
-// ── previews (N10) ────────────────────────────────────────────────────────────
-// Every asset row carries its own preview, lazily: the thumbnail fetches only
-// when the row is scrolled into view, addressed by the resource's STABLE ID (the
-// bridge resolves it through the folder manifest or the graph's resolver — the
-// page never sees a filesystem path). See `resource-preview.ts`.
-//
-// The folder is passed whenever the user has set one, because the FS manifest and
-// the graph share ONE id space: a hatted Document adopted its FS stable id, so it
-// previews from the same manifest the Shelf uses, with no extra machinery.
-function previewFolder(): string | undefined {
-  return resFolderInp.value.trim() || undefined;
-}
-
-/** A row: preview · label(+badges) · actions. */
-function resRow(thumb: HTMLElement | null, label: string,
-                sub?: string): { row: HTMLElement; main: HTMLElement } {
-  const row = document.createElement("div");
-  row.className = "res-row";
-  if (thumb) row.appendChild(thumb);
-  const main = document.createElement("div");
-  main.className = "res-row-main";
-  const title = document.createElement("span");
-  title.className = "res-row-title";
-  title.textContent = label;
-  main.appendChild(title);
-  if (sub) {
-    const s = document.createElement("span");
-    s.className = "res-row-sub";
-    s.textContent = sub;
-    main.appendChild(s);
-  }
-  row.appendChild(main);
-  return { row, main };
-}
-
-function renderResDocuments(): void {
-  if (!store) return;
-  const docs = store.doc.graph.nodes.filter(
-    (n) => n.node_type === RES_DOC_TYPE,
-  );
-  resDocs.innerHTML = "";
-  resDocsCount.textContent = docs.length ? `(${docs.length})` : "";
-  if (!docs.length) {
-    resDocs.innerHTML = `<div class="res-empty">${escapeHtml(t("res.noDocs"))}</div>`;
-    return;
-  }
-  const docJson = JSON.parse(store.toJSON());
-  for (const d of docs) {
-    const data = (d.data ?? {}) as Record<string, unknown>;
-    const locator = typeof data.url === "string" ? data.url : undefined;
-    const label = String(d.name || d.id.slice(0, 8));
-    const thumb = createResourceThumb({
-      resourceId: d.id,
-      // C3 · ONE base for a document's path: the folder the Doc viewer reads it
-      // in (the study's), unless a folder was scanned. dev.17 answered «absent»
-      // here for D.32 while Doc showed the file beside it.
-      folder: previewFolder() ?? studyDir() ?? undefined,
-      doc: docJson,
-      bridge: bridgeUrl,
-      // IIIF · a document that IS a published image gets its thumbnail from the
-      // image server instead of a round trip through the bridge
-      node: d,
-      declaredType: typeof data.resource_type === "string"
-        ? data.resource_type : undefined,
-      locator,
-      label,
-    });
-    const { row } = resRow(thumb, label);
-    resDocs.appendChild(row);
-  }
-}
-
-function renderResShelf(): void {
-  resShelf.innerHTML = "";
-  resShelfCount.textContent = resLastShelf.length
-    ? `(${resLastShelf.length})`
-    : "";
-  // DEV29 B6 · the two things the scan used to drop in silence
-  const dups = Object.entries(resLastNotes.dup);
-  if (dups.length || resLastNotes.noId.length) {
-    const notes = document.createElement("div");
-    notes.className = "res-notes";
-    for (const [id, files] of dups) {
-      const d = document.createElement("div");
-      d.className = "res-note warn";
-      d.dataset.dupId = id;
-      d.textContent = t("res.dupId", { id, n: String(files.length), files: files.join(" · ") });
-      notes.appendChild(d);
-    }
-    if (resLastNotes.noId.length) {
-      const d = document.createElement("div");
-      d.className = "res-note";
-      d.dataset.noId = String(resLastNotes.noId.length);
-      d.textContent = tn("res.noIdN", resLastNotes.noId.length, { files: resLastNotes.noId.join(" · ") });
-      notes.appendChild(d);
-    }
-    resShelf.appendChild(notes);
-  }
-  if (!resLastShelf.length) {
-    resShelf.insertAdjacentHTML("beforeend", `<div class="res-empty">${escapeHtml(t("res.shelfEmpty"))}</div>`);
-    return;
-  }
-  for (const e of resLastShelf) {
-    // A Shelf entry is not (yet) a graph node, so its preview resolves through
-    // the FOLDER manifest alone — no em.json needs to travel per row.
-    const thumb = createResourceThumb({
-      resourceId: e.resource_id,
-      folder: previewFolder(),
-      bridge: bridgeUrl,
-      locator: e.filename,
-      label: e.filename,
-    });
-    const { row } = resRow(thumb, e.filename, e.key_id);
-    const btn = document.createElement("button");
-    btn.textContent = t("res.toDocument");
-    // MICRO-CONTENTS-1 D39 · the graph the Document is made in, said
-    btn.title = t("res.toDocumentOf", { graph: activeGraphName() });
-    btn.addEventListener("click", () => hatShelfEntry(e));
-    row.appendChild(btn);
-    resShelf.appendChild(row);
-  }
-}
-
-async function scanResources(): Promise<void> {
-  if (!store) return;
-  const folder = resFolderInp.value.trim();
-  if (!folder) {
-    resStatus.textContent = t("res.needFolder");
-    return;
-  }
-  resStatus.textContent = t("res.scanning");
-  try {
-    const res = await fetch(`${await bridgeUrl()}/scan-resources`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder, doc: JSON.parse(store.toJSON()) }),
-    });
-    if (!res.ok) {
-      let msg = t("res.bridgeError", { status: String(res.status) });
-      try {
-        const j = await res.json();
-        if (j?.error) msg = j.error;
-      } catch {
-        /* non-JSON */
-      }
-      resStatus.textContent = t("res.scanFailed", { msg });
-      return;
-    }
-    const j = await res.json();
-    resLastShelf = (j.shelf ?? []) as OrphanEntry[];
-    // MICRO-CONTENTS-3 D39 · a stamp's file (`x.stamp.json`) is the stamp of the
-    // file beside it, not a file without an EM id: GT16's DosCo counted «50 file
-    // senza id EM», 25 of them the sidecars of the 25 stamped tables
-    const noId = ((j.no_id ?? []) as string[]).filter((f) => !/\.stamp\.json$/i.test(f));
-    resLastNotes = { noId, dup: (j.duplicate_ids ?? {}) as Record<string, string[]> };
-    renderResShelf();
-    // G7 · «not yet a document», not «orphan»
-    resStatus.textContent = tn("res.indexedN", resLastShelf.length);
-  } catch {
-    resStatus.textContent = BRIDGE_UNREACHABLE;
-  }
-}
-
-// Hat: promote a Shelf orphan → a Document ADOPTING the FS stable ID as node_id.
-// em.json is the source of truth (the mutation is a plain addNode in the store);
-// the resource then leaves the Shelf because its stable ID is now a graph node.
-function hatShelfEntry(entry: OrphanEntry): void {
-  if (!store) return;
-  if (store.node(entry.resource_id)) {
-    toast(t("res.idExists"));
-    return;
-  }
-  store.addNode({
-    id: entry.resource_id, // ADOPT the FS stable ID
-    name: entry.key_id || entry.resource_id.slice(0, 8),
-    node_type: RES_DOC_TYPE,
-    description: "",
-    data: {},
-  });
-  resLastShelf = resLastShelf.filter(
-    (e) => e.resource_id !== entry.resource_id,
-  );
-  renderResShelf();
-  renderResDocuments();
-  toast(t("res.hatted", { name: String(entry.key_id || t("res.aResource")) }));
-}
-
-// ── Resources (link nodes) list + "Promote to the S3 store" ────────────────────
-// Lists the graph's resources via the bridge (/list-resources — single connector).
-// Promote uploads a LOCAL resource's bytes into the shared S3 store under its OWN
-// stable ID (one ID space FS↔S3), then repoints its ResourceNode locator at the
-// returned s3:// URI. The stable ID and every graph reference are unchanged.
-async function renderResLinks(): Promise<void> {
-  if (!store) return;
-  resLinks.innerHTML = `<div class="res-empty">${escapeHtml(t("res.loading"))}</div>`;
-  let rows: ResourceRow[] = [];
-  try {
-    const res = await fetch(`${await bridgeUrl()}/list-resources`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ doc: JSON.parse(store.toJSON()) }),
-    });
-    if (res.ok) rows = ((await res.json()).resources ?? []) as ResourceRow[];
-    else rows = listResourcesFromStore(); // bridge down → local fallback
-  } catch {
-    rows = listResourcesFromStore();
-  }
-  resLinks.innerHTML = "";
-  resLinksCount.textContent = rows.length ? `(${rows.length})` : "";
   if (!rows.length) {
-    resLinks.innerHTML = `<div class="res-empty">${escapeHtml(t("res.noLinks"))}</div>`;
+    toast(`${t("door.doscoNothing", { folder: paths.leafName(folder) })}${notes.textContent ? ` · ${[...notes.children].map((n) => n.textContent).join(" · ")}` : ""}`);
     return;
   }
-  const docJson = JSON.parse(store.toJSON());
+  const body = document.createElement("div");
+  body.className = "door-body door-dosco";
+  body.dataset.doorDosco = String(rows.length);
+  // the same answer for every document at once: a date, a licence
+  const licOptions = ["", "CC-BY-4.0", "CC-BY-SA-4.0", "CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC0-1.0", STUDY_ONLY];
+  const licSelect = (): HTMLSelectElement => {
+    const s = document.createElement("select");
+    for (const l of licOptions) {
+      const o = document.createElement("option"); o.value = l; o.textContent = l === STUDY_ONLY ? t("gis.licStudyOnly") : l || t("door.licenseNone"); s.appendChild(o);
+    }
+    return s;
+  };
+  const all = document.createElement("div");
+  all.className = "door-row door-dosco-all";
+  const allDate = document.createElement("input");
+  allDate.type = "text"; allDate.dataset.doscoAllDate = "1"; allDate.placeholder = t("door.datePh");
+  const allLic = licSelect();
+  allLic.dataset.doscoAllLicense = "1";
+  const allGo = document.createElement("button");
+  allGo.type = "button"; allGo.dataset.doscoAll = "1"; allGo.textContent = t("door.doscoToAll");
+  all.append(`${t("door.doscoAll")} `, allDate, ` ${t("door.license")} `, allLic, " ", allGo);
+  const table = document.createElement("table");
+  table.className = "door-table";
+  const hd = document.createElement("tr");
+  for (const k of ["doc", "file", "date", "license", "role"]) { const th = document.createElement("th"); th.textContent = t(`door.doscoCol.${k}`); hd.appendChild(th); }
+  table.appendChild(hd);
+  // one date and one licence per DOCUMENT (its first file's row), a role per model
+  const perDoc = new Map<string, { date: HTMLInputElement; lic: HTMLSelectElement; tr: HTMLTableRowElement }>();
+  const roleOf = new Map<DoscoRow, HTMLSelectElement>();
   for (const r of rows) {
-    const node = store.node(r.id);
-    const data = (node?.data ?? {}) as Record<string, unknown>;
-    const label = String(r.name || r.id.slice(0, 8));
-    const thumb = createResourceThumb({
-      resourceId: r.id,
-      folder: previewFolder(),
-      doc: docJson,
-      bridge: bridgeUrl,
-      node,
-      declaredType: typeof data.resource_type === "string"
-        ? data.resource_type : undefined,
-      locator: r.locator,
-      label,
-    });
-    const { row } = resRow(thumb, label, t(`res.kind.${r.kind}`, undefined, r.kind));
-    // Promote is offered only for LOCAL resources (a path we can upload);
-    // already-remote (s3/http) resources have nothing to push.
-    if (r.kind === "local_path" || r.kind === "file_uri") {
-      const btn = document.createElement("button");
-      // AUDIT N9 · a different verb from «Promuovi a documento» (the Shelf's):
-      // this moves the BYTES to the object store
-      btn.textContent = t("res.uploadS3");
-      btn.title = t("res.uploadTitle");
-      btn.addEventListener("click", () => void promoteToS3(r, btn));
-      row.appendChild(btn);
+    const tr = document.createElement("tr");
+    tr.dataset.doscoRow = r.rel_path;
+    tr.dataset.doscoKey = r.key_id;
+    const c = (x: Node | string) => { const td = document.createElement("td"); td.append(x); tr.appendChild(td); return td; };
+    c(r.first ? r.key_id : "").title = t("door.doscoIdHint", { id: r.resource_id });
+    const fn = c(r.filename);
+    fn.title = `${r.rel_path} · ${t(`door.kind.${r.kind}`)}`;
+    if (r.first) {
+      const date = document.createElement("input");
+      date.type = "text"; date.placeholder = t("door.datePh"); date.dataset.doscoDate = r.key_id;
+      const paint = () => tr.classList.toggle("door-nodate", !date.value.trim());
+      date.addEventListener("input", paint);
+      paint();
+      const lic = licSelect();
+      lic.dataset.doscoLicense = r.key_id;
+      c(date); c(lic);
+      perDoc.set(r.key_id, { date, lic, tr });
+    } else { c(t("door.doscoSame")); c(""); }
+    if (r.roles.length) {
+      const sel = document.createElement("select");
+      sel.dataset.doscoRole = r.rel_path;
+      for (const x of r.roles) { const o = document.createElement("option"); o.value = x; o.textContent = t(`door.role.${x}`); sel.appendChild(o); }
+      c(sel);
+      roleOf.set(r, sel);
+    } else c(t("door.role.file"));
+    table.appendChild(tr);
+  }
+  allGo.addEventListener("click", () => {
+    for (const d of perDoc.values()) {
+      if (allDate.value.trim()) { d.date.value = allDate.value.trim(); d.date.dispatchEvent(new Event("input")); }
+      if (allLic.value) d.lic.value = allLic.value;
     }
-    resLinks.appendChild(row);
-  }
-}
-
-// Local fallback when the bridge is unreachable: read the link nodes straight
-// from the in-memory em.json (kind classified the same way the bridge does).
-function listResourcesFromStore(): ResourceRow[] {
-  if (!store) return [];
-  const out: ResourceRow[] = [];
-  for (const n of store.doc.graph.nodes) {
-    if (n.node_type !== RES_LINK_TYPE) continue;
-    const url = String((n.data as Record<string, unknown>)?.url ?? "");
-    const low = url.toLowerCase();
-    const kind = low.startsWith("http://") || low.startsWith("https://")
-      ? "http_url"
-      : low.startsWith("s3://")
-        ? "s3_uri"
-        : low.startsWith("file://")
-          ? "file_uri"
-          : "local_path";
-    out.push({ id: n.id, name: String(n.name ?? ""), locator: url, kind });
-  }
-  return out;
-}
-
-async function promoteToS3(r: ResourceRow, btn: HTMLButtonElement): Promise<void> {
-  if (!store) return;
-  btn.disabled = true;
-  const prev = btn.textContent;
-  btn.textContent = t("res.uploading");
-  try {
-    const res = await fetch(`${await bridgeUrl()}/ingest-s3`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // resource_id = the resource's stable ID → same id in FS and the S3 store
-      body: JSON.stringify({ path: r.locator, resource_id: r.id }),
-    });
-    if (!res.ok) {
-      let msg = t("res.bridgeError", { status: String(res.status) });
-      try {
-        const j = await res.json();
-        if (j?.error) msg = j.error;
-      } catch {
-        /* non-JSON */
-      }
-      // 501 = the [s3] extra isn't bundled — a clear, graceful message.
-      toast(res.status === 501 ? t("res.s3Unavailable", { msg }) : t("res.uploadFailed", { msg }));
-      btn.disabled = false;
-      btn.textContent = prev;
-      return;
-    }
-    const j = (await res.json()) as { s3_uri: string; object_key: string };
-    // Repoint the ResourceNode locator at the shared-store URI (id + refs unchanged).
-    const node = store.node(r.id);
-    const data = { ...((node?.data as Record<string, unknown>) ?? {}), url: j.s3_uri };
-    store.updateNode(r.id, { data });
-    toast(t("res.uploaded", { uri: j.s3_uri }));
-    await renderResLinks();
-  } catch {
-    toast(BRIDGE_UNREACHABLE);
-    btn.disabled = false;
-    btn.textContent = prev;
-  }
+  });
+  body.append(notes, all, table);
+  const docsN = perDoc.size;
+  const a = await openDialog({ kind: "door-dosco", title: t("door.doscoTitle", { folder: paths.leafName(folder), n: String(rows.length), d: String(docsN) }),
+    body, message: t("door.doscoHint"), ok: t("door.go"),
+    validate: () => {
+      const empty = [...perDoc.values()].find((d) => !d.date.value.trim());
+      return empty ? { message: tn("door.doscoNoDate", [...perDoc.values()].filter((d) => !d.date.value.trim()).length), at: empty.date } : null;
+    } });
+  if (!a.ok || store !== st) return;
+  const out = rows.map((r) => {
+    const d = perDoc.get(r.key_id)!;
+    return { rel_path: r.rel_path, filename: r.filename, key_id: r.key_id, resource_id: r.resource_id, kind: r.kind,
+      date: d.date.value.trim(), license: d.lic.value || null, ...(roleOf.get(r) ? { role: roleOf.get(r)!.value } : {}) };
+  });
+  const j = await postGraph<{ delta: ContainerDelta; documents: { key_id: string; document_name: string; born: boolean; items: unknown[] }[]; warnings: string[] }>(
+    "/graph/door-dosco", { doc: st.doc, doc_path: currentFilePath ?? "", folder, rows: out });
+  if (!j.ok) { toast(t("door.failed", { why: String(j.error ?? j.status) })); return; }
+  if (store !== st) return;
+  applyBridgeDelta(st, j.delta);
+  const born = j.documents.filter((d) => d.born).length;
+  const msg = t("door.doscoDone", { folder: paths.leafName(folder), n: String(out.length), d: String(born), m: String(j.documents.length - born) });
+  logInfo(msg);
+  for (const w of j.warnings ?? []) logWarn(w);
+  toastUndo(msg, st);
 }
 
 // MICRO-PULIZIA p.4 · «Uniform spellings…» left the graph's «⋯» for Tools: a
@@ -22140,29 +21953,8 @@ document.getElementById("btn-tool-uniform")?.addEventListener("click", () => {
   if (why) { toast(why); return; }
   promptUniformSpellings();
 });
-(document.getElementById("btn-resources") as HTMLButtonElement).addEventListener(
-  "click",
-  openResources,
-);
-(
-  document.getElementById("resources-close") as HTMLButtonElement
-).addEventListener("click", closeResources);
-(
-  document.getElementById("resources-done") as HTMLButtonElement
-).addEventListener("click", closeResources);
-(document.getElementById("res-scan") as HTMLButtonElement).addEventListener(
-  "click",
-  scanResources,
-);
-resourcesModal.addEventListener("click", (e) => {
-  if (e.target === resourcesModal) closeResources();
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !resourcesModal.classList.contains("hidden")) {
-    e.stopPropagation();
-    closeResources();
-  }
-});
+// MICRO-COR06 · Tools ▸ «Read as DosCo…» (it was «Resources»): the door
+document.getElementById("btn-door-dosco-tools")?.addEventListener("click", () => { void doorDoscoFromMenu(); });
 
 // "Circles of detail" panel — progressive disclosure, per view. Each ring
 // bundles node/edge types (filters.ts); toggling a ring re-derives the hidden
@@ -33445,9 +33237,9 @@ function renderAssociateSection(host: HTMLElement, win: Win, sketchId: string, i
   host.appendChild(sec);
 }
 
-/** «Associa a un'unità…» (the sketch's card, the right click): the Inspector's
- *  section, the Inspector opened if it is not there, the focus in its search. */
-function revealAssociate(): void {
+/** the Inspector's window, opened when there is none (MICRO-COR06: shared by
+ *  «Associa a un'unità…» and the graph's «Geographic position») */
+function ensureInspectorWin(): Win | null {
   let w = windowsOf().find((x) => x.type === "inspector");
   const max = maximizedWin();
   if (max && max !== w?.id) { toggleMaximize(max); renderTiles(); }
@@ -33457,12 +33249,19 @@ function revealAssociate(): void {
     const anchor = windowsOf().find((x) => x.type === "graph") ?? windowsOf().find((x) => x.type === "scene") ?? activeWin();
     setActiveWin(anchor.id);
     const made = splitWindow(anchor.id, "row", activeWorkspace(), 0.52, "b");
-    if (!made) return;
+    if (!made) return null;
     for (const k of Object.keys(made.state)) delete made.state[k];   // not the scene's
     setWinType(made, "inspector");
     renderTiles();
     w = made;
   }
+  return w;
+}
+/** «Associa a un'unità…» (the sketch's card, the right click): the Inspector's
+ *  section, the Inspector opened if it is not there, the focus in its search. */
+function revealAssociate(): void {
+  const w = ensureInspectorWin();
+  if (!w) return;
   refreshInspector();
   const id = w.id;
   let tries = 0;
@@ -36602,8 +36401,34 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       maxHeight: `calc(100% - ${top ? 44 + 34 : bottom + 56}px)`,
     });
   };
-  const legendRO = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => placeLegend()) : null;
+  // MICRO-COR06 · the plan last painted, the form the room of the scene gives,
+  // and the full legend opened from its label («Legend (n)»)
+  let legendPlan: ColourPlan | null = null;
+  let legendFormNow: LegendForm = "full";
+  let legendPeek = false;
+  const legendRO = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+    // the scene grew or shrank past a step: the legend takes the form of its room
+    if (legendPlan && !legendEl.classList.contains("hidden") && legendForm(host.clientWidth, host.clientHeight) !== legendFormNow)
+      paintLegend(spaceColoursOf(win.id), legendPlan);
+    placeLegend();
+  }) : null;
   legendRO?.observe(host);
+  // MICRO-COR06 · never over a measure's label: the labels are drawn above the
+  // legend (z-index), and a legend a label falls on lets it through — faint,
+  // the pointer passing — until the label leaves it (not the full legend opened
+  // by hand from its label). Read four times a second while there are labels
+  const legendUnderMarks = (): void => {
+    // opened by hand from its label it stays readable: the labels are still drawn above it
+    const labs = legendEl.classList.contains("hidden") || legendPeek ? [] : [...host.querySelectorAll<HTMLElement>(".scn-mark-label")];
+    const r = labs.length ? legendEl.getBoundingClientRect() : null;
+    legendEl.classList.toggle("under-mark", !!r && labs.some((l) => boxesMeet(r, l.getBoundingClientRect())));
+  };
+  let legendHostSeen = false;
+  const legendMarkTimer = window.setInterval(() => {
+    if (host.isConnected) legendHostSeen = true;
+    else { if (legendHostSeen) window.clearInterval(legendMarkTimer); return; }
+    if (!legendEl.classList.contains("hidden")) legendUnderMarks();
+  }, 250);
   // MICRO-PL09 p.0 · resized by its corner (CSS `resize`, which writes the
   // element's width and height): the size kept for this view when it settles
   let legendSized = "";
@@ -37248,36 +37073,76 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   /** the legend: colour, value, number; a click isolates, another hides, a third gives back.
    *  MICRO-PL09 p.0 · it folds into one line, shows the first rows and «+N altri»,
    *  is resized by its corner and moved by its head to a corner; ✎ opens the
-   *  window «Colori» on its scheme. Per view, in this machine's preferences */
+   *  window «Colori» on its scheme. Per view, in this machine's preferences.
+   *  MICRO-COR06 · it comes down by degrees with the room of the scene
+   *  (`legendForm`: full · swatches and numbers · one label «Legend (n)» that a
+   *  click opens), a swatch is a switch (shows / hides its class; its colour by
+   *  the right click), the whole value in the tooltip, and it never covers a
+   *  measure's label (`legendUnderMarks`) */
   function paintLegend(cs: ColourState, plan: ColourPlan): void {
     legendEl.textContent = "";
+    legendPlan = plan;
     legendEl.classList.toggle("hidden", cs.mode === "em" || !plan.legend.length);
     legendEl.dataset.mode = cs.mode;
-    if (cs.mode === "em" || !plan.legend.length) return;
+    if (cs.mode === "em" || !plan.legend.length) { legendPeek = false; return; }
     const pref = loadLegendPref(win.id);
     const keep = (p: Partial<LegendPref>) => saveLegendPref(win.id, { ...loadLegendPref(win.id), ...p });
-    legendEl.classList.toggle("folded", pref.folded);
-    legendEl.style.width = pref.folded || pref.w == null ? "" : `${pref.w}px`;
-    legendEl.style.height = pref.folded || pref.h == null ? "" : `${pref.h}px`;
+    legendFormNow = legendForm(host.clientWidth, host.clientHeight);
+    if (legendFormNow === "full") legendPeek = false;
+    const form: LegendForm = legendPeek ? "full" : legendFormNow;
+    legendEl.dataset.form = form;
+    legendEl.classList.toggle("peek", legendPeek);
+    const chip = form === "chip";
+    legendEl.classList.toggle("folded", pref.folded && !chip && !legendPeek);
+    legendEl.classList.toggle("chip", chip);
+    legendEl.classList.toggle("swatches", form === "swatches");
+    const sized = form === "full" && !legendPeek && !pref.folded;
+    legendEl.style.width = !sized || pref.w == null ? "" : `${pref.w}px`;
+    legendEl.style.height = !sized || pref.h == null ? "" : `${pref.h}px`;
     legendSized = `${legendEl.style.width}|${legendEl.style.height}`;
     const strips = host.querySelector<HTMLElement>(".scn-strips");
     if (strips && legendRO) legendRO.observe(strips);
     requestAnimationFrame(placeLegend);
+    const what = cs.mode === "epochs" ? `${t("col.mode.epochs")} · ${t(`col.variant.${cs.variant}`)}` : `${t("col.mode.property")} · ${cs.property ?? ""}`;
+    const keys = plan.legend.map((e) => e.key);
+    const labelOf = (e: (typeof plan.legend)[number]): string => {
+      const special = e.special === "empty" ? t("cw.empty") : e.special === "none" ? t("cw.none") : "";
+      return special || (e.none ? t(cs.mode === "epochs" ? "col.noEpoch" : "col.noValue") : e.label);
+    };
+    // the smallest form: one label, opened by a click
+    if (chip) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "scn-legend-chip";
+      b.dataset.legendChip = String(plan.legend.length);
+      b.textContent = t("col.legendChip", { n: String(plan.legend.length) });
+      b.title = `${what}\n${t("col.legendChipHint")}`;
+      b.addEventListener("click", (ev) => { ev.stopPropagation(); legendPeek = true; paintLegend(spaceColoursOf(win.id), plan); });
+      legendEl.appendChild(b);
+      return;
+    }
     const head = document.createElement("div");
     head.className = "scn-legend-h";
     head.dataset.legendHead = "1";
-    const what = cs.mode === "epochs" ? `${t("col.mode.epochs")} · ${t(`col.variant.${cs.variant}`)}` : `${t("col.mode.property")} · ${cs.property ?? ""}`;
     const fold = document.createElement("button");
     fold.type = "button";
     fold.className = "scn-legend-fold";
-    fold.dataset.legendFold = pref.folded ? "closed" : "open";
-    fold.textContent = pref.folded ? "▸" : "▾";
-    fold.title = t(pref.folded ? "col.legendOpen" : "col.legendFold");
-    fold.addEventListener("click", (ev) => { ev.stopPropagation(); keep({ folded: !pref.folded }); paintLegend(spaceColoursOf(win.id), plan); });
+    if (legendPeek) {
+      // opened from its label: the same button gives it back
+      fold.dataset.legendFold = "peek";
+      fold.textContent = "▾";
+      fold.title = t("col.legendChipClose");
+      fold.addEventListener("click", (ev) => { ev.stopPropagation(); legendPeek = false; paintLegend(spaceColoursOf(win.id), plan); });
+    } else {
+      fold.dataset.legendFold = pref.folded ? "closed" : "open";
+      fold.textContent = pref.folded ? "▸" : "▾";
+      fold.title = t(pref.folded ? "col.legendOpen" : "col.legendFold");
+      fold.addEventListener("click", (ev) => { ev.stopPropagation(); keep({ folded: !pref.folded }); paintLegend(spaceColoursOf(win.id), plan); });
+    }
     const title = document.createElement("span");
     title.className = "scn-legend-title";
-    title.textContent = pref.folded ? `${what} · ${tn("col.legendValues", plan.legend.length)}` : what;
-    title.title = t("col.legendMove");
+    title.textContent = pref.folded && !legendPeek ? `${what} · ${tn("col.legendValues", plan.legend.length)}` : what;
+    title.title = `${what}\n${t("col.legendMove")}`;
     const edit = document.createElement("button");
     edit.type = "button";
     edit.className = "scn-legend-edit";
@@ -37311,8 +37176,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     });
     head.title = t("col.legendHint");
     legendEl.appendChild(head);
-    if (pref.folded) return;
-    if (cs.mode === "epochs") {
+    if (pref.folded && !legendPeek) return;
+    if (cs.mode === "epochs" && form === "full") {
       // the two variants, one click away
       const vs = document.createElement("div");
       vs.className = "scn-legend-vars";
@@ -37335,48 +37200,77 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         legendEl.appendChild(c);
       }
     }
-    const rowsShown = legendRowsShown(plan.legend, pref.all);
-    const list = document.createElement("div");
-    list.className = "scn-legend-list";
-    for (const e of rowsShown.shown) {
-      const r = document.createElement("div");
-      r.className = "scn-legend-row";
-      r.dataset.legendKey = e.key;
-      const iso = cs.isolated === e.key, hid = (cs.hidden ?? []).includes(e.key);
-      if (iso) r.classList.add("iso");
-      if (hid || (cs.isolated && !iso)) r.classList.add("off");
-      // the swatch: an epoch's colour is the graph's (a delta, an undo); a value's is the view's
-      const sw = document.createElement("input");
-      sw.type = "color";
+    // a swatch: the class's switch (a click), its colour (the right click) —
+    // an epoch's colour is the graph's (a delta, an undo); a value's is the view's
+    const swatch = (e: (typeof plan.legend)[number], hid: boolean): HTMLElement => {
+      const sw = document.createElement("button");
+      sw.type = "button";
       sw.className = "scn-legend-sw";
-      sw.value = /^#[0-9a-f]{6}$/i.test(e.colour) ? e.colour.toLowerCase() : "#9a9a9a";
-      // MICRO-S · the two special values of a property, each its own row
-      const special = e.special === "empty" ? t("cw.empty") : e.special === "none" ? t("cw.none") : "";
-      sw.title = e.epochId ? t("col.epochColour", { e: e.label }) : t("col.valueColour", { v: e.label || special || t("col.noValue") });
-      if (e.untouched) { sw.disabled = true; sw.title = t("cw.leaveNoneHint"); r.classList.add("untouched"); }
-      sw.addEventListener("click", (ev) => ev.stopPropagation());
-      sw.addEventListener("change", () => {
-        const hex = sw.value.toUpperCase();
-        if (e.epochId && store) { store.setField(e.epochId, "data.color", hex); return; }
-        const cur = spaceColoursOf(win.id);
-        setColours({ ...cur, scheme: { ...cur.scheme, [e.key]: hex } });
+      sw.dataset.legendSw = e.key;
+      sw.setAttribute("aria-pressed", String(!hid));
+      sw.style.background = /^#[0-9a-f]{6}$/i.test(e.colour) ? e.colour : "#9a9a9a";
+      const label = labelOf(e) || t("col.noValue");
+      sw.title = `${label} · ${fmtN(e.count)}\n${t(hid ? "col.swShow" : "col.swHide")} · ${e.untouched ? t("cw.leaveNoneHint") : t("col.swColour")}`;
+      sw.addEventListener("click", (ev) => { ev.stopPropagation(); setColours(legendToggle(spaceColoursOf(win.id), e.key, keys)); });
+      sw.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (e.untouched) return;
+        const pick = document.createElement("input");
+        pick.type = "color";
+        pick.className = "scn-legend-pick";
+        pick.dataset.legendPick = e.key;
+        pick.value = /^#[0-9a-f]{6}$/i.test(e.colour) ? e.colour.toLowerCase() : "#9a9a9a";
+        pick.title = e.epochId ? t("col.epochColour", { e: e.label }) : t("col.valueColour", { v: label });
+        pick.addEventListener("change", () => {
+          const hex = pick.value.toUpperCase();
+          pick.remove();
+          if (e.epochId && store) { store.setField(e.epochId, "data.color", hex); return; }
+          const cur = spaceColoursOf(win.id);
+          setColours({ ...cur, scheme: { ...cur.scheme, [e.key]: hex } });
+        });
+        pick.addEventListener("blur", () => setTimeout(() => pick.remove(), 0));
+        sw.after(pick);
+        try { (pick as HTMLInputElement & { showPicker?: () => void }).showPicker?.(); } catch { pick.click(); }
       });
-      const lab = document.createElement("span");
-      lab.className = "scn-legend-lab";
-      lab.textContent = special || (e.none ? t(cs.mode === "epochs" ? "col.noEpoch" : "col.noValue") : e.label);
+      if (e.untouched) sw.classList.add("untouched");
+      return sw;
+    };
+    const rowsShown = legendRowsShown(plan.legend, pref.all || form === "swatches" || legendPeek);
+    const list = document.createElement("div");
+    list.className = form === "swatches" ? "scn-legend-list scn-legend-chips" : "scn-legend-list";
+    for (const e of rowsShown.shown) {
+      const iso = cs.isolated === e.key, hid = (cs.hidden ?? []).includes(e.key);
+      const off = hid || (!!cs.isolated && !iso);
+      const label = labelOf(e);
+      const tip = `${label} · ${e.faded ? `${fmtN(e.count)} (${fmtN(e.faded)}↓)` : fmtN(e.count)}${iso ? ` · ${t("col.isolated")}` : hid ? ` · ${t("col.hiddenMark")}` : ""}`;
+      const r = document.createElement("div");
+      r.className = form === "swatches" ? "scn-legend-cell" : "scn-legend-row";
+      r.dataset.legendKey = e.key;
+      if (iso) r.classList.add("iso");
+      if (off) r.classList.add("off");
+      if (e.untouched) r.classList.add("untouched");
       const n = document.createElement("span");
       n.className = "scn-legend-n";
       n.textContent = e.faded ? `${fmtN(e.count)} (${fmtN(e.faded)}↓)` : fmtN(e.count);
-      const mark = document.createElement("span");
-      mark.className = "scn-legend-mark";
-      mark.textContent = iso ? t("col.isolated") : hid ? t("col.hiddenMark") : "";
-      r.append(sw, lab, n, mark);
-      r.title = t("col.legendHint");
+      if (form === "swatches") {
+        r.append(swatch(e, off), n);
+        r.title = `${tip}\n${t("col.legendHint")}`;
+      } else {
+        const lab = document.createElement("span");
+        lab.className = "scn-legend-lab";
+        lab.textContent = label;
+        const mark = document.createElement("span");
+        mark.className = "scn-legend-mark";
+        mark.textContent = iso ? t("col.isolated") : hid ? t("col.hiddenMark") : "";
+        r.append(swatch(e, off), lab, n, mark);
+        r.title = `${tip}\n${t("col.legendHint")}`;
+      }
       r.addEventListener("click", () => setColours(legendClick(spaceColoursOf(win.id), e.key)));
       list.appendChild(r);
     }
     legendEl.appendChild(list);
-    if (rowsShown.more || (pref.all && plan.legend.length > LEGEND_ROWS + 1)) {
+    if (form === "full" && !legendPeek && (rowsShown.more || (pref.all && plan.legend.length > LEGEND_ROWS + 1))) {
       const more = document.createElement("button");
       more.type = "button";
       more.className = "scn-legend-more";
@@ -37385,6 +37279,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       more.addEventListener("click", (ev) => { ev.stopPropagation(); keep({ all: !pref.all }); paintLegend(spaceColoursOf(win.id), plan); });
       legendEl.appendChild(more);
     }
+    legendUnderMarks();
   }
   const spaceLayersSection = (): HTMLElement => {
     const box = document.createElement("details");
@@ -40364,21 +40259,26 @@ async function doorFromMenu(opts: { epoch?: string | null } = {}): Promise<void>
  *  to a plugin's reader of folders (door.reader@2) — the page itself reads no folder */
 async function doorFolderFromMenu(): Promise<void> {
   if (!store) { toast(t("toast.openADocument")); return; }
-  if (!plugins().readersFor("", true).length) { toast(t("door.noFolderReader")); return; }
+  // MICRO-COR06 · the page reads one kind of folder itself, a DosCo: with no
+  // add-on that reads folders the folder is read as DosCo
   const start = currentFilePath ? paths.dirname(currentFilePath) : undefined;
   const dir = isTauri() ? await pickFolder(start)
     : await pickPathInApp({ mode: "folder", title: t("door.folderPickTitle"), start: start ?? null });
   if (dir) await portaDentro([{ path: dir, name: paths.leafName(dir), dir: true }]);
 }
 
-/** MICRO-GEO09 · which of several readers reads this (one: itself; none: null) */
-async function chooseReader(cs: PluginCommand[], name: string): Promise<PluginCommand | null> {
-  if (cs.length <= 1) return cs[0] ?? null;
+/** MICRO-GEO09 · which of several readers reads this (one: itself; none: null).
+ *  MICRO-COR06 · for a folder, «Read as DosCo» is one of them, the page's own */
+async function chooseReader(cs: PluginCommand[], name: string, dosco = false): Promise<PluginCommand | "dosco" | null> {
+  if (cs.length <= 1 && !dosco) return cs[0] ?? null;
+  if (!cs.length) return "dosco";
   const lang = getLocale();
   const a = await openDialog({ kind: "door-reader", title: t("door.pickReader", { name }),
-    choices: cs.slice(1).map((c) => ({ key: runId(c), label: `${plugins().plugin(c.plugin)?.name ?? c.plugin} · ${labelOf(c, lang)}` })),
+    choices: [...(dosco ? [{ key: "dosco", label: t("door.doscoMenu") }] : []),
+      ...cs.slice(1).map((c) => ({ key: runId(c), label: `${plugins().plugin(c.plugin)?.name ?? c.plugin} · ${labelOf(c, lang)}` }))],
     ok: `${plugins().plugin(cs[0].plugin)?.name ?? cs[0].plugin} · ${labelOf(cs[0], lang)}` });
   if (!a.ok) return null;
+  if (a.choice === "dosco") return "dosco";
   return a.choice ? cs.find((c) => runId(c) === a.choice) ?? null : cs[0];
 }
 
@@ -40436,9 +40336,10 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   // page reads none itself); several readers: the person chooses
   const folders = files.filter((f) => f.dir && f.path);
   for (const f of folders) {
-    const c = await chooseReader(plugins().readersFor(f.path!, true), f.name);
-    if (c) await readWithPlugin(c, f.path!);
-    else if (!plugins().readersFor(f.path!, true).length) toast(t("door.noFolderReader"));
+    // MICRO-COR06 · …and «Read as DosCo», the page's own reader of folders
+    const c = await chooseReader(plugins().readersFor(f.path!, true), f.name, true);
+    if (c === "dosco") await openDoscoDoor(f.path!);
+    else if (c) await readWithPlugin(c, f.path!);
   }
   files = files.filter((f) => !folders.includes(f));
   if (folders.length && !files.length) return;

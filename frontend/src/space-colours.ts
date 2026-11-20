@@ -394,6 +394,14 @@ export function legendClick(state: ColourState, key: string): ColourState {
   return { ...state, isolated: key, hidden: [...hidden].filter((k) => k !== key) };
 }
 
+/** MICRO-COR06 · a swatch of the legend is a switch: its class shown or hidden.
+ *  Out of an isolation, what is shown stays shown (`keys`: the legend's) */
+export function legendToggle(state: ColourState, key: string, keys: string[]): ColourState {
+  const hidden = new Set(state.isolated ? keys.filter((k) => k !== state.isolated) : state.hidden ?? []);
+  if (hidden.has(key)) hidden.delete(key); else hidden.add(key);
+  return { ...state, isolated: null, hidden: keys.filter((k) => hidden.has(k)) };
+}
+
 /** is a unit drawn, after the legend? */
 export function legendShows(state: ColourState, plan: ColourPlan, unit: string): boolean {
   if (state.mode === "em") return true;
