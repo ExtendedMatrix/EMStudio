@@ -230,6 +230,9 @@ fi
 # MICRO-PL15 (W12) · /py/* (em_py over s3dgraphy.em, already in
 # --collect-submodules s3dgraphy; rlcompleter for the console's completion,
 # imported only when asked).
+# MICRO-TIL03 (T2) · em_graphwork: /geometry-summary in a worker process; the
+# frozen binary runs itself again for it (multiprocessing.freeze_support in
+# em_bridge's __main__).
 "$PY" -m PyInstaller --onefile --name em-bridge \
   --paths "$S3/src" --collect-submodules s3dgraphy \
   --add-data "$SRC/JSON_config${SEP}s3dgraphy/JSON_config" \
@@ -238,7 +241,7 @@ fi
   --add-data "$SRC/profiles/schema${SEP}s3dgraphy/profiles/schema" \
   --hidden-import lxml --hidden-import lxml.etree --hidden-import lxml._elementpath \
   --collect-submodules rdflib --copy-metadata rdflib \
-  --hidden-import em_net --hidden-import em_optimize --hidden-import em_blender --hidden-import em_geotiles --hidden-import em_gis --hidden-import em_sheet --hidden-import em_vocab --hidden-import em_extensions --hidden-import em_pose --hidden-import em_py --hidden-import llm_provider --hidden-import rlcompleter --hidden-import tomli --hidden-import certifi --collect-data certifi \
+  --hidden-import em_net --hidden-import em_optimize --hidden-import em_blender --hidden-import em_geotiles --hidden-import em_gis --hidden-import em_sheet --hidden-import em_vocab --hidden-import em_extensions --hidden-import em_pose --hidden-import em_py --hidden-import em_graphwork --hidden-import llm_provider --hidden-import rlcompleter --hidden-import tomli --hidden-import certifi --collect-data certifi \
   ${S3_ARGS[@]+"${S3_ARGS[@]}"} \
   ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} \
   ${PREVIEW_ARGS[@]+"${PREVIEW_ARGS[@]}"} \

@@ -5,7 +5,9 @@
 //      port answering NOTHING, which no app could recognise as a bridge;
 //   3. it leaves when the app named in EM_BRIDGE_PARENT_PID is gone (on
 //      Windows `getppid` never changes, so the old watch never fired);
-//   4. a bridge started by hand (./dev.sh) says `sidecar: false`.
+//   4. a bridge started by hand (./dev.sh) says `sidecar: false`;
+//   5. its graph worker (MICRO-TIL03: /geometry-summary in a process of its
+//      own, `graph_worker` in /health) leaves with it, killed or stopped.
 // What it cannot prove here: Windows' OpenProcess (the same rule, asked of a
 // handle instead of a signal) — left to E.D.
 //
@@ -42,10 +44,13 @@ await new Promise((r) => setTimeout(r, 300));
 let answered = 0;
 for (let i = 0; i < 5; i++) if ((await health(port))?.service === "em_bridge") answered++;
 ok(answered === 5, `with its pipes closed it still answers (${answered}/5)`);
+const worker = h?.graph_worker;
+ok(Number.isInteger(worker) && worker !== br.pid && alive(worker), `/health names a live graph worker: ${worker}`);
 // the app leaves: the bridge leaves after it
 app.kill("SIGKILL");
 const gone = await until(async () => !alive(br.pid) && !(await health(port)), 10000);
 ok(!!gone, "the app gone, the bridge leaves and frees the port");
+ok(!!(await until(async () => !alive(worker), 5000)), "…and its graph worker leaves too");
 if (alive(br.pid)) br.kill("SIGKILL");
 
 // by hand (./dev.sh): not a sidecar
@@ -54,7 +59,10 @@ const dev = spawn(PY, [`${TOOLS}em_bridge.py`, "--port", String(port2), "--s3dgr
   { env: { ...process.env, EM_BRIDGE_STATE_DIR: `${dir}/.state2`, EM_BRIDGE_PARENT_PID: "" }, stdio: "ignore" });
 const h2 = await until(() => health(port2));
 ok(h2?.sidecar === false && h2?.parent_pid === null, `a bridge started by hand says it is not a sidecar: ${JSON.stringify({ sidecar: h2?.sidecar, parent_pid: h2?.parent_pid })}`);
-dev.kill();
+const worker2 = h2?.graph_worker;
+dev.kill("SIGKILL");
+ok(Number.isInteger(worker2) && !!(await until(async () => !alive(worker2), 5000)),
+  `a bridge killed hard leaves no graph worker behind (${worker2})`);
 
 if (fails.length) {
   console.log(`check-bridge-orphan: ${fails.length} of ${checks} FAILED`);

@@ -185,6 +185,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import em_net
+import em_graphwork
 from html.parser import HTMLParser
 
 
@@ -3462,6 +3463,9 @@ def make_handler(api):
                                    # MICRO-BRIDGE-CERTIFICATI · where its HTTPS trust comes from
                                    "tls_ca": "certifi" if em_net.ca_file() else "system",
                                    "s3dgraphy": _s3dgraphy_identity(),
+                                   # MICRO-TIL03 · the process that loads whole graphs
+                                   # (/geometry-summary), none = inline
+                                   "graph_worker": em_graphwork.worker_pid(),
                                    # MICRO-PL15 · the Python routes are open only with a secret
                                    "py": {"secret": _py_secret()}}).encode()
                 self.send_response(200)
@@ -10285,20 +10289,21 @@ def make_handler(api):
                         "warnings": warnings})
 
         def _geometry_summary(self, raw):
-            try:
-                doc = json.loads(raw.decode("utf-8"))
-            except Exception as exc:
-                self._fail(400, f"invalid JSON body: {exc}")
-                return
+            # the body is parsed in the worker (a bad one is still a 400)
             if not hasattr(api, "geometry_summary"):
                 self._fail(501, "this s3dgraphy has no `geometry_summary` on its "
                                 "access API — point the bridge at a newer s3Dgraphy")
                 return
+            # MICRO-TIL03 (T2) · loaded and computed in the graph worker, a
+            # process of its own: here the GIL stayed taken ~1 s (8.5 s before
+            # TIL02) and the /fs/at ranges of the tiles fell from 2000+/s to ~10/s
             try:
-                graph, warnings = api.load_emjson(doc)
+                out, warnings = em_graphwork.run(em_graphwork.geometry_summary_of, raw)
                 for w in warnings:
                     sys.stderr.write(f"  [bridge] warning: {w}\n")
-                out = api.geometry_summary(graph)
+            except em_graphwork.BadRequest as exc:
+                self._fail(400, str(exc))
+                return
             except Exception as exc:  # pragma: no cover — surface to the UI
                 import traceback
                 traceback.print_exc()
@@ -10477,6 +10482,9 @@ def main() -> int:
         )
         return 1
 
+    # MICRO-TIL03 (T2) · the graph worker starts now and imports s3dgraphy in
+    # the background (the same sys.path as this process: --s3dgraphy first)
+    em_graphwork.start(list(sys.path))
     handler = make_handler(api)
     # A socket left in TIME_WAIT by a Ctrl-C should not lock the port for the
     # next run. This does NOT help against a bridge that is still alive — for
@@ -10518,4 +10526,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # MICRO-TIL03 · the frozen sidecar starts the graph worker by running
+    # itself again: this line makes that run the worker, not a second bridge
+    import multiprocessing
+    multiprocessing.freeze_support()
     raise SystemExit(main())
