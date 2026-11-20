@@ -38813,7 +38813,11 @@ function openSheetPrintWindow(from: SheetPrintScope | "menu"): void {
     file.textContent = c.output === "one"
       ? t("skp.fileOne", { name: SP.printFileName(std, graphName, now) })
       : t("skp.fileEach", { name: SP.printFileName(std, graphName, now, list[0]?.name ?? "US1") });
-    note.textContent = c.output === "each" && pdfWhy ? t("skp.eachNeedsPdf", { why: pdfWhy }) : "";
+    // MICRO-COR09 · a service without WeasyPrint is said with its remedy, not
+    // with the Python's own words (the reason stays in the tooltip)
+    note.textContent = c.output === "each" && pdfWhy
+      ? (/weasyprint/i.test(pdfWhy) ? t("skp.eachNoWeasy") : t("skp.eachNeedsPdf", { why: pdfWhy })) : "";
+    note.title = c.output === "each" && pdfWhy ? pdfWhy : "";
     go.disabled = !list.length || busy() || (c.output === "each" && !!pdfWhy);
   }
 
@@ -49122,15 +49126,15 @@ function stampReportBox(report: FolderReport): HTMLElement {
     el.append(count, text);
     box.appendChild(el);
   };
-  row("paired", t("stamp.classPaired"), report.paired.length,
+  row("paired", tn("stamp.classPaired", report.paired.length), report.paired.length,
       t("stamp.classPairedNote"));
-  row("orphan-stamp", t("stamp.classStampNoBytes"),
+  row("orphan-stamp", tn("stamp.classStampNoBytes", report.stampsWithoutBytes.length),
       report.stampsWithoutBytes.length, t("stamp.classStampNoBytesNote"));
   // …e la terza, col tono NEUTRO: è la normalità, non un guasto
-  row("plain", t("stamp.classNoStamp"), report.bytesWithoutStamp.length,
+  row("plain", tn("stamp.classNoStamp", report.bytesWithoutStamp.length), report.bytesWithoutStamp.length,
       t("stamp.classNoStampNote"));
   if (report.unreadable.length) {
-    row("broken", t("stamp.classUnreadable"), report.unreadable.length,
+    row("broken", tn("stamp.classUnreadable", report.unreadable.length), report.unreadable.length,
         t("stamp.classUnreadableNote"));
   }
   const close = document.createElement("button");
