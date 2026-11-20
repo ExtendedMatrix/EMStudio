@@ -195,7 +195,8 @@ try {
       select: (ids) => { asked.push(["select", ids]); selection = ids; },
       view: (name) => { asked.push(["view", name]); return name === "graph"; },
       notify: (m, l) => asked.push(["notify", m, l]),
-      command: (id) => { asked.push(["command", id]); return id === "file-save" ? true : false; },
+      // MICRO-SEG02 · a command the page does not know is THROWN (false is a value a command may answer)
+      command: (id) => { asked.push(["command", id]); if (id !== "file-save") throw new Error(`no command «${id}»`); return true; },
       camera: () => ({ position: [1, 2, 3], target: [0, 0, 0] }),
       setCamera: (c) => asked.push(["set_camera", c]),
       frame: (ids) => asked.push(["frame", ids]),

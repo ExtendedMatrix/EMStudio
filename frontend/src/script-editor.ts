@@ -20,6 +20,8 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLi
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { syntaxHighlighting, indentOnInput, bracketMatching } from "@codemirror/language";
 import { python } from "@codemirror/lang-python";
+import { autocompletion, completionKeymap, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { asAnswer, completionTail, type CompleteAnswer } from "./console-window";
 import { classHighlighter } from "@lezer/highlight";
 import { betaMark } from "./beta";
 
@@ -43,6 +45,9 @@ export interface ScriptHost {
   askConfirm(message: string, ok: string): Promise<boolean>;
   /** the name or the «modified» mark changed: the window's title follows */
   changed(buf: ScriptBuffer): void;
+  /** MICRO-SEG02 p.4 · what may follow the text before the cursor — the SAME
+   *  answer the console's Tab gets (`/py/complete`: kinds, signature) */
+  complete?(text: string): Promise<CompleteAnswer | string[]>;
   toast?(message: string): void;
 }
 
@@ -278,6 +283,27 @@ export function mountScriptEditor(doc: Document, host: ScriptHost, buf: ScriptBu
     where.title = w.kind === "folder" ? w.label : "";
     for (const b of [openB, saveB, saveAsB]) b.disabled = w.kind === "none";
   };
+  // MICRO-SEG02 p.4 · the editor's list: the bridge's answer as CodeMirror options
+  const CM_TYPE: Record<string, string> = { module: "namespace", class: "class", function: "function", method: "method",
+    property: "property", value: "variable", keyword: "keyword", string: "text", param: "variable" };
+  async function completeFromSession(ctx: CompletionContext): Promise<CompletionResult | null> {
+    const before = ctx.state.sliceDoc(0, ctx.pos);
+    const line = before.slice(before.lastIndexOf("\n") + 1);
+    // typing: only after a name, a dot, an open call or inside a string
+    if (!ctx.explicit && !/[A-Za-z_.(]$|["'][^"']*$|,\s*$/.test(line)) return null;
+    if (!line.trim()) return null;
+    const a = asAnswer(await host.complete!(before).catch(() => [] as string[]));
+    if (ctx.aborted) return null;
+    const tail = a.tail ?? completionTail(before);
+    const options: Completion[] = a.items.map((i) => ({
+      label: i.text, displayLabel: i.label ?? i.text.split(".").pop() ?? i.text,
+      type: CM_TYPE[i.kind] ?? "variable", ...(i.detail ? { detail: i.detail.length > 60 ? i.detail.slice(0, 59) + "…" : i.detail, info: i.detail } : {}) }));
+    if (a.signature) options.unshift({ label: tail, displayLabel: a.signature.text, type: "function", apply: tail, boost: 99,
+      ...(a.signature.doc ? { info: a.signature.doc } : {}) });
+    if (!options.length) return null;
+    return { from: ctx.pos - tail.length, options, filter: false };
+  }
+
 
   const view = new EditorView({
     parent: body,
@@ -292,11 +318,15 @@ export function mountScriptEditor(doc: Document, host: ScriptHost, buf: ScriptBu
         indentOnInput(),
         bracketMatching(),
         python(),
+        // MICRO-SEG02 p.4 · the list of the live session (as the console's Tab):
+        // while typing after a name or a dot, and on Ctrl+Space
+        ...(host.complete ? [autocompletion({ override: [completeFromSession], activateOnTyping: true, icons: true })] : []),
         syntaxHighlighting(classHighlighter),
         EditorState.tabSize.of(4),
         keymap.of([
           { key: "Mod-s", run: () => { void save(false); return true; } },
           { key: "Mod-Shift-s", run: () => { void save(true); return true; } },
+          ...completionKeymap,
           indentWithTab,
           ...defaultKeymap,
           ...historyKeymap,

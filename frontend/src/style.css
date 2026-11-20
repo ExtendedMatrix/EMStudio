@@ -12348,6 +12348,23 @@ button.uo-col { cursor: pointer; }
 .pyc-status { color: var(--text-muted); font-size: 0.76rem; }
 .pyc-status.pyc-why { color: var(--warn); }
 .pyc-line.pyc-k-script { color: var(--accent); font-weight: 600; }
+/* MICRO-SEG02 · Tab's list printed in the output (Blender's console): a mark
+   per kind, the name, what it is; a call's signature with its docstring */
+.pyc-matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(16em, 1fr)); gap: 0 12px; margin: 0 0 4px 0; }
+.pyc-m { display: flex; gap: 6px; align-items: baseline; min-width: 0; white-space: nowrap; }
+.pyc-mark { flex: 0 0 1.1em; text-align: center; color: var(--text-faint); }
+.pyc-mk-module .pyc-mark, .pyc-mk-class .pyc-mark { color: var(--accent); }
+.pyc-mk-function .pyc-mark, .pyc-mk-method .pyc-mark { color: var(--brand); }
+.pyc-mk-property .pyc-mark, .pyc-mk-param .pyc-mark { color: var(--ok); }
+.pyc-mname { color: var(--text); }
+.pyc-mdetail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-faint); font-size: 0.72rem; }
+.pyc-line.pyc-k-sig { color: var(--accent); }
+.pyc-line.pyc-k-sig .pyc-detail { color: var(--text-muted); font-style: italic; }
+/* the Script Editor's list (CodeMirror autocomplete) in the chrome's colours */
+.cm-tooltip.cm-tooltip-autocomplete { background: var(--bg-panel); border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 0.78rem; }
+.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent); color: var(--bg-panel); }
+.cm-completionDetail { color: var(--text-faint); font-style: normal; margin-left: 0.8em; }
+.cm-tooltip.cm-completionInfo { background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-muted); max-width: 36em; white-space: pre-wrap; font-size: 0.76rem; }
 /* MICRO-TIL002 · the console as a WINDOW of the shell: it fills its area,
    however small (the floating panel asked 320 px) */
 .tile-consolebody { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }

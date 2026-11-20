@@ -20,7 +20,10 @@ POST /py/run      {session, revision, ack?, doc?, code, dry_run?, selection?, la
                   → the run's answer (below)
 POST /py/resume   {session, run, answer?}   — the answer to a request that waits
                   (``pick``, ``camera``), or nothing: «how is it going»
-POST /py/complete {session, text}            → {ok, matches}
+POST /py/complete {session, text}            → {ok, matches, items, tail, signature?}
+                  (MICRO-SEG02: ``items`` [{text, kind, label, detail?}] — the
+                  kind of each name, the domain's values inside a string —, and
+                  the open call's ``signature`` {name, text, doc})
 POST /py/events   {session, revision, ack?, doc?, event, payload}
                   → the run's answer, or {status: "none"} with no listener
 POST /py/close    {session}
@@ -114,7 +117,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: the bridge's level these routes came with (``BRIDGE_LEVEL`` in em_bridge.py)
-LEVEL = 92  # 92: the level moved with /graph/door taking the survey and the site (MICRO-COR11); 91: the level moved with POST /graph/door-dosco, a DosCo folder through the door (MICRO-COR06); 90: GET /py/layer-image, the pictures of a plugin's layer of the Space (MICRO-GEO11); 89: the level moved with the signature of a repository (MICRO-PL28); 88: /py/compute, the values of phase 2 (MICRO-PL25); 87: the level moved with the list of the reviewed (MICRO-PL24); 86: the level moved with the updates (MICRO-PL23); 85: with the repositories (MICRO-PL22); the /py/* routes unchanged
+LEVEL = 93  # 93: /py/session takes the commands' catalogue, /py/complete answers kinds and signatures, the `app` requests of em.app.space / workspaces / windows (MICRO-SEG02); 92: the level moved with /graph/door taking the survey and the site (MICRO-COR11); 91: the level moved with POST /graph/door-dosco, a DosCo folder through the door (MICRO-COR06); 90: GET /py/layer-image, the pictures of a plugin's layer of the Space (MICRO-GEO11); 89: the level moved with the signature of a repository (MICRO-PL28); 88: /py/compute, the values of phase 2 (MICRO-PL25); 87: the level moved with the list of the reviewed (MICRO-PL24); 86: the level moved with the updates (MICRO-PL23); 85: with the repositories (MICRO-PL22); the /py/* routes unchanged
 TOKEN_ENV = "EM_BRIDGE_TOKEN"
 #: D-8 · the code of an act kept in its DTC node up to this many bytes
 CODE_MAX = 4096
@@ -140,7 +143,9 @@ PROOF_ROWS = 50
 #: the views ``em.app.view`` may ask for: EMStudio's window types (``WindowType``,
 #: frontend/src/workspace.ts; ``scene`` is the Space)
 VIEWS = ("graph", "narrative", "table", "emtree", "outliner", "inspector", "viewer",
-         "storage", "shelf", "study", "narrative-index", "chronology", "scene", "sheet")
+         "storage", "shelf", "study", "narrative-index", "chronology", "scene", "sheet",
+         # MICRO-SEG02 · the Python console and the Script Editor are windows too
+         "console", "script")
 
 # ── the words, EN + IT ──────────────────────────────────────────────────────
 
@@ -503,6 +508,9 @@ class Session:
         self.lang = str(body.get("lang") or "en")
         self.declared = body.get("declared") or []
         self.selection: List[str] = [str(i) for i in body.get("selection") or []]
+        #: MICRO-SEG02 · the commands and actions a script reaches, with their
+        #: params (the page's ``script-commands.json``): completion reads it
+        self.commands: List[Dict[str, Any]] = [c for c in body.get("commands") or [] if isinstance(c, dict)]
         self.listeners: Dict[str, List[Callable]] = {name: [] for name in em.EVENTS}
         self.ns: Dict[str, Any] = {"__name__": "__console__", "__builtins__": builtins, "em": em}
         self.runs: Dict[str, "Run"] = {}
@@ -524,6 +532,8 @@ class Session:
         if "declared" in body:
             self.declared = body.get("declared") or []
             self._overlay = None
+        if isinstance(body.get("commands"), list):
+            self.commands = [c for c in body["commands"] if isinstance(c, dict)]
 
     def overlay(self) -> Any:
         if self._overlay is None:
@@ -555,11 +565,184 @@ _run_ids = itertools.count(1)
 
 # ── the host ────────────────────────────────────────────────────────────────
 
+class _asks(property):
+    """A property whose reading ASKS the page (MICRO-SEG02): completion never
+    reads one — it would send a request to the page from a Tab."""
+
+
+def _ask_app(run: "Run", op: str, **args: Any) -> Any:
+    return run.ask("app", op=op, args=args)
+
+
+class Layer:
+    """A layer of the Space (a model or a tileset): ``name``, ``visible``
+    (settable), ``epochs``, ``bytes`` (its file's weight), ``kind``."""
+
+    def __init__(self, space: "EMStudioSpace", row: Dict[str, Any]):
+        self._space = space
+        self._row = dict(row)
+
+    key = property(lambda self: self._row.get("key"))
+    id = property(lambda self: self._row.get("id"))
+    name = property(lambda self: self._row.get("name"))
+    kind = property(lambda self: self._row.get("kind"))
+    epochs = property(lambda self: list(self._row.get("epochs") or []))
+    bytes = property(lambda self: self._row.get("bytes"))
+    file = property(lambda self: self._row.get("file"))
+
+    @property
+    def visible(self) -> bool:
+        return bool(self._row.get("visible"))
+
+    @visible.setter
+    def visible(self, on: bool) -> None:
+        self._row["visible"] = bool(_ask_app(self._space._run, "space.set_visible", key=self.key, visible=bool(on)))
+
+    def __repr__(self) -> str:
+        mb = f", {self.bytes / 1048576:.1f} MB" if isinstance(self.bytes, (int, float)) else ""
+        return (f"<Layer {self.name!r} {self.kind}, {'visible' if self.visible else 'hidden'}"
+                f"{', ' + ' · '.join(self.epochs) if self.epochs else ''}{mb}>")
+
+
+class EMStudioSpace:
+    """``em.app.space`` in EMStudio (MICRO-SEG02 p.3): the camera, a point
+    picked, and what the Space shows — its layers, its epoch, the hardware
+    profile it loads for."""
+
+    def __init__(self, run: "Run"):
+        self._run = run
+
+    def camera(self) -> Dict[str, Any]:
+        """The camera of the first Space open: ``{pos, target, …}``."""
+        return self._run.ask("camera")
+
+    def set_camera(self, camera: Dict[str, Any]) -> None:
+        """Move the camera (the shape :meth:`camera` returns)."""
+        self._run.request("set_camera", camera=camera)
+
+    def frame(self, ids) -> None:
+        """Frame these nodes (their proxies, their models) in the Space."""
+        self._run.request("frame", ids=[str(getattr(i, "id", i)) for i in ids])
+
+    def pick(self, prompt: str, primitive: str = "point") -> Any:
+        """Ask the person to pick a point in the Space."""
+        return self._run.ask("pick", prompt=str(prompt), primitive=str(primitive))
+
+    @_asks
+    def layers(self) -> List[Layer]:
+        """The models and tilesets of the Space: name, visible, epochs, bytes."""
+        return [Layer(self, r) for r in _ask_app(self._run, "space.layers") or []]
+
+    def layer(self, ref: str) -> Optional[Layer]:
+        """One layer, by its id or its name (None: not in the Space)."""
+        return next((x for x in self.layers if ref in (x.id, x.name, x.key)), None)
+
+    @_asks
+    def epochs(self) -> List[Dict[str, Any]]:
+        """The epochs the Space can show: ``{id, name, start, end}``."""
+        return list(_ask_app(self._run, "space.epochs") or [])
+
+    @_asks
+    def epoch(self) -> Optional[Dict[str, Any]]:
+        """The epoch shown: ``{id, name}``; set it with an id or a name."""
+        return _ask_app(self._run, "space.epoch")
+
+    @epoch.setter
+    def epoch(self, ref: Any) -> None:
+        _ask_app(self._run, "space.set_epoch", epoch=str(getattr(ref, "id", None) or (ref.get("id") if isinstance(ref, dict) else ref)))
+
+    @_asks
+    def profile(self) -> Dict[str, Any]:
+        """The hardware profile the Space loads for: ``{profile, chosen, read, why}``;
+        set it with ``"desktop"``, ``"web"``, ``"mobile"`` or None (read from the machine)."""
+        return _ask_app(self._run, "space.profile")
+
+    @profile.setter
+    def profile(self, value: Optional[str]) -> None:
+        _ask_app(self._run, "space.set_profile", profile=value)
+
+    def __repr__(self) -> str:
+        return "<em.app.space of emstudio>"
+
+
+class EMStudioWorkspaces:
+    """``em.app.workspaces`` (MICRO-SEG02 p.3): the tabs of the bar."""
+
+    def __init__(self, run: "Run"):
+        self._run = run
+
+    def list(self) -> List[Dict[str, Any]]:
+        """Every workspace: ``{id, label, builtin, active}``."""
+        return list(_ask_app(self._run, "workspaces.list") or [])
+
+    @_asks
+    def active(self) -> str:
+        """The id of the workspace in front; set it (id or label) to switch."""
+        return _ask_app(self._run, "workspaces.active")
+
+    @active.setter
+    def active(self, ref: str) -> None:
+        _ask_app(self._run, "workspaces.activate", id=str(ref))
+
+    def __iter__(self):
+        return iter(self.list())
+
+    def __repr__(self) -> str:
+        return "<em.app.workspaces of emstudio>"
+
+
+class EMStudioWindows:
+    """``em.app.windows`` (MICRO-SEG02 p.3): the windows of the workspace in
+    front (and the detached ones), the types an area can show."""
+
+    def __init__(self, run: "Run"):
+        self._run = run
+
+    def list(self) -> List[Dict[str, Any]]:
+        """Every window: ``{id, type, label, active, detached}``."""
+        return list(_ask_app(self._run, "windows.list") or [])
+
+    @_asks
+    def active(self) -> str:
+        """The id of the active window; set it to make another active."""
+        return _ask_app(self._run, "windows.active")
+
+    @active.setter
+    def active(self, win_id: str) -> None:
+        _ask_app(self._run, "windows.activate", id=str(win_id))
+
+    @_asks
+    def types(self) -> List[str]:
+        """The window types (graph, scene, console, script, …)."""
+        return list(_ask_app(self._run, "windows.types") or [])
+
+    def open(self, type: str, area: Optional[str] = None, split: str = "row") -> Optional[str]:
+        """Open a window of ``type``: in the area ``area`` (a window id, which
+        changes type), else beside the active one (``split``: row | col).
+        Returns the window's id."""
+        return _ask_app(self._run, "windows.open", type=str(type), area=area, split=split)
+
+    def __iter__(self):
+        return iter(self.list())
+
+    def __repr__(self) -> str:
+        return "<em.app.windows of emstudio>"
+
+
 class EMStudioApp:
     """``em.app`` in EMStudio: each call is a REQUEST the page executes in order."""
 
     def __init__(self, run: "Run"):
         self._run = run
+        #: MICRO-SEG02 p.3 · the Space, the workspaces, the windows as objects
+        self.space = EMStudioSpace(run)
+        self.workspaces = EMStudioWorkspaces(run)
+        self.windows = EMStudioWindows(run)
+
+    def command_catalog(self) -> List[Dict[str, Any]]:
+        """The commands and actions a script reaches, with their params
+        (``em.app.commands.list()``)."""
+        return [dict(c) for c in self._run.session.commands]
 
     def selection(self) -> List[str]:
         return list(self._run.session.selection)
@@ -1106,7 +1289,8 @@ def post(route: str, body: Dict[str, Any], maps: Callable, changes: Callable) ->
                 s = _sessions.get(str(body.get("session") or ""))
             if s is None:
                 return 404, _err("no_session", body.get("lang"), sid=body.get("session") or "—")
-            return 200, {"ok": True, "matches": complete(s, str(body.get("text") or ""))}
+            rich = complete_rich(s, str(body.get("text") or ""))
+            return 200, {"ok": True, "matches": [i["text"] for i in rich["items"]][:100], **rich}
         if route == "/py/resume":
             with _lock:
                 s = _sessions.get(str(body.get("session") or ""))
@@ -1205,54 +1389,427 @@ def layer_image(plugin: str, path: str, lang: Optional[str] = None) -> Tuple[int
 
 
 # ── completion ──────────────────────────────────────────────────────────────
+#
+# MICRO-SEG02 p.4 (E.D., 20 Nov 2026: «voglio la console in cui con Tab carico
+# le sottofunzioni o metodi, come in Blender») · ONE source for the console's
+# Tab and the Script Editor's list: the live session (``dir``,
+# ``inspect.signature``, the docstrings) and the params the page declared
+# (``script-commands.json``, sent with the session). What a Tab answers:
+#
+# * after a dotted name, the names that may follow, each with its KIND
+#   (module, class, function, method, property, value) — never by reading a
+#   property that asks the page (``_asks``): a Tab sends no request;
+# * after a callable and its «(», its SIGNATURE and the first line of its
+#   docstring; inside ``commands.run("open", …`` the command's own params
+#   (``path=``, ``replace=``) and its signature;
+# * inside a string, the values of the domain: the command ids in
+#   ``commands.run("…``, the ids and names of the nodes (``g.node("…``), the
+#   node types (``g.nodes("…``, ``type="…``), the edge types, the epochs'
+#   names (``epoch="…``), an enum param's choices, the package's qualia.
 
 _NAME_TAIL = re.compile(r"[A-Za-z_][\w\.]*$|$")
 _STRING_TAIL = re.compile(r"""(["'])([^"']*)$""")
+_CALL_HEAD = re.compile(r"([A-Za-z_][\w\.]*)\s*\($")
 
 
-def complete(s: Session, text: str, limit: int = 100) -> List[str]:
-    """What may follow ``text``: inside an open string, the ids and names of
-    the nodes and the package's qualia; else the names of the session
-    (``rlcompleter``: em, g, what the console defined, their attributes)."""
+class _NoAsk(Exception):
+    """Raised by the completion's stand-in for a run: nothing is asked."""
+
+
+class _CompletionRun:
+    """A run that never reaches the page: what EMStudio's ``em.app`` objects
+    are bound to while a Tab looks at them."""
+
+    def __init__(self, session: "Session"):
+        self.session = session
+
+    def request(self, *a: Any, **k: Any) -> None:
+        raise _NoAsk()
+
+    def ask(self, *a: Any, **k: Any) -> Any:
+        raise _NoAsk()
+
+
+class _AppView:
+    """``em.app`` as a Tab sees it inside EMStudio: s3Dgraphy's ``_App`` and
+    what EMStudio's application adds (space, workspaces, windows)."""
+
+    def __init__(self, app: Any, own: "EMStudioApp"):
+        self._app, self._own = app, own
+
+    def names(self) -> List[str]:
+        base = {n for n in dir(type(self._app)) if not n.startswith("_")}
+        base |= {"selection", "select", "view", "notify", "space", "commands", "available", "on",
+                 "workspaces", "windows"}
+        return sorted(base)
+
+    def get(self, name: str) -> Any:
+        if name in ("space", "workspaces", "windows"):
+            return getattr(self._own, name)
+        return getattr(self._app, name)
+
+    def static(self, name: str) -> Any:
+        if name in ("space", "workspaces", "windows"):
+            return property(lambda _self: None, doc=getattr(type(getattr(self._own, name)), "__doc__", None))
+        try:
+            import inspect
+            return inspect.getattr_static(self._app, name)
+        except AttributeError:
+            return None
+
+
+def _kind_of(static: Any, value: Any = None) -> str:
+    import inspect
+    if isinstance(static, (staticmethod, classmethod)):
+        return "function"
+    if isinstance(static, property):
+        return "property"
+    obj = static if value is None else value
+    if inspect.ismodule(obj):
+        return "module"
+    if inspect.isclass(obj):
+        return "class"
+    if inspect.isfunction(static) or inspect.isbuiltin(static):
+        return "method" if value is not None and inspect.ismethod(value) else "function"
+    if inspect.ismethod(obj) or inspect.ismethoddescriptor(static):
+        return "method"
+    if callable(obj):
+        return "function"
+    return "value"
+
+
+def _first_line(doc: Optional[str], cap: int = 200) -> str:
+    """The docstring's first paragraph, on one line (cut at ``cap``)."""
+    para: List[str] = []
+    for line in (doc or "").strip().splitlines():
+        if not line.strip():
+            if para:
+                break
+            continue
+        para.append(line.strip())
+    text = " ".join(para)
+    return text if len(text) <= cap else text[: cap - 1].rstrip() + "…"
+
+
+class _Resolver:
+    """Walks a dotted name in the session WITHOUT reading what asks the page."""
+
+    def __init__(self, s: "Session"):
+        self.s = s
+        self.em = _em()
+        self.own = EMStudioApp(_CompletionRun(s))
+        self.ns: Dict[str, Any] = dict(s.ns)
+        self.ns.setdefault("em", self.em)
+
+    def wrap(self, obj: Any) -> Any:
+        return _AppView(obj, self.own) if obj is getattr(self.em, "app", None) else obj
+
+    def root(self, name: str) -> Any:
+        if name == "g" and self.ns.get("g") is None:
+            from s3dgraphy.em.graph import GraphView
+            return GraphView(self.s.graph)
+        if name == "sel" and "sel" not in self.ns:
+            return list(self.s.selection)
+        if name in self.ns:
+            return self.wrap(self.ns[name])
+        if hasattr(builtins, name):
+            return getattr(builtins, name)
+        raise KeyError(name)
+
+    def static(self, obj: Any, name: str) -> Any:
+        import inspect
+        if isinstance(obj, _AppView):
+            return obj.static(name)
+        try:
+            return inspect.getattr_static(obj, name)
+        except AttributeError:
+            return None
+
+    def step(self, obj: Any, name: str) -> Any:
+        if isinstance(obj, _AppView):
+            return self.wrap(obj.get(name))
+        st = self.static(obj, name)
+        if isinstance(st, _asks):
+            raise _NoAsk()
+        if obj is self.em and name == "graph":
+            # ``em.graph`` is the host's graph: the session's, as ``g``
+            g = self.ns.get("g")
+            if g is None:
+                from s3dgraphy.em.graph import GraphView
+                g = GraphView(self.s.graph)
+            return g
+        return self.wrap(getattr(obj, name))
+
+    def resolve(self, dotted: str) -> Any:
+        parts = dotted.split(".")
+        obj = self.root(parts[0])
+        for p in parts[1:]:
+            obj = self.step(obj, p)
+        return obj
+
+    def names(self, obj: Any) -> List[str]:
+        if isinstance(obj, _AppView):
+            return obj.names()
+        try:
+            names = dir(obj)
+        except Exception:                            # noqa: BLE001
+            return []
+        if obj is self.em and "graph" not in names:
+            names = [*names, "graph"]                # PEP 562: ``em.graph`` is the host's
+        return [n for n in names if not (n.startswith("__") and n.endswith("__"))]
+
+    def item(self, obj: Any, name: str, text: str) -> Dict[str, Any]:
+        st = self.static(obj, name)
+        kind = _kind_of(st)
+        value = None
+        if kind not in ("property",) and not isinstance(st, _asks):
+            try:
+                value = self.step(obj, name)
+                kind = _kind_of(st if st is not None else value, value)
+            except BaseException:                    # noqa: BLE001 — an attribute that raises, or asks
+                pass
+        callable_ = kind in ("function", "method", "class")
+        src = st if isinstance(st, property) else value if value is not None else st
+        doc = _first_line(getattr(src, "__doc__", None)) if src is not None else ""
+        if kind in ("value",) and value is not None and type(value).__doc__ == getattr(value, "__doc__", None):
+            doc = type(value).__name__
+        return {"text": text + ("(" if callable_ else ""), "kind": kind, "label": name, **({"detail": doc} if doc else {})}
+
+
+def _signature(obj: Any, name: str) -> Optional[Dict[str, Any]]:
+    import inspect
+    target = obj._app if isinstance(obj, _AppView) else obj
+    try:
+        sg = inspect.signature(target)
+        ann = lambda a: a if isinstance(a, str) else getattr(a, "__name__", None) or str(a)  # noqa: E731
+        parts, star = [], False
+        for p in sg.parameters.values():
+            if p.kind is p.KEYWORD_ONLY and not star:
+                parts.append("*")
+                star = True
+            if p.kind is p.VAR_POSITIONAL:
+                star = True
+            pre = "*" if p.kind is p.VAR_POSITIONAL else "**" if p.kind is p.VAR_KEYWORD else ""
+            txt = pre + p.name + (f": {ann(p.annotation)}" if p.annotation is not p.empty else "")
+            if p.default is not p.empty:
+                txt += f" = {p.default!r}"
+            parts.append(txt)
+        sig = f"({', '.join(parts)})" + (f" -> {ann(sg.return_annotation)}" if sg.return_annotation is not sg.empty else "")
+    except (TypeError, ValueError):
+        sig = "(…)"
+    doc = _first_line(getattr(target, "__doc__", None))
+    if inspect.isclass(target) and not doc:
+        doc = _first_line(getattr(target.__init__, "__doc__", None))
+    return {"name": name, "text": f"{name.rsplit('.', 1)[-1]}{sig}", "doc": doc}
+
+
+def _param_text(p: Dict[str, Any]) -> str:
+    def py(v: Any) -> str:
+        return "None" if v is None else "True" if v is True else "False" if v is False else json.dumps(v) if isinstance(v, str) else str(v)
+    t = f"Literal[{', '.join(json.dumps(c) for c in p.get('choices') or [])}]" if p.get("type") == "enum" else str(p.get("type") or "")
+    return f"{p.get('name')}: {t}" if p.get("required") else f"{p.get('name')}: {t} = {py(p.get('default'))}"
+
+
+def _command_signature(c: Dict[str, Any]) -> Dict[str, Any]:
+    params = [_param_text(p) for p in c.get("params") or []]
+    return {"name": f"commands.run({c.get('id')!r})",
+            "text": f"run({', '.join([json.dumps(c.get('id'))] + params)})",
+            "doc": _first_line(c.get("doc"))}
+
+
+def _open_call(text: str) -> Optional[Tuple[str, str]]:
+    """The callee of the innermost call still open at the end of ``text`` and
+    the text of its arguments so far (strings and brackets respected)."""
+    depth_stack: List[int] = []
+    quote: Optional[str] = None
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "\"'":
+            quote = c
+        elif c in "([{":
+            depth_stack.append(i)
+        elif c in ")]}":
+            if depth_stack:
+                depth_stack.pop()
+        i += 1
+    while depth_stack:
+        at = depth_stack.pop()
+        if text[at] != "(":
+            continue
+        m = re.search(r"([A-Za-z_][\w\.]*)\s*$", text[:at])
+        if m:
+            return m.group(1), text[at + 1:]
+        return None
+    return None
+
+
+def _call_args(args: str) -> Tuple[List[str], Optional[str]]:
+    """The positional string literals given so far, and the keyword being
+    typed (``epoch="…`` → ``epoch``)."""
+    positional = re.findall(r"""^\s*(["'])([^"']*)\1\s*,""", args)
+    kw = re.search(r"""(\w+)\s*=\s*["'][^"']*$""", args)
+    return [p[1] for p in positional], (kw.group(1) if kw else None)
+
+
+def _domain(s: "Session", what: str) -> List[Tuple[str, str]]:
+    """The values of a domain, each with what it is (shown beside it)."""
+    nodes = [n for n in getattr(s.graph, "nodes", []) or []]
+    if what == "nodes":
+        out = []
+        for n in nodes:
+            out.append((str(n.node_id), str(getattr(n, "node_type", "") or "")))
+            name = str(getattr(n, "name", "") or "")
+            if name and name != str(n.node_id):
+                out.append((name, str(getattr(n, "node_type", "") or "")))
+        return out
+    if what == "types":
+        return sorted({(str(getattr(n, "node_type", "") or ""), "type") for n in nodes if getattr(n, "node_type", None)})
+    if what == "edge_types":
+        return sorted({(str(getattr(e, "edge_type", "") or ""), "edge") for e in getattr(s.graph, "edges", []) or []
+                       if getattr(e, "edge_type", None)})
+    if what == "epochs":
+        out = []
+        for n in nodes:
+            if getattr(n, "node_type", "") == "EpochNode":
+                out.append((str(getattr(n, "name", "") or n.node_id), "epoch"))
+        return out
+    return []
+
+
+def complete_rich(s: Session, text: str, limit: int = 200) -> Dict[str, Any]:
+    """What may follow ``text`` (the console's line up to the cursor, or the
+    editor's text up to it): ``items`` [{text, kind, label, detail?}],
+    ``signature`` {name, text, doc} when a call is open, ``tail`` — the part
+    of ``text`` the items replace."""
+    commands = {str(c.get("id")): c for c in s.commands}
+    call = _open_call(text)
     m = _STRING_TAIL.search(text)
-    if m and text.count(m.group(1)) % 2 == 1:
+    in_string = bool(m and text.count(m.group(1)) % 2 == 1)
+    out: Dict[str, Any] = {"items": [], "tail": ""}
+    sig_of_call: Optional[Dict[str, Any]] = None
+    res = _Resolver(s)
+    if call:
+        callee, args = call
+        given, _kw = _call_args(args)
+        if callee.endswith("commands.run") and given and given[0] in commands:
+            sig_of_call = _command_signature(commands[given[0]])
+        else:
+            try:
+                sig_of_call = _signature(res.resolve(callee), callee)
+            except BaseException:                    # noqa: BLE001 — nothing to say
+                sig_of_call = None
+    if in_string:
         part = m.group(2)
-        out: List[str] = []
+        out["tail"] = part
+        domain: List[Tuple[str, str]] = []
+        if call:
+            callee, args = call
+            given, kw = _call_args(args)
+            head = args[: len(args) - len(part) - 1].strip()
+            first_arg = head == "" and kw is None
+            if callee.endswith("commands.run") and first_arg:
+                domain = [(cid, str(c.get("label") or _first_line(c.get("doc")) or c.get("kind") or ""))
+                          for cid, c in commands.items()]
+            elif callee.endswith("commands.run") and kw and given and given[0] in commands:
+                p = next((p for p in commands[given[0]].get("params") or [] if p.get("name") == kw), None)
+                if p and p.get("choices"):
+                    domain = [(str(c), "choice") for c in p["choices"]]
+                elif kw in ("epoch",):
+                    domain = _domain(s, "epochs")
+                elif kw in ("type",):
+                    domain = _domain(s, "types")
+                elif kw in ("edge_type",):
+                    domain = _domain(s, "edge_types")
+                else:
+                    domain = _domain(s, "nodes")
+            elif kw == "type" or (first_arg and callee.split(".")[-1] == "nodes"):
+                domain = _domain(s, "types")
+            elif kw in ("edge_type",) or (callee.split(".")[-1] == "edges" and kw == "type"):
+                domain = _domain(s, "edge_types")
+            elif kw in ("epoch",) or callee.split(".")[-1] in ("set_epoch",):
+                domain = _domain(s, "epochs")
+            elif callee.split(".")[-1] == "view":
+                domain = [(v, "view") for v in VIEWS]
+            elif callee.split(".")[-1] == "open" and callee.endswith("windows.open"):
+                domain = [(v, "window") for v in VIEWS]
+            else:
+                domain = _domain(s, "nodes")
+        else:
+            domain = _domain(s, "nodes")
+            try:
+                for q in (getattr(s.overlay(), "qualia", None) or {}):
+                    domain.append((str(q), "quale"))
+            except Exception:                        # noqa: BLE001 — no packages
+                pass
         seen = set()
-        for n in getattr(s.graph, "nodes", []) or []:
-            for v in (str(n.node_id), str(getattr(n, "name", "") or "")):
-                if v and v.startswith(part) and v not in seen:
-                    seen.add(v)
-                    out.append(v)
-        try:
-            ov = s.overlay()
-            for q in (getattr(ov, "qualia", None) or {}):
-                q = str(q)
-                if q.startswith(part) and q not in seen:
-                    seen.add(q)
-                    out.append(q)
-        except Exception:                            # noqa: BLE001 — no packages
-            pass
-        return sorted(out)[:limit]
-    import rlcompleter
+        for v, what in domain:
+            if v and v.startswith(part) and v not in seen:
+                seen.add(v)
+                out["items"].append({"text": v, "kind": "string", "label": v, **({"detail": what} if what else {})})
+        out["items"].sort(key=lambda x: x["text"])
+        out["items"] = out["items"][:limit]
+        if sig_of_call:
+            out["signature"] = sig_of_call
+        return out
     word = _NAME_TAIL.search(text).group(0)
-    ns = dict(s.ns)
-    em = _em()
-    ns.setdefault("em", em)
-    completer = rlcompleter.Completer(ns)
-    out = []
-    for i in itertools.count():
+    out["tail"] = word
+    # inside commands.run("open", |  → the command's own params
+    if call and not word:
+        callee, args = call
+        given, _kw = _call_args(args)
+        if callee.endswith("commands.run") and given and given[0] in commands:
+            used = set(re.findall(r"(\w+)\s*=", args))
+            for p in commands[given[0]].get("params") or []:
+                if p.get("name") not in used:
+                    out["items"].append({"text": f"{p['name']}=", "kind": "param", "label": _param_text(p),
+                                         **({"detail": _first_line(p.get("doc"))} if p.get("doc") else {})})
+        if sig_of_call:
+            out["signature"] = sig_of_call
+        return out
+    if "." in word:
+        base, _, prefix = word.rpartition(".")
         try:
-            c = completer.complete(word, i)
-        except Exception:                            # noqa: BLE001 — an attribute that raises
-            break
-        if c is None or len(out) >= limit:
-            break
-        if c not in out:
-            out.append(c)
+            obj = res.resolve(base)
+        except BaseException:                        # noqa: BLE001 — not a name the session has, or it asks
+            obj = None
+        if obj is not None:
+            names = [n for n in res.names(obj) if n.startswith(prefix) and (prefix.startswith("_") or not n.startswith("_"))]
+            for n in sorted(names)[:limit]:
+                out["items"].append(res.item(obj, n, f"{base}.{n}"))
+    else:
+        import keyword
+        pool = set(res.ns) | {"g", "sel"} | set(dir(builtins)) | set(keyword.kwlist)
+        for n in sorted(x for x in pool if x.startswith(word) and (word.startswith("_") or not x.startswith("_")))[:limit]:
+            if n in keyword.kwlist:
+                out["items"].append({"text": n, "kind": "keyword", "label": n})
+            elif n in res.ns or n in ("g", "sel"):
+                v = res.root(n)
+                k = "value" if isinstance(v, _AppView) else _kind_of(v, v)
+                out["items"].append({"text": n + ("(" if k in ("function", "class", "method") else ""), "kind": k, "label": n})
+            else:
+                v = getattr(builtins, n)
+                k = _kind_of(v, v)
+                out["items"].append({"text": n + ("(" if k in ("function", "class", "method") else ""), "kind": k, "label": n})
+    if sig_of_call and not out["items"]:
+        out["signature"] = sig_of_call
+    elif sig_of_call and text.rstrip().endswith("("):
+        out["signature"] = sig_of_call
     return out
 
 
+def complete(s: Session, text: str, limit: int = 100) -> List[str]:
+    """The texts of :func:`complete_rich` (the answer of before, kept for an
+    older page)."""
+    return [i["text"] for i in complete_rich(s, text, limit)["items"]][:limit]
+
+
 __all__ = ["LEVEL", "ROUTES", "HOST", "plugins_now", "history_path", "read_history", "add_history", "proof_of", "TOKEN_ENV", "take_token", "has_token", "gate", "post",
-           "complete", "code_record", "console_caller", "Session", "Run", "EMStudioHost",
+           "complete", "complete_rich", "code_record", "console_caller", "Session", "Run", "EMStudioHost",
            "EMStudioApp", "WORDS"]

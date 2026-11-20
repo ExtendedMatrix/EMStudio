@@ -184,8 +184,9 @@ key(ta, "Tab"); await tick();
 eq(ta.value, "em.write(", "Tab completes the tail");
 put(ta, "g.node('U");
 key(ta, "Tab"); await tick();
-eq([ta.value, [...root.querySelectorAll(".pyc-match")].map((x) => x.textContent)], ["g.node('US", ["US1", "US2"]],
-   "several matches: their common start and the list");
+// MICRO-SEG02 · as Blender's console: the list PRINTED in the output, not a floating row
+eq([ta.value, [...root.querySelectorAll(".pyc-out .pyc-m .pyc-mname")].map((x) => x.textContent)], ["g.node('US", ["US1", "US2"]],
+   "several matches: their common start, and the list printed in the output");
 put(ta, "");
 key(ta, "Tab");
 eq(ta.value, "    ", "Tab at the start of a line indents");
@@ -199,6 +200,38 @@ key(si, "Enter");
 ok($(".pyc-search").hidden && ta.value === "g.node('US1')" && state.draft === "g.node('US1')", "Enter takes it");
 const ev = key(ta, "z");
 ok(ev.defaultPrevented === false, "a plain key is the textarea's");
+// ── MICRO-SEG02 p.4 · Tab as in Blender: pure pieces and the window ─────────
+{
+  const rich = { items: [{ text: "em.app.select(", kind: "method", label: "select" }, { text: "em.app.selection(", kind: "method", label: "selection" }], tail: "em.app.sel" };
+  eq(M.tabOutcome("em.app.sel", rich).replace, "em.app.select", "tabOutcome: several → their common start…");
+  eq(M.tabOutcome("em.app.sel", rich).list.length, 2, "…and the list to print");
+  eq(M.tabOutcome("em.app.sp", { items: [{ text: "em.app.space", kind: "property" }], tail: "em.app.sp" }),
+     { replace: "em.app.space", tail: "em.app.sp", list: [], signature: null }, "tabOutcome: one → completed, nothing printed");
+  const sg = { name: "g.node", text: "node(ref: NodeRef) -> NodeView", doc: "By id or by name." };
+  eq(M.tabOutcome("g.node(", { items: [], tail: "", signature: sg }).signature, sg, "tabOutcome: an open call → its signature");
+  eq(M.asAnswer(["a", "b"]).items.map((i) => i.text), ["a", "b"], "asAnswer: an older bridge's strings become items");
+  eq(M.completeLines([{ text: "em.app.space", kind: "property" }])[0].items[0].label, "space", "completeLines: the last part of a dotted name, as Blender prints");
+  ok(M.KIND_MARK.module && M.KIND_MARK.class && M.KIND_MARK.method && M.KIND_MARK.property && M.KIND_MARK.value, "a mark for each kind");
+  const richHost = { ...host, complete: async (text) => text.endsWith("em.app.") ? { tail: "em.app.", items: [
+      { text: "em.app.commands", kind: "property", detail: "the commands" }, { text: "em.app.select(", kind: "method" }, { text: "em.app.space", kind: "property" }] }
+    : text.endsWith("g.node(") ? { tail: "", items: [], signature: sg } : [] };
+  const st3 = M.newConsoleState();
+  const r3 = M.consoleContent(document, richHost, st3);
+  document.body.append(r3);
+  await tick();
+  const t3 = r3.querySelector(".pyc-input");
+  put(t3, "em.app.");
+  key(t3, "Tab"); await tick();
+  const marks = [...r3.querySelectorAll(".pyc-out .pyc-m")].map((m) => [m.dataset.kind, m.querySelector(".pyc-mname").textContent]);
+  eq(marks, [["property", "commands"], ["method", "select"], ["property", "space"]], "Tab on «em.app.»: the list printed, each with its kind");
+  ok(r3.querySelector(".pyc-out .pyc-m .pyc-mark").title === "pyc.kind.property", "…the mark says the kind in words");
+  put(t3, "g.node(");
+  const ce = key(t3, " ", { ctrlKey: true, code: "Space" }); await tick();
+  ok(ce.defaultPrevented, "Ctrl+Space does what Tab does");
+  ok([...r3.querySelectorAll(".pyc-out .pyc-k-sig")].some((l) => /node\(ref: NodeRef\)/.test(l.textContent) && /By id or by name/.test(l.textContent)),
+     "after «g.node(»: the signature and the docstring printed");
+  r3.remove();
+}
 // a rebuild (detach, language) loses nothing
 const before = state.lines.length;
 root.remove();
@@ -307,6 +340,50 @@ try {
   ok(/em\.graph/.test(out.output) && out.value === undefined, "em.help(): its text once, not again as a value");
   out = await s.run("x = 'abc'\nprint(x)\nx");
   eq([out.output, out.value], ["abc\n", "'abc'"], "…a printed string the script did not return as that text keeps its value");
+
+  // ── MICRO-SEG02 p.4 · Tab on a real bridge: ten typical cases ──────────────
+  {
+    const cat = JSON.parse(fs.readFileSync(path.join(SRC, "script-commands.json"), "utf8"));
+    const commands = [...Object.entries(cat.commands).map(([id, d]) => ({ id, kind: "command", ...d })),
+                      ...Object.entries(cat.actions).map(([id, d]) => ({ id, kind: "action", ...d }))];
+    const s2 = new M.PySession({ ...page, commands: () => commands });
+    await s2.open();
+    const T = async (text) => s2.completeRich(text);
+    const texts = (a) => a.items.map((i) => i.text);
+    const kind = (a, t) => a.items.find((i) => i.text === t)?.kind;
+    let a = await T("em.");
+    ok(texts(a).includes("em.app") && texts(a).includes("em.graph") && texts(a).includes("em.write("), "Tab 1 · «em.»: em.app, em.graph, em.write(");
+    a = await T("em.app.");
+    ok(["em.app.space", "em.app.commands", "em.app.workspaces", "em.app.windows", "em.app.select("].every((x) => texts(a).includes(x))
+       && kind(a, "em.app.select(") === "method" && kind(a, "em.app.space") === "property",
+       "Tab 2 · «em.app.»: space, commands, workspaces, windows (properties), select( (a method)");
+    a = await T("em.app.space.");
+    ok(["em.app.space.layers", "em.app.space.epoch", "em.app.space.profile", "em.app.space.camera("].every((x) => texts(a).includes(x)),
+       "Tab 3 · «em.app.space.»: layers, epoch, profile, camera(");
+    a = await T("em.app.wi");
+    eq(texts(a), ["em.app.windows"], "Tab 4 · «em.app.wi»: one possibility, completed");
+    a = await T("g.no");
+    eq(texts(a), ["g.node(", "g.nodes("], "Tab 5 · «g.no»: node( and nodes(, methods");
+    a = await T("g.node(");
+    ok(/^node\(ref/.test(a.signature?.text ?? "") && /By id or by name/.test(a.signature?.doc ?? ""), "Tab 6 · «g.node(»: the signature and the docstring");
+    a = await T("em.app.commands.run(");
+    ok(/^run\(command_id: str, \*\*params/.test(a.signature?.text ?? ""), "Tab 7 · «em.app.commands.run(»: its signature");
+    a = await T('em.app.commands.run("sa');
+    eq(texts(a), ["save", "saveAll", "saveAs"], "Tab 8 · «commands.run(\"sa»: the command ids");
+    a = await T('em.app.commands.run("open", ');
+    ok(texts(a).includes("path=") && texts(a).includes("replace=") && /run\("open", path: str = None, replace: bool = False\)/.test(a.signature?.text ?? ""),
+       "Tab 9 · inside «run(\"open\", »: its params and its own signature");
+    a = await T('g.node("US');
+    eq(texts(a), ["US1", "US2"], "Tab 10 · «g.node(\"US»: the units' names");
+    a = await T('g.nodes("');
+    ok(texts(a).includes("US") && texts(a).includes("dtc_process") && !texts(a).includes("US1"), "…«g.nodes(\"»: the node types (US, the acts' dtc_process), not the names");
+    a = await T('em.app.commands.run("spaceView", side="');
+    eq(texts(a), ["back", "bottom", "front", "left", "right", "top"], "…an enum param: its choices");
+    // the catalogue reaches Python: em.app.commands.list() / describe()
+    out = await s2.run("len(em.app.commands.list()), em.app.commands.describe('door')['form']");
+    eq(out.value, `(${commands.length}, 'invoke')`, "em.app.commands.list() and describe() answer from the page's table");
+    await s2.close();
+  }
 
   // the history trimmed past its size (the bridge's own function)
   const trim = spawnSync(py, ["-c", `

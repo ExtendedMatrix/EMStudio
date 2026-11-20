@@ -290,6 +290,7 @@ import type { Arrangement, STORAGE_MODES } from "./workspace";
 import { renderNarrativeIndex } from "./narrative-index";
 import { langName, renderCiteSection, renderNarrativeInspector } from "./narrative-inspector";
 import { linkGroupOf, throughExtractor } from "./add-menu";
+import { bindParams, declOf, registerScriptAction, registerScriptForm, runsWithoutWindow, scriptActionOf, scriptCatalog, scriptFormOf } from "./script-commands";
 import { refsForViewType, scene3dRefKind, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
 import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
 import { citedContext, setDocumentContent, setSceneFactory, setSitePicker, type NarrativeSelection, type Reading, type SceneFactory } from "./narrative";
@@ -480,7 +481,7 @@ import {
 } from "./tauri";
 import { PySession, pyToken, wordsOf, PY_COMPUTE_LEVEL, PY_DEV_LEVEL, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep, type PyValueWire } from "./py-session";
 // MICRO-PL16 (W13) · the Python console (beta; out of «Funzioni sperimentali», MICRO-COR11)
-import { mountConsole, newConsoleState, appendLines, setConsoleBusy, outcomeLines, CONSOLE_LEVEL, PYTHON_API_URL, type ConsoleHost } from "./console-window";
+import { mountConsole, newConsoleState, appendLines, setConsoleBusy, outcomeLines, CONSOLE_LEVEL, PYTHON_API_URL, type CompleteAnswer, type ConsoleHost } from "./console-window";
 import { mountScriptEditor, newScriptBuffer, pyNames, scriptTitle, type ScriptBuffer, type ScriptEditorMount, type ScriptHost } from "./script-editor";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): since MICRO-COR11
 // only the site and its footprint (experimental.ts)
@@ -845,7 +846,7 @@ import {
   type DropTarget,
 } from "./drag";
 import {
-  buildPageMenus, commandForKey, followLocale, installNativeMenu, redrawSlots, refreshNativeRecent, runCommand,
+  buildPageMenus, commandForKey, findRow, followLocale, installNativeMenu, redrawSlots, refreshNativeRecent, runCommand,
   type DynamicItem,
 } from "./menu-ui";
 import { currentPlatform, optionOn, setSlotRuns, type RunRow } from "./menu-table";
@@ -861,7 +862,7 @@ import {
   type PanelField, type PluginPanel, type SpaceGeometry,
 } from "./plugin-commands";
 import { renderPanelInto, renderSectionInto, type ValueState } from "./plugin-surfaces";
-import { askConfirm, askText, openDialog, tell } from "./app-dialog";
+import { armDialog, askConfirm, askText, openDialog, tell } from "./app-dialog";
 import nodeDatamodel from "./assets/s3Dgraphy_node_datamodel.json";
 import { onFirstVisible } from "./lazy";
 import { blendLabel, filterChoices, flatten, STATE_SIGN, type BlendFilters, type BlendFolder, type BlendState, type CheckRow } from "./blend-folder";
@@ -16307,7 +16308,8 @@ function menuNode(type: string, id: string, name: string, description: string, s
 }
 
 /** Create `spec` at world (wx, wy): node, edge and epoch in ONE undo step. */
-async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boolean): Promise<string | null> {
+async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boolean,
+                               opts: { quiet?: boolean } = {}): Promise<string | null> {
   if (!store) return null;
   const st = store;
   const type = spec.nodeType;
@@ -16404,9 +16406,10 @@ async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boole
     other ? [id, other.id] : [id],
   );
   select(id);
-  toastUndo(msg, st);
+  // MICRO-SEG02 · a script's node (`quiet`): no toast, no label picker opening
+  if (!opts.quiet) toastUndo(msg, st);
   draw();
-  if (vocabularyFor(type)) openQualiaPicker(id, wx, wy); // pick its label
+  if (vocabularyFor(type) && !opts.quiet) openQualiaPicker(id, wx, wy); // pick its label
   return id;
 }
 
@@ -18412,7 +18415,8 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 92;   // 92 = /graph/door takes acquisition (the survey that stamps the GIS sheets) and attach_to / site_name (the site, «Funzioni sperimentali») — the lab's door absorbed (MICRO-COR11); 91 = POST /graph/door-dosco, a DosCo folder through «Porta dentro…»: its rows planned, then brought in (s3Dgraphy door.dosco_plan / bring_in_dosco) (MICRO-COR06); 90 = GET /py/layer-image, the pictures of a plugin's layer of the Space (space.layer@1) served only from its own data folder (MICRO-GEO11); 89 = /extensions/repos/add|update take keys (a repository's minisign public keys: its index and archives signed or refused), the answers carry signed, signed_by, signature — the signature of a repository (MICRO-PL28); 88 = /py/compute, the values of the slots of phase 2 — an Inspector section, a column of the Tabular, the status bar, a declarative panel; /py/plugins carries the panels and the tools (MICRO-PL25); 87 = /extensions/repos/add|update take trust_reviews («Fidati delle revisioni di questo repository»), the answers carry verified and reviewed — the list of the reviewed (MICRO-PL24); 86 = /extensions/versions, /extensions/updates, /extensions/update-all, /extensions/use, /extensions/prune, /extensions/leftovers, /extensions/clean, /profiles/redeclare, /profiles/overlay's newer — the updates in «Estensioni» (MICRO-PL23); 85 = /extensions/repos*, /extensions/available, /extensions/online — the repositories of this machine in «Estensioni» (MICRO-PL22); 84 = /py/plugins {dev}, /py/plugins/dev, /py/plugins/reload — the plugins' development folder behind «Funzioni sperimentali» (MICRO-PL18); 83 = /py/plugins, /py/invoke, /py/checks — the plugins loaded from disk and their commands (MICRO-PL17); 82 = /py/history, the console's history of this machine, and a run's proofs (MICRO-PL16); 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+// 93 = /py/session takes the commands' catalogue, /py/complete answers kinds and signatures, the `app` requests of em.app.space / workspaces / windows (MICRO-SEG02)
+const BRIDGE_LEVEL_WANTED = 93;   // 92 = /graph/door takes acquisition (the survey that stamps the GIS sheets) and attach_to / site_name (the site, «Funzioni sperimentali») — the lab's door absorbed (MICRO-COR11); 91 = POST /graph/door-dosco, a DosCo folder through «Porta dentro…»: its rows planned, then brought in (s3Dgraphy door.dosco_plan / bring_in_dosco) (MICRO-COR06); 90 = GET /py/layer-image, the pictures of a plugin's layer of the Space (space.layer@1) served only from its own data folder (MICRO-GEO11); 89 = /extensions/repos/add|update take keys (a repository's minisign public keys: its index and archives signed or refused), the answers carry signed, signed_by, signature — the signature of a repository (MICRO-PL28); 88 = /py/compute, the values of the slots of phase 2 — an Inspector section, a column of the Tabular, the status bar, a declarative panel; /py/plugins carries the panels and the tools (MICRO-PL25); 87 = /extensions/repos/add|update take trust_reviews («Fidati delle revisioni di questo repository»), the answers carry verified and reviewed — the list of the reviewed (MICRO-PL24); 86 = /extensions/versions, /extensions/updates, /extensions/update-all, /extensions/use, /extensions/prune, /extensions/leftovers, /extensions/clean, /profiles/redeclare, /profiles/overlay's newer — the updates in «Estensioni» (MICRO-PL23); 85 = /extensions/repos*, /extensions/available, /extensions/online — the repositories of this machine in «Estensioni» (MICRO-PL22); 84 = /py/plugins {dev}, /py/plugins/dev, /py/plugins/reload — the plugins' development folder behind «Funzioni sperimentali» (MICRO-PL18); 83 = /py/plugins, /py/invoke, /py/checks — the plugins loaded from disk and their commands (MICRO-PL17); 82 = /py/history, the console's history of this machine, and a run's proofs (MICRO-PL16); 81 = /py/* — the Python session (em), behind the bridge's secret (MICRO-PL15); 80 = /profiles/overlay verifies a package's compiled sheets and gives their vocabularies; preview/install refuse a sheet edited after compiling (MICRO-PL11); 79 = /pose/* — an extractor of a community package placed on a model, a landmark set point by point, the declared combiners (MICRO-PL10); 78 = /extensions/* and /profiles/* — the extensions of this machine by parts, the overlay of a document's packages (MICRO-PL09); 77 = the vocabulary manager behind /vocab/* (versions, carriers, a package's vocabularies, tier C by hand, alignments, the log) (MICRO-PL02); 76 = POST /sheet/render takes a batch of records (MICRO-PL002); 75 = /vocab/* — the vocabularies installed on this machine (MICRO-U-VOCABOLARI-COME-FONT); 74 = /geo/crs-search, /geo/datum, /geo/datum-check, /geo/frame-fit — the card «Georeferenziazione» (MICRO-P-GEOREF-PER-GRAFO); 73 = POST /sheet/render, the A4 of a sheet by stratigraph-templates (MICRO-G-SCHEDE); 72 = GET /bucket/list (Archive › Files › Bucket), /graph/door takes a dropped tileset (packaging, digest, size, name_only) (MICRO-F-BUCKET-E-TILESET); 71 = /graph/door («Porta dentro…», s3Dgraphy door.bring_in) and /graph/master (a master replaced, a version promoted: s3Dgraphy master_swap) (MICRO-E-PORTA-VERSIONI-COLORI); 70 = /gis/raster-grid, /graph/gis-document, /graph/publishable, /gis/features shift + group_key (MICRO-D-GIS-DOCUMENTI); 69 = /graph/epoch-move, /graph/model-kind, /graph/container-links, /graph/containers ops leave, unpublish, unalternative, subcontainer (MICRO-TESTATE-COERENTI); 68 = GET /fs/thumb, the thumbnails' cache shared with EM Tools (MICRO-FOTO-DOCUMENTI-BBOX); 67 = /graph/containers new_document, op document, op align; /assets/list's containers (MICRO-SPAZIO-CONTAINER); 66 = /graph/containers (the containers by hand, the active alternative written in the graph) and /assets/versions/remove, /assets/textures/remove (versions removed where the graph cites them) (MICRO-ASSETS-LIVELLI); 65 = /assets/list reads a 3tz through one ZipFile, the phase «tiles», a sample over 50.000 tiles («stimato», «Misura tutto»), one measure per tileset, kept on disk (MICRO-ASSETS-3TZ); 64 = /geo/tileset-frame and /geo/frame take the GeoPositionNode's datum_operation (MICRO-DATUM-DICHIARATO); 63 = /geo/tileset-frame takes frame EPSG:4978, a true ECEF root into the study's CRS (MICRO-RIFINITURE); 62 = GET /machine/memory, the guard of memory (MICRO-MEMORIA-SESSIONE); 61 = /gis/inspect, /gis/features, /gis/surface, /graph/gis-ingest, /graph/landscape-surface, /graph/gis-contours (MICRO-GIS-BASE); 60 = /graph/add-version takes {profile, use_params}, apply_use and gltfpack name a version made for a use by its use, <model>@<use>[-<n>k] (MICRO-VERSIONI-PER-USO); 59 = a version already in versions/ refused with its path (409), POST /jobs {kind: variants, replace}, a variant named after its master (MICRO-CODA-VISTA-2); 58 = POST /jobs {step: cancel, by}, a job says who cancelled it (MICRO-CODA-VISTA); 57 = /assets/list reads a tileset's tiles by their heads (tileset.json or a .3tz, never the geometry) and passes them to s3Dgraphy: a tileset «ok» for a target only if its tiles fit the band, then it covers its meshes (MICRO-ARCHIVE-ASSET-3); 56 = POST/GET /fs/hydrate, the resolver never reads a file in the cloud (state in_cloud), /assets/list versions with cloud_paths — «Scarica e misura» (MICRO-TESTATA-CLOUD); 55 = GET /assets/progress, POST /assets/list {progress} — the first opening of Archive › Asset in phases with counters (MICRO-ARCHIVE-ASSET-2); 54 = /jobs/scheduler, POST /jobs {step: share}, a job's wait — the queue in parallel under a scheduler (MICRO-CODA-MULTICORE); 53 = POST /assets/list, Archive › Asset (MICRO-ARCHIVE-ASSET); 52 = /consolidate measured and verified against the stamps, /graph/register-new-version, /graph/tileset-master (MICRO-CONSOLIDA-2); 51 = /consolidate («Consolida per…»), /graph/compose-plan + POST /jobs {kind: blender, op: compose_graph} («Componi un .blend dal grafo», the room's files fetched by sha256), /graph/before-after (the check's before/after, «Aggiorna» = update_version in the background), /graph/tileset-whole (MICRO-BLEND-OFFICINA-3); 50 = /blend/compose-plan + POST /jobs {kind: blender, op: compose} (a working .blend for a profile, EM Tools' blend_compose), /blend/master-place (D5), blend_apply in the background with the graph's actions and their delta, /blend/open readonly (MICRO-BLEND-OFFICINA-2); 49 = /geo/fit-points, /geo/parse-points — the frame by points of «Fai entrare un asset» (MICRO-INGRESSO-ASSET-1); 48 = the .blend as a folder: POST /jobs {kind: blender, op: inventory | blend_apply}, /blend/session, /blend/open — read headless by EM Tools, checked against the graph, opened in Blender as a sidecar (MICRO-BLEND-OFFICINA-1); 47 = the profiles with E.D.'s names, the grid by groups with per-row params, a tileset suggested; /addons says what each add-on serves, Node.js an add-on of its own, Obj2Tiles from E.D.'s fork (MICRO-PREPARA-RITOCCHI); 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -18948,7 +18952,8 @@ document.getElementById("btn-ttl")!.addEventListener("click", async () => {
 // E.D., 4 Oct 2026: GraphML is DEPRECATED — read once, never written again. The
 // imported graph becomes an em.json at once (`keepGraphmlAsEmJson`), and from
 // then on Save writes that file; nothing in EMStudio exports a GraphML.
-async function importGraphmlText(text: string, srcName: string, srcPath: string | null = null): Promise<void> {
+async function importGraphmlText(text: string, srcName: string, srcPath: string | null = null,
+                                 opts: { keep?: boolean } = {}): Promise<void> {
   if (!(await confirmLeaveSidecar("Importing GraphML"))) return;
   toast(t("io.importing", { fmt: "GraphML" }));
   try {
@@ -18981,7 +18986,8 @@ async function importGraphmlText(text: string, srcName: string, srcPath: string 
     // its documents' «/DosCo/…» are read there
     if (srcPath) slot.sourceDir = paths.dirname(srcPath) || null;
     toast(t("io.imported", { name: srcName }));
-    await keepGraphmlAsEmJson(slot, srcName, srcPath);
+    // MICRO-SEG02 · a script's import asks no name: it saves with saveAs(path)
+    if (opts.keep !== false) await keepGraphmlAsEmJson(slot, srcName, srcPath);
   } catch {
     toast(BRIDGE_UNREACHABLE);
   }
@@ -23025,8 +23031,10 @@ function closeSlot(id: string): void {
 async function closeGraphAsking(id: string): Promise<void> {
   const slot = emtree.get(id);
   if (!slot) return;
-  // Unsaved work is the one thing a close must not take silently.
-  if (slot.store.dirty
+  // Unsaved work is the one thing a close must not take silently. MICRO-SEG02 ·
+  // the seed of New untouched is nobody's work (DEV30 V3, as closeEverythingAsking
+  // and confirmOpenOverUnsaved already say): closed without a question
+  if (slot.store.dirty && !isUntouchedSeed(slot)
       && !(await askConfirm(t("emtree.unsaved", { name: slotLabel(slot) })))) {
     return;
   }
@@ -28796,6 +28804,9 @@ function detachWindow(src: Win | null, at: { x: number; y: number } | null,
   stage.className = "em-detached-root";
   d.body.appendChild(stage);
   const win = addDetachedWindow(type, cloneState(rec?.state ?? src?.state ?? {}));
+  // MICRO-SEG02 · the Script Editor's twin shows the SAME script (its buffer,
+  // unsaved lines included): keyed by the window's id, it was a new empty one
+  if (type === "script" && src) { const b = scriptBuffers.get(src.id); if (b) scriptBuffers.set(win.id, b); }
   // the camera: where the original was looking (or where the twin was)
   if (type === "graph") {
     const mode = winMode(win);
@@ -28975,6 +28986,8 @@ function returnDetached(winId: string): void {
   setActiveWin(into);
   const clone = splitWindow(into, "row", activeWorkspace(), 0.5, "b");
   if (!clone) return;
+  // MICRO-SEG02 · …and the script comes back with it
+  if (p.win.type === "script") { const b = scriptBuffers.get(p.win.id); if (b) scriptBuffers.set(clone.id, b); }
   setWinType(clone, p.win.type);
   for (const k of Object.keys(clone.state)) delete clone.state[k];
   Object.assign(clone.state, cloneState(p.win.state));
@@ -42236,8 +42249,12 @@ function renderMissingPill(): void {
 }
 document.getElementById("footer-missing")?.addEventListener("click", () => { void relocateFiles(); });
 
-async function relocateFiles(folderGiven?: string): Promise<void> {
-  if (!store || !currentFilePath || assetStoreBase()) { toast(t("relocate.noFile")); return; }
+async function relocateFiles(folderGiven?: string, script?: { apply: boolean }):
+    Promise<{ found: number; ambiguous: number; missing: number; link: number; applied: number } | void> {
+  if (!store || !currentFilePath || assetStoreBase()) {
+    if (script) throw new Error(t("relocate.noFile"));
+    toast(t("relocate.noFile")); return;
+  }
   const emjson = currentFilePath;
   let folder = folderGiven ?? null;
   if (!folder) {
@@ -42263,6 +42280,15 @@ async function relocateFiles(folderGiven?: string): Promise<void> {
   relocateLast = { folder, verdicts, applied: [] };
   filesRefresh();
   if (currentFilePath !== emjson) return;
+  // MICRO-SEG02 · a script's search: no window — the tally; with `apply` the
+  // paths found without doubt rewritten (the ambiguous stay for a person)
+  if (script) {
+    const n = tally(verdicts);
+    const sure = verdicts.filter((v) => v.kind === "found" && v.choice);
+    if (script.apply && sure.length)
+      applyRelocation(rewritePlan(verdicts.map((v) => ({ ...v, choice: v.kind === "found" ? v.choice ?? null : null })), emjson));
+    return { found: n.found, ambiguous: n.ambiguous, missing: n.missing, link: n.link, applied: script.apply ? sure.length : 0 };
+  }
   showRelocateWindow(folder, verdicts, emjson);
 }
 
@@ -66135,7 +66161,7 @@ const consoleHost: ConsoleHost = {
     return null;
   },
   run: (code, opts) => (store ? pySessionFor(store).run(code, opts) : Promise.reject(new Error(t("pyc.noDoc")))),
-  complete: (text) => (store ? pySessionFor(store).complete(text) : Promise.resolve([])),
+  complete: (text) => (store ? pySessionFor(store).completeRich(text) as Promise<CompleteAnswer | string[]> : Promise.resolve([])),
   history: async () => (store && (await bridgeLevelAtLeast(CONSOLE_LEVEL)) ? pySessionFor(store).history() : []),
   docName: () => (store ? emtree.activeFile()?.name ?? null : null),
   openExternal: (url) => openOutside(url),
@@ -66263,6 +66289,9 @@ async function fsBridgeFetch(route: string, init?: RequestInit): Promise<Respons
 }
 const scriptHost: ScriptHost = {
   t: (key, vars) => t(key, vars),
+  // MICRO-SEG02 p.4 · the editor's list: the same answer as the console's Tab
+  complete: async (text) => (store && (await consoleHost.unavailable()) === null
+    ? pySessionFor(store).completeRich(text) as Promise<CompleteAnswer | string[]> : []),
   where: () => {
     const p = scriptPlace();
     return p.kind === "folder" ? { kind: "folder", label: p.dir } : p.kind === "browser" ? { kind: "browser", label: p.key } : { kind: "none", label: "" };
@@ -66343,6 +66372,8 @@ const scriptHost: ScriptHost = {
       if (b !== buf) continue;
       const w = everyWindow().find((x) => x.id === id);
       if (w && winCurrent(w, "script.file") !== buf.name) setWinCurrent(w, "script.file", buf.name);
+      // MICRO-SEG02 · two windows on one script (a detached twin): the other follows
+      scriptMounts.get(id)?.reload();
     }
     renderAreaHeaders();
   },
@@ -66572,12 +66603,20 @@ function pySessionFor(st: DocumentStore): PySession {
   const session = new PySession({
     base: bridgeUrl,
     token: () => pyToken(bridgeToken),
-    doc: () => JSON.parse(st.toJSON()),
+    // MICRO-SEG02 · a document born by New has no header yet: the bridge
+    // refused it («not an em.json document»), so no console on a new graph
+    doc: () => {
+      const d = JSON.parse(st.toJSON());
+      if (!d.header?.format) d.header = { format: "em.json", version: EMJSON_FORMAT_VERSION, ...(d.header ?? {}) };
+      return d;
+    },
     revision: () => st.rev,
     author: () => editorHand().orcid,
     lang: () => getLocale(),
     declared: () => declaredNow(),
     selection: () => [...selectedIds],
+    // MICRO-SEG02 · what `em.app.commands` reaches, with the params (the console completes from it)
+    commands: () => scriptCatalog((id) => { const r = findRow(id); return r ? t(r.label) : null; }),
     applyStep: (step: PyStep) => { applyDelta(st, step.delta, { renameCopies: true }); return st.rev; },
     log: (level, message, ids) => (level === "error" ? logError : level === "warn" ? logWarn : logInfo)(message, ids),
     t: (key, vars) => t(key, vars),
@@ -66590,7 +66629,9 @@ function pySessionFor(st: DocumentStore): PySession {
         return true;
       },
       notify: (message, level) => { (level === "error" ? logError : level === "warning" ? logWarn : logInfo)(`Python · ${message}`); toast(message); },
-      command: (id) => runCommand(id),
+      // MICRO-SEG02 · the params reach the command (they were lost here)
+      command: (id, slots) => runScriptCommand(id, slots),
+      app: (op, args) => scriptAppOp(op, args),
       camera: () => [...sceneHandles.values()][0]?.camera() ?? null,
       setCamera: (c) => { const h = [...sceneHandles.values()][0]; if (h && c) h.setCamera(c as Parameters<typeof h.setCamera>[0]); },
       frame: (ids) => { for (const h of sceneHandles.values()) h.frameKeys(ids.flatMap((id) => [id, `rm:${id}`])); },
@@ -66601,6 +66642,404 @@ function pySessionFor(st: DocumentStore): PySession {
   st.onChange(() => { if (py?.st === st) pyNudge("graph-changed"); });
   py = { session, st };
   return session;
+}
+
+// ── MICRO-SEG02 p.1–3 · what `em.app` reaches: commands with parameters, the
+// named actions, the Space, the workspaces and the windows ─────────────────
+//
+// `em.app.commands.run(id, **params)` arrives here with its params (the host
+// hook called `runCommand(id)` alone before, and they were lost). The table is
+// `script-commands.json`: a command whose values are there runs without its
+// window, else its window opens filled with them (Blender's EXEC / INVOKE);
+// an action (`addUnitAbove`, `connect`, `moveToEpoch`, `fold`, `frameNode`…)
+// is a key or a gesture given an id. A refusal comes back in the page's
+// language (py-session turns it into `NotAvailable` in Python).
+
+/** A node named in a script: its id, or a name only one node carries. */
+function scriptNode(ref: unknown, what = "id"): string {
+  const st = store;
+  if (!st) throw new Error(t("toast.openADocument"));
+  const r = String(ref ?? "").trim();
+  if (!r) throw new Error(t("py.paramMissing", { id: "", name: what }));
+  if (st.node(r)) return r;
+  const named = st.doc.graph.nodes.filter((n) => String(n.name ?? "") === r && !(n.data as Record<string, unknown> | undefined)?.removed);
+  if (named.length === 1) return named[0].id;
+  throw new Error(named.length > 1 ? t("py.nodeAmbiguous", { ref: r, n: String(named.length) }) : t("py.nodeUnknown", { ref: r }));
+}
+/** An epoch named in a script (id or name). */
+function scriptEpoch(ref: unknown): string {
+  const id = scriptNode(ref, "epoch");
+  if (store?.node(id)?.node_type !== "EpochNode") throw new Error(t("py.notEpoch", { ref: String(ref) }));
+  return id;
+}
+/** A text file read by path: the desktop's own hands, the bridge on the web. */
+async function scriptReadText(path: string): Promise<string> {
+  if (isTauri()) return (await import("@tauri-apps/plugin-fs")).readTextFile(paths.toNative(path));
+  return (await fsBridgeFetch(`/fs/file?path=${encodeURIComponent(path)}`)).text();
+}
+/** A text file written by path (over one already there). */
+async function scriptWriteText(path: string, text: string): Promise<void> {
+  if (isTauri()) { await (await import("@tauri-apps/plugin-fs")).writeTextFile(paths.toNative(path), text); return; }
+  await fsBridgeFetch("/fs/write", { method: "POST", body: new TextEncoder().encode(text),
+    headers: { "Content-Type": "application/octet-stream", "X-EM-Path": encodeURIComponent(path), "X-EM-Overwrite": "1" } });
+}
+/** The graph window the actions act on: the active one, else the first. */
+function scriptGraphWin(): Win {
+  const w = activeWin().type === "graph" ? activeWin() : windowsOf().find((x) => x.type === "graph");
+  if (!w) throw new Error(t("py.noGraphWin"));
+  if (activeWin().id !== w.id) selectWindow(w.id);
+  return w;
+}
+function scriptSpace(): SpaceSceneHandle {
+  const h = [...sceneHandles.values()][0];
+  if (!h) throw new Error(t("py.noSpace"));
+  return h;
+}
+
+/** `em.app.commands.run(id, **slots)` — the one door of a script. */
+async function runScriptCommand(id: string, slots: Record<string, unknown>): Promise<unknown> {
+  // a plugin's command keeps its own road (MICRO-PL17)
+  // (an unknown id, a command not possible now: an ERROR, never a `false` a
+  // command may well answer — `nudge` with nothing selected returns False)
+  if (id.startsWith("plugin:")) { if (!runCommand(id, { script: true })) throw new Error(t("py.noCommand", { id })); return null; }
+  const d = declOf(id);
+  if (!d && !findRow(id)) throw new Error(t("py.noCommand", { id }));
+  const b = bindParams(id, slots ?? {});
+  if (b.problems.length) throw new Error(b.problems.map((p) => t(p.key, p.vars)).join("; "));
+  if (d?.kind === "action") {
+    const fn = scriptActionOf(id);
+    if (!fn) throw new Error(t("py.noCommand", { id }));
+    return (await fn(b.values, b)) ?? null;
+  }
+  if (d && d.decl.form === "none") throw new Error(t("py.commandNotFromScript", { id, why: d.decl.why ?? "" }));
+  const form = scriptFormOf(id);
+  if (form && d && (runsWithoutWindow(d.decl, b) || b.given.size)) return (await form(b.values, b)) ?? null;
+  // INVOKE with nothing given: the command's own gesture (its window)
+  if (!runCommand(id, { script: true })) throw new Error(t("py.noCommand", { id }));
+  return null;
+}
+
+// the forms of the File menu (and the rest of the table)
+registerScriptForm("new", async () => { if (!(await confirmLeaveSidecar("Starting a new document"))) return false; newDocument(); return true; });
+const scriptOpen = async (v: Record<string, unknown>): Promise<unknown> => {
+  const path = v.path as string | null;
+  if (!path) { await (v.replace ? openReplacing() : openDocument()); return null; }
+  const text = await scriptReadText(path);
+  if (v.replace ? !(await closeEverythingAsking()) : !(await confirmOpenOverUnsaved(baseName(path)))) return false;
+  if (isGraphmlFile(path, text)) { await importGraphmlText(text, baseName(path), path, { keep: false }); return path; }
+  if (!(await confirmLeaveSidecar("Opening a file"))) return false;
+  loadContainerDocument(JSON.parse(text), baseName(path), path);
+  return path;
+};
+registerScriptForm("open", scriptOpen);
+registerScriptForm("openReplace", (v) => scriptOpen({ ...v, replace: true }));
+registerScriptForm("save", async () => { await saveDocument(); return !store?.dirty; });
+registerScriptForm("saveAs", async (v) => {
+  const path = v.path as string | null;
+  if (!path) { await saveAsDocument(); return null; }
+  const slot = emtree.active();
+  if (!slot) throw new Error(t("toast.openADocument"));
+  let file = emtree.fileOf(slot);
+  if (!file) { file = emtree.addFile(null, baseName(path)); emtree.assign(slot.id, file.id); }
+  const doc = fileContainer(file);
+  await scriptWriteText(path, JSON.stringify(doc, null, 1));
+  emtree.setFilePath(file.id, path, baseName(path));
+  for (const s of emtree.slotsOf(file.id)) s.seedSig = undefined;
+  currentFilePath = emtree.active()?.path ?? path;
+  addRecent({ path, name: baseName(path) }, Date.now());
+  markFileSaved(file, doc);
+  updateToolbar();
+  refreshEMTree();
+  logInfo(t("save.savedToast", { file: baseName(path) }));
+  return path;
+});
+registerScriptForm("saveAll", async () => { await saveAllDocuments(); return true; });
+registerScriptForm("pin", () => { pinProjectVersion(); return true; });
+const scriptDoor = async (v: Record<string, unknown>): Promise<unknown> => {
+  const list = (v.paths as string[] | null) ?? [];
+  if (!list.length) {
+    if (v.mode === "folder") await doorFolderFromMenu();
+    else if (v.mode === "dosco") await doorDoscoFromMenu();
+    else await doorFromMenu({ epoch: (v.epoch as string | null) ?? null });
+    return null;
+  }
+  if (!store) throw new Error(t("toast.openADocument"));
+  if (v.mode === "dosco") { if (v.confirm) armDialog("door-dosco", { ok: true }); await openDoscoDoor(list[0]); return 1; }
+  const files: DoorFile[] = list.map((p) => ({ path: p, name: paths.leafName(p), ...(v.mode === "folder" ? { dir: true } : {}) }));
+  // the door's field (its date) filled, and its OK pressed when asked
+  const disarm = v.confirm || v.date != null ? armDialog("door", { value: (v.date as string | null) ?? null, ok: !!v.confirm }) : () => {};
+  try {
+    await portaDentro(files, { epoch: v.epoch ? scriptEpoch(v.epoch) : null });
+  } finally { disarm(); }
+  return list.length;
+};
+registerScriptForm("door", scriptDoor);
+registerScriptForm("bringIn", scriptDoor);
+registerScriptForm("doorFolder", async (v) => {
+  if (!v.path) { await doorFolderFromMenu(); return null; }
+  await portaDentro([{ path: v.path as string, name: paths.leafName(v.path as string), dir: true }]);
+  return true;
+});
+registerScriptForm("doorDosco", async (v) => {
+  if (!v.path) { await doorDoscoFromMenu(); return null; }
+  await openDoscoDoor(v.path as string);
+  return true;
+});
+registerScriptForm("importGraphml", async (v) => {
+  if (!v.path) { document.getElementById("btn-import-graphml")?.click(); return null; }
+  const path = v.path as string;
+  await importGraphmlText(await scriptReadText(path), baseName(path), path, { keep: false });
+  return path;
+});
+registerScriptForm("exportSvg", async (v) => {
+  const s = scene();
+  if (!s || !store) throw new Error(t("toast.openADocument"));
+  const g = store.doc.graph;
+  const title = String(g["name"] ?? g.graph_id ?? "graph");
+  const svg = sceneToSvg(s, edgeVisible, title);
+  if (v.path) { await scriptWriteText(v.path as string, svg); return v.path; }
+  const name = `${title.replace(/[^\w.-]+/g, "_")}_${inContext() ? "group" : view}.svg`;
+  browserDownload(svg, name);
+  return name;
+});
+registerScriptForm("exportTtl", async (v) => {
+  if (!v.path) { document.getElementById("btn-ttl")?.click(); return null; }
+  if (!store) throw new Error(t("toast.openADocument"));
+  const res = await fetch(`${await bridgeUrl()}/export-ttl`, { method: "POST", headers: { "Content-Type": "application/json" }, body: store.toJSON() });
+  if (!res.ok) throw new Error(t("io.exportFailed", { fmt: "Turtle", msg: `bridge ${res.status}` }));
+  await scriptWriteText(v.path as string, await res.text());
+  return v.path;
+});
+registerScriptForm("relocate", async (v) => {
+  if (!v.folder) { await relocateFiles(); return null; }
+  return (await relocateFiles(v.folder as string, { apply: !!v.apply })) ?? null;
+});
+registerScriptForm("close", async () => { await closeActiveDocument(); return true; });
+registerScriptForm("closeProject", async () => { await closeProjectGesture(); return true; });
+const scriptUndo = (redo: boolean) => (v: Record<string, unknown>): number => {
+  const st = undoStore();
+  if (!st) return 0;
+  let n = 0;
+  for (let i = 0; i < Math.max(1, Number(v.steps) || 1); i++) {
+    const before = st.rev;
+    if (redo) st.redo(); else st.undo();
+    if (st.rev === before) break;
+    n++;
+  }
+  return n;
+};
+registerScriptForm("undo", scriptUndo(false));
+registerScriptForm("redo", scriptUndo(true));
+
+// the named actions (p.2)
+async function scriptAddLinked(v: Record<string, unknown>, relation: "above" | "below"): Promise<string> {
+  const st = store;
+  if (!st) throw new Error(t("toast.openADocument"));
+  const w = scriptGraphWin();
+  const of = scriptNode(v.of, "of");
+  const other = st.node(of)!;
+  const type = (v.type as string | null) || other.node_type;
+  const item = linkedItems(winMode(w) as AddContext, other.node_type).find((i) => i.nodeType === type && i.relation === relation);
+  if (!item) throw new Error(t(relation === "above" ? "py.noRelationAbove" : "py.noRelationBelow", { type, of: String(other.name ?? of) }));
+  const box = scene()?.nodes.find((n) => n.id === of);
+  const wx = box ? box.x + box.w / 2 : 0;
+  const wy = box ? (relation === "above" ? box.y - box.h * 1.5 : box.y + box.h * 2.5) : 0;
+  const epochBefore = st.firstEpochOf(of);
+  const id = await addNodeFromMenu({ nodeType: type, link: { otherId: of, dir: item.dir, edgeType: item.edgeType } } as AddSpec, wx, wy, false, { quiet: true });
+  if (!id) throw new Error(t("py.notMade", { type }));
+  if (v.name) st.updateNode(id, { name: String(v.name) });
+  if (epochBefore && st.firstEpochOf(id) !== epochBefore) st.setFirstEpoch([id], epochBefore);
+  return id;
+}
+registerScriptAction("addUnitAbove", (v) => scriptAddLinked(v, "above"));
+registerScriptAction("addUnitBelow", (v) => scriptAddLinked(v, "below"));
+registerScriptAction("addNode", async (v) => {
+  const st = store;
+  if (!st) throw new Error(t("toast.openADocument"));
+  scriptGraphWin();
+  const r = viewSize();
+  const c = viewport().toWorld(r.w / 2, r.h / 2);
+  const id = await addNodeFromMenu({ nodeType: String(v.type || "US") } as AddSpec, c.x, c.y, false, { quiet: true });
+  if (!id) throw new Error(t("py.notMade", { type: String(v.type) }));
+  if (v.name) st.updateNode(id, { name: String(v.name) });
+  if (v.epoch) st.setFirstEpoch([id], scriptEpoch(v.epoch));
+  return id;
+});
+registerScriptAction("connect", (v) => {
+  const st = store;
+  if (!st) throw new Error(t("toast.openADocument"));
+  const a = scriptNode(v.source, "source"), b = scriptNode(v.target, "target");
+  const ta = st.node(a)!.node_type, tb = st.node(b)!.node_type;
+  const allowed = allowedEdgeTypes(ta, tb);
+  const type = (v.edge_type as string | null) ?? (allowed.includes("is_after") ? "is_after" : allowed[0]);
+  if (!type || (v.edge_type && !allowed.includes(type as string)))
+    throw new Error(t("py.noEdge", { a: ta, b: tb, type: String(type ?? "—"), allowed: allowed.join(", ") || "—" }));
+  if (refuseReadOnly()) throw new Error(t("py.readOnly"));
+  st.batch(() => createEdge(a, b, type as string));
+  draw();
+  return type;
+});
+const scriptEpochVerb = (verb: EpochVerb) => async (v: Record<string, unknown>): Promise<number> => {
+  const epoch = scriptEpoch(v.epoch);
+  let n = 0;
+  for (const ref of (v.ids as string[]) ?? []) if (await epochGesture(scriptNode(ref), verb, epoch)) n++;
+  return n;
+};
+registerScriptAction("moveToEpoch", scriptEpochVerb("move"));
+registerScriptAction("extendToEpoch", scriptEpochVerb("extend"));
+const scriptFold = (folded: boolean) => (v: Record<string, unknown>): boolean => {
+  const id = scriptNode(v.id);
+  store?.setFoldedMany([id], folded);
+  buildScenes();
+  draw();
+  return true;
+};
+registerScriptAction("fold", scriptFold(true));
+registerScriptAction("unfold", scriptFold(false));
+registerScriptAction("enterGroup", (v) => { scriptGraphWin(); enterGroup(scriptNode(v.id)); return true; });
+registerScriptAction("leaveGroup", () => {
+  if (!inContext()) return false;
+  contextStack.pop();
+  rebuildContext();
+  return true;
+});
+registerScriptAction("frameNode", (v) => { scriptGraphWin(); jumpTo(scriptNode(v.id)); return true; });
+registerScriptAction("fit", () => { scriptGraphWin(); fit(); return true; });
+const scriptZoom = (into: boolean) => (v: Record<string, unknown>): boolean => {
+  scriptGraphWin();
+  const f = Math.max(1.0001, Number(v.factor) || 1.25);
+  viewport().zoomAt(viewSize().w / 2, viewSize().h / 2, into ? f : 1 / f);
+  draw();
+  return true;
+};
+registerScriptAction("zoomIn", scriptZoom(true));
+registerScriptAction("zoomOut", scriptZoom(false));
+registerScriptAction("back", () => { goBack(); return true; });
+registerScriptAction("deleteNodes", (v) => {
+  const ids = ((v.ids as string[] | null) ?? []).map((r) => scriptNode(r));
+  if (ids.length) selectMany(ids);
+  const n = selectedIds.size || (selectedId ? 1 : 0);
+  if (!n) return 0;
+  deleteSelectedNodes();
+  return n;
+});
+registerScriptAction("nudge", (v) => nudgeSelection(Number(v.dx) || 0, Number(v.dy) || 0));
+registerScriptAction("reflow", async (v) => {
+  const ids = ((v.ids as string[] | null) ?? []).map((r) => scriptNode(r));
+  if (ids.length) await reflowNodes(ids);
+  else await layoutAll(false, !!v.reduce_crossings);
+  return true;
+});
+registerScriptAction("layoutFresh", async () => { await layoutAll(true); return true; });
+registerScriptAction("compact", () => { runCompact(); return true; });
+registerScriptAction("magnify", (v) => {
+  const id = (v.window as string | null) ?? activeWin().id;
+  if (!windowsOf().some((w) => w.id === id)) throw new Error(t("py.noWindow", { id }));
+  magnifyWindow(id);
+  return true;
+});
+registerScriptAction("spaceView", (v) => { scriptSpace().setView(String(v.side || "front") as AlignedView); return true; });
+registerScriptAction("spaceToggleOrtho", () => { scriptSpace().toggleOrtho(); return true; });
+registerScriptAction("spaceFrameSelected", () => {
+  const ids = [...selectedIds];
+  return scriptSpace().frameKeys(ids.flatMap((id) => [`proxy:${id}`, `rm:${id}`, id]));
+});
+registerScriptAction("spaceFrameAll", () => { scriptSpace().frame(); return true; });
+registerScriptAction("spaceCursorReset", () => scriptSpace().centreScene());
+
+/** p.3 · `em.app.space`, `em.app.workspaces`, `em.app.windows`: what they read
+ *  and set, asked by name (`app` requests of py-session). */
+async function scriptAppOp(op: string, args: Record<string, unknown>): Promise<unknown> {
+  switch (op) {
+    case "space.layers": {
+      const sp = currentSpace();
+      if (!sp) return [];
+      const hidden = new Set(space3dPrefs().hidden);
+      const epochName = (id: string) => String(store?.node(id)?.name ?? id);
+      return sp.rms.map((rm) => {
+        const res = rm.tileset ?? rm.resource;
+        return { key: `rm:${rm.id}`, id: rm.id, name: rm.name, kind: rm.tileset || res?.tiles ? "tileset" : "model",
+          visible: !hidden.has(`rm:${rm.id}`), epochs: rm.epochs.map(epochName), epoch_ids: [...rm.epochs],
+          bytes: res?.bytes ?? null, file: res?.url ?? null, document: rm.documentId };
+      });
+    }
+    case "space.set_visible": {
+      const key = String(args.key ?? "");
+      const k = key.includes(":") ? key : `rm:${scriptNode(key)}`;
+      const p = space3dPrefs();
+      const h = new Set(p.hidden);
+      if (args.visible) h.delete(k); else h.add(k);
+      setSpace3dPrefs({ ...p, hidden: [...h] });
+      return !h.has(k);
+    }
+    case "space.epoch": {
+      const sp = currentSpace();
+      const id = spaceEpochId ?? sp?.epochs[sp.epochs.length - 1]?.id ?? null;
+      return id ? { id, name: String(store?.node(id)?.name ?? id) } : null;
+    }
+    case "space.set_epoch": {
+      spaceEpochId = scriptEpoch(args.epoch);
+      refreshSurfaces("scene");
+      return { id: spaceEpochId, name: String(store?.node(spaceEpochId)?.name ?? spaceEpochId) };
+    }
+    case "space.epochs": {
+      const sp = currentSpace();
+      return (sp?.epochs ?? []).map((e) => ({ id: e.id, name: e.name, start: e.start, end: e.end, ...(e.top ? { top: e.top } : {}) }));
+    }
+    case "space.profile":
+      return { profile: hardwareProfile(), chosen: !!space3dPrefs().hardware, read: detectHardware(), why: hardwareWhy };
+    case "space.set_profile": {
+      const v = args.profile == null ? null : String(args.profile);
+      if (v !== null && !["desktop", "web", "mobile"].includes(v)) throw new Error(t("py.paramChoice", { id: "space.profile", name: "profile", type: "enum", choices: "desktop, web, mobile, None" }));
+      const p = space3dPrefs();
+      setSpace3dPrefs({ ...p, hardware: (v ?? undefined) as Hardware | undefined });
+      refreshSurfaces("scene");
+      return hardwareProfile();
+    }
+    case "workspaces.list":
+      return WORKSPACES.map((w) => ({ id: w.id, label: workspaceLabel(w, t), builtin: !!w.builtin, active: w.id === activeWorkspace() }));
+    case "workspaces.active": return activeWorkspace();
+    case "workspaces.activate": {
+      const id = String(args.id ?? "");
+      const w = WORKSPACES.find((x) => x.id === id || workspaceLabel(x, t) === id);
+      if (!w) throw new Error(t("py.noWorkspace", { id, known: WORKSPACES.map((x) => x.id).join(", ") }));
+      setWorkspace(w.id);
+      return w.id;
+    }
+    case "windows.list": {
+      const act = activeWin().id;
+      const here = windowsOf().map((w) => ({ id: w.id, type: w.type, label: t(WINDOW_TYPE_META[w.type]?.labelKey ?? w.type), active: w.id === act, detached: false }));
+      const away = [...popouts.values()].filter((p) => !p.pop.closed).map((p) => ({ id: p.win.id, type: p.win.type, label: t(WINDOW_TYPE_META[p.win.type]?.labelKey ?? p.win.type), active: false, detached: true }));
+      return [...here, ...away];
+    }
+    case "windows.active": return activeWin().id;
+    case "windows.types": return Object.keys(WINDOW_TYPE_META);
+    case "windows.open": {
+      const type = String(args.type ?? "") as WindowType;
+      if (!WINDOW_TYPE_META[type]) throw new Error(t("py.noWindowType", { type, known: Object.keys(WINDOW_TYPE_META).join(", ") }));
+      if (args.area) {
+        const w = windowsOf().find((x) => x.id === args.area);
+        if (!w) throw new Error(t("py.noWindow", { id: String(args.area) }));
+        setWinType(w, type);
+        renderTiles();
+        return w.id;
+      }
+      if (type === "console") return openConsoleWindow({ focus: false })?.id ?? null;
+      const made = splitWindow(activeWin().id, args.split === "col" ? "col" : "row", activeWorkspace(), 0.5, "b");
+      if (!made) return null;
+      for (const k of Object.keys(made.state)) delete made.state[k];
+      setWinType(made, type);
+      renderTiles();
+      return made.id;
+    }
+    case "windows.activate": {
+      const id = String(args.id ?? "");
+      if (!windowsOf().some((w) => w.id === id)) throw new Error(t("py.noWindow", { id }));
+      selectWindow(id);
+      return id;
+    }
+  }
+  throw new Error(`unknown app request ${op}`);
 }
 
 /** An event of the page to the Python listeners — only when one waits for it. */
@@ -66639,6 +67078,10 @@ onLocaleChange(() => pyNudge("locale-changed"));
   open: () => (store ? pySessionFor(store).open() : Promise.reject(new Error("no document"))),
   run: (code: string, opts?: { dryRun?: boolean }) => (store ? pySessionFor(store).run(code, opts) : Promise.reject(new Error("no document"))),
   complete: (text: string) => (store ? pySessionFor(store).complete(text) : Promise.resolve([])),
+  // MICRO-SEG02 · the whole answer of a Tab (kinds, signature)
+  completeRich: (text: string) => (store ? pySessionFor(store).completeRich(text) : Promise.resolve([])),
+  // MICRO-SEG02 · `em.app.commands.run(id, **params)` as the bridge would call it
+  runCommand: (id: string, slots: Record<string, unknown> = {}) => runScriptCommand(id, slots),
   listeners: () => py?.session.listeners ?? {},
   close: () => py?.session.close(),
 };

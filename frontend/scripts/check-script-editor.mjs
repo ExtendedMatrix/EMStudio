@@ -86,6 +86,11 @@ eq([tp.arrangement.layout.a.dir, tp.arrangement.layout.a.a.win, tp.arrangement.l
 const builtin = ws.slice(ws.indexOf("const BUILTIN_WORKSPACES"), ws.indexOf("export const PARKED_WORKSPACES"));
 // MICRO-SEG02 p.0 · Scripting is ALSO the seventh built-in tab (last, after Schede)
 ok(/\n  SCRIPTING,\n\];/.test(builtin) && (builtin.match(/^\s*id: "/gm) ?? []).length === 6, "…and the seventh built-in tab, last");
+// MICRO-SEG02 p.4 · the editor's list: CodeMirror's autocomplete fed by the bridge's /py/complete (the console's Tab's answer)
+ok(/autocompletion\(\{ override: \[completeFromSession\]/.test(sce) && /completionKeymap/.test(sce), "the editor completes from the session (autocomplete, Ctrl+Space)");
+ok(/asAnswer\(await host\.complete!\(before\)/.test(sce) && /a\.signature/.test(sce), "…the same answer as the console: kinds, and the signature in the list");
+ok(/complete: async \(text\) =>[\s\S]{0,160}completeRich\(text\)/.test(main), "…the page gives it the session's completeRich");
+ok(/"@codemirror\/autocomplete"/.test(read("frontend/package.json")), "@codemirror/autocomplete is a declared dependency");
 ok(/showWorkspaceAddMenu\(r\.left, r\.bottom \+ 2\)/.test(main) && /for \(const tp of WORKSPACE_TEMPLATES\)/.test(main), "the «+» offers the models");
 // keys and places
 ok(/ev\.altKey && !ev\.ctrlKey && !ev\.metaKey && ev\.code === "KeyP"/.test(sce), "Alt+P runs the script, by the key's place");

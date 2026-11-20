@@ -210,8 +210,10 @@ export function buildPageMenus(platform: Platform, h: MenuHooks = {}): string[] 
 // ── one door for a command: the page's item, the system's item, the key ─────
 
 const lastRun = { button: "", at: 0 };
-/** Press the command's button — once per physical press. */
-export function runCommand(id: string): boolean {
+/** Press the command's button — once per physical press. MICRO-SEG02 · a
+ *  script's call (`script`) is not a physical press: three `undo` in a row
+ *  are three, never folded into one by the 400 ms guard. */
+export function runCommand(id: string, opts: { script?: boolean } = {}): boolean {
   // MICRO-PL17 · a plugin's command: an invocation, not a button
   if (id.startsWith("plugin:")) {
     if (!findRun(id) && !hooks.invoke) return false;
@@ -221,16 +223,18 @@ export function runCommand(id: string): boolean {
   const row = findRow(id);
   if (!row) return false;
   const now = performance.now();
-  if (lastRun.button === row.button && now - lastRun.at < 400) return true;
-  lastRun.button = row.button;
-  lastRun.at = now;
+  if (!opts.script) {
+    if (lastRun.button === row.button && now - lastRun.at < 400) return true;
+    lastRun.button = row.button;
+    lastRun.at = now;
+  }
   const b = document.getElementById(row.button) as HTMLButtonElement | null;
   if (!b || b.disabled) return false;
   b.click();
   return true;
 }
 
-function findRow(id: string): CommandRow | null {
+export function findRow(id: string): CommandRow | null {
   const walk = (rows: Row[]): CommandRow | null => {
     for (const r of rows) {
       if (r.kind === "cmd" && r.id === id) return r;

@@ -51,7 +51,7 @@ export interface PyStep {
 
 export interface PyRequest {
   n: number;
-  kind: "select" | "view" | "notify" | "command" | "camera" | "set_camera" | "frame" | "pick";
+  kind: "select" | "view" | "app" | "notify" | "command" | "camera" | "set_camera" | "frame" | "pick";
   wait?: boolean;
   [k: string]: unknown;
 }
@@ -132,7 +132,12 @@ export interface PyAppHost {
   /** false: the page has no such view */
   view(name: string): boolean;
   notify(message: string, level: "info" | "warning" | "error"): void;
+  /** MICRO-SEG02 · the command's answer (any value, `false` included); an
+   *  unknown id or a refusal is THROWN, its message said to the script */
   command(id: string, slots: Record<string, unknown>): unknown | Promise<unknown>;
+  /** MICRO-SEG02 p.3 · `em.app.space` / `workspaces` / `windows`: an operation
+   *  by name (`space.layers`, `windows.open`…), its answer */
+  app?(op: string, args: Record<string, unknown>): unknown | Promise<unknown>;
   camera(): unknown;
   setCamera(camera: unknown): void;
   frame(ids: string[]): void;
@@ -151,6 +156,9 @@ export interface PyPage {
   lang(): string;
   declared(): unknown;
   selection(): string[];
+  /** MICRO-SEG02 · the commands and actions a script reaches, with their
+   *  params (`script-commands.ts` `scriptCatalog`): the console completes from it */
+  commands?(): unknown;
   /** apply ONE step in ONE batch (one undo); the revision after it */
   applyStep(step: PyStep): number;
   host: PyAppHost;
@@ -207,7 +215,8 @@ export class PySession {
   async open(): Promise<PyAnswer> {
     const { status, answer } = await this.post("/py/session", {
       doc: this.page.doc(), revision: this.page.revision(), author: this.page.author(),
-      lang: this.page.lang(), declared: this.page.declared(), selection: this.page.selection() });
+      lang: this.page.lang(), declared: this.page.declared(), selection: this.page.selection(),
+      ...(this.page.commands ? { commands: this.page.commands() } : {}) });
     if (status !== 200 || !answer.ok) throw new PyError(wordsOf(answer, this.page.lang()) || `HTTP ${status}`, status, answer);
     this.id = (answer as { session?: string }).session ?? null;
     this.listeners = answer.listeners ?? {};
@@ -291,6 +300,19 @@ export class PySession {
     return status === 200 ? ((answer as { matches?: string[] }).matches ?? []) : [];
   }
 
+  /** MICRO-SEG02 · the whole answer: each name with its kind, the open call's
+   *  signature, the tail the names replace (an older bridge: its strings). */
+  async completeRich(text: string): Promise<string[] | { items: Array<{ text: string; kind: string; label?: string; detail?: string }>;
+                                                          tail?: string; signature?: { name: string; text: string; doc?: string } }> {
+    if (!this.id) await this.open();
+    let { status, answer } = await this.post("/py/complete", { session: this.id, text });
+    // a session the bridge forgot (restarted): a new one, asked again
+    if (status === 404) { await this.open(); ({ status, answer } = await this.post("/py/complete", { session: this.id, text })); }
+    if (status !== 200) return [];
+    const a = answer as { matches?: string[]; items?: Array<{ text: string; kind: string }>; tail?: string; signature?: { name: string; text: string; doc?: string } };
+    return a.items ? { items: a.items, ...(a.tail !== undefined ? { tail: a.tail } : {}), ...(a.signature ? { signature: a.signature } : {}) } : (a.matches ?? []);
+  }
+
   async close(): Promise<void> {
     if (!this.id) return;
     const id = this.id;
@@ -362,8 +384,14 @@ export class PySession {
         case "set_camera": h.setCamera(req.camera); return null;
         case "camera": { const c = h.camera(); return c == null ? { error: this.page.t("py.noSpace") } : { value: c }; }
         case "command": {
+          // MICRO-SEG02 · a refusal is thrown (caught below, said in the page's
+          // words); `false` is a value a command may answer
           const v = await h.command(String(req.id), (req.slots as Record<string, unknown>) ?? {});
-          return v === false ? { error: this.page.t("py.noCommand", { id: String(req.id) }) } : { value: v ?? null };
+          return { value: v ?? null };
+        }
+        case "app": {
+          if (!h.app) return { error: this.page.t("py.noApp", { op: String(req.op) }) };
+          return { value: (await h.app(String(req.op), (req.args as Record<string, unknown>) ?? {})) ?? null };
         }
         case "pick": {
           const v = await h.pick(String(req.prompt ?? ""), String(req.primitive ?? "point"));

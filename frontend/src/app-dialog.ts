@@ -68,6 +68,29 @@ function trace(): Trace[] {
 
 const FOCUSABLE = "button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex='-1'])";
 
+// ── MICRO-SEG02 p.1 · a dialog a SCRIPT answers ────────────────────────────
+// `em.app.commands.run("door", paths=[…], date="2024", confirm=True)`: the
+// command's window opens filled with what the script gave and, asked to, its
+// OK is pressed — through `validate`, as a person's click: refused, the window
+// stays open with the reason beside the field (Blender's INVOKE after a failed
+// EXEC). Armed for ONE dialog of that kind, for a short time: a question about
+// unsaved work is never answered by a script that did not arm it.
+interface Arm { value?: string; choice?: string; ok: boolean; until: number }
+const armed = new Map<string, Arm>();
+/** The next dialog of `kind` (within `ttlMs`) gets `value` in its field and,
+ *  with `ok`, its OK pressed. Gives back the disarm. */
+export function armDialog(kind: string, a: { value?: string | null; choice?: string; ok?: boolean }, ttlMs = 30000): () => void {
+  armed.set(kind, { ...(a.value != null ? { value: a.value } : {}), ...(a.choice ? { choice: a.choice } : {}),
+    ok: !!a.ok, until: Date.now() + ttlMs });
+  return () => { armed.delete(kind); };
+}
+function takeArm(kind: string): Arm | null {
+  const a = armed.get(kind);
+  if (!a) return null;
+  armed.delete(kind);
+  return a.until >= Date.now() ? a : null;
+}
+
 /** The general dialog. Resolves once, when it closes. */
 export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
   return new Promise((resolve) => {
@@ -211,6 +234,13 @@ export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
     document.addEventListener("keydown", onKey, true);
     if (field) { field.focus(); field.select(); }
     else (o.danger && cancelBtn ? cancelBtn : okBtn).focus();
+    // MICRO-SEG02 · a script's answer (`armDialog`): the field filled, OK pressed
+    const arm = takeArm(back.dataset.appDialog!);
+    if (arm) {
+      back.dataset.scripted = "1";
+      if (field && arm.value != null) { field.value = arm.value; field.dispatchEvent(new Event("input", { bubbles: true })); }
+      if (arm.ok) setTimeout(() => close(true, arm.choice), 0);
+    }
   });
 }
 

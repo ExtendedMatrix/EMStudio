@@ -23,8 +23,12 @@
  *     forced by the host): what it WOULD write, node by node, nothing applied;
  *   · HISTORY — this machine's (`~/.s3dgraphy/console_history`, bridge level
  *     82), ↑/↓ on the first/last line, Ctrl+R searches backwards;
- *   · COMPLETION — Tab (`/py/complete`: the names of the session, the ids and
- *     names of the nodes and the package's qualia inside a string).
+ *   · COMPLETION — Tab or Ctrl+Space, as Blender's console (MICRO-SEG02): one
+ *     possibility is completed; more → their common start is completed and
+ *     the list PRINTED in the output, each with the mark of its kind (module,
+ *     class, function, property, value); after «name(» the signature and the
+ *     docstring's first lines; inside a string the domain's values (command
+ *     ids, node ids and names, node types, epochs). `/py/complete`.
  *
  * Pure of `main.ts`: the page gives a {@link ConsoleHost}; the state lives here
  * so a rebuild of the window (a detach, the language) loses nothing.
@@ -41,7 +45,9 @@ export interface ConsoleHost {
   /** null: ready; else why the console cannot run here (said in the window) */
   unavailable(): Promise<string | null>;
   run(code: string, opts: { dryRun?: boolean; history?: boolean }): Promise<PyOutcome>;
-  complete(text: string): Promise<string[]>;
+  /** MICRO-SEG02 · the bridge's answer (`/py/complete`): the names with their
+   *  kind, the open call's signature; an older host answers plain strings */
+  complete(text: string): Promise<string[] | CompleteAnswer>;
   /** this machine's history, the oldest first (empty: none, or an older bridge) */
   history(): Promise<HistoryEntry[]>;
   /** the open document's name (null: none) */
@@ -56,8 +62,51 @@ export interface ConsoleHost {
  *  head and Help ▸ «Python API reference» open it. */
 export const PYTHON_API_URL = "https://docs.extendedmatrix.org/projects/emstudio-python-api/en/latest/";
 
-export type LineKind = "in" | "out" | "value" | "error" | "step" | "proof" | "info" | "script";
-export interface Line { kind: LineKind; text: string; dry?: boolean; detail?: string[] }
+export type LineKind = "in" | "out" | "value" | "error" | "step" | "proof" | "info" | "script" | "complete" | "sig";
+export interface Line { kind: LineKind; text: string; dry?: boolean; detail?: string[]; items?: CompleteItem[] }
+
+// ── MICRO-SEG02 p.4 · Tab as in Blender ─────────────────────────────────────
+/** What a name is: the mark drawn before it in the list Tab prints. */
+export type CompleteKind = "module" | "class" | "function" | "method" | "property" | "value" | "keyword" | "string" | "param" | "";
+export interface CompleteItem { text: string; kind: CompleteKind; label?: string; detail?: string }
+export interface CompleteSignature { name: string; text: string; doc?: string }
+export interface CompleteAnswer { items: CompleteItem[]; tail?: string; signature?: CompleteSignature }
+
+/** The mark of a kind (its word is `pyc.kind.<kind>`, the mark's title). */
+export const KIND_MARK: Record<string, string> = {
+  module: "▣", class: "◆", function: "ƒ", method: "ƒ", property: "•", value: "=", keyword: "k", string: "“", param: "⁼",
+};
+
+/** An answer of either shape, as items. */
+export function asAnswer(a: string[] | CompleteAnswer | null | undefined): CompleteAnswer {
+  if (!a) return { items: [] };
+  if (Array.isArray(a)) return { items: a.map((x) => ({ text: x, kind: "" as CompleteKind })) };
+  return { items: a.items ?? [], ...(a.tail !== undefined ? { tail: a.tail } : {}), ...(a.signature ? { signature: a.signature } : {}) };
+}
+
+/** What Tab does (Blender's console): one possibility → it is completed; more
+ *  → the common start is completed AND the list is printed in the output; a
+ *  call open after a name → its signature and docstring printed. */
+export function tabOutcome(before: string, answer: string[] | CompleteAnswer): {
+  replace: string | null; tail: string; list: CompleteItem[]; signature: CompleteSignature | null;
+} {
+  const a = asAnswer(answer);
+  const tail = a.tail ?? completionTail(before);
+  const seen = new Set<string>();
+  const items = a.items.filter((i) => !seen.has(i.text) && !!seen.add(i.text));
+  const sig = a.signature ?? null;
+  if (!items.length) return { replace: null, tail, list: [], signature: sig };
+  if (items.length === 1) return { replace: items[0].text, tail, list: [], signature: sig };
+  const p = commonPrefix(items.map((i) => i.text));
+  return { replace: p.length > tail.length ? p : null, tail, list: items, signature: sig };
+}
+
+/** The list Tab prints: one line per possibility, its mark, its name (the
+ *  last part of a dotted name, as Blender prints it), what it is. */
+export function completeLines(list: CompleteItem[]): Line[] {
+  if (!list.length) return [];
+  return [{ kind: "complete", text: "", items: list.map((i) => ({ ...i, label: i.label ?? (i.text.split(".").pop() ?? i.text).replace(/\($/, "") })) }];
+}
 
 /** the console's memory while the page lives */
 export interface ConsoleState {
@@ -273,6 +322,21 @@ function maker(doc: Document): El {
 function lineEl(el: El, l: Line, t: ConsoleHost["t"]): HTMLElement {
   const row = el("div", `pyc-line pyc-k-${l.kind}${l.dry ? " pyc-dry" : ""}`);
   if (l.kind === "in" && l.dry) row.append(el("span", "pyc-tag", t("pyc.tagTry")));
+  // MICRO-SEG02 · Tab's list: a mark per kind, the name, what it is
+  if (l.kind === "complete" && l.items?.length) {
+    const grid = el("div", "pyc-matches");
+    for (const it of l.items) {
+      const r = el("div", `pyc-m pyc-mk-${it.kind || "none"}`);
+      r.dataset.kind = it.kind || "";
+      const mark = el("span", "pyc-mark", KIND_MARK[it.kind] ?? "·");
+      if (it.kind) mark.title = t(`pyc.kind.${it.kind}`);
+      r.append(mark, el("span", "pyc-mname", it.label ?? it.text));
+      if (it.detail) r.append(el("span", "pyc-mdetail", it.detail));
+      grid.append(r);
+    }
+    row.append(grid);
+    return row;
+  }
   row.append(el("span", "pyc-text", l.text));
   if (l.detail?.length) {
     const d = el("div", "pyc-detail");
@@ -430,34 +494,26 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     const before = input.value.slice(0, pos);
     const lineStart = before.slice(before.lastIndexOf("\n") + 1);
     if (!lineStart.trim()) { input.setRangeText("    ", pos, pos, "end"); return; }
-    const matches = await host.complete(before).catch(() => []);
-    const c = completeWith(before, matches);
+    // MICRO-SEG02 · the whole text before the cursor: a call opened on an
+    // earlier line is still the call the cursor is in
+    const answer = await host.complete(before).catch(() => [] as string[]);
+    const c = tabOutcome(before, answer);
     if (c.replace != null) {
       input.setRangeText(c.replace, pos - c.tail.length, pos, "end");
       state.draft = state.at < 0 ? input.value : state.draft;
     }
-    list.replaceChildren();
-    if (c.list.length) {
-      for (const m of c.list.slice(0, 60)) {
-        const b = el("button", "pyc-match", m);
-        b.type = "button";
-        b.addEventListener("mousedown", (ev) => {
-          ev.preventDefault();
-          const p = input.selectionStart ?? input.value.length;
-          const tail = completionTail(input.value.slice(0, p));
-          input.setRangeText(m, p - tail.length, p, "end");
-          hideList();
-          input.focus();
-        });
-        list.append(b);
-      }
-      if (c.list.length > 60) list.append(el("span", "pyc-more", `… +${c.list.length - 60}`));
-      list.hidden = false;
-    } else if (c.replace == null) {
+    hideList();
+    // as Blender: the possibilities, and a call's signature, PRINTED in the output
+    const ls: Line[] = [];
+    if (c.list.length) ls.push(...completeLines(c.list.slice(0, 200)));
+    if (c.list.length > 200) ls.push({ kind: "info", text: `… +${c.list.length - 200}` });
+    if (c.signature && (!c.replace || c.list.length)) ls.push({ kind: "sig", text: c.signature.text, ...(c.signature.doc ? { detail: [c.signature.doc] } : {}) });
+    if (ls.length) { add([{ kind: "in", text: echo(input.value.slice(0, input.selectionStart ?? input.value.length)) }, ...ls]); return; }
+    if (c.replace == null) {
       list.append(el("span", "pyc-more", t("pyc.noMatch")));
       list.hidden = false;
       setTimeout(hideList, 1200);
-    } else hideList();
+    }
   }
 
   const showSearch = (): void => {
@@ -513,6 +569,8 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); void go(ev.shiftKey); return; }
     if (ev.key === "Enter" && !ev.shiftKey && !ev.altKey && pos === v.length && enterRuns(v)) { ev.preventDefault(); void go(false); return; }
     if (ev.key === "Tab" && !ev.shiftKey) { ev.preventDefault(); void tab(); return; }
+    // MICRO-SEG02 · Ctrl+Space does the same (for whom Tab is taken)
+    if ((ev.key === " " || ev.code === "Space") && ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); void tab(); return; }
     if (ev.key === "Escape") { if (!list.hidden) { ev.preventDefault(); hideList(); } return; }
     if ((ev.key === "r" || ev.key === "R") && ev.ctrlKey && !ev.metaKey) { ev.preventDefault(); openSearch(); return; }
     // Ctrl+L, and ⌘L on the Mac (MICRO-TIL002)
