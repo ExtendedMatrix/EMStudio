@@ -480,7 +480,8 @@ import {
 } from "./tauri";
 import { PySession, pyToken, wordsOf, PY_COMPUTE_LEVEL, PY_DEV_LEVEL, PY_LEVEL, PY_PLUGINS_LEVEL, type PyEvent, type PyIssueWire, type PyStep, type PyValueWire } from "./py-session";
 // MICRO-PL16 (W13) · the Python console (beta; out of «Funzioni sperimentali», MICRO-COR11)
-import { consoleContent, newConsoleState, CONSOLE_LEVEL, PYTHON_API_URL, type ConsoleHost } from "./console-window";
+import { mountConsole, newConsoleState, appendLines, setConsoleBusy, outcomeLines, CONSOLE_LEVEL, PYTHON_API_URL, type ConsoleHost } from "./console-window";
+import { mountScriptEditor, newScriptBuffer, pyNames, scriptTitle, type ScriptBuffer, type ScriptEditorMount, type ScriptHost } from "./script-editor";
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): since MICRO-COR11
 // only the site and its footprint (experimental.ts)
 import { EXPERIMENTAL, experimentalStored, setExperimental } from "./experimental";
@@ -668,6 +669,8 @@ import {
   WORKSPACES,
   WINDOW_TYPE_META,
   addWorkspace,
+  addWorkspaceFromTemplate,
+  WORKSPACE_TEMPLATES,
   removeWorkspaceUndoable,
   renameWorkspace,
   workspaceLabel,
@@ -29919,7 +29922,12 @@ const TRANSFORM_TYPES: WindowType[] = [
   "scene",
   "study",
   "narrative-index",
+  // MICRO-TIL002 · Python, as in Blender: the console and the Script Editor
+  "console",
+  "script",
 ];
+/** MICRO-TIL002 · the types the selector marks «beta» (beta.ts) */
+const BETA_TYPES: ReadonlySet<WindowType> = new Set<WindowType>(["console", "script"]);
 
 /**
  * WIN5 · which SURFACE of the window area is showing. The area has four: the
@@ -60675,6 +60683,7 @@ function buildAreaHeader(win: Win): DocumentFragment {
     b.dataset.wt = tt;
     b.classList.toggle("active", tt === type && !chain);
     b.innerHTML = `<span class="wt-ic">${meta.icon}</span> ${escapeHtml(t(meta.labelKey))}`;
+    if (BETA_TYPES.has(tt)) b.append(" ", betaMark());
     b.addEventListener("click", () => transformWindowOf(win, tt));
     typeMenu.appendChild(b);
     // MICRO-CONTENTS-3 F1 · the Chain is offered beside the Graph it is built on
@@ -61346,6 +61355,8 @@ function winTypeLabel(win: Win): string {
     const panel = pluginState ? panelNamed(plugins(), panelOfWin(win)) : null;
     if (panel) return labelOf({ label: panel.label, id: panel.id }, getLocale());
   }
+  // MICRO-TIL002 · the Script Editor says its file, and ● when it is modified
+  if (win.type === "script") return `${t("win.script")} · ${scriptTitle(scriptBufferOf(win), t("sce.untitled"))}`;
   return isChainWin(win) ? t("win.chain") : t(WINDOW_TYPE_META[win.type].labelKey);
 }
 
@@ -62160,6 +62171,9 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   scene: [],
   sheet: [],
   "plugin-panel": [],   // MICRO-PL25 · a plugin's panel: its buttons are its own
+  // MICRO-TIL002 · the console and the editor carry their verbs in their own head
+  console: [],
+  script: [],
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -62513,14 +62527,63 @@ function renderWorkspaceBar(): void {
   add.title = t("ws.addTitle");
   // the name is asked by the app's dialog: `prompt` opens nothing in the
   // desktop's WKWebView and returned null — the «+» did nothing (26 Oct 2026)
-  add.addEventListener("click", async () => {
-    const name = await askText(t("ws.addPrompt"), t("ws.addDefault"), { kind: "ws-add" });
-    if (name == null) return;
-    const ws = addWorkspace(name);
-    renderWorkspaceBar();
-    setWorkspace(ws.id);
+  // MICRO-TIL002 · the «+» offers a copy of this arrangement (as before) and the
+  // MODELS (`WORKSPACE_TEMPLATES`: Scripting) — none of them among the six tabs
+  add.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const r = add.getBoundingClientRect();
+    showWorkspaceAddMenu(r.left, r.bottom + 2);
   });
   workspaceBar.appendChild(add);
+}
+/** «+» · a new workspace: from this arrangement, or from a model. */
+async function addWorkspaceCopy(): Promise<void> {
+  const name = await askText(t("ws.addPrompt"), t("ws.addDefault"), { kind: "ws-add" });
+  if (name == null) return;
+  const ws = addWorkspace(name);
+  renderWorkspaceBar();
+  setWorkspace(ws.id);
+}
+async function addWorkspaceModel(templateId: string): Promise<WorkspaceId | null> {
+  const tp = WORKSPACE_TEMPLATES.find((w) => w.id === templateId);
+  if (!tp) return null;
+  const name = await askText(t("ws.addPrompt"), tp.labelKey ? t(tp.labelKey) : tp.id, { kind: "ws-add" });
+  if (name == null) return null;
+  const ws = addWorkspaceFromTemplate(templateId, name);
+  if (!ws) return null;
+  renderWorkspaceBar();
+  setWorkspace(ws.id);
+  return ws.id;
+}
+function showWorkspaceAddMenu(x: number, y: number): void {
+  hideContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu ws-add-menu";
+  menu.dataset.wsAddMenu = "1";
+  menu.style.left = `${Math.min(x, innerWidth - 260)}px`;
+  menu.style.top = `${Math.min(y, innerHeight - 160)}px`;
+  const item = (html: string, title: string, run: () => void, data: string): void => {
+    const b = document.createElement("button");
+    b.innerHTML = html;
+    b.title = title;
+    b.dataset.wsAdd = data;
+    b.onclick = () => { hideContextMenu(); run(); };
+    menu.appendChild(b);
+  };
+  item(escapeHtml(t("ws.addCopy")), t("ws.addTitle"), () => { void addWorkspaceCopy(); }, "copy");
+  const sep = document.createElement("div");
+  sep.className = "dd-sep";
+  menu.appendChild(sep);
+  const head = document.createElement("div");
+  head.className = "ctx-header";
+  head.textContent = t("ws.addModels");
+  menu.appendChild(head);
+  for (const tp of WORKSPACE_TEMPLATES) {
+    item(`<span class="ws-ic">${WINDOW_TYPE_META[tp.windowType]?.icon ?? tp.icon}</span> ${escapeHtml(tp.labelKey ? t(tp.labelKey) : tp.id)}`,
+      tp.hintKey ? t(tp.hintKey) : "", () => { void addWorkspaceModel(tp.id); }, tp.id);
+  }
+  document.body.appendChild(menu);
+  ctxMenuEl = keepOnScreen(menu);
 }
 /** AUDIT N11 · a user's space goes with a toast that brings it back */
 function removeSpace(id: string, label: string): void {
@@ -65976,6 +66039,281 @@ updateToolbar();
 // six converted types register their ONE constructor here, and the renderers
 // they need travel as arguments — so `shell/` never imports `main.ts` and its
 // `setFocused` bodies can be read by a checker without the app behind them.
+// MICRO-TIL002 · declared BEFORE the surfaces are registered: at a reload
+// with a console or an editor in the active workspace, `renderTiles` mounts
+// them while this module is still being evaluated — a `const` below this
+// point would be in its dead zone (and stop the whole page).
+// ── MICRO-PL16-CONSOLE (W13) · the Python console ───────────────────────────
+//
+// What it runs goes through the session above — each em.write one undo step
+// with its Log line and its code in the DTC; «Prova» forces every em.write into
+// a proof. The history is this machine's (/py/history, level 82). Marked «beta»
+// (MICRO-COR11, 20 Nov 2026: out of «Funzioni sperimentali», there for everyone).
+//
+// MICRO-TIL002 (E.D., 20 Nov 2026) · not a floating panel any more: a WINDOW
+// TYPE (`console`), any area of any workspace, as in Blender; Strumenti ▸
+// Console Python… opens one or brings it forward. Its sister, the Script Editor
+// (`script`), runs in the SAME session and prints here. One state for every
+// console window: they show the same lines.
+const pyConsoleState = newConsoleState();
+const consoleHost: ConsoleHost = {
+  t: (key, vars) => t(key, vars),
+  unavailable: async () => {
+    if (!store) return t("pyc.noDoc");
+    if (!(await pyToken(bridgeToken))) return t("py.noToken");
+    if (!(await bridgeLevelAtLeast(PY_LEVEL))) return t("pyc.oldBridge", { level: String(PY_LEVEL) });
+    return null;
+  },
+  run: (code, opts) => (store ? pySessionFor(store).run(code, opts) : Promise.reject(new Error(t("pyc.noDoc")))),
+  complete: (text) => (store ? pySessionFor(store).complete(text) : Promise.resolve([])),
+  history: async () => (store && (await bridgeLevelAtLeast(CONSOLE_LEVEL)) ? pySessionFor(store).history() : []),
+  docName: () => (store ? emtree.activeFile()?.name ?? null : null),
+  openExternal: (url) => openOutside(url),
+};
+/** MICRO-TIL00 · an address outside the app: the system browser on the
+ *  desktop, a new tab on the web. */
+function openOutside(url: string): void {
+  if (isTauri()) void openInSystemBrowser(url); else window.open(url, "_blank", "noopener");
+}
+// Help ▸ «Python API reference» (the console's head says the same)
+document.getElementById("btn-help-python-api")?.addEventListener("click", () => openOutside(PYTHON_API_URL));
+
+/** The live console mounts, by window: the Tools entry focuses the prompt of
+ *  the one it brings forward. */
+const consoleMounts = new Map<string, { focus(): void }>();
+let consoleFocusNext = false;
+function mountConsoleInto(body: HTMLElement, win: Win): { refresh(): void; destroy(): void } {
+  let m = mountConsole(document, consoleHost, pyConsoleState, { focus: consoleFocusNext });
+  consoleFocusNext = false;
+  body.appendChild(m.root);
+  consoleMounts.set(win.id, m);
+  let sig = getLocale();
+  return {
+    // the document changed: the head says which; the language rebuilds it
+    // (its lines and its draft live in the state, nothing is lost)
+    refresh() {
+      if (getLocale() !== sig) {
+        sig = getLocale();
+        m.destroy();
+        m.root.remove();
+        m = mountConsole(document, consoleHost, pyConsoleState, { focus: false });
+        body.appendChild(m.root);
+        consoleMounts.set(win.id, m);
+        return;
+      }
+      const where = m.root.querySelector<HTMLElement>(".pyc-where");
+      if (where) where.textContent = consoleHost.docName() ? t("pyc.on", { doc: consoleHost.docName()! }) : t("pyc.noDoc");
+    },
+    destroy() { m.destroy(); m.root.remove(); if (consoleMounts.get(win.id) === m) consoleMounts.delete(win.id); },
+  };
+}
+
+/** The console window of the active workspace (else of any open one). */
+function consoleWin(): Win | null {
+  return windowsOf().find((w) => w.type === "console") ?? null;
+}
+
+/** Strumenti ▸ Console Python… · the console window of this workspace taken to
+ *  the front (its prompt focused), else one opened under the active window —
+ *  as Blender's Python Console is an area, not a panel over the others. */
+function openConsoleWindow(opts: { focus?: boolean } = {}): Win | null {
+  const focus = opts.focus !== false;
+  const open = consoleWin();
+  if (open) {
+    if (focus) setActiveWin(open.id);
+    renderTiles();
+    const area = winAreas.get(open.id);
+    area?.classList.add("flash");
+    setTimeout(() => area?.classList.remove("flash"), 900);
+    if (focus) consoleMounts.get(open.id)?.focus();
+    return open;
+  }
+  const anchor = activeWin();
+  if (maximizedWin()) toggleMaximize(maximizedWin()!);
+  const made = splitWindow(anchor.id, "col", activeWorkspace(), 0.66, "b");
+  if (!made) return null;
+  for (const k of Object.keys(made.state)) delete made.state[k];
+  setWinType(made, "console");
+  if (!focus) setActiveWin(anchor.id);
+  consoleFocusNext = focus;
+  renderTiles();
+  consoleFocusNext = false;
+  return made;
+}
+{
+  // Strumenti ▸ Console Python… · beta, right after «Estensioni…»
+  const ext = document.getElementById("btn-tool-extensions");
+  if (ext && !document.getElementById("btn-tool-console")) {
+    const b = document.createElement("button");
+    b.id = "btn-tool-console";
+    b.dataset.i18n = "tools.console";
+    b.dataset.i18nTitle = "tools.consoleTitle";
+    b.textContent = t("tools.console");
+    b.title = t("tools.consoleTitle");
+    b.addEventListener("click", () => { openConsoleWindow(); });
+    ext.after(b);
+  }
+}
+
+// ── MICRO-TIL002 · the Script Editor ────────────────────────────────────────
+//
+// A window type (`script`), Blender's Text Editor: one buffer per window (the
+// file it shows, its text, the text as saved: modified = they differ, ● in the
+// title). The scripts live in the project's `scripts/` folder, beside the
+// em.json — the desktop writes them with its own hands (plugin-fs), the web
+// through the bridge (/fs/list, /fs/file, /fs/write); a project with no folder
+// (a room, a document never saved) keeps them in this browser, under the
+// project's key. «Run Script» (Alt+P) runs in the console's session and prints
+// in the console (one is opened when the workspace has none).
+const scriptBuffers = new Map<string, ScriptBuffer>();
+const scriptMounts = new Map<string, ScriptEditorMount>();
+function scriptBufferOf(win: Win): ScriptBuffer {
+  let b = scriptBuffers.get(win.id);
+  if (!b) {
+    b = newScriptBuffer();
+    scriptBuffers.set(win.id, b);
+  }
+  return b;
+}
+const SCRIPTS_LOCAL_KEY = "emstudio.scripts.v1";
+/** where this project's scripts are */
+function scriptPlace(): { kind: "folder"; dir: string } | { kind: "browser"; key: string } | { kind: "none" } {
+  if (!store) return { kind: "none" };
+  if (currentFilePath) return { kind: "folder", dir: paths.join(paths.dirname(currentFilePath), "scripts") };
+  if (sync.room) return { kind: "browser", key: `room:${getSettings().sync.hubUrl}/${sync.room}` };
+  return { kind: "browser", key: `doc:${emtree.activeFile()?.name ?? "untitled"}` };
+}
+function localScripts(): Record<string, Record<string, string>> {
+  try { const v = JSON.parse(localStorage.getItem(SCRIPTS_LOCAL_KEY) ?? "{}"); return v && typeof v === "object" ? v : {}; } catch { return {}; }
+}
+async function fsBridgeFetch(route: string, init?: RequestInit): Promise<Response> {
+  const r = await fetch(`${await bridgeUrl()}${route}`, init);
+  if (!r.ok) throw new Error(`${r.status} ${(await r.text().catch(() => "")).slice(0, 160)}`);
+  return r;
+}
+const scriptHost: ScriptHost = {
+  t: (key, vars) => t(key, vars),
+  where: () => {
+    const p = scriptPlace();
+    return p.kind === "folder" ? { kind: "folder", label: p.dir } : p.kind === "browser" ? { kind: "browser", label: p.key } : { kind: "none", label: "" };
+  },
+  list: async () => {
+    const p = scriptPlace();
+    if (p.kind === "browser") return pyNames(Object.keys(localScripts()[p.key] ?? {}));
+    if (p.kind !== "folder") return [];
+    // the desktop reads the folder with its own hands (fs:allow-read-dir); the
+    // bridge's /fs/list is the web's way, and the desktop's when that is refused
+    if (isTauri()) {
+      try {
+        const fs = await import("@tauri-apps/plugin-fs");
+        if (!(await fs.exists(paths.toNative(p.dir)))) return [];
+        return pyNames((await fs.readDir(paths.toNative(p.dir))).filter((e) => e.isFile).map((e) => e.name));
+      } catch { /* the bridge below */ }
+    }
+    try {
+      const j = await (await fsBridgeFetch(`/fs/list?path=${encodeURIComponent(p.dir)}`)).json() as { entries?: Array<{ name: string; kind?: string; dir?: boolean }> };
+      return pyNames((j.entries ?? []).filter((e) => !e.dir && e.kind !== "dir").map((e) => e.name));
+    } catch {
+      return [];   // no folder yet (nothing saved), or a bridge that cannot read it
+    }
+  },
+  read: async (name) => {
+    const p = scriptPlace();
+    if (p.kind === "browser") {
+      const v = localScripts()[p.key]?.[name];
+      if (v == null) throw new Error(t("sce.notFound"));
+      return v;
+    }
+    if (p.kind !== "folder") throw new Error(t("sce.whereNone"));
+    const full = paths.join(p.dir, name);
+    if (isTauri()) return (await import("@tauri-apps/plugin-fs")).readTextFile(paths.toNative(full));
+    return (await fsBridgeFetch(`/fs/file?path=${encodeURIComponent(full)}`)).text();
+  },
+  write: async (name, text) => {
+    const p = scriptPlace();
+    if (p.kind === "browser") {
+      const all = localScripts();
+      all[p.key] = { ...(all[p.key] ?? {}), [name]: text };
+      localStorage.setItem(SCRIPTS_LOCAL_KEY, JSON.stringify(all));
+      return;
+    }
+    if (p.kind !== "folder") throw new Error(t("sce.whereNone"));
+    const full = paths.join(p.dir, name);
+    if (isTauri()) {
+      const fs = await import("@tauri-apps/plugin-fs");
+      await fs.mkdir(paths.toNative(p.dir), { recursive: true }).catch(() => {});
+      await fs.writeTextFile(paths.toNative(full), text);
+      return;
+    }
+    await fsBridgeFetch("/fs/write", { method: "POST", body: new TextEncoder().encode(text),
+      headers: { "Content-Type": "application/octet-stream", "X-EM-Path": encodeURIComponent(full), "X-EM-Overwrite": "1" } });
+  },
+  run: async (code, name, opts) => {
+    // the output goes to the console: one is opened when this workspace has none
+    if (!consoleWin()) openConsoleWindow({ focus: false });
+    const why = await consoleHost.unavailable();
+    if (why) { appendLines(pyConsoleState, [{ kind: "error", text: why }]); return; }
+    if (pyConsoleState.busy) { toast(t("sce.busy")); return; }
+    appendLines(pyConsoleState, [{ kind: "script", dry: !!opts.dryRun, text: t(opts.dryRun ? "sce.tryLine" : "sce.runLine", { name }) }]);
+    setConsoleBusy(pyConsoleState, true);
+    try {
+      const o = await consoleHost.run(code, { dryRun: !!opts.dryRun, history: false });
+      appendLines(pyConsoleState, outcomeLines(o, consoleHost.t, !!opts.dryRun));
+    } catch (e) {
+      appendLines(pyConsoleState, [{ kind: "error", text: String((e as Error)?.message ?? e) }]);
+    } finally {
+      setConsoleBusy(pyConsoleState, false);
+    }
+  },
+  ask: (prompt, initial) => askText(prompt, initial, { kind: "script-name" }),
+  confirm: (message) => askConfirm(message),
+  // the title follows (● / the name), and the window remembers its file
+  changed: (buf) => {
+    for (const [id, b] of scriptBuffers) {
+      if (b !== buf) continue;
+      const w = everyWindow().find((x) => x.id === id);
+      if (w && winCurrent(w, "script.file") !== buf.name) setWinCurrent(w, "script.file", buf.name);
+    }
+    renderAreaHeaders();
+  },
+  toast: (message) => toast(message),
+};
+function mountScriptEditorInto(body: HTMLElement, win: Win): { refresh(): void; destroy(): void } {
+  const buf = scriptBufferOf(win);
+  let m = mountScriptEditor(document, scriptHost, buf);
+  body.appendChild(m.root);
+  scriptMounts.set(win.id, m);
+  // a window that remembers its file (a reload, a workspace saved) reads it again
+  const remembered = winCurrent(win, "script.file");
+  const file = typeof remembered === "string" ? remembered : null;
+  // …once its project is there (at a reload the window is drawn before the
+  // document arrives: the first refresh with a place reads it)
+  let pending = !!file && !buf.name && !buf.text;
+  const reopen = (): void => {
+    if (!pending || scriptPlace().kind === "none") return;
+    pending = false;
+    if (!buf.name && !buf.text) void m.open(file!);
+  };
+  reopen();
+  let sig = getLocale();
+  return {
+    refresh() {
+      reopen();
+      if (getLocale() !== sig) {
+        // the language: the head rebuilt, the buffer (and the text) kept
+        sig = getLocale();
+        m.destroy();
+        m = mountScriptEditor(document, scriptHost, buf);
+        body.appendChild(m.root);
+        scriptMounts.set(win.id, m);
+        return;
+      }
+      m.refresh();
+    },
+    destroy() { m.destroy(); if (scriptMounts.get(win.id) === m) scriptMounts.delete(win.id); },
+  };
+}
+
 registerBuiltinSurfaces({
   addEmDataHost, removeEmDataHost, renderEmData,
   addStorageHost, removeStorageHost, renderStorage,
@@ -65986,6 +66324,8 @@ registerBuiltinSurfaces({
   mountScene,
   renderSheetInto,
   renderPluginPanelInto: (body: HTMLElement, win: Win) => renderPluginPanelInto(body, win),   // MICRO-PL25
+  mountConsole: (body: HTMLElement, win: Win) => mountConsoleInto(body, win),           // MICRO-TIL002
+  mountScriptEditor: (body: HTMLElement, win: Win) => mountScriptEditorInto(body, win), // MICRO-TIL002
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
   // that a panel can be repainted, told the selection moved, and taken down.
@@ -66215,63 +66555,16 @@ function pyNudge(ev: PyEvent, extra: Record<string, unknown> = {}): void {
 }
 onLocaleChange(() => pyNudge("locale-changed"));
 
-// ── MICRO-PL16-CONSOLE (W13) · the Python console ───────────────────────────
-//
-// Strumenti ▸ Console Python…, a floating window like «Estensioni» (detachable
-// like it), marked «beta» (MICRO-COR11, 20 Nov 2026: out of «Funzioni
-// sperimentali», there for everyone). What it runs goes through the session above — each em.write one
-// undo step with its Log line and its code in the DTC; «Prova» forces every
-// em.write into a proof. The history is this machine's (/py/history, level 82).
-const pyConsoleState = newConsoleState();
-const consoleHost: ConsoleHost = {
-  t: (key, vars) => t(key, vars),
-  unavailable: async () => {
-    if (!store) return t("pyc.noDoc");
-    if (!(await pyToken(bridgeToken))) return t("py.noToken");
-    if (!(await bridgeLevelAtLeast(PY_LEVEL))) return t("pyc.oldBridge", { level: String(PY_LEVEL) });
-    return null;
-  },
-  run: (code, opts) => (store ? pySessionFor(store).run(code, opts) : Promise.reject(new Error(t("pyc.noDoc")))),
-  complete: (text) => (store ? pySessionFor(store).complete(text) : Promise.resolve([])),
-  history: async () => (store && (await bridgeLevelAtLeast(CONSOLE_LEVEL)) ? pySessionFor(store).history() : []),
-  docName: () => (store ? emtree.activeFile()?.name ?? null : null),
-  openExternal: (url) => openOutside(url),
-};
-/** MICRO-TIL00 · an address outside the app: the system browser on the
- *  desktop, a new tab on the web. */
-function openOutside(url: string): void {
-  if (isTauri()) void openInSystemBrowser(url); else window.open(url, "_blank", "noopener");
-}
-// Help ▸ «Python API reference» (the console's head says the same)
-document.getElementById("btn-help-python-api")?.addEventListener("click", () => openOutside(PYTHON_API_URL));
-const consoleWindow = new ColoursWindow(coloursWindowHostForVocab(), document, {
-  prefKey: "emstudio.console.window.v1", titleKey: "pyc.title", helpKey: "pyc.helpText", popupName: "emstudio-console", data: "consoleWindow",
-  content: (d) => consoleContent(d, consoleHost, pyConsoleState),
-  // only the language rebuilds it: the console moves its own lines in place
-  sig: () => getLocale(),
-});
-function openConsoleWindow(): void {
-  consoleWindow.open();
-}
-{
-  // Strumenti ▸ Console Python… · beta, right after «Estensioni…»
-  const ext = document.getElementById("btn-tool-extensions");
-  if (ext && !document.getElementById("btn-tool-console")) {
-    const b = document.createElement("button");
-    b.id = "btn-tool-console";
-    b.dataset.i18n = "tools.console";
-    b.dataset.i18nTitle = "tools.consoleTitle";
-    b.textContent = t("tools.console");
-    b.title = t("tools.consoleTitle");
-    b.addEventListener("click", () => openConsoleWindow());
-    ext.after(b);
-  }
-}
-
 // the tests' hook on the Python session (and the console)
 (window as unknown as { __EM_PY__?: unknown }).__EM_PY__ = {
   level: PY_LEVEL,
   console: () => openConsoleWindow(),
+  // MICRO-TIL002 · the Script Editor of a window (the active workspace's when none named)
+  script: (winId?: string) => scriptMounts.get(winId ?? windowsOf().find((w) => w.type === "script")?.id ?? "") ?? null,
+  addWorkspaceModel: (id: string) => addWorkspaceModel(id),
+  scriptBuffer: (winId?: string) => scriptBuffers.get(winId ?? windowsOf().find((w) => w.type === "script")?.id ?? "") ?? null,
+  consoleLines: () => pyConsoleState.lines.map((l) => ({ kind: l.kind, text: l.text })),
+  consoleWin: () => consoleWin()?.id ?? null,
   ready: () => bridgeLevelAtLeast(PY_LEVEL),
   open: () => (store ? pySessionFor(store).open() : Promise.reject(new Error("no document"))),
   run: (code: string, opts?: { dryRun?: boolean }) => (store ? pySessionFor(store).run(code, opts) : Promise.reject(new Error("no document"))),

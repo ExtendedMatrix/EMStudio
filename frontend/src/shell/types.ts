@@ -92,6 +92,12 @@ export interface SurfaceDeps {
   renderSheetInto(body: HTMLElement, win: Win): void;
   /** MICRO-PL25 · a plugin's declarative panel (the one in the window's state). */
   renderPluginPanelInto(body: HTMLElement, win: Win): void;
+  /** MICRO-TIL002 · the Python console and the Script Editor: built ONCE into
+   *  their body (a prompt, an editor under the person typing are never
+   *  rebuilt by a repaint), refreshed with the document, taken down with the
+   *  window. */
+  mountConsole(body: HTMLElement, win: Win): { refresh(): void; destroy(): void };
+  mountScriptEditor(body: HTMLElement, win: Win): { refresh(): void; destroy(): void };
   /** Which of its tabs this hosted window is showing (per WINDOW, never per
    *  type — two Inspector windows can sit on different tabs, and that is what
    *  makes the second one a view of its own instead of a duplicate). */
@@ -560,6 +566,38 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
       };
     },
   });
+
+  // ── MICRO-TIL002 · PYTHON · the console and the Script Editor ───────────
+  //
+  // Born converted, the shape of the Scena: a body, a mount built once by the
+  // page (the prompt's lines, the editor's text live in the page, per window),
+  // a refresh that only says where they work — never a rebuild under the hands.
+  for (const [id, cls, make] of [
+    ["console", "tile-consolebody", deps.mountConsole],
+    ["script", "tile-scriptbody", deps.mountScriptEditor],
+  ] as const) {
+    registerSurfaceType({
+      id,
+      create(): Surface {
+        let body: HTMLElement | null = null;
+        let mounted: { refresh(): void; destroy(): void } | null = null;
+        return {
+          mount(area, w) {
+            body = document.createElement("div");
+            body.className = cls;
+            area.appendChild(body);
+            mounted = make(body, w);
+          },
+          refresh() {
+            if (!body || !body.isConnected) return;
+            mounted?.refresh();
+          },
+          setFocused(on) { markFocus(body, on); },
+          destroy() { mounted?.destroy(); mounted = null; body?.remove(); body = null; },
+        };
+      },
+    });
+  }
 
   // ── GRAPH · the last privileged area ─────────────────────────────────────
   //

@@ -181,7 +181,7 @@ ok(/wordsOf\(out, getLocale\(\)\.startsWith\("it"\) \? "it" : "en"\)/.test(main)
   ok(lv[0] >= 88 && lv.every((x) => x === lv[0]), "level 88 or later, the same in the page, the bridge, em_py");
 }
 ok(/"\/py\/compute"\)\}/.test(bridge) && /"\/py\/compute"\)/.test(emPy), "/py/compute in the table of routes");
-ok(/\| "plugin-panel";/.test(ws) && /"plugin-panel": \{ icon: windowIcon\("plugin-panel"\)/.test(ws), "ONE window type for every panel");
+ok(/\| "plugin-panel"\s*(?:;|\/\/|\|)/.test(ws) && /"plugin-panel": \{ icon: windowIcon\("plugin-panel"\)/.test(ws), "ONE window type for every panel");
 ok(/id: "plugin-panel"/.test(shell) && /renderPluginPanelInto/.test(shell), "…a surface of its own (born converted)");
 ok(!/TRANSFORM_TYPES[^;]*"plugin-panel"/s.test(main.slice(main.indexOf("const TRANSFORM_TYPES"), main.indexOf("const TRANSFORM_TYPES") + 800)), "not a transform target: a panel is opened from its plugin");
 ok(/renderPluginSections\(host, owning, selectedId\)/.test(main), "inspector.section@1 in the Inspector");

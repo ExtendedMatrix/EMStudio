@@ -83,6 +83,11 @@ const CONVERTED = {
   sheet: ["sheet-view"],
   // 19 Nov 2026 (MICRO-PL25) · a plugin's declarative panel, born converted
   "plugin-panel": ["plugin-panel-view"],
+  // 20 Nov 2026 (MICRO-TIL002) · Python as in Blender: the console (it was a
+  // floating panel, never a singleton of the area) and the Script Editor, born
+  // converted
+  console: ["console-view"],
+  script: ["script-view"],
   // 13 set 2026 · the two HOSTED types. Their singletons were of two kinds and
   // both are listed: the surface they were mounted into (`#panel-view`) and the
   // four PANELS themselves, which were elements taken from the document at boot

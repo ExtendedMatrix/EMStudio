@@ -12321,6 +12321,48 @@ button.uo-col { cursor: pointer; }
 .pyc-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pyc-status { color: var(--text-muted); font-size: 0.76rem; }
 .pyc-status.pyc-why { color: var(--warn); }
+.pyc-line.pyc-k-script { color: var(--accent); font-weight: 600; }
+/* MICRO-TIL002 · the console as a WINDOW of the shell: it fills its area,
+   however small (the floating panel asked 320 px) */
+.tile-consolebody { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+.tile-consolebody > .pyc { flex: 1 1 auto; min-height: 0; padding: 6px 8px; box-sizing: border-box; }
+.tile-consolebody .pyc-out { min-height: 40px; flex: 1 1 auto; }
+.tile-consolebody .pyc-input { resize: none; }
+/* MICRO-TIL002 · the Script Editor: a head of verbs, a CodeMirror 6 page with
+   its line numbers and Python's colours in both themes (classHighlighter's
+   tok-* classes, coloured here from the chrome's variables) */
+.tile-scriptbody { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+.sce { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; font-size: 0.82rem;
+  --py-kw: #8a3ffc; --py-str: #1a7f37; --py-com: var(--text-faint); --py-num: #b35900; --py-fn: var(--brand); --py-op: var(--text-muted); }
+[data-theme="dark"] .sce { --py-kw: #c792ea; --py-str: #8fd18f; --py-num: #f2a25a; --py-fn: #82aaff; }
+.sce-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.sce-head button { font-size: 0.78rem; padding: 1px 8px; }
+.sce-title { font-family: var(--font-mono); font-weight: 600; color: var(--text); white-space: nowrap; }
+.sce-title.sce-modified { color: var(--accent); }
+.sce-where { flex: 1 1 120px; min-width: 0; text-align: right; color: var(--text-faint); font-size: 0.74rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sce-menu { position: absolute; z-index: 30; min-width: 220px; max-height: 60%; overflow: auto; padding: 4px;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+.sce-menu[hidden] { display: none; }
+.sce-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 4px 8px; border-radius: var(--radius-sm); }
+.sce-item:hover { background: var(--bg-hover, var(--bg-sunken)); }
+.sce-empty { padding: 4px 8px; color: var(--text-faint); font-style: italic; }
+.sce-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.sce-body .cm-editor { height: 100%; background: var(--bg-sunken); color: var(--text); font-size: 0.8rem; }
+.sce-body .cm-editor.cm-focused { outline: none; }
+.sce-body .cm-scroller { font-family: var(--font-mono); line-height: 1.45; }
+.sce-body .cm-gutters { background: var(--bg-panel); color: var(--text-faint); border-right: 1px solid var(--border); }
+.sce-body .cm-activeLine { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.sce-body .cm-activeLineGutter { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.sce-body .cm-cursor { border-left-color: var(--text); }
+.sce-body .cm-selectionBackground, .sce-body .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 28%, transparent) !important; }
+.sce-body .cm-matchingBracket { background: color-mix(in srgb, var(--ok) 25%, transparent); }
+.sce .tok-keyword, .sce .tok-bool, .sce .tok-null { color: var(--py-kw); font-weight: 600; }
+.sce .tok-string, .sce .tok-string2 { color: var(--py-str); }
+.sce .tok-comment { color: var(--py-com); font-style: italic; }
+.sce .tok-number { color: var(--py-num); }
+.sce .tok-variableName.tok-definition, .sce .tok-propertyName.tok-definition, .sce .tok-className { color: var(--py-fn); font-weight: 600; }
+.sce .tok-operator, .sce .tok-punctuation { color: var(--py-op); }
 
 /* MICRO-PL17 (W14) · Tools ▸ Plugins ▸: a plugin's name above its commands */
 .dd-sub-menu .dd-head {

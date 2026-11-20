@@ -2,8 +2,13 @@
  * MICRO-PL16-CONSOLE (W13, E.D. 18 Nov 2026) · the Python console.
  *
  * *Strumenti ▸ Console Python…* · beta (behind «Funzioni sperimentali» until
- * MICRO-COR11, 20 Nov 2026; now there for everyone). A floating window like
- * «Estensioni» and «Vocabolari», detachable like them (SPEC-plugin §9).
+ * MICRO-COR11, 20 Nov 2026; now there for everyone). MICRO-TIL002 (E.D., 20
+ * Nov 2026: «mi aspettavo la console come finestra e non come pannello
+ * flottante») · a WINDOW TYPE of the shell (`console`), as Blender's Python
+ * Console is an editor of an area: any area of any workspace, the type chosen
+ * from the head's selector; Tools ▸ Python console opens one or brings it
+ * forward. Its sister is the Script Editor (`script-editor.ts`), whose «Run
+ * Script» runs in the same session and writes here.
  *
  * What is inside: `em` imported, `g = em.graph`, `sel = em.app.selection()` —
  * the bridge's session (W12, `py-session.ts`, `tools/em_py.py`) on the open
@@ -51,7 +56,7 @@ export interface ConsoleHost {
  *  head and Help ▸ «Python API reference» open it. */
 export const PYTHON_API_URL = "https://docs.extendedmatrix.org/projects/emstudio-python-api/en/latest/";
 
-export type LineKind = "in" | "out" | "value" | "error" | "step" | "proof" | "info";
+export type LineKind = "in" | "out" | "value" | "error" | "step" | "proof" | "info" | "script";
 export interface Line { kind: LineKind; text: string; dry?: boolean; detail?: string[] }
 
 /** the console's memory while the page lives */
@@ -65,6 +70,16 @@ export interface ConsoleState {
   busy: boolean;
   /** Ctrl+R: the query, and the index of the match shown */
   search: { query: string; at: number } | null;
+  /** MICRO-TIL002 · the console windows showing this state (one per area):
+   *  a line added anywhere (a script run from the editor) reaches them all */
+  views: Set<ConsoleView>;
+}
+
+/** What a mounted console answers to (see {@link appendLines}). */
+export interface ConsoleView {
+  added(ls: Line[], dropped: number): void;
+  cleared(): void;
+  busy(on: boolean): void;
 }
 
 /** the bridge level of the console's history and proofs (/py/history) */
@@ -73,7 +88,29 @@ export const LINES_MAX = 500;
 export const HISTORY_KEEP = 1000;
 
 export function newConsoleState(): ConsoleState {
-  return { lines: [], history: [], historyLoaded: false, at: -1, draft: "", busy: false, search: null };
+  return { lines: [], history: [], historyLoaded: false, at: -1, draft: "", busy: false, search: null, views: new Set() };
+}
+
+/** MICRO-TIL002 · lines into the console's memory and into every console
+ *  window showing it (the editor's «Run Script» writes here). */
+export function appendLines(state: ConsoleState, ls: Line[]): void {
+  if (!ls.length) return;
+  state.lines.push(...ls);
+  const over = Math.max(0, state.lines.length - LINES_MAX);
+  if (over) state.lines.splice(0, over);
+  for (const v of state.views) v.added(ls, over);
+}
+
+/** Every console window emptied (Ctrl/⌘+L, «Pulisci»). */
+export function clearLines(state: ConsoleState): void {
+  state.lines = [];
+  for (const v of state.views) v.cleared();
+}
+
+/** A run going on (from the console or from the editor): every window says so. */
+export function setConsoleBusy(state: ConsoleState, on: boolean): void {
+  state.busy = on;
+  for (const v of state.views) v.busy(on);
 }
 
 // ── pure pieces ─────────────────────────────────────────────────────────────
@@ -248,9 +285,17 @@ function lineEl(el: El, l: Line, t: ConsoleHost["t"]): HTMLElement {
 /**
  * The window's content. Built from `state` whenever the window is rebuilt; a
  * run, a completion, the history move the elements in place (no rebuild
- * under the person typing).
+ * under the person typing). (Kept for the callers that only want the element;
+ * a window of the shell uses {@link mountConsole}, which gives it back.)
  */
 export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleState): HTMLElement {
+  return mountConsole(doc, host, state).root;
+}
+
+/** MICRO-TIL002 · a console in an area: its element, and how to take it down
+ *  (it stops listening to the shared lines). */
+export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleState,
+                             opts: { focus?: boolean } = {}): { root: HTMLElement; destroy(): void; focus(): void } {
   const t = host.t;
   const el = maker(doc);
   const root = el("div", "pyc");
@@ -258,7 +303,10 @@ export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleS
 
   const head = el("div", "pyc-head");
   const where = el("span", "pyc-where", host.docName() ? t("pyc.on", { doc: host.docName()! }) : t("pyc.noDoc"));
+  // MICRO-TIL002 · what the floating window said in its «?», said on its head
+  where.title = t("pyc.helpText");
   const note = el("span", "pyc-note beta-mark", t("ui.beta"));
+  note.dataset.beta = "1";
   note.title = t("ui.betaTip");
   // MICRO-TIL00 · the reference of what `em` offers, one click from the prompt
   const api = el("a", "pyc-api", t("help.pythonApi"));
@@ -306,25 +354,31 @@ export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleS
   const runB = btn(t("pyc.run"), t("pyc.runTitle"), () => void go(false), "primary");
   const tryB = btn(t("pyc.try"), t("pyc.tryTitle"), () => void go(true));
   const helpB = btn(t("pyc.help"), t("pyc.helpTitle"), () => void go(false, "em.help()", false));
-  const clearB = btn(t("pyc.clear"), t("pyc.clearTitle"), () => { state.lines = []; out.replaceChildren(); });
+  const clearB = btn(t("pyc.clear"), t("pyc.clearTitle"), () => clearLines(state));
   runB.dataset.pyc = "run"; tryB.dataset.pyc = "try"; helpB.dataset.pyc = "help"; clearB.dataset.pyc = "clear";
   const status = el("span", "pyc-status");
   bar.append(runB, tryB, helpB, clearB, status);
   root.append(head, out, list, searchRow, input, bar);
 
   const scrollDown = (): void => { out.scrollTop = out.scrollHeight; };
-  const add = (ls: Line[]): void => {
-    if (!state.lines.length) out.replaceChildren();
-    for (const l of ls) { state.lines.push(l); out.append(lineEl(el, l, t)); }
-    const over = state.lines.length - LINES_MAX;
-    if (over > 0) { state.lines.splice(0, over); for (let i = 0; i < over; i++) out.firstElementChild?.remove(); }
-    scrollDown();
+  // the welcome line is not a line of the state: the first real one takes its place
+  let welcome = !state.lines.length;
+  const view: ConsoleView = {
+    added(ls, dropped) {
+      if (welcome) { out.replaceChildren(); welcome = false; }
+      for (const l of ls) out.append(lineEl(el, l, t));
+      for (let i = 0; i < dropped; i++) out.firstElementChild?.remove();
+      scrollDown();
+    },
+    cleared() { out.replaceChildren(); welcome = false; },
+    busy(on) {
+      for (const b of [runB, tryB, helpB]) b.disabled = on;
+      status.textContent = on ? t("pyc.running") : "";
+    },
   };
-  const setBusy = (on: boolean): void => {
-    state.busy = on;
-    for (const b of [runB, tryB, helpB]) b.disabled = on;
-    status.textContent = on ? t("pyc.running") : "";
-  };
+  state.views.add(view);
+  const add = (ls: Line[]): void => appendLines(state, ls);
+  const setBusy = (on: boolean): void => setConsoleBusy(state, on);
   const setInput = (v: string): void => {
     input.value = v;
     input.selectionStart = input.selectionEnd = v.length;
@@ -344,7 +398,7 @@ export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleS
       state.history = merged;
     }
   })();
-  if (state.busy) setBusy(true);
+  if (state.busy) view.busy(true);
 
   async function go(dry: boolean, code = input.value, keep = true): Promise<void> {
     if (state.busy || !code.trim()) return;
@@ -461,7 +515,8 @@ export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleS
     if (ev.key === "Tab" && !ev.shiftKey) { ev.preventDefault(); void tab(); return; }
     if (ev.key === "Escape") { if (!list.hidden) { ev.preventDefault(); hideList(); } return; }
     if ((ev.key === "r" || ev.key === "R") && ev.ctrlKey && !ev.metaKey) { ev.preventDefault(); openSearch(); return; }
-    if ((ev.key === "l" || ev.key === "L") && ev.ctrlKey && !ev.metaKey) { ev.preventDefault(); clearB.click(); return; }
+    // Ctrl+L, and ⌘L on the Mac (MICRO-TIL002)
+    if ((ev.key === "l" || ev.key === "L") && (ev.ctrlKey || ev.metaKey) && !ev.altKey) { ev.preventDefault(); clearB.click(); return; }
     const firstLine = !v.slice(0, pos).includes("\n");
     const lastLine = !v.slice(pos).includes("\n");
     if ((ev.key === "ArrowUp" && firstLine) || (ev.key === "ArrowDown" && lastLine)) {
@@ -476,6 +531,9 @@ export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleS
   // keys typed in the transcript or on the buttons stay in the console too
   root.addEventListener("keydown", (ev) => ev.stopPropagation());
 
-  setTimeout(() => { scrollDown(); if (!state.search) input.focus(); else searchIn.focus(); }, 0);
-  return root;
+  // a window of the shell takes the keys only when asked (Tools ▸ Python
+  // console): a workspace opening does not steal them from the canvas
+  const focus = (): void => { if (!state.search) input.focus(); else searchIn.focus(); };
+  setTimeout(() => { scrollDown(); if (opts.focus !== false) focus(); }, 0);
+  return { root, destroy() { state.views.delete(view); }, focus };
 }

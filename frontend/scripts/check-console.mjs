@@ -90,11 +90,16 @@ const bridge = read("tools/em_bridge.py"), emPy = read("tools/em_py.py"), css = 
 ok(!/btn-tool-console|Console Python|Python console/i.test(html), "index.html has no word of the console (off: nothing)");
 // MICRO-COR11 · out of «Funzioni sperimentali»: the button for everyone, marked «beta»
 ok(/\{\s*\/\/ Strumenti ▸ Console Python… · beta[\s\S]{0,300}b\.id = "btn-tool-console"/.test(main), "the button made for everyone (MICRO-COR11)");
-ok(/function openConsoleWindow\(\): void \{\s*consoleWindow\.open\(\);/.test(main) && !/pyc\.off/.test(main), "…and the window opens with no switch");
+ok(/function openConsoleWindow\(opts[^)]*\): Win \| null \{/.test(main) && !/pyc\.off/.test(main), "…and the window opens with no switch");
 ok(/"tools\.console": "Python console… · beta"/.test(i18n) && /"tools\.console": "Console Python… · beta"/.test(i18n), "the entry says «beta» (EN + IT)");
 ok(/t\("ui\.beta"\)/.test(read("frontend/src/console-window.ts")), "the window's head says «beta»");
-ok(/new ColoursWindow\(coloursWindowHostForVocab\(\), document, \{\s*prefKey: "emstudio\.console\.window\.v1"/.test(main), "a floating window like «Estensioni» (detachable)");
-ok(/sig: \(\) => getLocale\(\)/.test(main), "…rebuilt only by the language");
+// MICRO-TIL002 · a WINDOW TYPE of the shell, not a floating panel any more
+ok(!/prefKey: "emstudio\.console\.window\.v1"/.test(main), "no floating panel (MICRO-TIL002)");
+ok(/\| "console"/.test(read("frontend/src/workspace.ts")) && /console: \{ icon: windowIcon\("console"\), labelKey: "win\.console" \}/.test(read("frontend/src/workspace.ts")),
+   "…a window type «console» with its icon and name");
+ok(/"console",\s*"script",\s*\];/.test(main), "…chosen from the head's selector, beside the Script Editor");
+ok(/\["console", "tile-consolebody", deps\.mountConsole\]/.test(read("frontend/src/shell/types.ts")), "…a surface of the shell (mounted once, never rebuilt by a repaint)");
+ok(/if \(getLocale\(\) !== sig\)/.test(main), "…rebuilt only by the language");
 ok(/console: \(\) => openConsoleWindow\(\)/.test(main), "the hook opens it");
 const keys = [...new Set([...i18n.matchAll(/"(pyc\.[A-Za-z]+|tools\.console(?:Title)?)":/g)].map((m) => m[1]))];
 ok(keys.length >= 26, `the console's words (${keys.length})`);   // MICRO-COR11: pyc.off, pyc.experimental gone (ui.beta)
@@ -202,6 +207,25 @@ document.body.append(root);
 await tick();
 eq([root.querySelectorAll(".pyc-line").length, root.querySelector(".pyc-input").value], [before, "g.node('US1')"],
    "rebuilt: the lines and the draft are still there");
+// MICRO-TIL002 · two console windows on one state: a line from outside (the
+// Script Editor's «Run Script») reaches both; ⌘L clears both; a window taken
+// down stops listening
+const second = M.mountConsole(document, host, state, { focus: false });
+document.body.append(second.root);
+await tick();
+M.appendLines(state, [{ kind: "script", text: "▶ prova.py" }, { kind: "out", text: "42" }]);
+eq([root.querySelectorAll(".pyc-line").length, second.root.querySelectorAll(".pyc-line").length], [before + 2, before + 2],
+   "a line from the editor reaches every console window");
+ok(root.querySelector(".pyc-k-script") && second.root.querySelector(".pyc-k-script"), "…marked as a script's run");
+M.setConsoleBusy(state, true);
+ok(root.querySelector('[data-pyc="run"]').disabled && second.root.querySelector('[data-pyc="run"]').disabled, "a run from the editor: every console says it is busy");
+M.setConsoleBusy(state, false);
+key(second.root.querySelector(".pyc-input"), "l", { metaKey: true });
+eq([state.lines.length, root.querySelectorAll(".pyc-line").length, second.root.querySelectorAll(".pyc-line").length], [0, 0, 0],
+   "⌘L clears the lines, in every window");
+second.destroy();
+M.appendLines(state, [{ kind: "out", text: "x" }]);
+eq([root.querySelectorAll(".pyc-line").length, second.root.querySelectorAll(".pyc-line").length], [1, 0], "a window taken down stops listening");
 // no bridge: said, nothing runs
 why = "py.noToken";
 const n0 = runs.length;

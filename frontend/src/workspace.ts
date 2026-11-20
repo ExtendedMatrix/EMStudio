@@ -85,7 +85,13 @@ export type WindowType =
   // every panel of every plugin, the panel in its state (`plugin.panel` =
   // `<plugin>/<panel>`) — the union stays closed (SPEC-plugin §3.3). Drawn by
   // the page from the plugin's fields; a plugin brings no HTML.
-  | "plugin-panel";
+  | "plugin-panel"
+  // MICRO-TIL002 (E.D., 20 Nov 2026) · PYTHON, as Blender has it: the Python
+  // CONSOLE (it was a floating panel; `console-window.ts`) and the SCRIPT
+  // EDITOR (`script-editor.ts`), two editors an area can be. «Run Script» runs
+  // in the console's session and prints in it.
+  | "console"
+  | "script";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -448,6 +454,60 @@ export const PARKED_WORKSPACES: WorkspacePreset[] = [
   // Fonti — `initial` — and a window of its type opens a Viewer: `migrateWin`.)
 ];
 
+/**
+ * MICRO-TIL002 · THE MODELS of the «+»: arrangements a new workspace can START
+ * from, besides a copy of the one in front of you. Not tabs: none of them is
+ * among the built-ins (the six stay six), and a workspace made from one is the
+ * person's — renamed, reshaped, removed like any other.
+ *
+ * SCRIPTING, as in Blender: the Script Editor on the left, the Python console
+ * under it, the graph on the right (the Matrix: what a script reads and writes).
+ */
+export const WORKSPACE_TEMPLATES: WorkspacePreset[] = [
+  {
+    id: "scripting", labelKey: "ws.scripting", hintKey: "ws.qScripting",
+    icon: "⌨", windowType: "script",
+    arrangement: {
+      wins: [
+        { name: "editor", type: "script" },
+        { name: "console", type: "console" },
+        { name: "canvas", type: "graph", state: { mode: "matrix" } },
+      ],
+      active: "editor",
+      layout: { dir: "row", ratio: 0.55,
+                a: { dir: "col", ratio: 0.62, a: { win: "editor" }, b: { win: "console" } },
+                b: { win: "canvas" } },
+    },
+  },
+];
+
+/**
+ * A new workspace from a MODEL (`WORKSPACE_TEMPLATES`): the model's
+ * arrangement, applied the first time it is opened (`applyArrangement`, as for
+ * a built-in), under the name given. Saved with the person's workspaces — the
+ * arrangement travels with it, so «↺» of a copy has nothing to go back to and
+ * a reload opens what was left.
+ */
+export function addWorkspaceFromTemplate(templateId: string, label: string): WorkspacePreset | null {
+  const tp = WORKSPACE_TEMPLATES.find((w) => w.id === templateId);
+  if (!tp) return null;
+  let n = WORKSPACES.length + 1;
+  while (WORKSPACES.some((w) => w.id === `ws${n}`)) n++;
+  const ws: WorkspacePreset = {
+    id: `ws${n}`,
+    label: label.trim() || templateId,
+    icon: tp.icon,
+    windowType: tp.windowType,
+    hintKey: tp.hintKey,
+    arrangement: JSON.parse(JSON.stringify(tp.arrangement)) as Arrangement,
+  };
+  WORKSPACES.push(ws);
+  registry[ws.id] = seedWindows(ws);
+  persistCustom();
+  persistWindows();
+  return ws;
+}
+
 const CUSTOM_KEY = "emstudio.workspaces.custom";
 
 function loadCustom(): WorkspacePreset[] {
@@ -605,6 +665,8 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   scene: { icon: windowIcon("scene"), labelKey: "win.scene" },
   sheet: { icon: windowIcon("sheet"), labelKey: "win.sheet" },
   "plugin-panel": { icon: windowIcon("plugin-panel"), labelKey: "win.pluginPanel" },
+  console: { icon: windowIcon("console"), labelKey: "win.console" },
+  script: { icon: windowIcon("script"), labelKey: "win.script" },
 };
 
 /** The window type the active workspace currently shows — the ACTIVE window's
