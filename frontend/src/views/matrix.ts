@@ -1045,12 +1045,20 @@ export function buildMatrixScene(
     for (const sn of scene.nodes) {
       if (!laneOf.has(sn.id)) laneOf.set(sn.id, laneIdxOfY(sn.y + sn.h / 2));
     }
+    // MICRO-SEG01 · a continuity node that `seatContinuity` seats below is not
+    // where it stands now (the layout's place, carried into the view): a lane
+    // grown for that place grew for nothing, and the whole Matrix under it moved
+    // when the «Continuity (BR)» ring went off or on (GT16: «XX sec» 214 → 224,
+    // 162 nodes 10 lower). Seated, it is inside its lane by construction
+    // (continuityPlace), so it asks no room here.
+    const toSeat = continuityToSeat(scene, doc);
     const origY = scene.lanes.map((l) => l.y);
     const origH = scene.lanes.map((l) => l.height);
     // content overflow beyond each lane's original rect, both directions
     const bottom = scene.lanes.map(() => 0);
     const top = scene.lanes.map(() => 0);
     for (const sn of scene.nodes) {
+      if (toSeat.has(sn.id)) continue;
       const li = laneOf.get(sn.id)!;
       const over = sn.y + sn.h + LANE_PAD - (origY[li] + origH[li]);
       if (over > 0) bottom[li] = Math.max(bottom[li], over);
@@ -1076,7 +1084,7 @@ export function buildMatrixScene(
       const over = extent + LANE_PAD - (origY[li] + origH[li]);
       let below = -Infinity;
       for (const sn of scene.nodes)
-        if (laneOf.get(sn.id) === li) below = Math.max(below, sn.y + sn.h + LANE_PAD - (origY[li] + origH[li]));
+        if (laneOf.get(sn.id) === li && !toSeat.has(sn.id)) below = Math.max(below, sn.y + sn.h + LANE_PAD - (origY[li] + origH[li]));
       bottom[li] = Math.max(over, below, -origH[li] + 1);
     }
     let cursor = origY[0] - top[0]; // keep the first lane roughly anchored
@@ -1197,6 +1205,19 @@ export function buildMatrixScene(
  * (`layout.hand_placed`, a drag like any unit's) keeps its place: the line goes
  * to it, orthogonal (continuityRoute).
  */
+/** the continuity nodes `seatContinuity` will seat (not placed by hand, their
+ *  unit drawn and open): their place now is not the one they will be drawn at */
+function continuityToSeat(scene: Scene, doc: EmDocument): Set<string> {
+  const out = new Set<string>();
+  const nodeById = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  const hand = new Set(doc.layout?.hand_placed ?? []);
+  for (const [brId, l] of continuityLinks(doc.graph.edges, (id) => isContinuityType(nodeById.get(id)?.node_type))) {
+    const unit = scene.byId.get(l.unit);
+    if (scene.byId.has(brId) && unit && !unit.collapsed && !hand.has(brId)) out.add(brId);
+  }
+  return out;
+}
+
 export function seatContinuity(scene: Scene, doc: EmDocument): void {
   const nodeById = new Map(doc.graph.nodes.map((n) => [n.id, n]));
   const hand = new Set(doc.layout?.hand_placed ?? []);
