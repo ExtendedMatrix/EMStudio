@@ -65367,7 +65367,7 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
   menu.style.top = clientY + "px";
   const header = document.createElement("div");
   header.className = "ctx-header";
-  header.textContent = `${ids.length} node${ids.length > 1 ? "s" : ""} selected`;
+  header.textContent = tn("ctx.nodesSelected", ids.length);
   menu.appendChild(header);
   // ── SHIFT-A fase 3 · the verbs on the node itself ─────────────────────────
   const item = (label: string, run: () => void, cls?: string): HTMLButtonElement => {
