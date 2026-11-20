@@ -182,10 +182,25 @@ for (const [old, canon] of PAIRS) {
     ok(!R.nodeElements("US").some((r) => r.field === "end_reason"), "…and only the BR");
   }
   eq(fields("EpochNode"), [], "an epoch has no definition");
-  eq(fields("property"), [], "a PropertyNode has no definition");
+  // A PropertyNode has no `definition` element. It does have elements of its own,
+  // added by two decisions of E.D. that came after this line was written:
+  // node datamodel 1.6.48 (MICRO-K-DEFINIZIONE-E-PASSI, 17 Nov 2026) puts a term
+  // that classifies a definition on the property itself (`data.concept`), and
+  // 1.6.51 (MICRO-PL08, D-9, 18 Nov 2026) gives a computed property its measure
+  // and unit (`data.measure`, `data.unit`).
+  ok(!fields("property").includes("definition"), "a PropertyNode has no definition");
+  eq(R.nodeElements("property").map((r) => [r.field, r.em_json]),
+    [["concept", "data.concept"], ["measure", "data.measure"], ["unit", "data.unit"]],
+    "a PropertyNode carries concept (1.6.48), measure and unit (1.6.51)");
   // 1.6.46 (MICRO-B-DOCUMENTI-MEDIA): a catalogue's stamp is an element of the
   // document, not a definition (the Inspector says it in the catalogue's line)
-  eq(fields("document").filter((f) => f !== "catalog_stamp"), [], "a document has no definition");
+  // 1.6.48 (MICRO-K-DEFINIZIONE-E-PASSI, E.D. 17 Nov 2026, the MICRO-A proposal
+  // approved 14 Nov): a document says when it was acquired and until when it holds
+  // (`data.acquired`, `data.valid_until`) — dates, not a definition
+  ok(!fields("document").includes("definition"), "a document has no definition");
+  eq(R.nodeElements("document").filter((r) => r.field !== "catalog_stamp").map((r) => [r.field, r.em_json]),
+    [["acquired", "data.acquired"], ["valid_until", "data.valid_until"]],
+    "a document carries acquired and valid_until (1.6.48)");
 
   const cp = R.conceptParts;
   eq(cp({ concept: "https://x.invalid/c", label: "strato di crollo" }),
