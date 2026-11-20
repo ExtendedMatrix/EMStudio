@@ -11493,6 +11493,103 @@ test("COR8.pack", "MICRO-COR08 · «Impacchetta in .3tz» dove non risponde il s
   return { pass: Object.values(conds).every(Boolean), detail: { conds, out, toast, asked, errors } };
 });
 
+// MICRO-SEG03 (20 Nov 2026) · E.D.: «con EMStudio sei costretto a metterlo
+// dentro a un em.json, a me serve solo la trasformazione». No study open: in
+// Files the RealityScan pair (X/ with X.json beside it; the folder holding it)
+// shows «Pack this tileset into a .3tz»; the click writes X.3tz beside the pair
+// — 3DSC's bytes — and its stamp beside it (the folder its parent by content,
+// as 3DSC writes it), the message says where, and no graph is born.
+test("SEG3.pair", "MICRO-SEG03 · Files senza studio: la coppia RealityScan (X/ con X.json accanto, e la cartella che la contiene) mostra «Pack this tileset into a .3tz»; il clic scrive X.3tz accanto — gli stessi byte di 3DSC — e X.3tz.stamp.json accanto (genitore la cartella), il messaggio dice dove, nessun grafo toccato", async () => {
+  const { dir } = await tsdBench("seg3");
+  const root = FS_ROOT ?? (await rootPath());
+  const ID = "0000-0002-1825-0097";
+  const { p, ctx, errors } = await open({ doc: null, locale: "en",
+    init: { "emstudio.identities": JSON.stringify({ current: ID, known: [{ orcid: ID, name: "Josiah", surname: "Carberry", verified: false }] }) } });
+  const noStudyBefore = await p.evaluate(() => window.__EM_DRAG__.docJson() === "null");
+  await workspace(p, "assets");
+  await p.evaluate(() => window.__EM_DRAG__.archiveView("files"));
+  await p.waitForTimeout(500);
+  const buttons = () => p.evaluate(() => [...document.querySelectorAll('[data-action="pack-3tz"]')]
+    .map((b) => ({ text: b.textContent, root: b.dataset.packRoot ?? null, name: b.dataset.packName ?? null, disabled: b.disabled })));
+  const optimize = async () => { await p.click('.files-tab[data-tab="optimize"]').catch(() => {}); await p.waitForTimeout(900); };
+  // the folder holding the pair (disco/ beside it is a tileset.json folder, not a pair)
+  await storageInto(p, [root.split("/").pop(), dir.split("/").pop()]);
+  await optimize();
+  const holding = await buttons();
+  // X/ itself: X.json is beside it
+  await storageInto(p, ["disco_rs"]);
+  await optimize();
+  await p.waitForFunction(() => !!document.querySelector('[data-action="pack-3tz"][data-pack-root]'), null, { timeout: 8000 }).catch(() => {});
+  const inX = await buttons();
+  await p.screenshot({ path: SHOT("seg3-coppia-in-files") }).catch(() => {});
+  await p.click('[data-action="pack-3tz"]');
+  const target = `${dir}/disco_rs.3tz`;
+  for (let i = 0; i < 120 && !(existsSync(target) && existsSync(`${target}.stamp.json`)); i++) await p.waitForTimeout(250);
+  await p.waitForTimeout(800);
+  const toast = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  const log = await p.evaluate(() => window.__EM_DRAG__.logTail(8));
+  const noStudyAfter = await p.evaluate(() => window.__EM_DRAG__.docJson() === "null");
+  await p.screenshot({ path: SHOT("seg3-scritto") }).catch(() => {});
+  await ctx.close();
+  // 3DSC on the same pair, into another folder
+  const dsc = new URL("../../../3D-survey-collection/cesium_exporter/archive_3tz.py", import.meta.url).pathname;
+  const S3DPY = new URL("../../../s3Dgraphy/.venv/bin/python", import.meta.url).pathname;
+  let dscSha = null;
+  if (existsSync(dsc) && existsSync(S3DPY)) {
+    mkdirSync(`${dir}/dsc`, { recursive: true });
+    execFileSync(S3DPY, ["-c", `import sys, shutil, importlib.util
+spec = importlib.util.spec_from_file_location("archive_3tz", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+folder, root, out = m.find_tileset_source(sys.argv[2])
+stage = m.stage_tileset_pair(root, folder)
+try: m.write_3tz(stage, sys.argv[3])
+finally: shutil.rmtree(stage, ignore_errors=True)`, dsc, `${dir}/disco_rs`, `${dir}/dsc/disco_rs.3tz`],
+      { env: { ...process.env, PYTHONPATH: new URL("../../../dtcstamp/", import.meta.url).pathname } });
+    dscSha = createHash("sha256").update(readFileSync(`${dir}/dsc/disco_rs.3tz`)).digest("hex");
+  }
+  const mine = existsSync(target) ? createHash("sha256").update(readFileSync(target)).digest("hex") : null;
+  const stampText = existsSync(`${target}.stamp.json`) ? readFileSync(`${target}.stamp.json`, "utf8") : "";
+  const stamp = stampText ? JSON.parse(stampText) : null;
+  const conds = {
+    noStudy: noStudyBefore && noStudyAfter,
+    holding: holding.length === 1 && holding[0].text === "Pack this tileset into a .3tz" && /disco_rs\.json$/.test(holding[0].root ?? "") && !holding[0].disabled,
+    inX: inX.length === 1 && inX[0].text === "Pack this tileset into a .3tz" && /disco_rs\.json$/.test(inX[0].root ?? "") && !inX[0].disabled,
+    written: !!mine,
+    sameAs3dsc: !!mine && mine === dscSha,
+    stamped: !!stamp && stamp.self?.digest === `sha256:${mine}` && /"res:[0-9a-f]{16}"/.test(stampText),
+    saysWhere: [toast, ...log].some((l) => l.includes(`disco_rs.3tz written in ${dir}`) || l.includes(`disco_rs.3tz written in ${realpathSync(dir)}`)),
+    saysStamp: log.some((l) => /stamped as derived from its folder: the stamp is beside it/.test(l)),
+    noErrors: !pageErrors(errors).length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, holding, inX, mine, dscSha, toast, log, stampSelf: stamp?.self, errors } };
+});
+
+test("SEG3.study", "MICRO-SEG03 p.2–3 · con uno studio aperto, la strada dell'asset manager (packTilesetFlow con un percorso senza root): X.json della coppia RealityScan risolto con la regola di 3DSC, X.3tz scritto, il grafo con le due forme (la cartella per il suo X.json, l'archivio) come oggi; due coppie nella stessa cartella: rifiutato con i loro nomi", async () => {
+  const { dir } = await tsdBench("seg3s");
+  // a second pair beside the first: the folder now holds two
+  execFileSync("cp", ["-cR", `${dir}/disco_rs`, `${dir}/altro_rs`]);
+  writeFileSync(`${dir}/altro_rs.json`, readFileSync(`${dir}/disco_rs.json`, "utf8").replaceAll("disco_rs/", "altro_rs/"));
+  const ID = "0000-0002-1825-0097";
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en",
+    init: { "emstudio.identities": JSON.stringify({ current: ID, known: [{ orcid: ID, name: "Josiah", surname: "Carberry", verified: false }] }) } });
+  const viaJson = await p.evaluate((f) => window.__EM_DRAG__.packTileset(f), `${dir}/disco_rs.json`);
+  const two = await p.evaluate((f) => window.__EM_DRAG__.packTileset(f), dir);
+  await p.waitForTimeout(500);
+  const graph = await p.evaluate(() => window.__EM_DRAG__.idsOfType("resource").map((id) => window.__EM_DRAG__.node(id)).filter(Boolean)
+    .map((n) => ({ name: n.name, packaging: n.data?.packaging, url: n.data?.url ?? null, cd: n.data?.content_digest?.digest ?? null })));
+  await ctx.close();
+  const cd = viaJson?.content_digest?.digest;
+  const forms = graph.filter((n) => cd && n.cd === cd);
+  const conds = {
+    packed: viaJson?.ok === true && viaJson.state === "written" && /disco_rs\.3tz$/.test(viaJson.path ?? "") && existsSync(`${dir}/disco_rs.3tz`),
+    stamped: viaJson?.stamped === true && existsSync(`${dir}/disco_rs.3tz.stamp.json`),
+    forms: forms.length === 2 && forms.some((n) => n.packaging === "directory" && /disco_rs\.json$/.test(n.url ?? ""))
+      && forms.some((n) => n.packaging === "archive" && /disco_rs\.3tz$/.test(n.url ?? "")),
+    twoRefused: two?.ok === false && /2 tilesets in the RealityScan form/.test(two.error ?? "") && /altro_rs, disco_rs/.test(two.error ?? ""),
+    noErrors: !pageErrors(errors).length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, viaJson: viaJson && { ok: viaJson.ok, state: viaJson.state, path: viaJson.path, stamped: viaJson.stamped, why: viaJson.stampWhy }, two, forms, errors } };
+});
+
 test("TD2.pair", "tileset trascinato · la forma RealityScan (X/ dallo Storage, X.json accanto) sul Viewer: riconosciuta e detta, la posizione avvisa «geocentriche», centrata solo per la vista, le tile si vedono", async () => {
   const { dir } = await tsdBench("td2");
   const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });

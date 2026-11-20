@@ -56,6 +56,56 @@ export async function packTileset(bridge: string, folder: string, root?: string)
   return body;
 }
 
+/** MICRO-SEG03 · what a path packs into: the folder, its root `X.json` when it
+ *  is the RealityScan form (null for a folder with `tileset.json`), the `.3tz`
+ *  written, and the name a button says. */
+export interface TilesetSource { folder: string; root: string | null; out: string; name: string }
+
+/** MICRO-SEG03 · the rule of 3D Survey Collection
+ *  (`cesium_exporter/archive_3tz.find_tileset_source`, 1.7.0-dev.72), its four
+ *  shapes, read from a listing of `path` (its entries with their full paths)
+ *  and whether `<path>.json` is a file beside it:
+ *  - `tileset.json` at the root → the folder, `<path>.3tz` beside it;
+ *  - the folder `X/` of the RealityScan form, `X.json` beside it → `X.3tz` beside them;
+ *  - (the `X.json` itself, chosen as a file: `tilesetSourceOfJson`);
+ *  - a folder holding `X.json` + `X/` (no `tileset.json`) → `X.3tz` inside it.
+ *  Where 3DSC refuses several pairs in one folder («choose one of their
+ *  folders»), this answers each of them (a button per pair, by its name).
+ *  Empty: not a tileset. */
+export function tilesetSourcesIn(path: string, entries: ReadonlyArray<{ name: string; type: string; path: string }>,
+    besideJson: boolean): TilesetSource[] {
+  const p = path.replace(/[/\\]+$/, "");
+  const name = (x: string) => x.split(/[/\\]/).pop() ?? x;
+  if (entries.some((e) => e.type === "file" && e.name === "tileset.json"))
+    return [{ folder: p, root: null, out: `${p}.3tz`, name: name(p) }];
+  if (besideJson) return [{ folder: p, root: `${p}.json`, out: `${p}.3tz`, name: name(p) }];
+  const dirs = new Map(entries.filter((e) => e.type === "dir").map((e) => [e.name, e.path]));
+  // Python's `sorted` of the names: by code point
+  const cp = (a: string, b: string) => { const x = [...a], y = [...b];
+    for (let i = 0; i < Math.min(x.length, y.length); i++) { const d = x[i].codePointAt(0)! - y[i].codePointAt(0)!; if (d) return d; }
+    return x.length - y.length; };
+  return entries
+    .filter((e) => e.type === "file" && e.name.toLowerCase().endsWith(".json") && dirs.has(e.name.slice(0, -5)))
+    .sort((a, b) => cp(a.name.slice(0, -5), b.name.slice(0, -5)))
+    .map((e) => { const folder = dirs.get(e.name.slice(0, -5))!.replace(/[/\\]+$/, "");
+      return { folder, root: e.path, out: `${folder}.3tz`, name: e.name.slice(0, -5) }; });
+}
+
+/** MICRO-SEG03 · the third shape: `X.json` chosen as a file, `X/` beside it. */
+export function tilesetSourceOfJson(json: string, folderBeside: boolean): TilesetSource | null {
+  if (!/\.json$/i.test(json) || !folderBeside) return null;
+  const folder = json.slice(0, -5);
+  return { folder, root: json, out: `${folder}.3tz`, name: folder.split(/[/\\]/).pop() ?? folder };
+}
+
+/** MICRO-SEG03 · the parent of a packed .3tz in its stamp when its folder has
+ *  no stamp of its own — 3DSC's `_folder_parent`: by identity, `res:` and the
+ *  first 16 hex of the content digest (which the .3tz shares: the same
+ *  content, another form), the digest that content digest. */
+export function folderParentOf(contentDigest: string): { resource_id: string; digest: string } {
+  return { resource_id: "res:" + contentDigest.split(":").pop()!.slice(0, 16), digest: contentDigest };
+}
+
 const dataOf = (n: EmNode | undefined): Record<string, unknown> =>
   ((n?.data ?? {}) as Record<string, unknown>);
 export const contentDigestOf = (n: EmNode | undefined): string | null => {
@@ -79,8 +129,9 @@ export function formsOf(g: ResourceGraph, resId: string): EmNode[] {
  *  (or made, by `addResource`), both carrying the `content_digest`, the
  *  archive a representation of the folder. Returns the two ids. */
 export function landPack(g: ResourceGraph, folderLocator: string, out: PackResult,
-    names: { folder: string; archive: string }): { folderId: string; archiveId: string } {
-  const entry = `${folderLocator.replace(/\/+$/, "")}/tileset.json`;
+    names: { folder: string; archive: string }, rootLocator?: string): { folderId: string; archiveId: string } {
+  // MICRO-SEG03 · the RealityScan form: the folder's resource is its root X.json
+  const entry = rootLocator ?? `${folderLocator.replace(/\/+$/, "")}/tileset.json`;
   const find = (url: string) => g.nodes().find((n) => n.node_type === "resource" && dataOf(n).url === url);
   const cd = { ...out.content_digest! };
   return g.batch(() => {

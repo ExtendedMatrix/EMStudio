@@ -548,7 +548,7 @@ import { catalogueState, cite, documentOf, groupItems, setTree, isCatalogue, ite
          FRONTISPIECE as MEDIA_FRONTISPIECE, type CatalogueState, type MediaItem } from "./media";
 import { askWhichPointersMove } from "./resource-panel";
 import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
-import { foldForms, landPack, packTileset } from "./pack3tz";
+import { folderParentOf, foldForms, landPack, packTileset, tilesetSourceOfJson, tilesetSourcesIn, type TilesetSource } from "./pack3tz";
 import {
   type AwarenessNote, emptyPresence, type HubOp, noteForRemoteOp, noteForStale,
   opKey, opsForLocalChange, peerSelections, planRejoin, refusalIsNews, stampForResend,
@@ -45671,11 +45671,14 @@ function filesPackSection(listing: FsListing): HTMLElement {
   pp.textContent = t("files.on");
   ph.append(pb, pp);
   pk.appendChild(ph);
-  const isTileset = !listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json");
+  // MICRO-SEG03 · a folder with tileset.json, and the RealityScan form (X/
+  // with X.json beside it, or a folder holding X.json + X/): 3DSC's rule
+  const sources = listing.roots ? [] : filesTilesetSources(listing);
+  const isTileset = sources.length > 0;
   ph.append(" ", tabTip(t(isTileset ? "files.optPackBorn" : "files.optPackWhere")));
-  if (isTileset) {
-    pk.appendChild(pack3tzButton(listing.path));
-    if (!filesFolderStamped(listing)) pk.appendChild(tabLead(t("files.optPackStampFirst"), "files-hint files-warn"));
+  for (const src of sources) {
+    pk.appendChild(pack3tzButton(src.folder, src.root ?? undefined, sources.length > 1 ? src.name : undefined));
+    if (!folderStampOf(src.folder)) pk.appendChild(tabLead(t("files.optPackStampFirst"), "files-hint files-warn"));
   }
   const prows = jobRows(["pack3tz"]);
   if (prows) pk.appendChild(prows);
@@ -46108,10 +46111,44 @@ async function registerTilesetNow(o: TsOut, params: Record<string, unknown>, too
   return null;
 }
 
-/** Is the tileset folder of this listing stamped (its own sidecar beside it)? */
-function filesFolderStamped(listing: FsListing): boolean {
-  return !!folderStampOf(listing.path);
+/** MICRO-SEG03 · what this listing packs into (`tilesetSourcesIn`, 3DSC's
+ *  rule): whether `<folder>.json` is beside it is asked of the parent's
+ *  listing once, then the panel is drawn again. */
+const besideJsonSeen = new Map<string, boolean | null>();
+function filesTilesetSources(listing: FsListing): TilesetSource[] {
+  const p = listing.path.replace(/[/\\]+$/, "");
+  let beside = false;
+  if (!listing.entries.some((e) => e.type === "file" && e.name === "tileset.json") && listing.parent) {
+    if (!besideJsonSeen.has(p)) {
+      besideJsonSeen.set(p, null);
+      void fsList(listing.parent).then((up) => {
+        const want = `${paths.basename(p)}.json`;
+        besideJsonSeen.set(p, up.entries.some((e) => e.type === "file" && e.name === want));
+        if (besideJsonSeen.get(p)) renderStorage();
+      }).catch(() => besideJsonSeen.set(p, false));
+    }
+    beside = besideJsonSeen.get(p) === true;
+  }
+  return tilesetSourcesIn(p, listing.entries, beside);
 }
+/** MICRO-SEG03 · a path given to pack (Archive ▸ Assets, a script): what it
+ *  packs into by the same rule, asked of the bridge's listings — or why not. */
+async function resolveTilesetSource(path: string): Promise<TilesetSource | string> {
+  const p = path.replace(/[/\\]+$/, "");
+  const up = await fsList(paths.dirname(p)).catch(() => null);
+  const me = up?.entries.find((e) => e.name === paths.basename(p));
+  if (me?.type === "file") {
+    const src = tilesetSourceOfJson(p, !!up?.entries.some((e) => e.type === "dir" && e.name === paths.basename(p).slice(0, -5)));
+    return src ?? t("pack3tz.noFolderBeside", { name: paths.basename(p) });
+  }
+  const here = await fsList(p).catch(() => null);
+  if (!here) return t("pack3tz.notTileset", { name: p });
+  const all = tilesetSourcesIn(p, here.entries, !!up?.entries.some((e) => e.type === "file" && e.name === `${paths.basename(p)}.json`));
+  if (all.length === 1) return all[0];
+  if (all.length > 1) return t("pack3tz.manyPairs", { name: p, n: String(all.length), list: all.slice(0, 4).map((x) => x.name).join(", ") });
+  return t("pack3tz.notTileset", { name: p });
+}
+
 const folderStamps = new Map<string, { self: { resource_id: string; digest?: string } } | null>();
 function folderStampOf(folder: string): { self: { resource_id: string; digest?: string } } | null {
   if (!folderStamps.has(folder)) {
@@ -46135,7 +46172,11 @@ async function stampDerived(source: string | string[], out: { path: string; sha2
  *  (null: stamped) — «0 stamped as derived» named nothing. */
 async function stampDerivedWhy(source: string | string[], out: { path: string; sha256?: string }, act: { kind: string; technique: string;
     parameters: Record<string, unknown>; software: { name: string; version: string }[] },
-    opts: { tree?: boolean; declare?: boolean; parent?: DeclaredParent; replacing?: boolean } = {}): Promise<string | null> {
+    opts: { tree?: boolean; declare?: boolean; parent?: DeclaredParent; replacing?: boolean;
+            /** MICRO-SEG03 · the input when the one source has no stamp: by identity and digest (a packed folder) */
+            bareInput?: { resource_id: string; digest: string };
+            /** MICRO-SEG03 · false: the stamp only, the Chain (the corpus) not touched — no study open */
+            land?: boolean } = {}): Promise<string | null> {
   const me = currentIdentity();
   if (!me?.orcid) return t("files.stampWhy.author");
   // MICRO-OTTIMIZZA-3 p.3 · one step with N inputs (the parts of a survey's
@@ -46148,7 +46189,7 @@ async function stampDerivedWhy(source: string | string[], out: { path: string; s
   // MICRO-CODA-VISTA p.4 · a source the graph knows as stamped (its date in
   // the Stamp column) but whose sidecar is not beside it is declared too
   const bare = all.find((x, i) => !stamps[i] && !isGraphStampedPath(x));
-  if (bare && !opts.declare) return t("files.stampWhy.source", { file: baseName(bare) });
+  if (bare && !opts.declare && !(opts.bareInput && all.length === 1)) return t("files.stampWhy.source", { file: baseName(bare) });
   // MICRO-CODA-VISTA-2 · made again with the very same bytes («Sostituisci»
   // of a deterministic tool): the stamp beside it is already theirs
   if (out.sha256) {
@@ -46180,10 +46221,11 @@ async function stampDerivedWhy(source: string | string[], out: { path: string; s
     if (ins.length) draft.inputs = ins;
     if (decl.length) draft.declared = [{ parents: decl }];
   } else if (src) draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(all[0]), path: all[0] }];
+  else if (opts.bareInput) draft.inputs = [{ ...opts.bareInput, label: baseName(all[0]), path: all[0] }];
   else draft.declared = [{ parents: [opts.parent ?? { kind: "file", label: baseName(all[0]), path: all[0] }] }];
   const emitted = await emitDraft(draft, { graph_id: store?.doc?.graph?.graph_id as string | undefined });
   if (!emitted.written.length) return emitted.error || emitted.refused.map((r) => `${baseName(r.path)}: ${r.why}`).join("; ") || t("files.stampWhy.none");
-  landEmission(draft, emitted);
+  if (opts.land !== false) landEmission(draft, emitted);
   return null;
 }
 
@@ -48139,17 +48181,21 @@ async function doStamp(win: Win): Promise<void> {
  *  service has it; a page the node serves has none, and the button says so in
  *  place of packing (MICRO-COR08, E.D. 19 Nov: «via bridge, con messaggio
  *  chiaro»). */
-function pack3tzButton(folder: string): HTMLElement {
+function pack3tzButton(folder: string, root?: string, name?: string): HTMLElement {
   const box = document.createElement("div");
   box.className = "stamp-report-ask";
   const b = document.createElement("button");
   b.className = "ghost";
   b.dataset.action = "pack-3tz";
-  b.textContent = t("pack3tz.button");
+  // MICRO-SEG03 · the RealityScan form (X.json beside X/), and a button per
+  // pair, by its name, when a folder holds several
+  if (root) b.dataset.packRoot = root;
+  if (name) b.dataset.packName = name;
+  b.textContent = name ? t("pack3tz.buttonNamed", { name }) : t("pack3tz.button");
   const here = canPack3tzHere();
   b.disabled = !here || pack3tzBusy;
-  b.title = here ? t("pack3tz.hint") : t("pack3tz.desktopOnly");
-  b.onclick = () => { void packTilesetFlow(folder); };
+  b.title = here ? t(root ? "pack3tz.hintPair" : "pack3tz.hint", { name: paths.basename(root ?? "") }) : t("pack3tz.desktopOnly");
+  b.onclick = () => { void packTilesetFlow(folder, undefined, root ?? null); };
   box.appendChild(b);
   if (!here) {
     const why = document.createElement("span");
@@ -48176,13 +48222,24 @@ let pack3tzBusy = false;
 /** Pack, then the graph: the folder and the archive as two FORMS of one
  *  content (equal `content_digest`), the archive derived from the folder.
  *  Locators beside the em.json are written relative to it. */
-async function packTilesetFlow(folder: string, theirs?: { software: string; generator: string }): Promise<(import("./pack3tz").PackResult & { stamped?: boolean }) | null> {
+async function packTilesetFlow(folder: string, theirs?: { software: string; generator: string },
+    root?: string | null): Promise<(import("./pack3tz").PackResult & { stamped?: boolean; stampWhy?: string }) | null> {
   if (pack3tzBusy) return null;
   // MICRO-COR08 · no service that packs (the page the node serves): said, not tried
   if (!isTauri() && !(await bridgeLevelAtLeast(BRIDGE_LEVEL_PACK3TZ))) {
     const why = t("pack3tz.desktopOnly");
     toast(why);
     return { ok: false, error: why };
+  }
+  // MICRO-SEG03 · a path without its root said (Archive ▸ Assets, a script):
+  // what it packs into, by 3DSC's rule — a tileset.json folder, or the
+  // RealityScan form (X/ with X.json beside it, X.json itself, the folder
+  // holding the pair)
+  if (root === undefined) {
+    const src = await resolveTilesetSource(folder);
+    if (typeof src === "string") { toast(t("pack3tz.failed", { detail: src })); return { ok: false, error: src }; }
+    folder = src.folder;
+    root = src.root;
   }
   pack3tzBusy = true;
   renderStorage();
@@ -48201,42 +48258,51 @@ async function packTilesetFlow(folder: string, theirs?: { software: string; gene
     // MICRO-OTTIMIZZA-1 · a job of the bridge (level 43): the page goes on
     // while it packs; an older bridge packs in the one request as before
     let out: import("./pack3tz").PackResult;
-    const job = await bridgeLevelAtLeast(43) ? await startJob({ kind: "pack3tz", folder }, `.3tz · ${baseName(folder)}`) : null;
+    const pair = root ? { root } : {};
+    const job = await bridgeLevelAtLeast(43) ? await startJob({ kind: "pack3tz", folder, ...pair }, `.3tz · ${baseName(folder)}`) : null;
     if (job) {
       const end = await job.done;
       out = end.state === "done" ? (end.result as import("./pack3tz").PackResult)
         : { ok: false, error: end.state === "cancelled" ? t("files.jobCancelled", { what: end.label }) : end.error ?? "" };
-    } else out = await packTileset(await bridgeUrl(), folder);
+    } else out = await packTileset(await bridgeUrl(), folder, root ?? undefined);
     if (!out.ok) { toast(t("pack3tz.failed", { detail: out.error ?? "" })); return out; }
     const canon = out.canonical?.canonical === true;
+    // MICRO-SEG03 · the message says WHERE the file was written
     const msg = t(out.state === "same" ? "pack3tz.same" : "pack3tz.done", {
-      name: baseName(out.path ?? ""), sha: (out.sha256 ?? "").slice(0, 19),
+      name: baseName(out.path ?? ""), dir: paths.dirname(out.path ?? ""), sha: (out.sha256 ?? "").slice(0, 19),
       cd: (out.content_digest?.digest ?? "").slice(0, 19), n: String(out.content_digest?.files ?? 0),
       s: String(out.seconds ?? 0) });
     toast(canon ? msg : `${msg} — ${t("pack3tz.notCanonical")}`);
     logInfo(msg);
+    // MICRO-SEG03 · with a study open, the two forms as resources (as before);
+    // without one, no graph is touched: the file and its stamp only
     if (store) {
       const rel = (abs: string) => {
         const dir = currentFilePath ? paths.dirname(currentFilePath) : "";
         return dir && paths.isInside(dir, abs) ? paths.relativeTo(currentFilePath!, abs) : abs;
       };
       const ids = landPack(storeGraph(store), rel(folder), { ...out, path: rel(out.path!) },
-        { folder: baseName(folder), archive: baseName(out.path!) });
+        { folder: baseName(root ?? folder), archive: baseName(out.path!) }, root ? rel(root) : undefined);
       select(ids.archiveId);
     }
     // MICRO-OTTIMIZZA-1 · the archive born stamped as DERIVED from its folder
-    // (act `packing`, the writer and its profile said), and in the Chain
+    // (act `packing`, the writer and its profile said), and in the Chain.
+    // MICRO-SEG03 · a folder with no stamp of its own is the parent by its
+    // content digest, as 3DSC writes it (`_folder_parent`): the stamp is
+    // written all the same, X.3tz.stamp.json beside the archive
     if ((out.state === "written" || out.state === "same") && out.path
         && !(await readStamp(stampPathFor(out.path)).catch(() => null))) {
-      const stamped = await stampDerived(folder, { path: out.path, sha256: out.sha256 }, { kind: "packing", technique: "3tz",
+      const cd = out.content_digest?.digest ?? "";
+      const why = await stampDerivedWhy(folder, { path: out.path, sha256: out.sha256 }, { kind: "packing", technique: "3tz",
         parameters: { profile: "dtcstamp 3tz", entries: out.entries ?? null, canonical: out.canonical?.canonical ?? null,
-                      content_digest: out.content_digest?.digest ?? null },
-        software: [{ name: "dtcstamp.write_canonical_3tz", version: String((out as { writer?: { version?: string } }).writer?.version ?? "") }] })
-        .catch(() => false);
-      if (stamped) logInfo(t("pack3tz.stamped", { name: baseName(out.path) }));
-      else logWarn(t("pack3tz.notStamped", { name: baseName(out.path) }));
+                      content_digest: cd || null, ...(root ? { root_json: baseName(root) } : {}) },
+        software: [{ name: "dtcstamp.write_canonical_3tz", version: String((out as { writer?: { version?: string } }).writer?.version ?? "") }] },
+        { bareInput: cd ? folderParentOf(cd) : undefined, land: !!store })
+        .catch((e: unknown) => String((e as Error)?.message ?? e));
+      if (why === null) logInfo(t(store ? "pack3tz.stamped" : "pack3tz.stampedBeside", { name: baseName(out.path) }));
+      else logWarn(t("pack3tz.notStampedWhy", { name: baseName(out.path), why }));
       folderStamps.delete(folder);
-      return { ...out, stamped: !!stamped };
+      return { ...out, stamped: why === null, ...(why === null ? {} : { stampWhy: why }) };
     }
     return out;
   } finally {
@@ -53024,11 +53090,13 @@ function tilesetFolderOf(x: AL.VersionRow): string | null {
   if (!raw || /\.3tz$/i.test(raw) || (paths.hasScheme(raw) && !/^[A-Za-z]:/.test(raw))) return null;
   const p = paths.resolveRelative(currentFilePath, raw);
   if (!paths.isAbsolute(p)) return null;
+  // MICRO-SEG03 · a RealityScan root (X.json beside X/) stays itself: the
+  // packing resolves it by 3DSC's rule (`resolveTilesetSource`)
   return /(^|\/)tileset\.json$/i.test(p) ? paths.dirname(p) : p;
 }
 /** …its .3tz already among the asset's versions (the same name beside it) */
 function packedFormOf(a: AL.AssetRow, folder: string): AL.VersionRow | null {
-  const want = `${paths.basename(folder)}.3tz`.toLowerCase();
+  const want = `${paths.basename(folder).replace(/\.json$/i, "")}.3tz`.toLowerCase();
   return a.versions.find((y) => y.tileset && paths.basename((y.url || "").split("#")[0]).toLowerCase() === want) ?? null;
 }
 /** …and what the last packing of that row said: written or the same bytes, stamped or not */
@@ -53040,9 +53108,10 @@ async function packFromAssets(versionId: string, folder: string, repaint: () => 
   else {
     const name = baseName(out.path ?? "");
     const said = t(out.state === "same" ? "pack3tz.same" : "pack3tz.done", {
-      name, sha: (out.sha256 ?? "").slice(0, 19), cd: (out.content_digest?.digest ?? "").slice(0, 19),
+      name, dir: paths.dirname(out.path ?? ""), sha: (out.sha256 ?? "").slice(0, 19), cd: (out.content_digest?.digest ?? "").slice(0, 19),
       n: String(out.content_digest?.files ?? 0), s: String(out.seconds ?? 0) });
-    const stamp = out.stamped === undefined ? "" : ` · ${t(out.stamped ? "pack3tz.stamped" : "pack3tz.notStamped", { name })}`;
+    const stamp = out.stamped === undefined ? "" : ` · ${out.stamped ? t(store ? "pack3tz.stamped" : "pack3tz.stampedBeside", { name })
+      : t("pack3tz.notStampedWhy", { name, why: out.stampWhy ?? "" })}`;
     packSaid.set(versionId, { text: said + stamp, ok: true });
     askAssetListSoon();
   }
