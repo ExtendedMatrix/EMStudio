@@ -1,8 +1,11 @@
 # Changelog
 
-Notable changes to **EMStudio**. Until 16 October 2026 they lived only in the
-commits and in the reports of each MICRO; this file starts with the first change
-that asked for one.
+Notable changes to **EMStudio**, newest first. Until 16 October 2026 they lived
+only in the commits and in the reports of each MICRO; this file started with the
+first change that asked for one. What EMStudio became before that day, from its
+first commit (11 July 2026), is reconstructed from the commits and the MICRO
+reports and grouped by stage, at the end of the file («Before 16 October
+2026»).
 
 ## [Unreleased]
 
@@ -959,3 +962,441 @@ that asked for one.
   at each opening: the same file gave 9 new nodes and 15 edges every time on
   Templu Mare v3.2, and a second «Bring into a room…» seated them again. Their
   ids are derived from the epoch's now.
+
+## Before 16 October 2026
+
+What EMStudio became between its first commit (11 July 2026) and the day
+this changelog started. Reconstructed from the commits and the MICRO reports;
+grouped by stage, newest first.
+
+## 9–15 October 2026 — a fast graph, paradata as a view, rooms that hold (v1.6.0-dev.27 … dev.41)
+
+### Added
+- **A large document opens in a second** (9 October 2026). Lookups that
+  scanned the whole graph indexed once; the canvas draws only what is on
+  screen, one path per style. Measured on the GPU at the end of the MICRO
+  (with the items below): first draw of Templu Mare v2 1 442 → 382 ms (532 ms
+  with the indexing alone); a synthetic 5 000-unit graph from 165 s to 1.7 s,
+  and the switch to Graph from 45.9 s to 0.22 s.
+- **Layout engine v5: every arrow of the Matrix points down** (G1, 9 October
+  2026). Each lane laid out as one compound layered graph
+  (`crates/em-core/src/layered.rs`); Templu Mare v2 from 3 upward edges to 0,
+  width −17.5 %.
+- **The liquid Graph** (G2, G3, 9 October 2026, «a first version, to be
+  reviewed with E.D.»): every node a disc coloured by family, ringed by
+  specialisation, sized by degree; epochs and groups as halos; a live force
+  simulation in a Web Worker. Glyphs of the 3D objects from the datamodel
+  (G9), the legend as a floating glyph (G4), right-button pan (G5), the
+  Outliner from the keyboard (G6), the EMTree above the Outliner in the
+  Stratigraphy space (G7).
+- **Properties seen and compacted** (MICRO-PROPRIETA-COMPATTA, E.D. 9 October
+  2026): the circle of an edge decided by its arrival, so `has_property` is
+  drawn; «Compatta le proprietà» / «Sciogli il gruppo» (Templu Mare v2: 204
+  property threads → 5, 670 scene nodes → 301); the warning «one property, one
+  owner».
+- **The instance is a view** (MICRO-EMSTUDIO-PROPRIETA-COME-FONTE v2, E.D. 9
+  October 2026): `paradata-view.ts` computes the instances of documents and
+  properties from `paradata_instances` in the visual rules, held equal to
+  s3Dgraphy's `all_view_instances`; **«Indietro»**, one stack of views (⌘[,
+  ⌥←); «Prendi da un'altra proprietà…»; before removing a node s3Dgraphy is
+  asked who leans on it — «Elimina lasciando la traccia» or «Elimina a
+  cascata».
+- **The paradata chip and the document's epoch** (MICRO badge PD e
+  cronologia, 9 October 2026): the chip at the bottom right, click to solo,
+  Shift+click to open in place; a document stands in the epoch of its date; a
+  property's readable label beside its technical name.
+- **The Overlays menu** (MICRO sovrapposizioni, 9 October 2026): the twenty
+  badges and marks drawn over a node, inventoried in `overlays.ts` and switched
+  one by one.
+- **The study, its place, its code** (10–11 October 2026, E.D.): the trench is
+  a study, the site is topography, HC1 is heritage where it is recognised;
+  the study's code **proposed and confirmed**, never derived, carried in the
+  graph's header at every save; the relations between graphs shown.
+- **The author in time and no automatic arrangement** (MICRO-AUTORI-LAYOUT,
+  E.D. 11 October 2026): an author's master in the epoch of its date, its
+  instances where it is cited; **a node moved by hand stays where it is left**;
+  ⌘N, ⌘S, ⇧⌘S in the desktop's File menu; «⊞ Layout» on the graph window's
+  bar; the graph's own paradata out of the Matrix into a new «Multigraph» view
+  where every open graph is a node.
+- **Storage and Shelf from s3Dgraphy's rows** (11 October 2026): search, kind,
+  use, versions under their master, «Find moved files», a bucket check,
+  verified upload, freeing the disk copy; the Shelf's «Resources» mode, one
+  table for the resource nodes of every graph of the em.json.
+- **A release opens EMStudio in a real browser before it tags** (13 October
+  2026): `check-apertura.mjs`, after dev.36 went out green and opened as a dead
+  page.
+
+### Changed
+- **A place is not a band of time** (s3Dgraphy#25, E.D. 9 October 2026): a
+  LocationNodeGroup is not laid out in the Matrix and `is_in_location` is
+  neither membership nor a lane path — on Enzo Cocca's demo site one such edge
+  had put every unit in the first lane. `extracted_from` towards a unit is
+  allowed.
+- **Rooms that hold** (MICRO tavolo-convergenza, 12 October 2026): the work
+  done without network stays and leaves when the room is back; a remote op
+  goes through the comparison; ties and clocks as in s3Dgraphy (milliseconds);
+  **a viewer reads** — writing gestures off, a write that slips through taken
+  back; in a room an undo is an operation. A node born in a room is signed by
+  who entered the node.
+- **A room's bytes by path and digest** (13 October 2026): the 3D scene asks the
+  room's store with the signature, whatever host wrote the url; the Space reads
+  an edge's tombstone in `attributes.removed` and asks again for a refused or
+  missing file when the graph changes.
+
+### Fixed
+- An em.json given to the desktop app opens, and a taken port 8765 is said
+  as such (s3Dgraphy#25, Enzo Cocca on dev.26, 9 October 2026).
+- A room link opens the room in the session that is there (13 October 2026).
+- The bar's first drawing no longer reads the token before it exists — the
+  dead page of dev.36 (13 October 2026).
+
+## 2–8 October 2026 — files, stamps and rooms in earnest (v1.6.0-dev.15 … dev.26)
+
+### Added
+- **New warnings** (2 October 2026): two documents on one file, a double
+  slash, a graph not georeferenced, a resource declared missing; s3Dgraphy's
+  own warnings through the bridge's `/validate` (licence, a download without
+  origin, georeferenced by camera GPS), shown last so they never renumber a
+  row on screen.
+- **The DTC read as work is done** (2 October 2026): an acquisition of many
+  files as one block, processes by technique, lanes by step, the two events of
+  one lot kept apart and linked; a download requires «from where?».
+- **DosCo** (2 October 2026): the ids two files share and the files without
+  one after a scan; «Scan as DosCo» on a Storage folder; a document's
+  `/DosCo/` image shown in the Doc; the file and its DosCo id asked of
+  s3Dgraphy through its public seam.
+- **Each file with its own graphs** (2 October 2026): every graph's layout in
+  its own section of the container, the EMTree by file, each file saved with
+  its graphs; Settings › Sync split into «Your StratiGraph node» and Blender
+  sync.
+- **Sign-in from the desktop** (3 October 2026): the system browser, answers on
+  the app's own scheme, ORCID and the node by deep link or pasted.
+- **«Open with…»** on a node: StratiField's US sheet, Blender, Heriverse (3
+  October 2026).
+- **The bar in four zones** (3 October 2026): where you work, who you are, the
+  message, Log and Warnings; the connection panel lists the node's rooms; one
+  file per room (a second snapshot replaces the copy).
+- **Bring a graph into a room with its resources** (3–5 October 2026): an
+  inventory in four groups, uploads in resumable pieces with pause and resume,
+  store-backed nodes that keep their origin; «Move here» for a file kept in
+  another room; photo lots proposed with thresholds in Settings (30 minutes,
+  5 photos). Then the **whole study**: the room born with every graph, every
+  operation naming its graph, a graph the room refuses said by name (5
+  October); the Multigraph tab renamed «Full graph».
+- **The room's operations on the Sidecar too** (4 October 2026): one
+  translation at the door, twin of s3Dgraphy's `ops_for_local_change`.
+- **Where each file is** (4 October 2026), with s3Dgraphy's one resolver: a
+  section at the head of Contents with the common signs, a filter per state,
+  the same line in a resource's Inspector and a document's card; a room's
+  files cached on this computer by sha256; «New EM project» and «Reorder by
+  the EM standard» with a preview.
+- **Choosing the node** (4 October 2026): this computer, the local network,
+  saved and typed nodes with the same finder as EM Tools; a personal node
+  turned on and opened to the network only on an explicit yes.
+- **Links that land on a node** (5 October 2026): `stratigraph://open` takes
+  `&node=<id>`; EMStudio selects and centres it once the room or the study is
+  open (measured: EM Tools' «Edit USM02» opens on USM02).
+- **A unit's images and alternative labels in the Inspector** (5 October
+  2026), as EM Tools' Stratigraphy Manager shows them; the search ranks a unit
+  by its other labels.
+- **Versions in the Space** (6 October 2026): `asset-versions.ts`, s3Dgraphy's
+  `choose_version` in TypeScript on a shared table of 19 cases; the glTF
+  version a scene should load instead of the `.blend` master, its bytes by
+  digest from the room or through the bridge; tileset versions drawn; Draco
+  decoder. Measured on Templu Mare v2: 87 of 87 models and 11 of 11 tiles.
+
+### Changed
+- **GraphML is read once and never written again** (E.D., 4 October 2026):
+  after the import the desktop proposes `<stem>.em.json`, the graph then
+  belongs to that file; the GraphML export button is gone.
+- The node's access renewed in one place (`nodeAuthFetch`), a node selected
+  elsewhere framed in the graph (5 October 2026); leaving a room empties every
+  window (6 October 2026).
+
+### Fixed
+- A GeoPositionNode without an EPSG is read as not georeferenced, never as
+  WGS84 at the shift (2 October 2026).
+- `last_editor` says the EMStudio version that wrote the file, not 0.1.0; a new
+  graph nobody touched gives its place to the next open (2 October 2026).
+- SQLAlchemy no longer installed for the GraphML import (2 October 2026).
+
+## 28 September – 1 October 2026 — the desk: one studio, touched like Blender (v1.6.0-dev.12 … dev.14)
+
+### Added
+- **German locale** and new qualia (`feature_shape`, `boundary_distinctness`)
+  (28 September 2026); a canonical edge-spelling normaliser.
+- **The skin of the desk** (PELLE, 28 September 2026). The Extended Matrix
+  design system's tokens (ultramarine, ochre for selection and focus), Sora and
+  Comfortaa vendored (OFL), one canvas typography helper, glyphs rasterised at
+  the size they are drawn, the chrome redone.
+- **The structure of the desk** (STRUTTURA, 28 September 2026). One workspace
+  «Studio» (Outliner | Matrix | Inspector) with the Outliner by epoch, the
+  window header, **the corner gesture as in Blender** to split and join, rounded
+  windows, the name bar with full-text search, the table window, one model of
+  the warnings shown in three places.
+- **Add at the cursor, as in Blender** (SHIFT-A, 29 September 2026). One «Add»
+  menu reached by Shift+A, a right click on empty space, the «+» of the graph
+  window or a long press; an edge dragged into the void opens it with the edge
+  already chosen. **The node palette is gone.** The document box follows the
+  EM3 rule; glyphs from paths.
+- **Touching the drawing, not the box** (TOCCARE, 29 September 2026): one
+  geometry for what is seen and what is hit; a drag that always starts, stays,
+  and changes epoch in one gesture; the layout that is not felt.
+- **Linking and four workspaces** (COLLEGARE, 29 September 2026): link to an
+  existing node; **Stratigrafia, Fonti, Contenuti, Narrativa**, one per
+  activity; the narrative page as its own reader, blocks and media, the Index
+  and its coverage; the legend back beside the graph and the «Collegato a X»
+  phrases from the datamodel (LEGENDA).
+- **The paradata chain in the Inspector** (CATENA, 29 September 2026): a
+  property's card shows document → extractor (→ combiner) → property, every
+  link clickable; «+ lettura» asks where from and opens the document window on
+  the new reading; a second source creates the combiner `C.<n>` by itself; the
+  extractor is named `<source>.<NN>`; AI verification on nodes. Readings write
+  a region node, a line or polyline in the document window (LUOGO).
+- **The interaction audit and its bench** (AUDIT, 29–30 September 2026):
+  `check-interactions.mjs` in a real browser (playwright-core), one case per
+  defect, 0/10 at the first run; then focus is sacred, shortcuts have a scope,
+  each graph window has its own view, one selection for every panel, empty
+  states that speak, one verb per action.
+- **The Space** (SPAZIO, 30 September 2026): a workspace «Spazio» with the
+  **Scene 3D** window (one WebGL canvas per window, the epoch selector shared
+  with the Chronology, RMs and proxies), the service window, the Table's
+  sheets; deleting an epoch and moving its content.
+- **3D Tiles in the viewer** (MICRO-3DTILES, 30 September 2026):
+  3DTilesRendererJS loaded only at the first tileset, LOD sets and the
+  threshold for large assets.
+- **One way to create a resource** (RISORSA-FILE, 30 September – 1 October
+  2026): `resources.ts` mirrors s3Dgraphy's `resources/files.py` (add, files,
+  revisions with `was_revision_of`), held to a golden written by s3Dgraphy;
+  the viewer chooses the representation offline and online; packing a tileset
+  into `.3tz` on the desktop.
+- **A datamodel check of EMStudio's own** (DERIVA, 1 October 2026): `npm run
+  check:datamodel` against `datamodel.fingerprint.json`, s3Dgraphy's
+  fingerprint written beside the vendored copies — a copy edited by hand is
+  now said.
+- **Translations** (TRADUZIONI, 1 October 2026): TranslationNode support, the
+  languages beside the text and the facing text, «da verificare / verificati»;
+  `data.lang` written when a node is born in EMStudio; a realigned translation
+  is a new one, `was_revision_of` the old.
+- **Signing in on the field** (1 October 2026) with the iD and the node's
+  password, attested by the node.
+
+### Changed
+- The DTC vocabularies unified on the 1.6.22 datamodel (acquisition split into
+  capture and retrieval) and the 2D annotator removed; one import door through
+  the mapping editor (30 September 2026).
+- The chronology asked of the bridge on request (`POST /chronology`); core
+  visual rules split out for the deterministic layout (29 September 2026).
+
+### Fixed
+- **The test campaign of 1 October 2026** (CAMPAGNA, dev.13 in Chrome on Templu
+  Mare and San Pietro di Segni): a multi-file stamp judged by its members,
+  never by the door's sha256; from the receipt to the document, the 3D that
+  shows; the seal; warnings that correct.
+
+## 23 August – 27 September 2026 — releases, StratiGraph Server and the study (v1.6.0-dev.3 … dev.11)
+
+### Added
+- **Release automation with an s3Dgraphy gate** (23 August 2026). `./em.sh
+  devrel` bumps the version, builds the four targets in a matrix and **refuses
+  to tag** if the pinned `s3dgraphy` is not on PyPI, so the sidecar is
+  reproducible; a reusable release workflow and a nightly that calls it; the
+  manual built with `-W`. First tag: `v1.6.0-dev.3`.
+- **The Mapping Editor** (24–25 August 2026): visual authoring of the mapping
+  JSONs of the StratiMiner family over s3Dgraphy's new
+  `mappings/authoring.py` (source fields with examples, target catalogue
+  resolved to EM node types, allowed edges, validation, `apply` volatile or
+  baked); a grouped mapping catalogue. «Import with a mapping» followed (20
+  September), with a `mapped_source` auxiliary type and a report of the
+  unmatched keys.
+- **Browser file staging and storage places** (25 August 2026); the Shelf in a
+  Table view with promote (24 August).
+- **Georeferencing nodes** (29 August 2026).
+- **StratiGraph links and sign-in** (30 August – 1 September 2026). The
+  `stratigraph://open?server=&room=` handoff (a link carries a PLACE, never a
+  permission: credential parameters are refused), in-app OIDC sign-in with
+  Authorization Code + PKCE (S256, the token only in memory), a round-trip that
+  opens the current room in the other EMStudio (desktop ↔ web), then **study**
+  handoffs beside room handoffs (`studylink.ts`), room creation and seeding,
+  «Share room link» (the Members panel of 23 August retired).
+- **HDT-O twin attribution** (6 September 2026); the study panel in its own
+  window.
+- **One surface per window** (12–15 September 2026). A rectangle-based area
+  model and one surface contract (`shell/layout.ts`, `surface.ts`); each graph
+  window its own canvas and minimap instead of one canvas moved between
+  windows. Measured: a focus change wrote three classes and created no
+  element, 1–4 ms instead of 94–123 ms. «Hub» mode renamed «Join Room».
+- **Stamps and provenance of files** (DTC-EMS 1–3, 15 September 2026).
+  EMStudio reads the `.stamp.json` beside the bytes, accepts by digest only,
+  climbs the chain, draws the parents it cannot find with a question mark and,
+  when found, writes a hint, never the stamp; DTC step composition and the
+  ingestion stamp.
+- **RM container and DTC device** (16 September 2026): the
+  RepresentationModelNodeGroup with `is_in_representation_model_group`, the
+  DTCDeviceNode with `dtc_happened_on_device`.
+- **A web image** (22 September 2026): a multi-stage Docker build served by
+  Caddy (`/` the editor, `/read/` the reader, `/health`), published to GHCR
+  with an anonymous-pull test.
+
+### Changed
+- **em-server is «StratiGraph Server»** everywhere — docs, UI strings, scripts
+  (28 August 2026).
+- **The deep-link schemes moved to the plugin and the macOS Intel target was
+  dropped** (16 September 2026): dev.9 had produced no binaries because Tauri
+  2's `bundle` refused unknown keys; three installers from then on.
+- **The DTC chain rule written once** (3 September 2026): the list travels with
+  the connections datamodel (`dtc_role: "chain"`, 1.6.13) instead of
+  `startsWith("dtc_")` in two views.
+- The nightly schedule disabled (31 August 2026); parser-based guard checks for
+  the front-end scripts (6 September 2026).
+
+### Fixed
+- Focus-parity layout drift (31 August 2026); the declared exceptions of
+  `check-focus-parity` indexed by identity, not by line (PARITY, 15 September
+  2026).
+- Study link handling, sign-in and IdP parameters stripped from the URL (1
+  September 2026).
+
+## 1–22 August 2026 — from editor to studio: narrative, windows, rooms (no tags)
+
+### Added
+- **The Log panel and a layout snapshot test** (2 August 2026): an activity
+  trail and the document's diagnostics; a deterministic layout regression
+  test.
+- **The narrative** (2–20 August 2026). A reader and an editor of
+  NarrativeNode chapters with embeds; AI authorship of a passage and LLM
+  drafting, with keys in the system keychain (session keys in browser dev
+  mode); then (DP-79, 15 August) real embeds — matrix, timeline, table,
+  paradata, scene — a standalone **dissemination reader** (`reader.html`) and
+  narrative export; Word (`.docx`) export with figures, SVG map and timeline
+  figures (20 August).
+- **3D, georeference and a map** (3 August 2026): a 3D viewer and resource
+  previews, georeferencing, a lightweight OSM map; PROJ data fixed in the
+  frozen binary. A native glTF viewer for 3D embeds followed (15 August).
+- **StratiMiner in EMStudio** (SM1, 3 August 2026): from a folder of sources to
+  `em_data.xlsx` to an em.json, through the bridge. The report found that the
+  XLSX importer minted random UUIDs, so the second step was not deterministic.
+- **The EMTree and the interface languages** (4 August 2026): a multi-document
+  workspace (one slot per open document, its own view state) and the i18n
+  layer; datamodel translations (8 August). On 21 August **English became the
+  default UI language** and the hard-coded Italian strings went into `i18n.ts`.
+- **Reading aids on the canvas** (5–6 August 2026): theme, naming rules,
+  authors and licences as badges, the **Data funnel** and PDG tablets,
+  auxiliary files (AUX, AUX2: volatile mapped files), the EM-Data dock with a
+  tabular editor.
+- **LinkNode renamed ResourceNode** (7 August 2026); graph-scope paradata
+  (MIG1-A, 8 August); a graph-level site position with a map picker; recent
+  files and the short native extension `.emj` (QOL1, 8 August).
+- **Windows** (WIN1–WIN7, HDR1, 8–9 August 2026). A workspace leader bar and a
+  window model (graph, narrative, table, doc), a window header whose dropdown
+  transforms the window in place, a per-instance camera and mode, DTC as a
+  real canvas projection, a **tiled workspace** with a docked window bar, the
+  corner-drag split/join gesture, panels as windows, cross-area connector
+  drag; the side panel tabs retired, the node palette moved into the area.
+- **Collaboration, offline first** (13–14 August 2026). A dated merge with
+  visible conflicts and light versioning (P3, twin of s3Dgraphy's
+  `MergeReport.conflicts`); the **CRDT** (`crdt.ts`, P4.1): OR-Set presence,
+  LWW per field, inline tombstones, held equal to s3Dgraphy's `crdt.py` on one
+  parity fixture (`testdata/crdt-parity.json`, `check-crdt.mjs`); the **room
+  client** of the hub (em-server, P4.3) with presence; the Wire v2 envelope
+  (`wire.ts`); structural operations applied live (P4.5).
+- **ORCID identity, declared now and verified later** (13 August 2026): an
+  iD with its checksum checked, a `verified` flag on the author, and
+  publishing gated on a verified identity while saving and exporting stay free.
+- **The Shelf** (13 August 2026), a curated list of resources; a 2D annotator
+  and client-side IIIF (13–14 August).
+- **Rooms with roles and storage** (16–18 August 2026): the read-only role of a
+  room shown and enforced, resource rights and their denials, MinIO uploads
+  with attribution, bulk asset ingestion, storage surfaces as hosts, the DTC
+  corpus separated from the study graphs and drawn as a DAG, per-document undo,
+  push/pull with the room's **resident register** (`/v1/corpus`), additive in
+  both directions.
+- **Connector plugins** (21–22 August 2026): a connector registry and a version
+  handshake on the client, mirroring s3Dgraphy's new `contract` module, with
+  Blender as reference connector #1; consumer checks.
+
+### Fixed
+- A re-sync no longer resurrects deleted nodes (field tombstones, 14 August
+  2026; ADR-003).
+- The reader's asset paths in served builds (16 August 2026); windows that
+  emptied on focus change (20 August 2026); scroll state kept across focus
+  changes (21 August 2026).
+
+## 11–31 July 2026 — the editor and its engine (1.6.0-dev.1, no tags yet)
+
+### Added
+- **The first editor** (11–12 July 2026). From *Initial commit* to a working
+  application in two days: a TypeScript + Vite front end with the two
+  projections of ONE graph, the swimlane **Matrix** and the full **Graph**
+  (read-only first, then editable), a Tauri desktop shell, and the Templu Mare
+  fixture. Phase 4 brought editing — a palette, live socket validation from
+  the s3Dgraphy datamodels, undo/redo, move and delete, an editable
+  Inspector — and hypergraph folding with a breadcrumb; phase 5 orthogonal
+  edge routing with crossing bridges and arrowheads, the official EM 2D icons,
+  the «EM 1.6» version chip, a node list, an overview minimap and SVG export.
+- **ADR-001: s3Dgraphy consumed through a versioned JSON contract** (12 July
+  2026). The datamodels of s3Dgraphy are the single source of truth for the EM
+  language; EMStudio vendors them with `sync-datamodels.sh` and never
+  hardcodes a type, a colour or a rule. The mined `em_node_classes.json` was
+  dropped. On 22 July (P1-J) the class hierarchy moved to the split registry
+  `node_registry.generated.json`, generated in s3Dgraphy (P1-A).
+- **em-core, the Rust layout engine** (12–13 July 2026). Compaction,
+  layer wrapping into sub-rows (Templu Mare's canvas from 13 410 × 680 to
+  3 450 × 880), then layout v3 — **directed edges always point down**, epochs
+  are **lanes, not nodes** in the Matrix — and engine v4, a recursive yEd-style
+  layout where every group is laid out as its own hierarchic subgraph. The
+  **Layout** button runs em-core through WASM, byte-identical to the CLI.
+  **From-Sketch** (`compute_with_sketch`) keeps the hand's order on re-layout
+  and folded groups release their slots. Port routing fans edges along a
+  node's sides.
+- **Groups and containment drawn as containers** (12 July 2026). yEd-style
+  group boxes in the Matrix (open box and closed tab, swimlane expansion);
+  `is_part_of` joins the membership closure, so any US/USD/VSF with parts is an
+  outline container; a shared node lives in ONE box, its **primary parent**.
+- **Master and instances of documents** (12 July 2026). One document node in
+  the graph, one visual instance per usage context, drawn as a vector sheet
+  whose border thickness says the Master role and whose colour the geometry
+  variant (`document_variant_styles`).
+- **Live sync with Blender, first phases** (13 July 2026). A sync client and an
+  op-log data channel (`update_node` from EMStudio to the host); ADR-002.
+- **Epochs, phases and chronology in the Matrix** (14–19 July 2026). New
+  document, epoch creation, multi-selection with marquee and drag-drop
+  grouping, progressive-disclosure filters, radial and force Graph layouts;
+  **phase sub-bands** inside an epoch's lane (shown by default, clickable, with
+  start–end), a «+» to add a phase on the epoch rail, numeric chronology
+  bounds with a validation banner, lane-conflicting chronological edges drawn
+  in bright red, safe epoch insertion and deletion.
+- **A Monochrome (B/W) toggle** (21 July 2026), replacing an automatic Harris
+  black; colours and borders realigned to the canonical SVGs and to the EM 1.3
+  standard colour table (visual rules 1.6.1).
+- **GraphML in the desktop app through a bundled sidecar** (21–22 July 2026).
+  The Python transformer (`em_bridge.py` + s3Dgraphy) became a pluggable HTTP
+  endpoint (`?bridge=`, `window.EM_BRIDGE`, a remote StratiGraph server, or
+  the local sidecar), frozen into the desktop app; pandas and numpy left out
+  (cold start 30 s → 6 s).
+- **An application version of its own** (22 July 2026). `1.6.0-dev.1`, distinct
+  from the EM language version, shown beside the wordmark; `set-version.sh`
+  keeps `package.json`, `Cargo.toml` and `tauri.conf.json` in step.
+- **Turtle export** (P1-G, 22 July 2026): the bridge exports `.ttl` with
+  rdflib bundled in the sidecar; «Turtle (.ttl)» in the front end.
+- **HDT-O** (23–24 July 2026): the datamodel, an Inspector and a store, an
+  authority resolver through the bridge, the profile kept **off** the
+  stratigraphic canvas (graph metadata, not nodes on the Matrix).
+- **The DTC substrate profile** (25–26 July 2026), data-driven kinds and
+  glyphs; `DTCOutputNode` replaced by a LinkNode as the resource output,
+  `DTCInputNode` retired.
+- **Resources** (R5, 27 July 2026): a panel that scans, shelves and adopts
+  documents; optional MinIO endpoints in the bridge; resource promotion and
+  DTC bridge endpoints; a local dev stack with MinIO and optional auth (29
+  July).
+
+### Fixed
+- Group boxes no longer intersect: containment follows the primary parent, and
+  dragging a group no longer drags a shared document master (12 July 2026).
+- Epoch reorder moves the nodes with their lanes and keeps the order on
+  From-Sketch; a new phase no longer creates a giant lane (18 July 2026).
+- A single node dragged freely in the Matrix no longer snaps back (19 July
+  2026).
+- The sidecar: stdout drained so it does not wedge, «closed» emitted
+  synchronously on disconnect, self-termination when the app exits (no stale
+  port 8765) (22 July 2026).
