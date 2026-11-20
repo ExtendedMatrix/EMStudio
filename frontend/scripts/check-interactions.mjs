@@ -1099,12 +1099,19 @@ test("10.header", "l'intestazione del grafo: tipo, modo a segmenti, nessun «⋯
       // (the lab's Epochs ⇄ Horizons is a control of its own, `.win-bands-seg`)
       seg: [...bar.querySelectorAll(".win-seg:not(.win-bands-seg) button")].map((b) => b.textContent),
       menus: [...bar.querySelectorAll(".win-menu-toggle")].map((b) => b.textContent.trim()),
+      // MICRO-V-LAYOUT-ACCESO (E.D., 18 Nov 2026) · the Matrix's «⋯» is no longer
+      // empty: «Disponi» and «Disponi riducendo gli incroci» (628d9c5). Read what it lists.
+      more: (() => { const tg = bar.querySelector(".win-menu-toggle"); if (!tg) return null; tg.click();
+        // (MICRO-TIL001 · a head too narrow puts its verbs in the «⋯» too, `[data-folded-verb]`: not the menu's own)
+        const items = [...tg.parentElement.querySelectorAll(".dd-menu button:not([data-folded-verb])")].map((b) => b.textContent.trim()); tg.click(); return items; })(),
       graphWords: (bar.innerText.match(/\bGrafo\b|\bGraph\b/g) ?? []).length,
       tools: [...document.querySelectorAll("#dd-tools .dd-menu button")].map((b) => b.textContent.trim()),
     };
   });
   await ctx.close();
-  return { pass: r.seg.length === 4 && r.menus.length === 0 && r.graphWords <= 2
+  // one «⋯», with the two layouts of the Matrix and nothing else (never an empty one)
+  return { pass: r.seg.length === 4 && r.menus.length === 1
+    && JSON.stringify(r.more) === JSON.stringify(["Disponi", "Disponi riducendo gli incroci"]) && r.graphWords <= 2
     && r.tools.some((i) => /grafie|spellings/i.test(i)), detail: r };
 });
 test("10.warnings", "la pillola degli avvisi porta alla tabella, non apre un popover sopra l'ispettore; conta solo il grafo", async () => {
@@ -7549,12 +7556,15 @@ test("PU3.views", "PULIZIA p.3 · viste del grafo: niente «Grafo completo»; «
   return { pass, detail: { ...r, errors } };
 });
 
-test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'icona (senza «Layout»), accanto Compatta le proprietà; niente «+»; Uniforma le grafie in Strumenti; ⇧C adatta come 0; il «⋯» solo dove ha qualcosa (il Grafo: l'algoritmo)", async () => {
+test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'icona (senza «Layout»), accanto Compatta le proprietà; niente «+»; Uniforma le grafie in Strumenti; ⇧C adatta come 0; il «⋯» solo dove ha qualcosa (la Matrix: Disponi e Disponi riducendo gli incroci; il Grafo: l'algoritmo)", async () => {
   const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
   const bar = () => p.evaluate(() => {
     const b = document.querySelector('.tile-area[data-win="canvas:1"] .tile-bar');
     const acts = [...b.querySelectorAll(".win-act")].map((x) => ({ act: x.dataset.act ?? null, text: x.textContent.trim(), aria: x.getAttribute("aria-label") ?? "", title: x.title, svg: !!x.querySelector("svg") }));
-    return { acts, more: !!b.querySelector(".win-more"), text: b.innerText };
+    const tg = b.querySelector(".win-more");
+    let items = [];
+    if (tg) { tg.click(); items = [...tg.parentElement.querySelectorAll(".dd-menu button:not([data-folded-verb])")].map((x) => x.textContent.trim()); tg.click(); }
+    return { acts, more: !!tg, items, text: b.innerText };
   });
   const matrix = await bar();
   await p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="canvas:1"] .tile-bar button')].find((b) => b.offsetParent && !b.closest(".dd-menu") && b.textContent.trim() === "Grafo")?.click());
@@ -7576,7 +7586,11 @@ test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'ico
   await ctx.close();
   const lay = matrix.acts.find((a) => a.act === "layout"), comp = matrix.acts.find((a) => a.act === "compact-all");
   const pass = !!lay && lay.svg && !lay.text && /Ricalcola layout/.test(lay.aria) && !!comp && comp.svg && /Compatta le proprietà/.test(comp.aria)
-    && !matrix.acts.some((a) => a.text === "+") && !/Disponi|Layout\b/.test(matrix.text) && !matrix.more && graph.more
+    && !matrix.acts.some((a) => a.text === "+") && !/Disponi|Layout\b/.test(matrix.text)
+    // MICRO-V-LAYOUT-ACCESO (E.D., 18 Nov 2026, 628d9c5) · the Matrix's «⋯» has
+    // something now: «Disponi» and «Disponi riducendo gli incroci»; the Graph's, the algorithm
+    && matrix.more && JSON.stringify(matrix.items) === JSON.stringify(["Disponi", "Disponi riducendo gli incroci"])
+    && graph.more && ["Layered", "Radial", "Force"].every((a) => graph.items.some((i) => i.endsWith(a)))
     && tools.includes("btn-tool-uniform") && !!fit0 && zoomed !== fit0 && fitC === fit0 && !errors.length;
   return { pass, detail: { matrix, graphMore: graph.more, fit0, zoomed, fitC, tools, errors } };
 });
