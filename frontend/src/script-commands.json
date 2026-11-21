@@ -170,7 +170,7 @@
     "s3pick": { "why": "a pure gesture in the Space: a script asks a point with em.app.space.pick" },
     "s3pickRm": { "why": "a pure gesture in the Space: a script reads the models with em.app.space.layers" },
     "s3menu": { "why": "opens a menu a person reads" },
-    "s3dbl": { "why": "a pure gesture (the centre of rotation under the cursor): a script sets the camera with em.app.space.set_camera" },
+    "s3dbl": { "why": "a pure gesture (a flight towards the point under the cursor): a script sets the camera with em.app.space.set_camera" },
     "s3box": { "why": "waits for a rectangle drawn by a person" },
     "s3cursor": { "why": "a pure gesture (the 3D cursor on the surface under the pointer)" },
     "s3cursorReset": { "action": "spaceCursorReset" },
