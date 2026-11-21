@@ -664,6 +664,19 @@ export interface LayerSpaceDeps {
   /** …a trace complete: its command with the geometry */
   run?: (tool: LayerTool, geometry: Record<string, unknown>) => Promise<void>;
   toast?: (s: string) => void;
+  /** MICRO-SEG19 · the trace changed (a tool armed, a point placed, done): the
+   *  Space's toolbar and the sidebar's «Tool» tab are drawn again */
+  onTrace?: () => void;
+}
+
+/** MICRO-SEG19 · the trace as the toolbar and the «Tool» tab show it */
+export interface TraceNow {
+  /** the tools usable now (their plugin drew a layer shown) */
+  offered: string[];
+  armed: LayerTool | null;
+  points: number;
+  busy: boolean;
+  verdict: "more" | "may_close" | "done" | null;
 }
 
 export interface LayerSpace {
@@ -678,8 +691,11 @@ export interface LayerSpace {
   setPref(key: string, p: LayerPref): void;
   /** MICRO-GEO13 · a click of the scene with a layer's tool armed: true = it was the tool's */
   toolClick(hit: ToolHit | null, dbl: boolean): boolean;
-  /** arm a tool (its id) or none; the probes' seam */
+  /** arm a tool (its id) or none; the probes' seam (MICRO-SEG19: the toolbar's too) */
   arm(id: string | null): void;
+  /** MICRO-SEG19 · the trace now; close it (✓, Enter), drop it (✕, Esc) */
+  trace(): TraceNow;
+  finish(): void;
   /** MICRO-GEO16 · a stack shown (this machine's preference): the Outliner's eye */
   shown(key: string): boolean;
 }
@@ -753,7 +769,10 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     if (b && hud.dataset.plgKey) move(hud.dataset.plgKey, Number(b.dataset.plgStep));
   });
 
-  // MICRO-GEO13 · the tracing bar: the tools of the plugins that drew a layer shown
+  // MICRO-GEO13 · the tracing bar: the tools of the plugins that drew a layer shown.
+  // MICRO-SEG19 · the tools are in the Space's toolbar on the left now (T): this
+  // bar only says the trace while a tool is armed — its points, ✓, ✕ — the
+  // same words as the sidebar's «Tool» tab, for a sidebar closed
   const bar = document.createElement("div");
   bar.className = "plg-trace hidden";
   bar.dataset.plgTrace = "";
@@ -767,19 +786,16 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     const ts = offered();
     if (armed && !ts.some((x) => x.id === armed!.id)) { armed = null; clicks = []; }
     driver?.pending(clicks.map((c) => c.point), armed?.primitive === "surface");
-    bar.classList.toggle("hidden", !ts.length);
+    bar.classList.toggle("hidden", !ts.length || !armed);
     bar.textContent = "";
+    d.onTrace?.();
     if (!ts.length) return;
-    for (const tool of ts) {
-      const b = document.createElement("button");
-      b.type = "button"; b.textContent = tool.glyph || "◆"; b.dataset.plgTool = tool.id;
-      const off = tool.disabled?.() ?? null;
-      b.disabled = !!off;
-      b.title = off ?? `${tool.label()} — ${t("plyr.trace.how")}`;
-      b.classList.toggle("on", armed?.id === tool.id);
-      bar.appendChild(b);
-    }
     if (armed) {
+      const g = document.createElement("span");
+      g.className = "plg-trace-glyph";
+      g.textContent = armed.glyph || "◆";
+      g.title = `${armed.label()} — ${t("plyr.trace.how")}`;
+      bar.appendChild(g);
       const s = document.createElement("span");
       s.className = "plg-trace-state";
       s.textContent = busy ? t("plyr.trace.busy") : clicks.length === 1 ? t("plyr.trace.state_one", { tool: armed.label() })
@@ -1012,6 +1028,9 @@ export function mountLayerSpace(d: LayerSpaceDeps): LayerSpace {
     setPref,
     toolClick,
     arm,
+    trace: (): TraceNow => ({ offered: offered().map((x) => x.id), armed, points: clicks.length, busy,
+      verdict: armed ? traceVerdict(armed, clicks.length) : null }),
+    finish: () => { void finish(); },
     shown: (k: string) => { followDoc(); return !pref(k).hidden; },
   };
 }

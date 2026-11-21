@@ -185,8 +185,10 @@ export const DRAG_PX = 4;
 export type SpaceKeyAction =
   | "frame-selection" | "frame-all" | "box-zoom" | "cursor-reset"
   | "add-menu" | "grab" | "rotate" | "scale" | "delete" | "cancel" | "back"
-  /** MICRO-SPAZIO-3D-2 · N, the «Vista» panel on the right */
+  /** MICRO-SPAZIO-3D-2 · N, the «Vista» panel on the right (MICRO-SEG19: the sidebar of tabs) */
   | "sidebar"
+  /** MICRO-SEG19 · T, the toolbar on the left (freed by MICRO-SEG14) */
+  | "toolbar"
   /** MICRO-SPAZIO-3D-3 · A, Alt+A; H, Alt+H, Shift+H; B (box select) */
   | "select-all" | "select-none" | "hide" | "reveal" | "hide-unselected" | "box-select";
 
@@ -214,7 +216,9 @@ export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boo
   switch (k) {
     case ".": case "f": case "F": return "frame-selection";
     case "Home": return "frame-all";
-    // MICRO-SEG14 p.2 · T opened the scene's own Outliner: retired with it
+    // MICRO-SEG14 p.2 · T opened the scene's own Outliner: retired with it.
+    // MICRO-SEG19 · T is the toolbar's now, as Blender's
+    case "t": case "T": return "toolbar";
     case "n": case "N": return "sidebar";
     case "a": case "A": return "select-all";
     case "h": case "H": return "hide";

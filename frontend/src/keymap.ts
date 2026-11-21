@@ -81,6 +81,7 @@ export const KEYMAP: KeyRow[] = [
   { id: "s3np0", keys: "@gesture.s3Np0", scope: "space" },
   { id: "s3npDot", keys: "@gesture.s3NpDot", scope: "space" },
   { id: "s3sidebar", keys: "N", scope: "space" },
+  { id: "s3toolbar", keys: "T", scope: "space" },
   { id: "s3frameSel", keys: ". · F", scope: "space" },
   { id: "s3frameAll", keys: "Home", scope: "space" },
   { id: "s3add", keys: "⇧A", scope: "space" },

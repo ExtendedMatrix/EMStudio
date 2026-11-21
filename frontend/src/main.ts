@@ -347,6 +347,9 @@ import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, remov
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
 import { buildOutlinerTree, loadSpacePrefs, opensFor, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
+// MICRO-SEG19 · the Space's sidebar of tabs (N) and its toolbar (T), as Blender's
+import { chosenTab, findTab, findTool, loadTabs, panelRegion, rememberTab, sidebarOverlays, sidebarTabs,
+         tabOfPanel, toolbarEntries, type CoreTab, type CoreTool, type SidebarTab, type ToolbarEntry } from "./space-sidebar";
 import { patchProxyNodes, proxyPartsOf, proxyRelPath, unitBrief } from "./proxy-association";
 import { groupNodeIdFor, planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type GroupPlan } from "./rm-groups";
 import { shownModelName } from "./rm-names";
@@ -32622,18 +32625,39 @@ function rmShown(id: string, sp: Space | null = currentSpace()): { shown: string
   return { ...s, level: s.shown !== s.technical || lvl ? lvl : null };
 }
 
-/** The N panel «Vista» of a Space window, drawn into `el` (Blender's sidebar). */
+/** The N panel of a Space window, drawn into `el` (Blender's sidebar).
+ *  MICRO-SEG19 · vertical tabs on its right edge, each a set of panels: Item
+ *  (the object selected), Tool (the active tool's options), View (the view, the
+ *  3D cursor, the level of detail, the snap) and one tab per tab the
+ *  extensions' panels name; the tab chosen is remembered per workspace. */
 function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void {
   el.textContent = "";
   const sp = currentSpace();
-  const tabs = document.createElement("div");
-  tabs.className = "np-tabs";
-  const tab = document.createElement("button");
-  tab.type = "button";
-  tab.textContent = t("s3.nView");
-  tab.setAttribute("aria-pressed", "true");
-  tabs.appendChild(tab);
-  el.appendChild(tabs);
+  const all = sidebarTabsNow();
+  const tabNow = sidebarTabOf();
+  el.dataset.npTabNow = tabNow;
+  const body = document.createElement("div");
+  body.className = "np-body";
+  body.dataset.npBody = tabNow;
+  const strip = document.createElement("div");
+  strip.className = "np-tabs np-vtabs";
+  strip.setAttribute("role", "tablist");
+  strip.setAttribute("aria-orientation", "vertical");
+  strip.setAttribute("aria-label", t("sb.tabs"));
+  for (const tb of all) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `np-vtab${tb.kind === "extension" ? " np-vtab-ext" : ""}`;
+    b.dataset.npTab = tb.id;
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(tb.id === tabNow));
+    const words = tb.kind === "core" ? t(CORE_TAB_KEY[tb.id as CoreTab]) : tb.label ?? tb.id;
+    b.textContent = words;
+    b.title = tb.kind === "core" ? t(`sb.tabTitle.${tb.id}`) : t("sb.extTabTitle", { tab: words, ext: (tb.extensions ?? []).join(", ") });
+    b.addEventListener("click", () => setSidebarTab(tb.id));
+    strip.appendChild(b);
+  }
+  el.append(body, strip);
   const sect = (title: string, probe: string, help?: string) => {
     const d = document.createElement("div");
     d.className = "np-sect";
@@ -32650,51 +32674,15 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     h5.addEventListener("click", () => foldPanel(key, !folded));
     d.classList.toggle("folded", folded);
     d.appendChild(h5);
-    el.appendChild(d);
+    body.appendChild(d);
     return d;
   };
-  // the 3D cursor: X Y Z and rotation, in the scene's frame (Blender's axes)
-  const cur = sect(t("s3.nCursor"), "cursor", t("s3.nCursorNote"));
-  const at = threeToBlender(h.cursor());
-  const grid = document.createElement("div");
-  grid.className = "xf-grid";
-  const dec = coordDecimals(Math.max(...at.map(Math.abs)));
-  // MICRO-DOVE-CHI-MENU p.6 · Blender's numeric fields: drag, click to type,
-  // ⌘C ⌘V Backspace over them, a drag down X·Y·Z takes the three; one gesture
-  // is one write
-  const posGroup = new NumGroup((changes) => {
-    const p = [...at] as V3;
-    for (const c of changes) { const i = "xyz".indexOf(c.field.slice(-1)); if (i >= 0 && c.value != null) p[i] = c.value; }
-    h.setCursor(blenderToThree(p)); renderSpaceNPanels();
-  });
-  const rotGroup = new NumGroup((changes) => {
-    const r = [...spaceCursorRot] as V3;
-    for (const c of changes) { const i = "xyz".indexOf(c.field.slice(-1)); if (i >= 0 && c.value != null) r[i] = rad(c.value); }
-    spaceCursorRot = r; renderSpaceNPanels();
-  });
-  const row = (lab: string, field: string, v: number, d: number, unit: "m" | "deg", group: NumGroup) => {
-    const l = document.createElement("span");
-    l.className = "xf-lab";
-    l.textContent = lab;
-    grid.append(l, numField({ value: v, decimals: d, unit, defaultValue: 0, field, group, column: unit }));
-  };
-  const head = (text: string) => { const x = document.createElement("div"); x.className = "xf-head"; x.textContent = text; grid.appendChild(x); };
-  head(`${t("xf.position")} (m)`);
-  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.${"xyz"[i]}`, at[i], dec, "m", posGroup);
-  head(`${t("xf.rotation")} (°, XYZ)`);
-  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.r${"xyz"[i]}`, deg(spaceCursorRot[i]), 3, "deg", rotGroup);
-  cur.appendChild(grid);
-  const acts = document.createElement("div");
-  acts.className = "xf-actions";
-  const centre = document.createElement("button");
-  centre.type = "button";
-  centre.className = "btn";
-  centre.dataset.act = "cursor-centre";
-  centre.textContent = t("s3.nCentre");
-  centre.title = t("keys.s3cursorReset");
-  centre.addEventListener("click", () => { h.centreScene(); renderSpaceNPanels(); });
-  acts.appendChild(centre);
-  cur.appendChild(acts);
+  // MICRO-SEG19 · the tabs that are not the Space's own: the active tool's options, an extension's panels
+  if (tabNow === "tool") { renderToolTab(body, win, h, sect); return; }
+  const extTab = all.find((x) => x.id === tabNow && x.kind === "extension");
+  if (extTab) { renderExtensionTab(body, extTab); return; }
+  // MICRO-SEG19 · Item: the object selected (Blender's «Item»)
+  if (tabNow === "item") {
   // the selected object: its nine values, the same as the Inspector's.
   // MICRO-SPAZIO-3D-3 · the ACTIVE one; with others selected, a value changed
   // here carries to all of them by the same amount (`carryXf`), one step
@@ -32757,22 +32745,10 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     none.textContent = t("s3.nNothingShort");
     obj.appendChild(none);
   }
-  // MICRO-PROVA-DEV47 p.3b · the level of detail, for the active, the selection, the epoch
-  renderLodSection(sect(t("lod.title"), "lod", t("lod.modeTitle")), sp);
-  // MICRO-SPAZIO-3D-3 p.5 · the snap: Ctrl during G lays the object on the face
-  // under the pointer; «Allinea alla normale» (off by default) turns it too
-  const sn = sect(t("s3.nSnap"), "snap", t("s3.nSnapNote"));
-  const lab = document.createElement("label");
-  lab.className = "settings-check";
-  const cb = document.createElement("input");
-  cb.type = "checkbox";
-  cb.dataset.np = "snap-align";
-  cb.checked = space3dPrefs().snapAlign === true;
-  cb.addEventListener("change", () => setSpace3dPrefs({ ...space3dPrefs(), snapAlign: cb.checked }));
-  const sp1 = document.createElement("span");
-  sp1.textContent = t("s3.nSnapAlign");
-  lab.append(cb, sp1);
-  sn.appendChild(lab);
+    void win;
+    return;
+  }
+  // View: the view and the lens, the 3D cursor, the level of detail, the snap
   // the view and the lens
   const v: SceneView = h.view();
   const vw = sect(t("s3.nViewSect"), "view");
@@ -32803,11 +32779,249 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
   po.addEventListener("click", () => h.toggleOrtho());
   va.appendChild(po);
   vw.appendChild(va);
+  // the 3D cursor: X Y Z and rotation, in the scene's frame (Blender's axes)
+  const cur = sect(t("s3.nCursor"), "cursor", t("s3.nCursorNote"));
+  const at = threeToBlender(h.cursor());
+  const grid = document.createElement("div");
+  grid.className = "xf-grid";
+  const dec = coordDecimals(Math.max(...at.map(Math.abs)));
+  // MICRO-DOVE-CHI-MENU p.6 · Blender's numeric fields: drag, click to type,
+  // ⌘C ⌘V Backspace over them, a drag down X·Y·Z takes the three; one gesture
+  // is one write
+  const posGroup = new NumGroup((changes) => {
+    const p = [...at] as V3;
+    for (const c of changes) { const i = "xyz".indexOf(c.field.slice(-1)); if (i >= 0 && c.value != null) p[i] = c.value; }
+    h.setCursor(blenderToThree(p)); renderSpaceNPanels();
+  });
+  const rotGroup = new NumGroup((changes) => {
+    const r = [...spaceCursorRot] as V3;
+    for (const c of changes) { const i = "xyz".indexOf(c.field.slice(-1)); if (i >= 0 && c.value != null) r[i] = rad(c.value); }
+    spaceCursorRot = r; renderSpaceNPanels();
+  });
+  const row = (lab: string, field: string, v: number, d: number, unit: "m" | "deg", group: NumGroup) => {
+    const l = document.createElement("span");
+    l.className = "xf-lab";
+    l.textContent = lab;
+    grid.append(l, numField({ value: v, decimals: d, unit, defaultValue: 0, field, group, column: unit }));
+  };
+  const head = (text: string) => { const x = document.createElement("div"); x.className = "xf-head"; x.textContent = text; grid.appendChild(x); };
+  head(`${t("xf.position")} (m)`);
+  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.${"xyz"[i]}`, at[i], dec, "m", posGroup);
+  head(`${t("xf.rotation")} (°, XYZ)`);
+  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.r${"xyz"[i]}`, deg(spaceCursorRot[i]), 3, "deg", rotGroup);
+  cur.appendChild(grid);
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const centre = document.createElement("button");
+  centre.type = "button";
+  centre.className = "btn";
+  centre.dataset.act = "cursor-centre";
+  centre.textContent = t("s3.nCentre");
+  centre.title = t("keys.s3cursorReset");
+  centre.addEventListener("click", () => { h.centreScene(); renderSpaceNPanels(); });
+  acts.appendChild(centre);
+  cur.appendChild(acts);
+  // MICRO-PROVA-DEV47 p.3b · the level of detail, for the active, the selection, the epoch
+  renderLodSection(sect(t("lod.title"), "lod", t("lod.modeTitle")), sp);
+  // MICRO-SPAZIO-3D-3 p.5 · the snap: Ctrl during G lays the object on the face
+  // under the pointer; «Allinea alla normale» (off by default) turns it too
+  const sn = sect(t("s3.nSnap"), "snap", t("s3.nSnapNote"));
+  const lab = document.createElement("label");
+  lab.className = "settings-check";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.dataset.np = "snap-align";
+  cb.checked = space3dPrefs().snapAlign === true;
+  cb.addEventListener("change", () => setSpace3dPrefs({ ...space3dPrefs(), snapAlign: cb.checked }));
+  const sp1 = document.createElement("span");
+  sp1.textContent = t("s3.nSnapAlign");
+  lab.append(cb, sp1);
+  sn.appendChild(lab);
   void win;
 }
 /** every Space window's N panel, after a change that is not the graph's */
 const npanelRenderers = new Map<string, () => void>();
 function renderSpaceNPanels(): void { for (const f of npanelRenderers.values()) f(); }
+
+// ── MICRO-SEG19 · the sidebar's tabs (N) and the toolbar (T) of the Space ────
+//
+// E.D., 21 Nov 2026 («come la N di Blender… gli strumenti a sinistra come la
+// T»): the extensions' panels are tabs of the 3D view's sidebar, never a column
+// squeezed between the areas; the tools are a column of icons on the left edge
+// of the 3D view, the Space's own first, the extensions' after a separator. On
+// the right of the view only the navigation is left (gizmo, zoom, hand, frame,
+// grid, Globe/Plan/Site). The model of both is `space-sidebar.ts`.
+
+const CORE_TAB_KEY: Record<CoreTab, string> = { item: "sb.tab.item", tool: "sb.tab.tool", view: "sb.tab.view" };
+/** the tab chosen per workspace (read once, written at each choice) */
+// eslint-disable-next-line no-var
+var sidebarTabMemo: Record<string, string> | null = null;
+/** the tabs now: the Space's three and the loaded extensions' */
+function sidebarTabsNow(): SidebarTab[] {
+  if (!pluginState) return sidebarTabs([], getLocale(), () => null);
+  const ps = plugins();
+  return sidebarTabs(panelsOf(ps), getLocale(), (pid) => ps.plugin(pid)?.name ?? null);
+}
+/** the tab the sidebar shows in a workspace (the remembered one while it exists, else «View») */
+function sidebarTabOf(ws: string = activeWorkspace()): string {
+  sidebarTabMemo ??= loadTabs();
+  return chosenTab(sidebarTabsNow(), sidebarTabMemo[ws]);
+}
+/** a tab chosen: remembered for the workspace, the sidebar opened on it */
+function setSidebarTab(tab: string, ws: string = activeWorkspace()): void {
+  sidebarTabMemo = rememberTab(ws, tab);
+  pluginComputeSig = "";
+  schedulePluginCompute();
+  const p = space3dPrefs();
+  if (!p.nShown) setSpace3dPrefs({ ...p, nShown: true });
+  else renderSpaceNPanels();
+}
+
+/** the core tool of each Space window (an extension's tool armed is its layers' own) */
+// eslint-disable-next-line no-var
+var spaceCoreTools = new Map<string, CoreTool>();
+const CORE_TOOL_KEY: Record<CoreTool, string> = { select: "tb.select", cursor: "tb.cursor" };
+/** the extensions' tools of a Space window, as the toolbar draws them */
+function spaceExtTools(winId: string): Array<{ id: string; glyph: string; title: string; off: string | null; tool: LayerTool }> {
+  if (!pluginState) return [];
+  const ps = plugins();
+  const offered = new Set(layerSpaces.get(winId)?.trace().offered ?? []);
+  return layerToolsNow().map((tool) => {
+    const p = ps.plugin(tool.plugin);
+    const c = p?.commands.find((x) => x.id === tool.command);
+    const ext = p?.name ?? tool.plugin;
+    const mark = badgeOf(p, t);
+    const title = t("plg.toolTitle", { label: tool.label(), plugin: ext, prim: t(`pose.prim.${c?.primitive ?? tool.primitive}`) }) + (mark ? ` · ${mark}` : "");
+    const off = tool.disabled?.() ?? (offered.has(tool.id) ? null : t("tb.extOff", { ext }));
+    return { id: tool.id, glyph: tool.glyph, title, off, tool };
+  });
+}
+/** the toolbar's entries of a Space window */
+function spaceToolbar(winId: string): ToolbarEntry[] {
+  return toolbarEntries({ core: spaceCoreTools.get(winId) ?? "select", coreTitle: (id) => t(CORE_TOOL_KEY[id]),
+    extensions: spaceExtTools(winId), armed: layerSpaces.get(winId)?.trace().armed?.id ?? null });
+}
+/** a tool of the toolbar chosen (a core tool, or an extension's armed on its layers);
+ *  false: it cannot be used here (its reason said) */
+function setSpaceTool(winId: string, id: string): boolean {
+  const entry = spaceToolbar(winId).find((e) => e.id === id);
+  if (!entry) return false;
+  if (entry.off) { toast(entry.off); return false; }
+  const ls = layerSpaces.get(winId);
+  if (entry.group === "core") {
+    ls?.arm(null);
+    spaceCoreTools.set(winId, id as CoreTool);
+  } else {
+    ls?.arm(id);
+    if (ls?.trace().armed?.id !== id) return false;
+  }
+  for (const f of spaceToolbarRenderers.values()) f();
+  renderSpaceNPanels();
+  return true;
+}
+/** the toolbars drawn, per Space window */
+const spaceToolbarRenderers = new Map<string, () => void>();
+
+type NpSect = (title: string, probe: string, help?: string) => HTMLElement;
+/** the «Tool» tab: the active tool, its name, its extension, how it works, its trace */
+function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: NpSect): void {
+  void body;                                         // the sections go in it through `sect`
+  const entry = spaceToolbar(win.id).find((e) => e.active);
+  const box = sect(t("tt.active"), "tool");
+  box.dataset.npTool = entry?.id ?? "select";
+  const name = document.createElement("div");
+  name.className = "np-tool-name";
+  const g = document.createElement("span");
+  g.className = "np-tool-glyph";
+  g.textContent = entry?.glyph ?? "";
+  const words = document.createElement("b");
+  words.textContent = entry?.group === "core" ? t(`tb.name.${entry.id}`) : (entry?.title ?? "");
+  name.append(g, " ", words);
+  box.appendChild(name);
+  const note = (text: string, probe?: string) => {
+    const p = document.createElement("p");
+    p.className = "xf-note";
+    p.textContent = text;
+    if (probe) p.dataset.np = probe;
+    box.appendChild(p);
+    return p;
+  };
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const act = (label: string, probe: string, run: () => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.act = probe;
+    b.textContent = label;
+    b.disabled = disabled;
+    b.addEventListener("click", run);
+    acts.appendChild(b);
+  };
+  if (!entry || entry.id === "select") note(t("tt.selectHow"));
+  else if (entry.id === "cursor") {
+    note(t("tt.cursorHow"));
+    act(t("s3.nCentre"), "cursor-centre", () => { h.centreScene(); renderSpaceNPanels(); });
+  } else {
+    const ls = layerSpaces.get(win.id);
+    const tr = ls?.trace();
+    const tool = tr?.armed;
+    if (tool) {
+      note(t("plyr.trace.how"));
+      note(tr!.busy ? t("plyr.trace.busy") : tr!.points ? (tr!.points === 1 ? t("plyr.trace.state_one", { tool: tool.label() })
+        : t("plyr.trace.state", { n: String(tr!.points), tool: tool.label() })) : t("tt.noTrace"), "trace");
+      act(t("plyr.trace.finish"), "trace-finish", () => ls!.finish(), tr!.verdict !== "may_close" || tr!.busy);
+      act(t("plyr.trace.cancel"), "trace-cancel", () => setSpaceTool(win.id, "select"));
+    }
+  }
+  // (an extension's tool has «Stop tracing (Esc)» already: the same gesture)
+  if (entry?.id === "cursor") act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
+  if (acts.childElementCount) box.appendChild(acts);
+}
+
+/** an extension's tab: its panels, one under the other, each with its fields */
+function renderExtensionTab(body: HTMLElement, tab: SidebarTab): void {
+  for (const name of tab.panels) {
+    const host = document.createElement("div");
+    host.className = "np-sect np-ext";
+    host.dataset.npPanel = name;
+    body.appendChild(host);
+    renderPluginPanelNamed(host, name);
+  }
+}
+
+/** open a panel where it goes: the Space's sidebar on its tab (the Space shown,
+ *  the sidebar opened), or a window of its own */
+function openPanelInSidebar(panel: PluginPanel): void {
+  const tab = tabOfPanel(sidebarTabsNow(), panel.name);
+  if (!tab) return;
+  const show = () => {
+    setSidebarTab(tab);
+    setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`.scn-npanel:not(.hidden) [data-np-panel="${CSS.escape(panel.name)}"]`);
+      if (!el) return;
+      el.scrollIntoView({ block: "nearest" });
+      el.classList.add("flash");
+      setTimeout(() => el.classList.remove("flash"), 900);
+    }, 120);
+  };
+  if (windowsOf().some((w) => w.type === "scene")) { show(); return; }
+  if (activeWorkspace() !== "space") setWorkspace("space");
+  // the Space draws after the workspace: its sidebar a moment later
+  setTimeout(show, 350);
+}
+
+/** MICRO-SEG19 · the panels that were columns between the areas (a `plugin-panel`
+ *  window split beside another, before): closed — their panels are in the
+ *  Space's sidebar now. A detached one (a window of its own) stays. */
+function retirePanelColumns(): number {
+  let n = 0;
+  for (const w of WORKSPACES) {
+    for (const win of windowsOf(w.id).filter((x) => x.type === "plugin-panel")) if (closeWindow(win.id, w.id)) n++;
+  }
+  if (n) { renderTiles(); logInfo(t("sb.columnsRetired", { n: String(n) })); }
+  return n;
+}
 
 /** USVs → USV/s: the abbreviation the Matrix's legend uses */
 /** MICRO-SERVSF-FINE-ISTANZE p.1 · a node's card on the canvas names its type
@@ -36226,7 +36440,7 @@ const extWindowHost: ExtWindowHost = {
     const p = pluginState?.plugins.find((x) => (x.id === id || x.package === id) && x.state === "loaded" && !x.dev);
     if (!p) return null;
     return { commands: p.commands.map((c) => ({ id: c.id, label: c.label, in: c.in, slots: c.slots, folders: c.folders, when: c.when })),
-      panels: (p.panels ?? []).map((x) => ({ id: x.id, label: x.label, place: x.place })) };
+      panels: (p.panels ?? []).map((x) => ({ id: x.id, label: x.label, place: x.place, region: x.region, tab: x.tab })) };
   },
   showWhere: (p, id) => showExtPlace(p, id),
   openGuide: () => {
@@ -36759,6 +36973,55 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   ntab.textContent = "‹";
   ntab.title = t("s3.openNPanel");
   sideTab(ntab, -1, () => setSpace3dPrefs({ ...space3dPrefs(), nShown: true }));
+  // MICRO-SEG19 · the toolbar (T) on the left edge inside the 3D view, as Blender's:
+  // the Space's own tools, a separator, the extensions' tools; the active one lit
+  const toolbar = document.createElement("div");
+  toolbar.className = "scn-toolbar";
+  toolbar.dataset.scnToolbar = win.id;
+  toolbar.setAttribute("role", "toolbar");
+  toolbar.setAttribute("aria-orientation", "vertical");
+  toolbar.setAttribute("aria-label", t("tb.label"));
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) toolbar.addEventListener(ev, (e) => e.stopPropagation());
+  const ttab = document.createElement("button");
+  ttab.type = "button";
+  ttab.className = "scn-ttab";
+  ttab.dataset.ttab = "1";
+  ttab.textContent = "›";
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) ttab.addEventListener(ev, (e) => e.stopPropagation());
+  ttab.addEventListener("click", (e) => { e.stopPropagation(); setSpace3dPrefs({ ...space3dPrefs(), tShown: true }); });
+  const drawToolbar = (): void => {
+    const shown = space3dPrefs().tShown !== false;
+    toolbar.classList.toggle("hidden", !shown);
+    ttab.classList.toggle("hidden", shown);
+    ttab.title = t("tb.openToolbar");
+    toolbar.setAttribute("aria-label", t("tb.label"));
+    if (!shown) return;
+    toolbar.textContent = "";
+    let group = "";
+    for (const e of spaceToolbar(win.id)) {
+      if (group && e.group !== group) {
+        const sep = document.createElement("div");
+        sep.className = "scn-tb-sep";
+        sep.setAttribute("role", "separator");
+        sep.title = t("tb.extSep");
+        toolbar.appendChild(sep);
+      }
+      group = e.group;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `scn-tb-btn${e.active ? " on" : ""}${e.off ? " off" : ""}`;
+      b.dataset.tbTool = e.id;
+      if (e.group === "extension") b.dataset.plgTool = e.id;           // «Mostrami» and the probes find it as before
+      b.textContent = e.glyph;
+      b.title = e.off ? `${e.title}\n${e.off}` : e.title;
+      b.setAttribute("aria-label", e.title);
+      b.setAttribute("aria-pressed", String(e.active));
+      if (e.off) b.setAttribute("aria-disabled", "true");
+      b.addEventListener("click", (ev) => { ev.stopPropagation(); setSpaceTool(win.id, e.id); });
+      toolbar.appendChild(b);
+    }
+  };
+  spaceToolbarRenderers.set(win.id, drawToolbar);
   // MICRO-PROVA-DEV47 · the overlays glyph of THIS window, floating in the
   // scene's top right corner above the navigation gizmo: the graph's twin
   // (same glyph, dot and tooltip), there whichever window has the focus
@@ -36779,8 +37042,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   const tsp = document.createElement("div");
   tsp.className = "tsp-scene hidden";
   for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) tsp.addEventListener(ev, (e) => e.stopPropagation());
-  host.append(overlay, empty, legendEl, tab, ntab, ovBtn, tsp);
+  host.append(overlay, empty, legendEl, tab, ntab, ovBtn, tsp, toolbar, ttab);
   row.append(outl, grip, host, ngrip, npanel);
+  // MICRO-SEG19 · a narrow window (a telephone): the sidebar over the view instead of squeezing it
+  const rowRO = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+    row.classList.toggle("np-over", sidebarOverlays(row.clientWidth, space3dPrefs().nWidth));
+  }) : null;
+  rowRO?.observe(row);
   wrap.append(row);
   body.appendChild(wrap);
   queueMicrotask(placeBar);
@@ -36796,7 +37064,17 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   const drawNPanel = () => {
     if (npQueued) return;
     npQueued = true;
-    requestAnimationFrame(() => { npQueued = false; if (space3dPrefs().nShown) renderSpaceNPanel(npanel, win, handle); });
+    requestAnimationFrame(() => {
+      npQueued = false;
+      if (!space3dPrefs().nShown) return;
+      // MICRO-SEG19 · a field of the sidebar being written keeps its words: drawn again once it is left
+      const a = document.activeElement as HTMLElement | null;
+      if (a && npanel.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && !a.classList.contains("num-field")) {
+        a.addEventListener("blur", () => drawNPanel(), { once: true });
+        return;
+      }
+      renderSpaceNPanel(npanel, win, handle);
+    });
   };
   npanelRenderers.set(win.id, drawNPanel);
   /** the selection before the last click's pick (a slow double click restores it) */
@@ -36805,8 +37083,14 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   let whyTimer = 0;
   let viewTimer = 0;
   const handle = mountSpaceScene(host, {
-    // MICRO-GEO13 · a layer's tool armed: the click on a plane of the stack is its
-    onTool: (hit, dbl) => layerSpaces.get(win.id)?.toolClick(hit, dbl) ?? false,
+    // MICRO-GEO13 · a layer's tool armed: the click on a plane of the stack is its.
+    // MICRO-SEG19 · the toolbar's 3D cursor: a click on a surface puts the cursor there
+    onTool: (hit, dbl) => {
+      if (layerSpaces.get(win.id)?.toolClick(hit, dbl)) return true;
+      if (dbl || spaceCoreTools.get(win.id) !== "cursor") return false;
+      if (hit) { handle.setCursor(hit.point); drawNPanel(); }
+      return true;
+    },
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
       referenceOnly: (name, rid) => refOnlyWords(name, rid),
@@ -36930,6 +37214,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
       if (a === "sidebar") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, nShown: !p.nShown }); return true; }
+      // MICRO-SEG19 · T, the toolbar; Esc, back to «Select» from another tool
+      if (a === "toolbar") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, tShown: p.tShown === false }); return true; }
+      if (a === "cancel") {
+        const armedNow = layerSpaces.get(win.id)?.trace().armed;
+        if (!armedNow && (spaceCoreTools.get(win.id) ?? "select") === "select") return false;
+        return setSpaceTool(win.id, "select");
+      }
       if (a === "add-menu") {
         const r = host.getBoundingClientRect();
         const at = spacePointer ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 };
@@ -37054,6 +37345,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     tools: () => layerToolsNow(),
     run: (tool, geometry) => runLayerTool(tool, geometry),
     toast,
+    // MICRO-SEG19 · the trace moved: the toolbar's lit tool and the «Tool» tab follow
+    onTrace: () => { drawToolbar(); if (sidebarTabOf() === "tool") drawNPanel(); },
   });
   layerSpaces.set(win.id, layerSpace);
   // MICRO-RIFINITURE p.6 · the «Livelli» of the scene at the head of the data panel:
@@ -37764,7 +38057,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     ngrip.classList.toggle("hidden", !prefs.nShown);
     ntab.classList.toggle("hidden", prefs.nShown);
     npanel.style.width = `${prefs.nWidth}px`;
+    row.classList.toggle("np-over", sidebarOverlays(row.clientWidth, prefs.nWidth));
     if (prefs.nShown) drawNPanel();
+    drawToolbar();
     // the bar: the epochs, the two layers, ⤢, and the colours of the language
     bar.innerHTML = "";
     const back = document.createElement("button");
@@ -38283,7 +38578,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     }, 12000);
   };
   refresh();
-  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); lead.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); if (sceneLeads.get(win.id) === lead) sceneLeads.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); layerSpace.destroy(); if (layerSpaces.get(win.id) === layerSpace) layerSpaces.delete(win.id); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); lead.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); if (sceneLeads.get(win.id) === lead) sceneLeads.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); layerSpace.destroy(); if (layerSpaces.get(win.id) === layerSpace) layerSpaces.delete(win.id); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); spaceToolbarRenderers.delete(win.id); rowRO?.disconnect(); } };
 }
 
 /** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
@@ -67463,6 +67758,51 @@ async function scriptAppOp(op: string, args: Record<string, unknown>): Promise<u
       refreshSurfaces("scene");
       return hardwareProfile();
     }
+    // MICRO-SEG19 · the sidebar's tabs and the toolbar's tools, for scripts (and SEG20)
+    case "space.sidebar.tabs": {
+      const cur = sidebarTabOf();
+      return sidebarTabsNow().map((x) => ({ id: x.id, label: x.kind === "core" ? t(CORE_TAB_KEY[x.id as CoreTab]) : x.label ?? x.id,
+        kind: x.kind === "core" ? "space" : "extension", extensions: x.extensions ?? [], panels: [...x.panels], active: x.id === cur }));
+    }
+    case "space.sidebar.active":
+      return { tab: sidebarTabOf(), shown: space3dPrefs().nShown, workspace: activeWorkspace() };
+    case "space.sidebar.open": {
+      const ref = String(args.tab ?? "");
+      const tabs = sidebarTabsNow();
+      const id = findTab(tabs, ref, (c) => t(CORE_TAB_KEY[c]));
+      if (!id) throw new Error(t("py.noTab", { tab: ref, known: tabs.map((x) => x.id).join(", ") }));
+      setSidebarTab(id);
+      return id;
+    }
+    case "space.sidebar.close": {
+      const p = space3dPrefs();
+      if (p.nShown) setSpace3dPrefs({ ...p, nShown: false });
+      return false;
+    }
+    case "space.tools": {
+      const w = spaceWinId();
+      if (!w) return [];
+      const ext = new Map(spaceExtTools(w).map((x) => [x.id, x.tool] as const));
+      return spaceToolbar(w).map((e) => ({ id: e.id, name: e.group === "core" ? t(`tb.name.${e.id}`) : ext.get(e.id)?.label() ?? e.id,
+        group: e.group === "core" ? "space" : "extension", extension: e.group === "core" ? null : plugins().plugin(ext.get(e.id)?.plugin ?? "")?.name ?? ext.get(e.id)?.plugin ?? null,
+        command: e.group === "core" ? null : ext.get(e.id)?.command ?? null, active: e.active, available: !e.off, why: e.off }));
+    }
+    case "space.tools.active": {
+      const w = spaceWinId();
+      return w ? spaceToolbar(w).find((e) => e.active)?.id ?? "select" : null;
+    }
+    case "space.tools.activate": {
+      const w = spaceWinId();
+      if (!w) throw new Error(t("py.noSpace"));
+      const ref = String(args.tool ?? "");
+      const entries = spaceToolbar(w);
+      const id = findTool(entries, ref);
+      if (!id) throw new Error(t("py.noTool", { tool: ref, known: entries.map((e) => e.id).join(", ") }));
+      const e = entries.find((x) => x.id === id)!;
+      if (e.off) throw new Error(e.off);
+      if (!setSpaceTool(w, id)) throw new Error(t("py.noTool", { tool: ref, known: entries.map((x) => x.id).join(", ") }));
+      return id;
+    }
     case "workspaces.list":
       return WORKSPACES.map((w) => ({ id: w.id, label: workspaceLabel(w, t), builtin: !!w.builtin, active: w.id === activeWorkspace() }));
     case "workspaces.active": return activeWorkspace();
@@ -67833,6 +68173,8 @@ function schedulePluginChecks(s: DocumentStore): void {
 
 // the plugins asked once the bridge is up, then after each change in «Estensioni»
 setTimeout(() => void refreshPlugins(), 1500);
+// MICRO-SEG19 · a layout saved with a panel as a column between the areas: closed (bridge or not)
+setTimeout(() => { if (!panelColumnsRetired) { panelColumnsRetired = true; retirePanelColumns(); } }, 1200);
 
 // ── MICRO-PL25-SLOT-DELLA-FASE-2 (X5) · what a plugin shows, and its tools ───
 //
@@ -67886,7 +68228,14 @@ function pluginPhase2Changed(): void {
   schedulePluginCompute();
   // a panel's window says the panel's name in its head: drawn again with the plugins
   if (windowsOf().some((w) => w.type === "plugin-panel")) { refreshSurfaces("plugin-panel"); renderAreaHeaders(); }
+  // MICRO-SEG19 · the sidebar's tabs and the toolbar follow the extensions
+  renderSpaceNPanels();
+  for (const f of spaceToolbarRenderers.values()) f();
+  if (!panelColumnsRetired) { panelColumnsRetired = true; retirePanelColumns(); }
 }
+/** MICRO-SEG19 · the old panel columns closed once per page, when the plugins are first known */
+// eslint-disable-next-line no-var
+var panelColumnsRetired = false;
 
 function panelOfWin(win: Win): string | null {
   const v = win.state["plugin.panel"];
@@ -67915,9 +68264,12 @@ function pluginComputeItems(st: DocumentStore): Array<{ key: string; plugin: str
     const ids = sheetRowIds(st, view as never);
     for (const c of columnsFor(ps, view)) add("tabular.column@1", c, view, fillSlots(c, { selection: ids }));
   }
-  for (const w of windowsOf()) {
-    if (w.type !== "plugin-panel") continue;
-    const panel = panelNamed(ps, panelOfWin(w));
+  // MICRO-SEG19 · the panels of the extension's tab the Space's sidebar shows
+  const sideNames = windowsOf().some((w) => w.type === "scene") && space3dPrefs().nShown
+    ? sidebarTabsNow().find((x) => x.id === sidebarTabOf())?.panels ?? [] : [];
+  const panelNames = [...windowsOf().filter((w) => w.type === "plugin-panel").map((w) => panelOfWin(w)), ...sideNames];
+  for (const pname of new Set(panelNames)) {
+    const panel = panelNamed(ps, pname);
     if (!panel) continue;
     const fields = pluginPanelFields.get(panel.name) ?? {};
     for (const f of panel.fields) {
@@ -67969,6 +68321,7 @@ async function runPluginCompute(): Promise<void> {
   if (selectedId && sectionsFor(plugins(), String(st.node(selectedId)?.node_type ?? "")).length) refreshInspector();
   if (plugins().commandsIn("tabular.column").length) renderEmData();
   if (windowsOf().some((w) => w.type === "plugin-panel")) refreshSurfaces("plugin-panel");
+  if (sidebarTabOf().startsWith("ext:")) renderSpaceNPanels();      // MICRO-SEG19 · the sidebar's extension tab
 }
 
 /** MICRO-GEO12 · space.layer@1 · the layers the plugins described, from the last answers. */
@@ -68116,6 +68469,10 @@ async function vwFinishPlugin(win: Win, s: VwScene, spec: SpaceToolSpec, vs: V3[
 /** panel@1 · open a plugin's panel where it proposes (the first time; a
  *  window already showing it takes the focus instead). */
 function openPluginPanel(panel: PluginPanel): void {
+  // MICRO-SEG19 · a panel goes in the Space's sidebar, on its tab (the
+  // extension's name when it says none); only `region = "window"` (the old
+  // `place = "window"`) is a window of its own. No column between the areas.
+  if (panelRegion(panel) === "sidebar") { openPanelInSidebar(panel); return; }
   const open = windowsOf().find((w) => w.type === "plugin-panel" && panelOfWin(w) === panel.name);
   if (open) {
     setActiveWin(open.id);
@@ -68126,15 +68483,12 @@ function openPluginPanel(panel: PluginPanel): void {
     return;
   }
   const state = { "plugin.panel": panel.name };
-  if (panel.place === "window") {
-    if (detachWindow({ id: `plugin-panel:${panel.name}`, type: "plugin-panel", state }, null)) { schedulePluginCompute(); return; }
-  }
+  if (detachWindow({ id: `plugin-panel:${panel.name}`, type: "plugin-panel", state }, null)) { schedulePluginCompute(); return; }
+  // no detached window here (a blocked popup): a window beside the active one, as before
   const anchor = activeWin();
   if (maximizedWin()) toggleMaximize(maximizedWin()!);
   setActiveWin(anchor.id);
-  const made = panel.place === "below" ? splitWindow(anchor.id, "col", activeWorkspace(), 0.66, "b")
-    : panel.place === "left" ? splitWindow(anchor.id, "row", activeWorkspace(), 0.3, "a")
-      : splitWindow(anchor.id, "row", activeWorkspace(), 0.7, "b");
+  const made = splitWindow(anchor.id, "row", activeWorkspace(), 0.7, "b");
   if (!made) return;
   for (const k of Object.keys(made.state)) delete made.state[k];
   setWinType(made, "plugin-panel");
@@ -68146,7 +68500,11 @@ function openPluginPanel(panel: PluginPanel): void {
 
 /** The panel of a `plugin-panel` window, drawn from its fields. */
 function renderPluginPanelInto(body: HTMLElement, win: Win): void {
-  const name = panelOfWin(win);
+  renderPluginPanelNamed(body, panelOfWin(win));
+}
+/** MICRO-SEG19 · a panel by its name, drawn from its fields: in a window of its
+ *  own, or in an extension's tab of the Space's sidebar */
+function renderPluginPanelNamed(body: HTMLElement, name: string | null): void {
   const ps = plugins();
   const panel = panelNamed(ps, name);
   const lang = getLocale();
@@ -68166,6 +68524,7 @@ function renderPluginPanelInto(body: HTMLElement, win: Win): void {
       if (value === undefined) delete now[field]; else now[field] = value;
       pluginPanelFields.set(panel.name, now);
       refreshSurfaces("plugin-panel");
+      renderSpaceNPanels();                          // MICRO-SEG19 · the sidebar's tab
       schedulePluginCompute();
     },
     valueOf: (f: PanelField) => {

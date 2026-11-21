@@ -10,6 +10,8 @@
  * il codice». Pure: no DOM (`scripts/check-ext-page.mjs`).
  */
 
+import { panelRegion, panelTabLabel } from "./space-sidebar";
+
 /** a command as the preview, the register or the loaded plugin describe it */
 export interface WhereCommand {
   id: string;
@@ -19,8 +21,9 @@ export interface WhereCommand {
   folders?: boolean;
   when?: string;
 }
-/** a declarative panel (`[[code.panels]]`) */
-export interface WherePanel { id: string; label?: Record<string, string> | string; place?: string }
+/** a declarative panel (`[[code.panels]]`); MICRO-SEG19: its region and its tab */
+export interface WherePanel { id: string; label?: Record<string, string> | string; place?: string; region?: string;
+  tab?: Record<string, string> | string | null }
 
 /** the kinds of place, in the order the page lists them (the order of the approved draft) */
 export const WHERE_ORDER = ["door", "import", "export", "panel", "layer", "tool", "section", "column", "statusbar",
@@ -47,8 +50,10 @@ export interface WherePlace {
   folders?: boolean;
   /** the command ids behind it (for «Mostrami»: the first) */
   commands: string[];
-  /** panels: where it opens (right, left, below, window) */
+  /** panels: where it goes — the Space's sidebar or a window of its own (MICRO-SEG19) */
   place?: string;
+  /** panels in the sidebar: the tab's words (the extension's name when it says none) */
+  tab?: string;
   /** the Python line (kind python) */
   code?: string;
   /** more commands only reachable from Python */
@@ -79,6 +84,8 @@ export function pythonLine(c: WhereCommand, pluginId: string): string {
 export function whereOf(o: {
   commands: WhereCommand[]; panels: WherePanel[]; vocabularies: string[];
   codeActive: boolean; dataActive: boolean; lang: string; pluginId?: string;
+  /** MICRO-SEG19 · the extension's name: the tab of a panel that names none */
+  extensionName?: string;
 }): WherePlace[] {
   const by = new Map<WhereKind, WherePlace>();
   const add = (kind: WhereKind, name: string, cmd: string | null, extra: Partial<WherePlace> = {}, active = o.codeActive) => {
@@ -95,7 +102,12 @@ export function whereOf(o: {
       if (k) add(k, name, c.id, k === "door" && c.folders ? { folders: true } : {});
     }
   }
-  for (const p of o.panels) add("panel", labelOf(p.label, o.lang, p.id), null, { place: p.place || "right" });
+  // MICRO-SEG19 · a panel goes in the Space's sidebar, on its tab, or (region window) in a window of its own
+  for (const p of o.panels) {
+    const region = panelRegion(p);
+    add("panel", labelOf(p.label, o.lang, p.id), null, region === "window" ? { place: "window" }
+      : { place: "sidebar", tab: panelTabLabel({ tab: p.tab, plugin: o.pluginId ?? "" }, o.lang, o.extensionName ?? o.pluginId ?? "") });
+  }
   if (o.vocabularies.length) add("vocab", "", null, { names: [...o.vocabularies] }, o.dataActive);
   // Python: every command can be run from a script; the line shown is the first
   // one no menu carries (else the first), the others counted

@@ -3,8 +3,8 @@
 // terze parti»:
 //   · «Dove la trovi» (src/extensions-where.ts) on the commands of the REAL
 //     Geofisica manifest (em-extensions, geofisica 0.1.0): door.reader → File ▸
-//     Porta dentro…, the panel → Pannello destro, space.layer → Spazio ▸ Layer,
-//     space.tool → Spazio ▸ Strumenti, inspector.section → Ispettore, the
+//     Porta dentro…, the panel → Spazio ▸ barra laterale ▸ tab «Geofisica», space.layer → Spazio ▸ Layer,
+//     space.tool → Spazio ▸ barra degli strumenti, inspector.section → Ispettore, the
 //     vocabularies → the Inspector's pickers, a command → em.app.commands.run(…);
 //   · the page (src/extensions-window.ts, linkedom): Geofisica «solo dati» says
 //     so on its line, ONE action «Installa il codice», the places read from its
@@ -54,13 +54,13 @@ const VOCABS = ["anomalie", "metodi", "grandezze"];
 const X = await load("extensions-where.ts");
 let places = X.whereOf({ commands: GEO_COMMANDS, panels: GEO_PANELS, vocabularies: VOCABS, codeActive: false, dataActive: true, lang: "it", pluginId: "geofisica" });
 eq(places.map((p) => p.kind), ["door", "panel", "layer", "tool", "section", "vocab", "python"],
-   "Geofisica: File ▸ Porta dentro…, Pannello destro, Spazio ▸ Layer, Spazio ▸ Strumenti, Ispettore, Vocabolari, Python — in the draft's order");
+   "Geofisica: File ▸ Porta dentro…, Spazio ▸ barra laterale ▸ tab «Geofisica», Spazio ▸ Layer, Spazio ▸ barra degli strumenti, Ispettore, Vocabolari, Python — in the draft's order");
 eq(places.map((p) => p.active), [false, false, false, false, false, true, false], "data only: the vocabularies ● now, the rest ○ (with the code)");
 const door = places.find((p) => p.kind === "door");
 eq([door.names, door.folders, door.commands], [["Pila geofisica"], true, ["geofisica.read"]], "the reader: its name, it reads a folder, its command");
 eq(places.find((p) => p.kind === "tool").names, ["Anomalia puntuale su fetta", "Anomalia lineare su fetta", "Anomalia areale su fetta"], "the three Space tools on one line");
 eq(places.find((p) => p.kind === "section").names, ["Lettura geofisica"], "the Inspector's section");
-eq(places.find((p) => p.kind === "panel").place, "right", "the panel opens on the right");
+eq([places.find((p) => p.kind === "panel").place, places.find((p) => p.kind === "panel").tab], ["sidebar", "geofisica"], "the panel goes in the Space's sidebar, on a tab with the extension's name (MICRO-SEG19; no name given here: its id)");
 eq(places.find((p) => p.kind === "vocab").names, VOCABS, "the vocabularies by name");
 const py = places.find((p) => p.kind === "python");
 eq([py.code, py.more], ['em.plugins.invoke("geofisica", "geofisica.ingest", {"folder": …})', 7],
@@ -140,7 +140,7 @@ geo = box.querySelector('.ext-list [data-ext-id="geofisica"]');
 eq(previews, 1, "…and not read again");
 const placesOf = (row) => [...row.querySelectorAll("[data-ext-where-place]")].map((e) => [e.dataset.extWherePlace, e.dataset.extWhereActive]);
 eq(placesOf(geo), [["door", "0"], ["panel", "0"], ["layer", "0"], ["tool", "0"], ["section", "0"], ["vocab", "1"], ["python", "0"]],
-   "«Dove la trovi»: ○ File ▸ Porta dentro…, ○ Pannello destro, ○ Spazio ▸ Layer, ○ Spazio ▸ Strumenti, ○ Ispettore, ● Vocabolari, ○ Python");
+   "«Dove la trovi»: ○ File ▸ Porta dentro…, ○ Spazio ▸ barra laterale ▸ tab «Geofisica», ○ Spazio ▸ Layer, ○ Spazio ▸ barra degli strumenti, ○ Ispettore, ● Vocabolari, ○ Python");
 ok(geo.querySelector(".ext-where-legend")?.textContent === "ext.w.legend", "«○ arriva con il codice»");
 eq([...geo.querySelectorAll("[data-ext-show-where]")].map((b) => b.dataset.extShowWhere), ["vocab"], "«Mostrami» only where it is now");
 ok(geo.querySelector('[data-ext-where-what="door"]').textContent.includes("Pila geofisica") && geo.querySelector('[data-ext-where-what="door"]').textContent.includes("ext.w.doorFolder"),

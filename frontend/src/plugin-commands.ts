@@ -96,8 +96,14 @@ export interface PluginPanel {
   /** `<plugin>/<panel>` — what a `plugin-panel` window keeps */
   name: string;
   label: Record<string, string>;
-  /** where it opens the first time; after, the person's */
+  /** where it opens the first time; after, the person's.
+   *  MICRO-SEG19 · read only when `region` is absent: «window» a window, the rest the sidebar */
   place: "right" | "left" | "below" | "window";
+  /** MICRO-SEG19 · the editor it lives in (the Space), its region there, the sidebar's tab
+   *  (absent from a bridge before SEG19: the sidebar, the extension's name) */
+  space?: string;
+  region?: "sidebar" | "window";
+  tab?: Record<string, string> | null;
   when: string;
   fields: PanelField[];
 }

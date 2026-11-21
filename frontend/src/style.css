@@ -9069,13 +9069,45 @@ button.cw-lab:hover { text-decoration: underline; }
 .scn-host .scn-ov { top: 26px; }
 .scn-box.select { border-style: solid; border-color: #fff; outline-style: dashed; }
 /* the N panel «Vista», on the right as Blender's sidebar */
-.scn-npanel { display: flex; flex-direction: column; min-width: 180px; max-width: 520px; border-left: 1px solid var(--border); background: var(--bg-panel); font-size: 0.76rem; overflow: auto; }
+/* MICRO-SEG19 · the sidebar of tabs: its panels (.np-body) and, on its right edge,
+   the vertical tabs (.np-vtabs) as Blender's N — Item, Tool, View, the extensions' */
+.scn-npanel { display: flex; flex-direction: row; min-width: 180px; max-width: 520px; border-left: 1px solid var(--border); background: var(--bg-panel); font-size: 0.76rem; overflow: hidden; }
+.scn-npanel > .np-body { flex: 1 1 auto; min-width: 0; overflow: auto; }
 .scn-npanel.hidden, .scn-ngrip.hidden, .scn-ntab.hidden { display: none; }
 .scn-ngrip { width: 5px; cursor: col-resize; background: transparent; flex: none; margin-right: -3px; z-index: 3; }
 .scn-ngrip:hover { background: var(--accent); opacity: 0.4; }
 .scn-ntab { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 4; border: 1px solid var(--border-strong); border-right: 0; border-radius: 6px 0 0 6px; background: var(--bg-panel); color: var(--text); padding: 10px 4px; cursor: pointer; font: inherit; font-weight: 600; }
-.scn-npanel .np-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); }
-.scn-npanel .np-tabs button { border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0; background: var(--bg-panel-2, var(--bg-panel)); color: var(--text); padding: 3px 10px; font: inherit; font-weight: 600; }
+.scn-npanel .np-vtabs { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-left: 1px solid var(--border); background: var(--bg-sunken); overflow-y: auto; overflow-x: hidden; }
+.scn-npanel .np-vtab { writing-mode: vertical-rl; border: 1px solid transparent; border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: transparent; color: var(--text-muted);
+  padding: 9px 4px; font: 600 0.72rem var(--font-sans); letter-spacing: 0.02em; cursor: pointer; white-space: nowrap; max-height: 160px; overflow: hidden; text-overflow: ellipsis; }
+.scn-npanel .np-vtab:hover { background: var(--bg-hover); color: var(--text); }
+.scn-npanel .np-vtab[aria-selected="true"] { background: var(--bg-panel); color: var(--text); border-color: var(--border); box-shadow: inset 3px 0 0 var(--accent); }
+.scn-npanel .np-vtab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.scn-npanel .np-vtab-ext:first-of-type, .scn-npanel .np-vtab:not(.np-vtab-ext) + .np-vtab-ext { margin-top: 8px; }
+.scn-npanel .np-ext.flash { box-shadow: inset 0 0 0 2px var(--accent); }
+.scn-npanel .np-ext .plg-panel { border: 0; padding: 0; background: transparent; }
+/* the narrative palette's .np-sect (uppercase eyebrow) does not reach an extension's panel nor the Tool tab: their words as written */
+.scn-npanel .np-ext, .scn-npanel .np-sect[data-np="tool"] { text-transform: none; letter-spacing: normal; font-weight: 400; font-size: inherit; color: var(--text); margin: 0; }
+.scn-npanel .np-tool-name { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.scn-npanel .np-tool-glyph { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-sm); background: var(--bg-accent-soft); color: var(--accent-ink); font-size: 0.9rem; }
+/* a narrow window (a telephone): the sidebar over the 3D view, not beside it */
+.scn-row.np-over { position: relative; }
+.scn-row.np-over > .scn-npanel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; box-shadow: -6px 0 16px rgba(0, 0, 0, 0.18); max-width: calc(100% - 44px); }
+.scn-row.np-over > .scn-ngrip { display: none; }
+/* MICRO-SEG19 · the toolbar (T): a column of icons on the left edge inside the 3D view */
+.scn-toolbar { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px;
+  border: 1px solid var(--scene-ov-border); border-radius: var(--radius); background: var(--scene-ov-bg); color: var(--scene-ov-ink); max-height: calc(100% - 120px); overflow-y: auto; }
+.scn-toolbar.hidden, .scn-ttab.hidden { display: none; }
+.scn-tb-btn { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: inherit; font: 15px/1 var(--font-sans); cursor: pointer; }
+.scn-tb-btn:hover { background: var(--bg-hover); color: var(--text); }
+.scn-tb-btn.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.scn-tb-btn.off { opacity: 0.42; cursor: default; }
+.scn-tb-btn.off:hover { background: transparent; color: inherit; }
+.scn-tb-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.scn-tb-sep { width: 22px; height: 0; border-top: 1px solid var(--scene-ov-border); margin: 3px 0; }
+.scn-ttab { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 4; border: 1px solid var(--border-strong); border-left: 0; border-radius: 0 6px 6px 0; background: var(--bg-panel); color: var(--text); padding: 10px 4px; cursor: pointer; font: inherit; font-weight: 600; }
+/* the trace's state over the view, while an extension's tool is armed (its tools are in the toolbar) */
+.plg-trace-glyph { padding: 0 4px; font-weight: 700; }
 .scn-npanel .np-sect { padding: 6px 10px 8px; border-bottom: 1px solid var(--border); }
 .scn-npanel .np-sect > h5 { margin: 2px 0 6px; font-size: 0.74rem; font-weight: 600; color: var(--text-muted, inherit); text-transform: none; }
 .xf-grid { display: grid; grid-template-columns: auto 1fr; gap: 3px 6px; align-items: center; }
@@ -11553,7 +11585,7 @@ td.al-cloud { color: var(--accent-ink); }
   font: 12px/18px system-ui, sans-serif; color: #fff; background: rgba(20, 20, 20, 0.72); border-radius: 4px; max-width: calc(100% - 24px); }
 .plg-depth.hidden { display: none; }
 .plg-depth button { font: inherit; color: inherit; background: transparent; border: 1px solid rgba(255, 255, 255, 0.4); border-radius: 3px; padding: 0 6px; cursor: pointer; }
-.plg-trace { position: absolute; left: 12px; bottom: 76px; z-index: 5; display: flex; align-items: center; gap: 4px; padding: 3px 6px;
+.plg-trace { position: absolute; left: 52px; bottom: 76px; z-index: 5; display: flex; align-items: center; gap: 4px; padding: 3px 6px;
   background: rgba(20, 20, 20, 0.72); color: #fff; border-radius: 4px; font-size: 12px; max-width: calc(100% - 24px); }
 .plg-trace.hidden { display: none; }
 .plg-trace button { font: inherit; color: inherit; background: transparent; border: 1px solid rgba(255, 255, 255, 0.4); border-radius: 3px; padding: 0 6px; cursor: pointer; min-width: 22px; }

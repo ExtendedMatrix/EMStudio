@@ -4089,6 +4089,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             return;
           case "cancel":
             if (boxArmed) { boxArmed = false; host.classList.remove("scn-armed"); stop(); }
+            // MICRO-SEG19 · else a tool of the toolbar other than «Select»: back to «Select»
+            else if (opts.onKeyAction?.(a, e)) stop();
             return;
           case "delete":
             // MICRO-PROVA-DEV47 p.5 · the sketches, and the proxies selected: the caller asks

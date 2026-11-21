@@ -604,13 +604,96 @@ class Layer:
                 f"{', ' + ' · '.join(self.epochs) if self.epochs else ''}{mb}>")
 
 
-class EMStudioSpace:
-    """``em.app.space`` in EMStudio (MICRO-SEG02 p.3): the camera, a point
-    picked, and what the Space shows — its layers, its epoch, the hardware
-    profile it loads for."""
+class EMStudioSidebar:
+    """``em.app.space.sidebar`` (MICRO-SEG19): the sidebar of the 3D view, N —
+    vertical tabs, each a set of panels: ``item``, ``tool``, ``view`` and one
+    per tab the extensions' panels name (``ext:<word>``)."""
 
     def __init__(self, run: "Run"):
         self._run = run
+
+    @_asks
+    def tabs(self) -> List[Dict[str, Any]]:
+        """Every tab: ``{id, label, kind, extensions, panels, active}`` (kind
+        ``space`` or ``extension``)."""
+        return list(_ask_app(self._run, "space.sidebar.tabs") or [])
+
+    @_asks
+    def active(self) -> Optional[str]:
+        """The id of the tab shown (remembered per workspace); set it to open another."""
+        return (_ask_app(self._run, "space.sidebar.active") or {}).get("tab")
+
+    @active.setter
+    def active(self, tab: str) -> None:
+        self.open(tab)
+
+    @_asks
+    def shown(self) -> bool:
+        """Whether the sidebar is open (N opens and closes it)."""
+        return bool((_ask_app(self._run, "space.sidebar.active") or {}).get("shown"))
+
+    def open(self, tab: str) -> str:
+        """Open the sidebar on a tab — its id (``"view"``, ``"ext:geofisica"``)
+        or its words (``"Geofisica"``). Returns the tab's id."""
+        return _ask_app(self._run, "space.sidebar.open", tab=str(tab))
+
+    def close(self) -> None:
+        """Close the sidebar."""
+        _ask_app(self._run, "space.sidebar.close")
+
+    def __iter__(self):
+        return iter(self.tabs)
+
+    def __repr__(self) -> str:
+        return "<em.app.space.sidebar of emstudio>"
+
+
+class EMStudioTools:
+    """``em.app.space.tools`` (MICRO-SEG19): the toolbar of the 3D view, T — the
+    Space's own tools (``select``, ``cursor``), then the extensions' ones
+    (``plugin:<plugin>/<command>``)."""
+
+    def __init__(self, run: "Run"):
+        self._run = run
+
+    def list(self) -> List[Dict[str, Any]]:
+        """Every tool: ``{id, name, group, extension, command, active,
+        available, why}`` (group ``space`` or ``extension``; ``why`` says why
+        one is not available here)."""
+        return list(_ask_app(self._run, "space.tools") or [])
+
+    @_asks
+    def active(self) -> Optional[str]:
+        """The id of the active tool; set it to activate another."""
+        return _ask_app(self._run, "space.tools.active")
+
+    @active.setter
+    def active(self, tool: str) -> None:
+        self.activate(tool)
+
+    def activate(self, tool: str) -> str:
+        """Activate a tool: its id, or an extension's command
+        (``"geofisica.trace.point"``). Its options are in the «Tool» tab of the
+        sidebar. Returns the tool's id."""
+        return _ask_app(self._run, "space.tools.activate", tool=str(tool))
+
+    def __iter__(self):
+        return iter(self.list())
+
+    def __repr__(self) -> str:
+        return "<em.app.space.tools of emstudio>"
+
+
+class EMStudioSpace:
+    """``em.app.space`` in EMStudio (MICRO-SEG02 p.3): the camera, a point
+    picked, and what the Space shows — its layers, its epoch, the hardware
+    profile it loads for; its sidebar of tabs and its toolbar (MICRO-SEG19)."""
+
+    def __init__(self, run: "Run"):
+        self._run = run
+        #: MICRO-SEG19 · the sidebar's tabs (N) and the toolbar's tools (T)
+        self.sidebar = EMStudioSidebar(run)
+        self.tools = EMStudioTools(run)
 
     def camera(self) -> Dict[str, Any]:
         """The camera of the first Space open: ``{pos, target, …}``."""

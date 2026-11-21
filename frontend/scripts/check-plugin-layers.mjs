@@ -206,7 +206,8 @@ ok(/\/py\/layer-image\?plugin=/.test(pls) && /Authorization: `Bearer \$\{token\}
 ok(/texture\?\.dispose\?\.\(\)/.test(pls) && /if \(!keep\.has\(mk\)\) free\(mk\)/.test(pls), "a hidden plane's texture freed");
 ok(/const layerHitAt = /.test(scene3d) && /scene\.getObjectByName\("plugin-layers"\)/.test(scene3d)
   && /if \(lh && \(!hh \|\| lh\.distance <= hh\.distance\)\)/.test(scene3d), "a tool's click on a plane nearer than the models is the plane's");
-ok(/onTool: \(hit, dbl\) => layerSpaces\.get\(win\.id\)\?\.toolClick\(hit, dbl\) \?\? false/.test(main), "the Space's clicks go to its layers' bar");
+// MICRO-SEG19 · …first; then the toolbar's 3D cursor
+ok(/onTool: \(hit, dbl\) => \{\n\s+if \(layerSpaces\.get\(win\.id\)\?\.toolClick\(hit, dbl\)\) return true;/.test(main), "the Space's clicks go to its layers' bar");
 ok(/tools: \(\) => layerToolsNow\(\)/.test(main) && /run: \(tool, geometry\) => runLayerTool\(tool, geometry\)/.test(main), "the plugins' tools and their command");
 ok(/for \(const l of layerSpaces\.values\(\)\) l\.refresh\(\);/.test(main), "the bar follows the plugins' tools");
 ok(/frame: "model" \| "layer";/.test(pcs), "the geometry's frame «layer»");

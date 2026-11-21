@@ -642,7 +642,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     const codeActive = r?.code?.status === "installed" && !!r.code.active && !!host.loadedFacts?.(r.id);
     const ff = f && typeof f === "object" ? f : { commands: [], panels: [] };
     const places = whereOf({ commands: ff.commands, panels: ff.panels, vocabularies: vocabNames(e),
-      codeActive, dataActive: r?.data?.status === "installed", lang, pluginId: r?.code?.module || e.id });
+      codeActive, dataActive: r?.data?.status === "installed", lang, pluginId: r?.code?.module || e.id, extensionName: labelIn((e.row?.name ?? e.avail?.name) as Record<string, string> | string | undefined, lang) || e.id });
     if (places.some((p) => !p.active)) hd.appendChild(el("span", "ext-where-legend", t(r?.code?.status === "installed" ? "ext.w.legendRestart" : "ext.w.legend")));
     const grid = el("div", "ext-where-grid");
     grid.dataset.extWhere = String(places.length);
@@ -650,7 +650,7 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
       const a = el("div", `ext-w-place${p.active ? " on" : ""}`);
       a.dataset.extWherePlace = p.kind;
       a.dataset.extWhereActive = p.active ? "1" : "0";
-      a.textContent = `${p.active ? "●" : "○"} ${t(p.kind === "panel" ? `ext.w.panel.${p.place ?? "right"}` : `ext.w.${p.kind}`)}`;
+      a.textContent = `${p.active ? "●" : "○"} ${p.kind === "panel" ? t(`ext.w.panel.${p.place ?? "sidebar"}`, { tab: p.tab ?? "" }) : t(`ext.w.${p.kind}`)}`;
       const b = el("div", "ext-w-what");
       b.dataset.extWhereWhat = p.kind;
       const names = el("b", "", p.names.join(", "));

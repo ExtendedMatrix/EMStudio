@@ -220,6 +220,8 @@ export interface Space3dPrefs {
    *  the Outliner): no move, rotation, scale in the Space. Local, never in the em.json
    *  (the datamodel has no field of the kind, checked 14 Nov 2026) */
   pinned?: string[];
+  /** MICRO-SEG19 · the toolbar on the left of the 3D view (T); absent = shown */
+  tShown?: boolean;
 }
 
 export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [], versionModes: {} };
@@ -259,6 +261,7 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
       nShown: typeof p.nShown === "boolean" ? p.nShown : DEFAULT_PREFS.nShown,
       nWidth: typeof p.nWidth === "number" && p.nWidth >= 180 && p.nWidth <= 520 ? p.nWidth : DEFAULT_PREFS.nWidth,
       snapAlign: p.snapAlign === true,
+      ...(typeof p.tShown === "boolean" ? { tShown: p.tShown } : {}),
       collapsed: list(p.collapsed),
       versionModes: p.versionModes && typeof p.versionModes === "object" ? Object.fromEntries(Object.entries(p.versionModes as Record<string, unknown>)
         .filter(([, v]) => v && typeof v === "object" && ["manual", "use", "auto", "light"].includes(String((v as { mode?: unknown }).mode)))

@@ -119,7 +119,7 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 {
   const k = (key, m = {}) => N.spaceKeyAction({ key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...m }, true);
   eq([k("."), k("f"), k("F"), k("Home"), k("t"), k("B", { shiftKey: true }), k("C", { shiftKey: true }), k("A", { shiftKey: true })],
-    ["frame-selection", "frame-selection", "frame-selection", "frame-all", null, "box-zoom", "cursor-reset", "add-menu"], "the keys");
+    ["frame-selection", "frame-selection", "frame-selection", "frame-all", "toolbar", "box-zoom", "cursor-reset", "add-menu"], "the keys (MICRO-SEG19: T, the toolbar)");
   eq([k("g"), k("r"), k("s"), k("x"), k("Escape"), k("[", { metaKey: true }), k("ArrowLeft", { altKey: true })],
     ["grab", "rotate", "scale", "delete", "cancel", "back", "back"], "G R S X Esc, and «Indietro»");
   eq([k("s", { metaKey: true }), k("z", { metaKey: true })], [null, null], "⌘S and ⌘Z are not the Space's");
