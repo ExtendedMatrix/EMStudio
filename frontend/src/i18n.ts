@@ -7589,6 +7589,8 @@ const EN: Dict = {
   "pyc.searchNone": "not in the history:",
   "pyc.noMatch": "no completion",
   "pyc.tabAgain": "{n} possibilities · Tab again to list them",
+  "pyc.tabShown": "already listed above · change the line to ask again",
+  "pyc.callableDot": "{name} is a function: call it with ( )",
   "ext.fromNode": "The packages the StratiGraph node's administrator installed (read only: nothing is installed from the page).",
   // MICRO-PL27 (X7) · the plugins of the node
   "npl.head": "Plugins of the node",
@@ -16703,6 +16705,8 @@ const IT: Dict = {
   "pyc.searchNone": "non è nella storia:",
   "pyc.noMatch": "nessun completamento",
   "pyc.tabAgain": "{n} possibilità · ancora Tab per elencarle",
+  "pyc.tabShown": "già elencate sopra · cambia la riga per chiedere di nuovo",
+  "pyc.callableDot": "{name} è una funzione: chiamala con ( )",
   "ext.fromNode": "I pacchetti che l'amministratore del nodo StratiGraph ha installato (sola lettura: dalla pagina non si installa nulla).",
   // MICRO-PL27 (X7) · the plugins of the node
   "npl.head": "Plugin del nodo",

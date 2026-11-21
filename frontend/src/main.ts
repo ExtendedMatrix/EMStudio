@@ -66486,7 +66486,7 @@ document.getElementById("btn-help-python-api")?.addEventListener("click", () => 
 
 /** The live console mounts, by window: the Tools entry focuses the prompt of
  *  the one it brings forward. */
-const consoleMounts = new Map<string, { focus(): void }>();
+const consoleMounts = new Map<string, { focus(): void; recheck(): Promise<void> }>();
 let consoleFocusNext = false;
 function mountConsoleInto(body: HTMLElement, win: Win): { refresh(): void; destroy(): void } {
   let m = mountConsole(document, consoleHost, pyConsoleState, { focus: consoleFocusNext });
@@ -66507,8 +66507,9 @@ function mountConsoleInto(body: HTMLElement, win: Win): { refresh(): void; destr
         consoleMounts.set(win.id, m);
         return;
       }
-      const where = m.root.querySelector<HTMLElement>(".pyc-where");
-      if (where) where.textContent = consoleHost.docName() ? t("pyc.on", { doc: consoleHost.docName()! }) : t("pyc.noDoc");
+      // MICRO-SEG12 · the head says which, AND whether it can run: a console
+      // restored with its workspace is built before the document opens
+      void m.recheck();
     },
     destroy() { m.destroy(); m.root.remove(); if (consoleMounts.get(win.id) === m) consoleMounts.delete(win.id); },
   };

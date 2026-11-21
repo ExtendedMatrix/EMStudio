@@ -12546,25 +12546,24 @@ button.uo-col { cursor: pointer; }
 .pyc-tag { display: inline-block; margin-right: 6px; padding: 0 4px; border-radius: var(--radius-sm); font-weight: 400;
   background: var(--warn); color: var(--bg-panel); font-size: 0.7rem; }
 .pyc-detail { margin: 2px 0 4px 14px; color: var(--text-muted); }
-.pyc-complete { display: flex; flex-wrap: wrap; gap: 3px; max-height: 96px; overflow: auto; }
-.pyc-complete[hidden], .pyc-search[hidden] { display: none; }
-.pyc-match { font-family: var(--font-mono); font-size: 0.74rem; padding: 0 5px; }
-.pyc-more { color: var(--text-faint); font-size: 0.74rem; }
+.pyc-search[hidden] { display: none; }
 .pyc-search { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.76rem; }
 .pyc-search-in { flex: 1 1 auto; font-family: var(--font-mono); }
 .pyc-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 54px; font-family: var(--font-mono); font-size: 0.8rem; tab-size: 4; }
 .pyc-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pyc-status { color: var(--text-muted); font-size: 0.76rem; }
 .pyc-status.pyc-why { color: var(--warn); }
+/* MICRO-SEG12 · Tab's hints live in the status line, under the prompt */
+.pyc-status.pyc-hint { color: var(--text-muted); }
 .pyc-line.pyc-k-script { color: var(--accent); font-weight: 600; }
 /* MICRO-SEG02 · Tab's list printed in the output (Blender's console): a mark
    per kind, the name, what it is; a call's signature with its docstring */
-.pyc-matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(16em, 1fr)); gap: 0 12px; margin: 0 0 4px 0; }
+/* MICRO-SEG12 · as Blender: the names only, whole, in columns as wide as the longest */
+.pyc-matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(var(--pyc-colw, 16ch), 100%), 1fr)); gap: 0 12px; margin: 0 0 4px 0; }
 .pyc-m { display: flex; gap: 6px; align-items: baseline; min-width: 0; white-space: nowrap; }
 /* MICRO-SEG09 · the whole list green (--ok-ink), the mark tells the kind */
 .pyc-mark { flex: 0 0 1.1em; text-align: center; color: var(--ok-ink); }
 .pyc-mname { color: var(--ok-ink); }
-.pyc-mdetail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ok-ink); font-size: 0.72rem; }
 .pyc-line.pyc-k-sig { color: var(--ok-ink); }
 .pyc-line.pyc-k-sig .pyc-detail { color: var(--ok-ink); font-style: italic; }
 /* the Script Editor's list (CodeMirror autocomplete) in the chrome's colours */

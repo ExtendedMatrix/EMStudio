@@ -303,14 +303,18 @@ export class PySession {
   /** MICRO-SEG02 · the whole answer: each name with its kind, the open call's
    *  signature, the tail the names replace (an older bridge: its strings). */
   async completeRich(text: string): Promise<string[] | { items: Array<{ text: string; kind: string; label?: string; detail?: string }>;
-                                                          tail?: string; signature?: { name: string; text: string; doc?: string } }> {
+                                                          tail?: string; signature?: { name: string; text: string; doc?: string };
+                                                          callable?: { name: string; kind: string } }> {
     if (!this.id) await this.open();
     let { status, answer } = await this.post("/py/complete", { session: this.id, text });
     // a session the bridge forgot (restarted): a new one, asked again
     if (status === 404) { await this.open(); ({ status, answer } = await this.post("/py/complete", { session: this.id, text })); }
     if (status !== 200) return [];
-    const a = answer as { matches?: string[]; items?: Array<{ text: string; kind: string }>; tail?: string; signature?: { name: string; text: string; doc?: string } };
-    return a.items ? { items: a.items, ...(a.tail !== undefined ? { tail: a.tail } : {}), ...(a.signature ? { signature: a.signature } : {}) } : (a.matches ?? []);
+    const a = answer as { matches?: string[]; items?: Array<{ text: string; kind: string }>; tail?: string; signature?: { name: string; text: string; doc?: string };
+                          callable?: { name: string; kind: string } };
+    // MICRO-SEG12 · `callable`: a function followed by «.» (nothing to reach)
+    return a.items ? { items: a.items, ...(a.tail !== undefined ? { tail: a.tail } : {}), ...(a.signature ? { signature: a.signature } : {}),
+                       ...(a.callable ? { callable: a.callable } : {}) } : (a.matches ?? []);
   }
 
   async close(): Promise<void> {

@@ -86,7 +86,9 @@ export interface Line { kind: LineKind; text: string; dry?: boolean; detail?: st
 export type CompleteKind = "module" | "class" | "function" | "method" | "property" | "value" | "keyword" | "string" | "param" | "";
 export interface CompleteItem { text: string; kind: CompleteKind; label?: string; detail?: string }
 export interface CompleteSignature { name: string; text: string; doc?: string }
-export interface CompleteAnswer { items: CompleteItem[]; tail?: string; signature?: CompleteSignature }
+/** MICRO-SEG12 · `callable`: the name before the «.» is a function (nothing to
+ *  reach with a dot: call it) */
+export interface CompleteAnswer { items: CompleteItem[]; tail?: string; signature?: CompleteSignature; callable?: { name: string; kind: string } }
 
 /** The mark of a kind (its word is `pyc.kind.<kind>`, the mark's title). */
 export const KIND_MARK: Record<string, string> = {
@@ -97,7 +99,8 @@ export const KIND_MARK: Record<string, string> = {
 export function asAnswer(a: string[] | CompleteAnswer | null | undefined): CompleteAnswer {
   if (!a) return { items: [] };
   if (Array.isArray(a)) return { items: a.map((x) => ({ text: x, kind: "" as CompleteKind })) };
-  return { items: a.items ?? [], ...(a.tail !== undefined ? { tail: a.tail } : {}), ...(a.signature ? { signature: a.signature } : {}) };
+  return { items: a.items ?? [], ...(a.tail !== undefined ? { tail: a.tail } : {}), ...(a.signature ? { signature: a.signature } : {}),
+           ...(a.callable ? { callable: a.callable } : {}) };
 }
 
 /** What Tab does (Blender's console): one possibility → it is completed; more
@@ -117,11 +120,23 @@ export function tabOutcome(before: string, answer: string[] | CompleteAnswer): {
   return { replace: p.length > tail.length ? p : null, tail, list: items, signature: sig };
 }
 
-/** The list Tab prints: one line per possibility, its mark, its name (the
- *  last part of a dotted name, as Blender prints it), what it is. */
+/** The list Tab prints: in columns, each possibility's mark and its name (the
+ *  last part of a dotted name, as Blender prints it), WHOLE. MICRO-SEG12 (E.D.,
+ *  21 Nov 2026) · no description beside it any more — a docstring's first line
+ *  cut with «…» on every name was not Blender's list: what a name is is said
+ *  only when it is the one possibility (or after «name(»). */
 export function completeLines(list: CompleteItem[]): Line[] {
   if (!list.length) return [];
-  return [{ kind: "complete", text: "", items: list.map((i) => ({ ...i, label: i.label ?? (i.text.split(".").pop() ?? i.text).replace(/\($/, "") })) }];
+  return [{ kind: "complete", text: "", items: list.map((i) => {
+    const { detail: _d, ...rest } = i;
+    return { ...rest, label: i.label ?? (i.text.split(".").pop() ?? i.text).replace(/\($/, "") };
+  }) }];
+}
+
+/** MICRO-SEG12 · the columns' width: the longest name, its mark and a gap
+ *  (in `ch` of the transcript's monospace font), so no name is ever cut. */
+export function columnWidth(items: CompleteItem[]): number {
+  return Math.max(8, ...items.map((i) => (i.label ?? i.text).length)) + 4;
 }
 
 /** MICRO-SEG09 · Tab pressed again on the same text, caret where the first
@@ -410,13 +425,13 @@ function lineEl(el: El, l: Line, t: ConsoleHost["t"]): HTMLElement {
   // MICRO-SEG02 · Tab's list: a mark per kind, the name, what it is
   if (l.kind === "complete" && l.items?.length) {
     const grid = el("div", "pyc-matches");
+    grid.style.setProperty("--pyc-colw", `${columnWidth(l.items)}ch`);
     for (const it of l.items) {
       const r = el("div", `pyc-m pyc-mk-${it.kind || "none"}`);
       r.dataset.kind = it.kind || "";
       const mark = el("span", "pyc-mark", KIND_MARK[it.kind] ?? "·");
       if (it.kind) mark.title = t(`pyc.kind.${it.kind}`);
       r.append(mark, el("span", "pyc-mname", it.label ?? it.text));
-      if (it.detail) r.append(el("span", "pyc-mdetail", it.detail));
       grid.append(r);
     }
     row.append(grid);
@@ -453,7 +468,7 @@ export function consoleContent(doc: Document, host: ConsoleHost, state: ConsoleS
 /** MICRO-TIL002 · a console in an area: its element, and how to take it down
  *  (it stops listening to the shared lines). */
 export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleState,
-                             opts: { focus?: boolean } = {}): { root: HTMLElement; destroy(): void; focus(): void } {
+                             opts: { focus?: boolean } = {}): { root: HTMLElement; destroy(): void; focus(): void; recheck(): Promise<void> } {
   const t = host.t;
   const el = maker(doc);
   const root = el("div", "pyc");
@@ -482,8 +497,6 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
   if (!state.lines.length) out.append(lineEl(el, { kind: "info", text: t("pyc.welcome") }, t));
   for (const l of state.lines) out.append(lineEl(el, l, t));
 
-  const list = el("div", "pyc-complete");
-  list.hidden = true;
   const searchRow = el("div", "pyc-search");
   searchRow.hidden = !state.search;
   const searchLabel = el("span", "pyc-search-l", t("pyc.search"));
@@ -516,11 +529,16 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
   runB.dataset.pyc = "run"; tryB.dataset.pyc = "try"; helpB.dataset.pyc = "help"; clearB.dataset.pyc = "clear";
   const status = el("span", "pyc-status");
   bar.append(runB, tryB, helpB, clearB, status);
-  root.append(head, out, list, searchRow, input, bar);
+  // MICRO-SEG12 · nothing between the transcript and the prompt: the ephemeral
+  // hints («N possibilities · Tab again») are said in the status, under it
+  root.append(head, out, searchRow, input, bar);
 
   const scrollDown = (): void => { out.scrollTop = out.scrollHeight; };
   // the welcome line is not a line of the state: the first real one takes its place
   let welcome = !state.lines.length;
+  // MICRO-SEG12 · where the last thing a Tab PRINTED was asked: Tab again on
+  // the same line and caret prints nothing twice (it says so in the status)
+  let lastPrinted: TabMark | null = null;
   const view: ConsoleView = {
     added(ls, dropped) {
       if (welcome) { out.replaceChildren(); welcome = false; }
@@ -528,11 +546,8 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
       for (let i = 0; i < dropped; i++) out.firstElementChild?.remove();
       scrollDown();
     },
-    cleared() { out.replaceChildren(); welcome = false; },
-    busy(on) {
-      for (const b of [runB, tryB, helpB]) b.disabled = on;
-      status.textContent = on ? t("pyc.running") : "";
-    },
+    cleared() { out.replaceChildren(); welcome = false; lastPrinted = null; },
+    busy() { paintStatus(); },
   };
   state.views.add(view);
   const add = (ls: Line[]): void => appendLines(state, ls);
@@ -541,11 +556,38 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     input.value = v;
     input.selectionStart = input.selectionEnd = v.length;
   };
-  const hideList = (): void => { list.hidden = true; list.replaceChildren(); };
 
-  void (async () => {
-    const why = await host.unavailable();
-    if (why) { status.textContent = why; status.classList.add("pyc-why"); runB.disabled = tryB.disabled = helpB.disabled = true; return; }
+  // MICRO-SEG12 (E.D., 21 Nov 2026: «Open a document…» with Templu Mare v11
+  // open, after two restarts) · the status line says ONE thing: a run going
+  // on, else why the console cannot run, else a hint of the Tab. `why` was
+  // asked once, when the window was built: a console restored with its
+  // workspace is built BEFORE the document opens, and it stayed «no
+  // document» for good. Now it is asked again whenever the page says the
+  // document changed (`recheck`), when the prompt takes the focus, at a Tab
+  // and at a run.
+  let why: string | null = null;
+  let hintText = "";
+  let hintTimer: ReturnType<typeof setTimeout> | null = null;
+  function paintStatus(): void {
+    const off = state.busy || !!why;
+    for (const b of [runB, tryB, helpB]) b.disabled = off;
+    status.textContent = state.busy ? t("pyc.running") : why ?? hintText;
+    status.classList.toggle("pyc-why", !state.busy && !!why);
+    status.classList.toggle("pyc-hint", !state.busy && !why && !!hintText);
+  }
+  const hideList = (): void => {
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = null;
+    if (hintText) { hintText = ""; paintStatus(); }
+  };
+  async function recheck(): Promise<void> {
+    const w = await host.unavailable().catch((e) => String((e as Error)?.message ?? e));
+    why = w;
+    where.textContent = host.docName() ? t("pyc.on", { doc: host.docName()! }) : t("pyc.noDoc");
+    paintStatus();
+    if (!w) await loadHistory();
+  }
+  async function loadHistory(): Promise<void> {
     if (!state.historyLoaded) {
       state.historyLoaded = true;
       const h = await host.history().catch(() => []);
@@ -555,15 +597,17 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
       for (const c of state.history) merged = pushHistory(merged, c);
       state.history = merged;
     }
-  })();
-  if (state.busy) view.busy(true);
+  }
+  void recheck();
+  if (state.busy) paintStatus();
+  input.addEventListener("focus", () => { if (why) void recheck(); });
 
   async function go(dry: boolean, code = input.value, keep = true): Promise<void> {
     if (state.busy || !code.trim()) return;
-    const why = await host.unavailable();
+    await recheck();
     if (why) { add([{ kind: "error", text: why }]); return; }
     hideList();
-    where.textContent = host.docName() ? t("pyc.on", { doc: host.docName()! }) : t("pyc.noDoc");
+    lastPrinted = null;
     if (keep) {
       state.history = pushHistory(state.history, code);
       state.at = -1;
@@ -591,9 +635,9 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
   const sigLine = (sg: CompleteSignature): Line => ({ kind: "sig", text: sg.text, ...(sg.doc ? { detail: [sg.doc] } : {}) });
   const hint = (text: string): void => {
     hideList();
-    list.append(el("span", "pyc-more", text));
-    list.hidden = false;
-    setTimeout(hideList, 1600);
+    hintText = text;
+    paintStatus();
+    hintTimer = setTimeout(hideList, 2400);
   };
 
   /** Tab (`both` = Ctrl+Space, the double Tab at once). */
@@ -602,12 +646,16 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     const before = input.value.slice(0, pos);
     const lineStart = before.slice(before.lastIndexOf("\n") + 1);
     if (!lineStart.trim()) { input.setRangeText("    ", pos, pos, "end"); lastTab = null; return; }
+    // MICRO-SEG12 · the line as it was when its list (or signature) was printed
+    if (isSecondTab(lastPrinted, input.value, pos)) { hint(t("pyc.tabShown")); return; }
+    if (why) await recheck();
     const second = both || isSecondTab(lastTab, input.value, pos);
     // MICRO-SEG02 · the whole text before the cursor: a call opened on an
     // earlier line is still the call the cursor is in
     const answer = await host.complete(before).catch(() => [] as string[]);
     // typed on while the bridge answered: this Tab is stale
     if (input.value.slice(0, pos) !== before) return;
+    const a = asAnswer(answer);
     const c = tabOutcome(before, answer);
     if (c.replace != null) {
       input.setRangeText(c.replace, pos - c.tail.length, pos, "end");
@@ -635,10 +683,19 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
       // a name completed to «name(»: its signature at once, as after a «(»
       const sg = await sigOf(input.value.slice(0, caret));
       if (sg) ls.push(sigLine(sg));
+    } else if (second && a.items.length === 1 && c.list.length === 0) {
+      // MICRO-SEG12 · the one possibility, Tab again: what it is (its description)
+      const one = a.items[0];
+      const label = one.label ?? (one.text.split(".").pop() ?? one.text);
+      ls.push({ kind: "sig", text: label, ...(one.detail ? { detail: [one.detail] } : {}) });
+    } else if (!a.items.length && a.callable) {
+      // MICRO-SEG12 · «em.graph.chronology.»: a function has nothing after a dot
+      ls.push({ kind: "sig", text: t("pyc.callableDot", { name: a.callable.name }) });
     }
     if (ls.length) {
       add([{ kind: "in", text: echo(input.value) }, ...ls]);
       lastTab = null;
+      lastPrinted = { value: input.value, caret: input.selectionStart ?? input.value.length };
       input.focus();
       return;
     }
@@ -646,6 +703,18 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     if (c.list.length > 1) hint(t("pyc.tabAgain", { n: String(c.list.length) }));
     else if (c.replace == null) hint(t("pyc.noMatch"));
   }
+
+  // MICRO-SEG12 · Tabs one after the other: on a big document the bridge's
+  // first answer takes a while, and a second Tab pressed meanwhile is the
+  // SECOND of a double Tab (it ran as another first, and printed nothing)
+  let tabChain: Promise<void> = Promise.resolve();
+  const queueTab = (both: boolean): void => {
+    // at the start of a line Tab indents, at once
+    const pos = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, pos);
+    if (!both && !before.slice(before.lastIndexOf("\n") + 1).trim()) { input.setRangeText("    ", pos, pos, "end"); lastTab = null; return; }
+    tabChain = tabChain.then(() => tab(both)).catch(() => {});
+  };
 
   const showSearch = (): void => {
     const s = state.search;
@@ -690,7 +759,8 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
   input.addEventListener("input", () => {
     if (state.at >= 0) state.at = -1;   // an entry of the history edited: it is the draft now
     state.draft = input.value;
-    if (!list.hidden) hideList();
+    lastPrinted = null;
+    hideList();
   });
   input.addEventListener("keydown", (ev) => {
     // the console keeps its keys: none reaches the page's shortcuts
@@ -699,10 +769,10 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     const pos = input.selectionStart ?? 0;
     if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); void go(ev.shiftKey); return; }
     if (ev.key === "Enter" && !ev.shiftKey && !ev.altKey && pos === v.length && enterRuns(v)) { ev.preventDefault(); void go(false); return; }
-    if (ev.key === "Tab" && !ev.shiftKey) { ev.preventDefault(); void tab(); return; }
+    if (ev.key === "Tab" && !ev.shiftKey) { ev.preventDefault(); queueTab(false); return; }
     // MICRO-SEG02 · Ctrl+Space (for whom Tab is taken) = the double Tab (MICRO-SEG09)
-    if ((ev.key === " " || ev.code === "Space") && ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); void tab(true); return; }
-    if (ev.key === "Escape") { if (!list.hidden) { ev.preventDefault(); hideList(); } return; }
+    if ((ev.key === " " || ev.code === "Space") && ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); queueTab(true); return; }
+    if (ev.key === "Escape") { if (hintText) { ev.preventDefault(); hideList(); } return; }
     if ((ev.key === "r" || ev.key === "R") && ev.ctrlKey && !ev.metaKey) { ev.preventDefault(); openSearch(); return; }
     // Ctrl+L, and ⌘L on the Mac (MICRO-TIL002)
     if ((ev.key === "l" || ev.key === "L") && (ev.ctrlKey || ev.metaKey) && !ev.altKey) { ev.preventDefault(); clearB.click(); return; }
@@ -724,5 +794,5 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
   // console): a workspace opening does not steal them from the canvas
   const focus = (): void => { if (!state.search) input.focus(); else searchIn.focus(); };
   setTimeout(() => { scrollDown(); if (opts.focus !== false) focus(); }, 0);
-  return { root, destroy() { state.views.delete(view); }, focus };
+  return { root, destroy() { state.views.delete(view); if (hintTimer) clearTimeout(hintTimer); }, focus, recheck };
 }

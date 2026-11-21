@@ -213,7 +213,10 @@ key(ta, "Tab"); await tick();
 // MICRO-SEG09 · the FIRST Tab only completes (the common start), says how many
 eq([ta.value, root.querySelectorAll(".pyc-out .pyc-m").length], ["g.node('US", 0],
    "several matches, first Tab: their common start, nothing printed");
-ok(/pyc\.tabAgain.*"n":"2"/.test(root.querySelector(".pyc-complete").textContent), "…a hint: «2 possibilities · Tab again»");
+ok(/pyc\.tabAgain.*"n":"2"/.test(root.querySelector(".pyc-status").textContent), "…a hint in the status line: «2 possibilities · Tab again»");
+// MICRO-SEG12 · nothing between the transcript and the prompt (the half-hidden strip)
+eq([...root.children].map((c) => c.className.split(" ")[0]), ["pyc-head", "pyc-out", "pyc-search", "pyc-input", "pyc-bar"],
+   "the window: head, transcript, (search), prompt, status bar — no strip between transcript and prompt");
 const nLines = state.lines.length;
 key(ta, "Tab"); await tick();
 // MICRO-SEG02/SEG09 · as Blender's console: the SECOND Tab prints the list under the line
@@ -289,6 +292,81 @@ ok(ev.defaultPrevented === false, "a plain key is the textarea's");
      "«x.node» with x.node( and x.nodes(: Tab Tab lists both, then the signature of the one named");
   r4.remove();
   r3.remove();
+}
+// ── MICRO-SEG12 · Blender's list: names whole, no description; nothing twice ──
+{
+  const items = [{ text: "em.graph.chronology(", kind: "method", label: "chronology", detail: "The core's computation…" },
+                 { text: "em.graph.id", kind: "property", label: "id", detail: "The graph's id, or None." },
+                 { text: "em.graph.a_rather_long_name_of_thirty_two", kind: "value", label: "a_rather_long_name_of_thirty_two" }];
+  const h5 = { ...host, complete: async (text) => text.endsWith("em.graph.") ? { tail: "em.graph.", items }
+    : text.endsWith("em.graph.i") || text.endsWith("em.graph.id") ? { tail: text.slice(text.lastIndexOf("em.")), items: [items[1]] }
+    : text.endsWith("em.graph.chronology.") ? { tail: "em.graph.chronology.", items: [], callable: { name: "chronology", kind: "method" } }
+    : text.endsWith("g.node(") ? { tail: "", items: [], signature: { name: "g.node", text: "node(ref) -> NodeView", doc: "By id." } } : [] };
+  const st5 = M.newConsoleState();
+  const m5 = M.mountConsole(document, h5, st5, { focus: false });
+  const r5 = m5.root;
+  document.body.append(r5); await tick();
+  const t5 = r5.querySelector(".pyc-input");
+  put(t5, "em.graph.");
+  key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick();
+  eq([...r5.querySelectorAll(".pyc-out .pyc-m")].map((m) => m.textContent.slice(1)), ["chronology", "id", "a_rather_long_name_of_thirty_two"],
+     "Tab Tab on «em.graph.»: the names only, whole (no docstring beside them)");
+  ok(!r5.querySelector(".pyc-mdetail") && /36ch/.test(r5.querySelector(".pyc-matches").style.getPropertyValue("--pyc-colw")),
+     "…columns as wide as the longest name (32 + mark and gap)");
+  const n5 = st5.lines.length;
+  key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick();
+  eq(st5.lines.length, n5, "Tab again on the same line: the list is NOT printed twice");
+  ok(/pyc\.tabShown/.test(r5.querySelector(".pyc-status").textContent), "…the status says it is above");
+  put(t5, "em.graph.chronology.");
+  t5.dispatchEvent(new window.Event("input"));
+  key(t5, "Tab"); await tick();
+  ok(st5.lines.at(-1).kind === "sig" && /pyc\.callableDot.*chronology/.test(st5.lines.at(-1).text), "«em.graph.chronology.» Tab: «chronology is a function: call it with ( )»");
+  const n6 = st5.lines.length;
+  key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick();
+  eq(st5.lines.length, n6, "…said once");
+  put(t5, "g.node(");
+  t5.dispatchEvent(new window.Event("input"));
+  key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick();
+  eq(st5.lines.filter((l) => l.kind === "sig" && /node\(ref\)/.test(l.text)).length, 1, "the signature after «g.node(» not repeated while the line is the same");
+  put(t5, "em.graph.i");
+  t5.dispatchEvent(new window.Event("input"));
+  const n7 = st5.lines.length;
+  key(t5, "Tab"); await tick();
+  eq([t5.value, st5.lines.length], ["em.graph.id", n7], "one possibility, first Tab: completed, nothing printed");
+  key(t5, "Tab"); await tick();
+  ok(st5.lines.at(-1).kind === "sig" && st5.lines.at(-1).text === "id" && st5.lines.at(-1).detail?.[0] === "The graph's id, or None.",
+     "…Tab again: what it is, its description (only now, the one possibility)");
+  // MICRO-SEG12 · a console built BEFORE the document (a workspace restored):
+  // it says «no document»; the document opens, the page asks again: it runs
+  why = "pyc.noDoc";
+  const st6 = M.newConsoleState();
+  const m6 = M.mountConsole(document, host, st6, { focus: false });
+  document.body.append(m6.root); await tick();
+  ok(m6.root.querySelector('[data-pyc="run"]').disabled && /pyc\.noDoc/.test(m6.root.querySelector(".pyc-status").textContent),
+     "a console built before the document: «open a document», Run off");
+  why = null;
+  await m6.recheck();
+  ok(!m6.root.querySelector('[data-pyc="run"]').disabled && m6.root.querySelector(".pyc-status").textContent === "",
+     "…the document opened (the page's refresh): Run on, the message gone");
+  why = "pyc.noDoc";
+  await m6.recheck();
+  why = null;
+  m6.root.querySelector(".pyc-input").dispatchEvent(new window.Event("focus")); await tick();
+  ok(!m6.root.querySelector('[data-pyc="run"]').disabled, "…and the prompt's focus asks again too");
+  m6.destroy(); m6.root.remove();
+  m5.destroy(); r5.remove();
+  // MICRO-SEG12 · a slow bridge (a big document): the second Tab pressed
+  // before the first answer is still the SECOND of a double Tab
+  const slow = { ...h5, complete: (text) => new Promise((res) => setTimeout(() => res(h5.complete(text)), 40)) };
+  const st7 = M.newConsoleState();
+  const m7 = M.mountConsole(document, slow, st7, { focus: false });
+  document.body.append(m7.root); await tick();
+  const t7 = m7.root.querySelector(".pyc-input");
+  put(t7, "em.graph.");
+  key(t7, "Tab"); key(t7, "Tab");
+  await new Promise((r) => setTimeout(r, 200));
+  eq(st7.lines.filter((l) => l.kind === "complete").length, 1, "Tab Tab faster than the bridge: the list printed once");
+  m7.destroy(); m7.root.remove();
 }
 // a rebuild (detach, language) loses nothing
 const before = state.lines.length;
@@ -420,6 +498,14 @@ try {
        "Tab 3 · «em.app.space.»: layers, epoch, profile, camera(");
     a = await T("em.app.wi");
     eq(texts(a), ["em.app.windows"], "Tab 4 · «em.app.wi»: one possibility, completed");
+    // MICRO-SEG12 · em's public names only (its __all__), not typing's
+    a = await T("em.");
+    ok(!["Any", "Dict", "List", "Optional", "annotations", "messages"].some((x) => texts(a).some((t) => t.replace(/\($/, "") === `em.${x}`)),
+       "Tab 1b · «em.»: no Any, Dict, List, Optional, annotations, messages");
+    a = await T("em.graph.");
+    ok(texts(a).includes("em.graph.chronology(") && texts(a).includes("em.graph.nodes("), "Tab 1c · «em.graph.»: GraphView's names");
+    a = await T("em.graph.chronology.");
+    eq([a.items.length, a.callable?.name], [0, "chronology"], "Tab 1d · «em.graph.chronology.»: nothing, and «chronology is a function»");
     a = await T("g.no");
     eq(texts(a), ["g.node(", "g.nodes("], "Tab 5 · «g.no»: node( and nodes(, methods");
     a = await T("g.node(");

@@ -1554,6 +1554,12 @@ class _Resolver:
             names = dir(obj)
         except Exception:                            # noqa: BLE001
             return []
+        # MICRO-SEG12 · a module says its public names in ``__all__``: a Tab lists
+        # those, not the typing helpers and modules it imports (an older wheel
+        # without the module's ``__dir__``)
+        import inspect
+        if inspect.ismodule(obj) and isinstance(getattr(obj, "__all__", None), (list, tuple)):
+            names = [n for n in obj.__all__ if isinstance(n, str)]
         if obj is self.em and "graph" not in names:
             names = [*names, "graph"]                # PEP 562: ``em.graph`` is the host's
         return [n for n in names if not (n.startswith("__") and n.endswith("__"))]
@@ -1783,6 +1789,11 @@ def complete_rich(s: Session, text: str, limit: int = 200) -> Dict[str, Any]:
             names = [n for n in res.names(obj) if n.startswith(prefix) and (prefix.startswith("_") or not n.startswith("_"))]
             for n in sorted(names)[:limit]:
                 out["items"].append(res.item(obj, n, f"{base}.{n}"))
+            # MICRO-SEG12 · «em.graph.chronology.»: a function has nothing to
+            # reach with a dot — the page says to call it
+            k = _kind_of(obj, obj)
+            if not out["items"] and k in ("function", "method"):
+                out["callable"] = {"name": base.rsplit(".", 1)[-1], "kind": k}
     else:
         import keyword
         pool = set(res.ns) | {"g", "sel"} | set(dir(builtins)) | set(keyword.kwlist)
