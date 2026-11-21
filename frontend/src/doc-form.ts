@@ -17,6 +17,7 @@
  * Pure DOM, no store: the caller creates the node with what comes back, so the
  * creation stays one undo step in the caller's batch.
  */
+import { floating } from "./floating";
 import { t } from "./i18n";
 
 export interface NewDocumentValues {
@@ -58,8 +59,10 @@ export function newDocumentFormIsOpen(): boolean {
 }
 
 /**
- * Open the form at a client point. `onSubmit` receives the values; Esc,
- * «Annulla» or a click outside close it without creating anything.
+ * Open the form at a client point. `onSubmit` receives the values; «Annulla»
+ * closes it without creating anything; Esc and a click outside too while
+ * nothing was typed in it — after that it is a work window (MICRO-SEG13): a
+ * click outside leaves it, Esc asks whether to discard.
  */
 export function openNewDocumentForm(
   clientX: number,
@@ -126,22 +129,8 @@ export function openNewDocumentForm(
     closeNewDocumentForm();
     onSubmit(v);
   });
-  form.addEventListener("keydown", (e) => {
-    if ((e as KeyboardEvent).key === "Escape") {
-      e.stopPropagation();
-      closeNewDocumentForm();
-    }
-  });
-  const outside = (e: PointerEvent): void => {
-    if (open !== box) {
-      document.removeEventListener("pointerdown", outside, true);
-      return;
-    }
-    if (!box.contains(e.target as Node)) closeNewDocumentForm();
-  };
-  document.addEventListener("pointerdown", outside, true);
-
   document.body.appendChild(box);
+  floating(box, { work: true, name: "doc-form", close: () => { if (open === box) closeNewDocumentForm(); else box.remove(); } });
   const r = box.getBoundingClientRect();
   box.style.left = Math.max(8, Math.min(clientX, window.innerWidth - r.width - 8)) + "px";
   box.style.top = Math.max(8, Math.min(clientY, window.innerHeight - r.height - 8)) + "px";

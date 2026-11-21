@@ -10,6 +10,7 @@
  * The selection is the app's one selection (`deps.pick`): the view, the Matrix
  * and the Properties follow it, and a row follows them (`setSelected`).
  */
+import { floating } from "./floating";
 import {
   DEFAULT_OPTS, DIMS, flattenOutliner, isTemporalHierarchy, opensForNode, paradataShown,
   type Dim, type Hierarchy, type OutlinerOpts, type OutlinerSourceIn, type Texts, type URow,
@@ -879,12 +880,8 @@ export function outlinerSelector(opts: () => OutlinerOpts, set: (o: OutlinerOpts
     const r = btn.getBoundingClientRect();
     pop.style.left = `${Math.max(4, Math.min(r.left, innerWidth - 240))}px`;
     pop.style.top = `${r.bottom + 4}px`;
-    const close = (ev: Event) => {
-      if (pop.contains(ev.target as Node) || ev.target === btn) return;
-      pop.remove();
-      document.removeEventListener("pointerdown", close, true);
-    };
-    setTimeout(() => document.addEventListener("pointerdown", close, true), 0);
+    // MICRO-SEG13 · a press outside, Esc, «☰» again: `floating`
+    floating(pop, { close: () => pop.remove(), opener: btn, name: "uo-selector" });
   });
   wrap.appendChild(btn);
   return wrap;

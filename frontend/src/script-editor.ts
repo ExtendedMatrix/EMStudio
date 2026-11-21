@@ -15,6 +15,7 @@
  * Pure of `main.ts`: the page gives a {@link ScriptHost}; the buffer lives in
  * the page (per window) so a rebuild of the area loses nothing.
  */
+import { floating } from "./floating";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -352,6 +353,7 @@ export function mountScriptEditor(doc: Document, host: ScriptHost, buf: ScriptBu
     menu.style.left = `${anchor.offsetLeft}px`;
     menu.style.top = `${anchor.offsetTop + anchor.offsetHeight + 2}px`;
     menu.hidden = false;
+    floating(menu, { close: hideMenu, opener: anchor, name: "sce-menu" });   // MICRO-SEG13
   };
   const menuItem = (label: string, fn: () => void, data: Record<string, string> = {}): HTMLButtonElement => {
     const b = el("button", "sce-item", label);
@@ -360,10 +362,7 @@ export function mountScriptEditor(doc: Document, host: ScriptHost, buf: ScriptBu
     b.addEventListener("click", () => { hideMenu(); fn(); });
     return b;
   };
-  const outside = (ev: Event): void => {
-    if (!menu.hidden && !menu.contains(ev.target as Node) && ev.target !== openB && ev.target !== tplB) hideMenu();
-  };
-  doc.addEventListener("pointerdown", outside, true);
+  // (MICRO-SEG13 · a press outside, Esc: `floating`)
 
   /** Leave the buffer? (asked when it holds unsaved changes) */
   const mayLeave = async (): Promise<boolean> => !isModified(buf) || host.askConfirm(t("sce.discard", { name: buf.name ?? t("sce.untitled") }), t("sce.discardOk"));
@@ -443,7 +442,6 @@ export function mountScriptEditor(doc: Document, host: ScriptHost, buf: ScriptBu
   // the Mac ⌥P types «π»; Alt+Shift+P is «Try».
   root.addEventListener("keydown", (ev) => {
     if (ev.altKey && !ev.ctrlKey && !ev.metaKey && ev.code === "KeyP") { ev.preventDefault(); void run(ev.shiftKey); }
-    if (ev.key === "Escape" && !menu.hidden) { ev.preventDefault(); hideMenu(); }
     ev.stopPropagation();
   });
 
@@ -457,7 +455,7 @@ export function mountScriptEditor(doc: Document, host: ScriptHost, buf: ScriptBu
     },
     refresh() { paintWhere(); paintTitle(); },
     focus() { view.focus(); },
-    destroy() { hideMenu(); doc.removeEventListener("pointerdown", outside, true); view.destroy(); root.remove(); },
+    destroy() { hideMenu(); view.destroy(); root.remove(); },
     run, save, open, template, setText,
   };
 }

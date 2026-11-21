@@ -23,6 +23,7 @@
  * Playwright's `page.on("dialog")`, which no longer fires.
  */
 import { t } from "./i18n";
+import { floating, setDiscardAsker } from "./floating";
 
 export interface DialogOptions {
   /** the head of the card; default: the app's name for a question */
@@ -207,10 +208,13 @@ export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
     // capture, so a canvas's own Enter/Escape never sees a key meant for the
     // dialog; everything else the dialog swallows too — it is modal
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        e.preventDefault(); e.stopPropagation();
-        close(o.cancel === null);   // a notice: Escape is its only OK
-      } else if (e.key === "Enter" && !e.isComposing
+      // a dialog asked from a dialog (MICRO-SEG13 · «discard?»): the keys are the
+      // top one's. Escape is `floating`'s: it closes this one, or asks first
+      // when something was written in it
+      const tops = document.querySelectorAll(".modal.app-dialog");
+      if (tops[tops.length - 1] !== back) return;
+      if (e.key === "Escape") return;
+      if (e.key === "Enter" && !e.isComposing
                  && !(e.target instanceof HTMLTextAreaElement)
                  && !(e.target instanceof HTMLButtonElement && e.target !== okBtn)) {
         e.preventDefault(); e.stopPropagation();
@@ -229,8 +233,19 @@ export function openDialog(o: DialogOptions): Promise<DialogAnswer> {
     okBtn.addEventListener("click", () => close(true));
     for (const b of chosen) b.addEventListener("click", () => close(true, b.dataset.dialogChoice));
     cancelBtn?.addEventListener("click", () => close(false));
-    back.addEventListener("mousedown", (e) => { if (e.target === back && o.cancel !== null) close(false); });
+    // MICRO-SEG13 · a WORK window once something is written in it: a press
+    // outside the card closes it only while it holds nothing; Esc asks then
+    let touched = false;
+    card.addEventListener("input", (e) => { if (e.isTrusted) touched = true; });
+    card.addEventListener("change", (e) => { if (e.isTrusted) touched = true; });
+    back.addEventListener("mousedown", (e) => { if (e.target === back && o.cancel !== null && !touched) close(false); });
     document.body.appendChild(back);
+    floating(back, {
+      work: true,
+      dirty: () => touched && o.cancel !== null,
+      close: () => close(o.cancel === null),   // a notice: Escape is its only OK
+      name: "dialog",
+    });
     document.addEventListener("keydown", onKey, true);
     if (field) { field.focus(); field.select(); }
     else (o.danger && cancelBtn ? cancelBtn : okBtn).focus();
@@ -259,3 +274,8 @@ export async function askConfirm(message: string, opts: Omit<DialogOptions, "mes
 export async function tell(message: string, opts: Omit<DialogOptions, "message" | "cancel"> = {}): Promise<void> {
   await openDialog({ ...opts, message, cancel: null });
 }
+
+// MICRO-SEG13 · the question `floating` asks before Esc throws away what was written
+setDiscardAsker(() => askConfirm(t("float.discardAsk"), {
+  ok: t("float.discard"), cancel: t("float.keep"), danger: true, kind: "discard",
+}));

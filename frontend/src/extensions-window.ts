@@ -65,6 +65,7 @@
  * Nothing here knows `main.ts`: the host gives the dialogs, the file pickers, the
  * words. Every installation is the library's (W21); the window has none of its own.
  */
+import { floating } from "./floating";
 import type { DevInfo } from "./plugin-commands";
 import { codeCounts, repoHost, whereOf, type WhereCommand, type WherePanel, type WherePlace } from "./extensions-where";
 import {
@@ -893,6 +894,14 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     sec.setAttribute("role", "dialog");
     sec.setAttribute("aria-label", t("ext.reposHead"));
     sec.hidden = !reposOpen;
+    // MICRO-SEG13 · a press outside, Esc, the selector again close it; an address
+    // being typed in it keeps it open (a work window)
+    if (reposOpen) floating(sec, {
+      work: true, name: "ext-repos",
+      close: () => { reposOpen = false; repaint(); },
+      opener: () => sec.ownerDocument.querySelector<HTMLElement>("[data-ext=repos]"),
+      openerSel: "[data-ext=repos]",
+    });
     const hd = el("div", "ext-repos-h");
     const hl = el("div", "ext-repos-hl");
     hl.append(el("b", "ext-missing-h", t("ext.reposHead")), el("span", "cw-hint", t("ext.reposLead")));

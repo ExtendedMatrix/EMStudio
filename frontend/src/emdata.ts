@@ -15,6 +15,7 @@
 //  · cards for Units (the provenance chain), Documents (master and instances)
 //    and Chronology.
 
+import { floating } from "./floating";
 import { modelsRows, modelsTableHtml, type ModelsCtx } from "./models-sheet";
 import { listMayMove, listStep, ROW_KEYS } from "./list-keys";
 import { LEDGER_SHEETS, ledgerIds, ledgerTableHtml, type LedgerCtx, type LedgerSheet } from "./ledger-sheets";
@@ -536,6 +537,13 @@ function drawPop(): void {
     `<button type="button" data-fall="0">${escapeHtml(t("table.none"))}</button></div>`;
   document.body.appendChild(el);
   el.addEventListener("pointerdown", (e) => e.stopPropagation());
+  // MICRO-SEG13 · a press outside, Esc, its column's button: `floating` (redrawn: the
+  // button by selector)
+  floating(el, {
+    close: () => { closePop(); renderEmData(); }, name: "facet",
+    opener: () => document.querySelector<HTMLElement>(`[data-fpop="${CSS.escape(def.key)}"]`),
+    openerSel: `[data-fpop="${CSS.escape(def.key)}"]`,
+  });
   const pq = el.querySelector<HTMLInputElement>(".fpq");
   if (pq) {
     pq.addEventListener("input", () => {
@@ -565,16 +573,7 @@ function drawPop(): void {
   });
 }
 
-document.addEventListener("pointerdown", (e) => {
-  if (!pop) return;
-  const tgt = e.target as HTMLElement;
-  if (tgt.closest?.(".fpop, [data-fpop]")) return;
-  closePop();
-  renderEmData();
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && pop) { closePop(); renderEmData(); }
-});
+// (MICRO-SEG13 · a press outside and Esc close it: `floating`)
 
 // ── rows for filtering and counting ─────────────────────────────────────────
 function rowsForCounts(sheet: TableView, ctx: ViewCtx, ix: ReturnType<typeof indexOf>):

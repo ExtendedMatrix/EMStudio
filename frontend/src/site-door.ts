@@ -25,6 +25,7 @@
  * the site is found by the datamodel's own fields, everything that writes goes
  * through s3Dgraphy.
  */
+import { floating } from "./floating";
 import type { EmDocument, EmNode } from "./types";
 import { glyphFor } from "./glyphs";
 import { glyphElement } from "./type-icons";
@@ -135,8 +136,7 @@ function siteMenu(site: EmNode, at: HTMLElement): void {
   item(t(fp ? "labsite.footprintAgain" : "labsite.footprintMake"), "site-footprint",
     () => askFootprint(site), deps.readOnly() ? t("labsite.readOnly") : undefined);
   document.body.appendChild(menu);
-  const close = (e: Event) => { if (!menu.contains(e.target as Node)) { menu.remove(); removeEventListener("pointerdown", close, true); } };
-  setTimeout(() => addEventListener("pointerdown", close, true), 0);
+  floating(menu, { close: () => menu.remove(), opener: at, name: "site-menu" });   // MICRO-SEG13
 }
 
 /** The footprint from the proxies of the units named: asked to s3Dgraphy. */

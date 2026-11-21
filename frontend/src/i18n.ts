@@ -2436,6 +2436,10 @@ const EN: Dict = {
   "common.cancel": "Cancel",
   "dlg.title": "EMStudio",
   "dlg.ok": "OK",
+  // MICRO-SEG13 · Esc on a window holding something not yet saved asks first
+  "float.discardAsk": "Discard what you wrote in this window?",
+  "float.discard": "Discard",
+  "float.keep": "Keep writing",
   // ── CONDIVIDI · a LINK to the node's panel, never a copy of it ─────────────
 
   "share.open": "Share this room…",
@@ -11626,6 +11630,9 @@ const IT: Dict = {
   "common.cancel": "Annulla",
   "dlg.title": "EMStudio",
   "dlg.ok": "OK",
+  "float.discardAsk": "Scartare quello che hai scritto in questa finestra?",
+  "float.discard": "Scarta",
+  "float.keep": "Continua a scrivere",
 
   "share.open": "Condividi questa stanza…",
   "share.with": "Condividi con…",

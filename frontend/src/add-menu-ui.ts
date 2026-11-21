@@ -8,6 +8,7 @@
  * handed in as a model; what a pick does is the caller's `onPick`. This file
  * only draws, navigates (↑↓ → ← Enter Esc) and closes.
  */
+import { floating } from "./floating";
 
 export interface AddMenuEntry {
   /** stable key (recents, tests) */
@@ -429,42 +430,27 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
         subOpen ? subOpen.rows[subOpen.hi] : rows[hi];
       if (cur?.run) cur.run();
       else cur?.sub?.();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      if (subOpen) {
-        closeSub();
-        paintHi();
-      } else close();
     }
+    // (Escape: `floating`, below — the submenu first, then the menu)
   });
 
-  const onOutside = (e: PointerEvent): void => {
-    if (!menu.contains(e.target as Node)) close();
-  };
-  // Esc when the focus has left the box (a click on a row's padding, say)
-  const onKey = (e: KeyboardEvent): void => {
-    if (e.key === "Escape" && document.activeElement !== input) {
-      e.stopPropagation();
-      close();
-    }
-  };
   function close(): void {
     if (openMenu?.el !== menu) return;
     openMenu = null;
     if (!picked) queueMicrotask(() => model.onDismiss?.());
     hideTip();
     menu.remove();
-    document.removeEventListener("pointerdown", onOutside, true);
-    document.removeEventListener("keydown", onKey, true);
   }
 
   render();
   document.body.appendChild(menu);
   fit();
   openMenu = { el: menu, close };
-  document.addEventListener("pointerdown", onOutside, true);
-  document.addEventListener("keydown", onKey, true);
+  // MICRO-SEG13 · a press outside, Esc (the submenu first): the one rule
+  floating(menu, {
+    close, name: "add-menu",
+    esc: () => { if (!subOpen) return false; closeSub(); paintHi(); return true; },
+  });
   // p.2 · the list opens on its first row, whole, under the search field —
   // whatever the focus or the engine does to the scroll on the way
   input.focus({ preventScroll: true });

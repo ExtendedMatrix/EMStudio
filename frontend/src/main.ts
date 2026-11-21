@@ -1,4 +1,6 @@
 import "./style.css";
+// MICRO-SEG13 · first: its guard is the first capture listener of the page
+import { floating, floatingOpen, guardFloating } from "./floating";
 import { composeName } from "./person-name";
 import { hdtoDropped, shownCode, studyCode, withCode } from "./hdto";
 import { linksOf, resolveAddress, type GraphDocs } from "./links";
@@ -2386,18 +2388,6 @@ let verPop: HTMLDivElement | null = null;
 function closeVerPop(): void {
   verPop?.remove();
   verPop = null;
-  document.removeEventListener("pointerdown", onVerOutside, true);
-  document.removeEventListener("keydown", onVerKey, true);
-}
-function onVerOutside(e: PointerEvent): void {
-  if (verPop && !verPop.contains(e.target as Node) && e.target !== verBtn)
-    closeVerPop();
-}
-function onVerKey(e: KeyboardEvent): void {
-  if (e.key === "Escape") {
-    e.stopPropagation();
-    closeVerPop();
-  }
 }
 verBtn.addEventListener("click", () => {
   if (verPop) {
@@ -2458,10 +2448,7 @@ verBtn.addEventListener("click", () => {
   const openUp = rect.top - ph - 6 >= 0 || rect.top > window.innerHeight - rect.bottom;
   pop.style.top = (openUp ? Math.max(6, rect.top - ph - 6) : rect.bottom + 6) + "px";
   verPop = pop;
-  setTimeout(() => {
-    document.addEventListener("pointerdown", onVerOutside, true);
-    document.addEventListener("keydown", onVerKey, true);
-  }, 0);
+  floating(pop, { close: closeVerPop, opener: verBtn, name: "version" });   // MICRO-SEG13
 });
 
 let toastTimer: number | undefined;
@@ -2697,6 +2684,8 @@ window.__EM_SCENE__ = () => {
 // the selection, a node's first epoch, its stored position and the undo depth.
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
+  /** MICRO-SEG13 · the floating panels open now, bottom first (their `data-floating`) */
+  floatingOpen: () => floatingOpen().map((el) => el.dataset.floating ?? ""),
   selected: () => [...selectedIds],
   // MICRO-G-SCHEDE · the sheet of the unit shown, its boxes and their states
   sheetReading: () => {
@@ -13584,7 +13573,7 @@ function openEpochMoveMenu(extend: boolean, at?: { x: number; y: number }, ids: 
   sw.onclick = () => openEpochMoveMenu(!extend, at, ids);
   menu.appendChild(sw);
   document.body.appendChild(menu);
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
   (menu.querySelector("button[data-epoch]") as HTMLButtonElement | null)?.focus();
 }
 
@@ -14313,9 +14302,7 @@ function openCopyDialog(destSlot?: string): void {
   card.className = "modal-card cp-card";
   card.dataset.copyDialog = "1";
   pop.appendChild(card);
-  const close = (): void => { pop.remove(); document.removeEventListener("keydown", onKey, true); };
-  const onKey = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
-  document.addEventListener("keydown", onKey, true);
+  const close = (): void => { pop.remove(); };
   const esc = (x: unknown): string => escapeHtml(String(x ?? ""));
   const draw = (): void => {
     const choices: SC.CopyChoices = { fields, relations, embargoed, epoch };
@@ -14404,6 +14391,8 @@ function openCopyDialog(destSlot?: string): void {
   };
   draw();
   document.body.appendChild(pop);
+  // MICRO-SEG13 · a work window: Esc closes it, and asks first once a choice was changed
+  floating(pop, { work: true, close, name: "copy" });
 }
 
 function auxTypeLabel(ft: string): string {
@@ -14582,11 +14571,7 @@ function spaceFileStateOf(key: string | undefined): { state: string; title: stri
 let gisToolsEl: HTMLElement | null = null;
 function closeGisTools(): void {
   gisToolsEl?.remove(); gisToolsEl = null;
-  document.removeEventListener("pointerdown", gisToolsOutside, true);
-  document.removeEventListener("keydown", gisToolsKey, true);
 }
-function gisToolsOutside(e: Event): void { if (gisToolsEl && !gisToolsEl.contains(e.target as Node)) closeGisTools(); }
-function gisToolsKey(e: KeyboardEvent): void { if (e.key === "Escape" && gisToolsEl) { e.stopPropagation(); closeGisTools(); } }
 function openGisTools(r: URow, anchor: HTMLElement): void {
   closeGisTools();
   const g = [...gisSpaces.values()][0];
@@ -14604,8 +14589,7 @@ function openGisTools(r: URow, anchor: HTMLElement): void {
   keepOnScreen(m);
   gisToolsEl = m;
   if (r.gis) m.querySelector(`[data-gis-row="${CSS.escape(r.gis)}"], [data-gis-doc="${CSS.escape(r.gis)}"]`)?.classList.add("vis-flash");
-  document.addEventListener("pointerdown", gisToolsOutside, true);
-  document.addEventListener("keydown", gisToolsKey, true);
+  floating(m, { close: closeGisTools, opener: anchor, name: "gis-tools" });   // MICRO-SEG13
 }
 
 /** MICRO-TESTATE-COERENTI p.2 · the category of «Visibilità ▾» a Space key falls in */
@@ -16231,6 +16215,7 @@ function showEdgeMenu(
   const cvr = (liveCanvas() ?? tileRoot).getBoundingClientRect();
   const area = liveArea().getBoundingClientRect();
   edgeMenu.classList.remove("hidden");
+  floating(edgeMenu, { close: hideEdgeMenu, name: "edge" });   // MICRO-SEG13
   const mw = edgeMenu.offsetWidth || 220;
   const mh = edgeMenu.offsetHeight || 40 * (types.length + 2);
   const x = cvr.left + (tn.x + tn.w) * vp.scale + vp.x + 10;
@@ -17530,17 +17515,6 @@ function hideVocabMenu(): void {
   if (vocabMenuEl) {
     vocabMenuEl.remove();
     vocabMenuEl = null;
-    document.removeEventListener("pointerdown", onVocabOutside, true);
-    document.removeEventListener("keydown", onVocabKey, true);
-  }
-}
-function onVocabOutside(e: PointerEvent): void {
-  if (vocabMenuEl && !vocabMenuEl.contains(e.target as Node)) hideVocabMenu();
-}
-function onVocabKey(e: KeyboardEvent): void {
-  if (e.key === "Escape") {
-    e.stopPropagation();
-    hideVocabMenu();
   }
 }
 function escapeHtml(text: string): string {
@@ -17687,8 +17661,7 @@ function openQualiaPicker(nodeId: string, wx: number, wy: number): void {
   liveArea().appendChild(menu);
   vocabMenuEl = menu;
   setTimeout(() => search.focus(), 0);
-  document.addEventListener("pointerdown", onVocabOutside, true);
-  document.addEventListener("keydown", onVocabKey, true);
+  floating(menu, { close: hideVocabMenu, name: "vocab" });   // MICRO-SEG13
 }
 
 // ---------- toolbar wiring ----------
@@ -17718,6 +17691,7 @@ document.querySelectorAll<HTMLElement>(".dropdown").forEach((dd) => {
     closeAllDropdowns();
     if (!willOpen) return;
     menu.classList.remove("hidden");
+    floating(menu, { close: () => { menu.classList.add("hidden"); closeAllSubmenus(); }, opener: toggle, name: "dd" });
     // (AUDIT C · the `#window-header` branch went with the element: the window
     // bars' menus are placed by `wireBarDropdown`)
   });
@@ -17738,7 +17712,9 @@ document.querySelectorAll<HTMLElement>(".dd-sub").forEach((sub) => {
     e.stopPropagation();
     const willOpen = menu.classList.contains("hidden");
     closeAllSubmenus();
-    if (willOpen) menu.classList.remove("hidden");
+    if (!willOpen) return;
+    menu.classList.remove("hidden");
+    floating(menu, { close: () => menu.classList.add("hidden"), opener: toggle, name: "dd-sub" });
   });
 });
 document.addEventListener("click", () => {
@@ -19459,13 +19435,7 @@ function helpPopover(title: string, rows: Array<[string, string]>): void {
     pop.appendChild(r);
   }
   document.body.appendChild(pop);
-  const close = (e: MouseEvent): void => {
-    if (!pop.contains(e.target as Node)) {
-      pop.remove();
-      document.removeEventListener("pointerdown", close, true);
-    }
-  };
-  setTimeout(() => document.addEventListener("pointerdown", close, true), 0);
+  floating(pop, { close: () => pop.remove(), name: "help" });   // MICRO-SEG13 · a press outside, Esc
 }
 document.getElementById("btn-help-about")?.addEventListener("click", () => {
   helpPopover("EMStudio", [
@@ -20443,6 +20413,13 @@ function openWhoMenu(focus: who.WhoSection | null = null, why = ""): void {
   if (whoChooserOpen) void paintWhoChooser();
   void pollNodeReach();
   void probeServingNode();
+  // MICRO-SEG13 · a work window: a node address typed there keeps it open
+  floating(menu, {
+    work: true, close: closeWhoMenu, name: "who",
+    opener: () => document.getElementById("ns-who-chip"),
+    openerSel: "#ns-who-chip, #footer-identity",
+    inside: "#mode-indicator",   // the status bar's place: it moves the menu to «where»
+  });
 }
 
 /** THE node selector, inside «Nodo e account» (never a popup of its own). */
@@ -20630,20 +20607,7 @@ function paintWhoMenu(menu: HTMLElement): void {
 }
 
 document.getElementById("ns-who-chip")?.addEventListener("click", () => toggleWhoMenu());
-document.addEventListener("pointerdown", (e) => {
-  const m = document.getElementById("who-menu");
-  if (!m) return;
-  const tg = e.target as Node;
-  // the menu, the chip and the doors that open it (the status bar's place)
-  if (m.contains(tg) || document.getElementById("ns-who-chip")?.contains(tg) || modeIndicator.contains(tg)
-      || document.getElementById("footer-identity")?.contains(tg)) return;
-  // a dialog it opened (askText, askConfirm) is not «outside»
-  if ((tg as Element).closest?.(".modal, .app-dialog")) return;
-  closeWhoMenu();
-}, true);
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && document.getElementById("who-menu")) { closeWhoMenu(); document.getElementById("ns-who-chip")?.focus(); }
-});
+// (MICRO-SEG13 · a press outside and Esc: `floating`, the one rule)
 
 function refreshIdentityChip(): void {
   queueMicrotask(renderStatusLine);   // K1 · the access in the status line follows
@@ -22057,6 +22021,8 @@ function openFilterPanel(): void {
   filterPanel.classList.remove("hidden");
   placeOwnedPanels();
   btnViewProps.classList.add("hidden");
+  // MICRO-SEG13 · a press outside or Esc closes it; the focus back on the funnel
+  floating(filterPanel, { close: closeFilterPanel, opener: btnViewProps, name: "filter" });
   // G4 · the filter and the legend are alternatives: the focused window's
   // legend closes when the filter opens
   const w = activeWin();
@@ -22085,12 +22051,7 @@ function closePanelByEsc(which: "filter" | "overlay"): void {
   else closeOverlayPanel();
   giveKeysBackToView(owner);
 }
-filterPanel.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  e.preventDefault();
-  e.stopPropagation();
-  closePanelByEsc("filter");
-});
+// (MICRO-SEG13 · the panel's own Esc went: `floating` closes it)
 
 /**
  * The funnel is shown when it has something to filter: a document open, a CANVAS
@@ -22760,12 +22721,7 @@ overlayPanel.className = "hidden";
 btnViewProps.parentElement?.insertBefore(overlayPanel, filterPanel.nextSibling);
 for (const ev of ["pointerdown", "wheel", "dblclick", "contextmenu"])
   overlayPanel.addEventListener(ev, (e) => e.stopPropagation());
-overlayPanel.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  e.preventDefault();
-  e.stopPropagation();
-  closePanelByEsc("overlay");
-});
+// (MICRO-SEG13 · the panel's own Esc went: `floating` closes it)
 function overlayPanelOpen(): boolean {
   return !overlayPanel.classList.contains("hidden");
 }
@@ -22781,6 +22737,14 @@ function openOverlayPanel(owner: string | null = canvasAnchorId()): void {
   renderOverlayPanel();
   refreshFunnel();
   placeOwnedPanels();
+  // MICRO-SEG13 (E.D.: «chiudere questi pannelli flottanti cliccando fuori») ·
+  // a press outside, Esc or its glyph again closes it; the focus back on the glyph
+  floating(overlayPanel, {
+    close: closeOverlayPanel,
+    opener: () => sceneOverlayBtns.get(owner) ?? btnOverlays,
+    openerSel: `[data-scn-overlays="${CSS.escape(owner)}"]`,
+    name: "overlay",
+  });
 }
 function closeOverlayPanel(): void {
   if (!overlayPanelOpen()) return;
@@ -23120,8 +23084,7 @@ function openGraphMenu(slotId: string, anchor: HTMLElement): void {
   title.className = "edge-menu-title";
   title.textContent = slotLabel(slot);
   menu.appendChild(title);
-  const close = (): void => { menu.remove(); document.removeEventListener("pointerdown", away, true); };
-  const away = (e: Event): void => { if (!menu.contains(e.target as Node)) close(); };
+  const close = (): void => { menu.remove(); };
   const item = (label: string, tail: string, act: string, run: () => void, cls = ""): void => {
     const b = document.createElement("button");
     b.textContent = label;
@@ -23174,7 +23137,7 @@ function openGraphMenu(slotId: string, anchor: HTMLElement): void {
   const mh = menu.offsetHeight || 240;
   menu.style.left = `${Math.round(Math.max(4, Math.min(r.left, window.innerWidth - mw - 4)))}px`;
   menu.style.top = `${Math.round(r.bottom + 2 + mh > window.innerHeight ? Math.max(4, r.top - mh - 2) : r.bottom + 2)}px`;
-  setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
+  floating(menu, { close, opener: anchor, name: "graph-menu" });   // MICRO-SEG13
 }
 
 /**
@@ -24039,17 +24002,7 @@ function renderGeoSections(host: HTMLElement, st: DocumentStore): void {
 // the active file (`georef-card.ts`): never the file, never every graph at once.
 let grCardEl: HTMLElement | null = null;
 function closeGeorefCard(): void { grCardEl?.remove(); grCardEl = null; }
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || !grCardEl || document.querySelector(".modal.app-dialog")) return;
-  e.preventDefault();
-  e.stopPropagation();
-  closeGeorefCard();
-}, true);
-document.addEventListener("pointerdown", (e) => {
-  const tgt = e.target as Element | null;
-  if (!grCardEl || !tgt || grCardEl.contains(tgt) || tgt.closest?.(".modal, .app-dialog, .ctx-menu, [data-gr-open]")) return;
-  closeGeorefCard();
-}, true);
+// (MICRO-SEG13 · a press outside and Esc close it: `floating`, in `openGeorefCard`)
 /** the graphs of the active graph's file (a graph with no file: itself) */
 function georefCardGraphs(): GeorefGraph[] {
   const act = emtree.active();
@@ -24101,6 +24054,9 @@ function openGeorefCard(slotId?: string | null): void {
   for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) card.addEventListener(ev, (e) => e.stopPropagation());
   document.body.appendChild(card);
   grCardEl = card;
+  // its changes are applied as they are made (no draft to lose): a light panel
+  floating(card, { close: () => { if (grCardEl === card) closeGeorefCard(); else card.remove(); },
+    openerSel: "[data-gr-open], #btn-georef", name: "georef" });
   paintGeorefCard();
 }
 document.getElementById("btn-georef")?.addEventListener("click", () => openGeorefCard());
@@ -28059,7 +28015,7 @@ function openNarrativeContextMenu(narrativeId: string, c: number, b: number | nu
     item(t("nv.ctx.chapterHere"), "chapter-here", () => newChapterHere(narrativeId, c, b), b === 0 ? t("nv.ctx.chapterHereFirst") : undefined);
   }
   document.body.appendChild(menu);
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
 }
 
 // NARR-BUTTONS · `setNarrativeOpen()` is GONE. It was the WIN1 back-compat
@@ -28153,22 +28109,9 @@ function openPublishMenu(anchor: HTMLElement): void {
   menu.appendChild(note);
   document.body.appendChild(menu);
   keepOnScreen(menu);
-  const done = (): void => {
-    menu.remove();
-    document.removeEventListener("pointerdown", off, true);
-    document.removeEventListener("keydown", esc, true);
-  };
-  const off = (e: PointerEvent): void => {
-    if (menu.contains(e.target as Node) || anchor.contains(e.target as Node)) return;
-    done();
-  };
-  const esc = (e: KeyboardEvent): void => {
-    if (e.key !== "Escape" || !menu.isConnected) return;
-    e.stopPropagation();
-    done();
-  };
-  document.addEventListener("pointerdown", off, true);
-  document.addEventListener("keydown", esc, true);
+  const done = (): void => { menu.remove(); };
+  // MICRO-SEG13 · a press outside, Esc, «Export ▾» again: `floating`
+  floating(menu, { close: done, opener: anchor, name: "publish" });
   for (const b of menu.querySelectorAll("button")) b.addEventListener("click", done);
 }
 
@@ -28855,6 +28798,9 @@ function detachWindow(src: Win | null, at: { x: number; y: number } | null,
   areaFor(win);
   renderAreaHeaders();
   d.title = `${winTypeLabel(win)} — EMStudio`;
+  // MICRO-SEG13 · the floating panels' guard here too, before the relay: a press
+  // in this window closes a panel with its real target, and is swallowed here
+  off.push(guardFloating(pop));
   off.push(wireRelay(pop, document, {
     isWriting: (el) => isWritingField(el),
     ported: (el) => !!el?.closest?.("[data-ported], #overlay-panel, #filter-panel, #edge-menu"),
@@ -32848,11 +32794,7 @@ function closeSpaceMenu(): void {
   spaceMenuEl?.remove();
   spaceMenuEl = null;
 }
-// a press outside the menu, or Esc, closes it
-document.addEventListener("pointerdown", (e) => {
-  if (spaceMenuEl && !spaceMenuEl.contains(e.target as Node)) closeSpaceMenu();
-}, true);
-document.addEventListener("keydown", (e) => { if (spaceMenuEl && e.key === "Escape") { e.stopPropagation(); closeSpaceMenu(); } }, true);
+// a press outside the menu, or Esc, closes it (MICRO-SEG13: `floating`)
 /** MICRO-INSTALLER-PULSANTE p.2 · an object of the Outliner that did not come:
  *  its reason (as a line, not a verb), then «Find…» — «Find missing files…» */
 function failMenuEntries(r: { failed?: string }): Array<{ label: string; act: string; run: () => void; disabled?: boolean }> {
@@ -32890,6 +32832,7 @@ function spaceMenu(x: number, y: number, head: string, entries: Array<{ label: s
   }
   document.body.appendChild(menu);
   spaceMenuEl = menu;
+  floating(menu, { close: () => { if (spaceMenuEl === menu) closeSpaceMenu(); else menu.remove(); }, name: "space-menu" });
   return menu;
 }
 
@@ -37182,9 +37125,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     return box;
   };
   let visMenu: HTMLElement | null = null;
-  const closeVis = () => { visMenu?.remove(); visMenu = null; document.removeEventListener("pointerdown", visOutside, true); document.removeEventListener("keydown", visKey, true); };
-  const visOutside = (e: Event) => { const el = e.target as HTMLElement; if (visMenu && !visMenu.contains(el) && !el.closest("[data-vis]")) closeVis(); };
-  const visKey = (e: KeyboardEvent) => { if (e.key === "Escape" && visMenu) { e.stopPropagation(); closeVis(); } };
+  const closeVis = () => { visMenu?.remove(); visMenu = null; };
   const redrawVis = () => { if (visMenu) { visMenu.replaceChildren(visibilityBody()); } refresh(); };
   const openVis = (anchor: HTMLElement, territory = false) => {
     if (visMenu) { closeVis(); return; }
@@ -37200,8 +37141,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     keepOnScreen(m);
     visMenu = m;
     if (territory) m.querySelector<HTMLElement>('[data-vis-row="territory"]')?.classList.add("vis-flash");
-    document.addEventListener("pointerdown", visOutside, true);
-    document.addEventListener("keydown", visKey, true);
+    // MICRO-SEG13 · the head is redrawn while it is open: its «Visibility ▾» by selector
+    floating(m, { close: closeVis, opener: () => tail.querySelector<HTMLElement>("[data-vis]"), openerSel: "[data-vis]", name: "vis" });
   };
   visOpeners.set(win.id, (cat?: OverlayKey) => {
     const b = tail.querySelector<HTMLElement>("[data-vis]");
@@ -37211,9 +37152,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   });
   // ── MICRO-E p.6 · «Colori ▾» and its legend ────────────────────────────────
   let colMenu: HTMLElement | null = null;
-  function closeColours(): void { colMenu?.remove(); colMenu = null; document.removeEventListener("pointerdown", colOutside, true); document.removeEventListener("keydown", colKey, true); }
-  function colOutside(e: Event): void { const el = e.target as HTMLElement; if (colMenu && !colMenu.contains(el) && !el.closest("[data-colours], [data-colours-menu]")) closeColours(); }
-  function colKey(e: KeyboardEvent): void { if (e.key === "Escape" && colMenu) { e.stopPropagation(); closeColours(); } }
+  function closeColours(): void { colMenu?.remove(); colMenu = null; }
   function setColours(s2: ColourState): void { setSpaceColours(win.id, s2); if (colMenu) colMenu.replaceChildren(coloursBody()); refresh(); }
   function coloursUnits(): string[] {
     const sp = currentSpace();
@@ -37368,8 +37307,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     document.body.appendChild(m);
     keepOnScreen(m);
     colMenu = m;
-    document.addEventListener("pointerdown", colOutside, true);
-    document.addEventListener("keydown", colKey, true);
+    floating(m, { close: closeColours, opener: anchor, openerSel: "[data-colours], [data-colours-menu]", name: "colours" });
   }
   /** the legend: colour, value, number; a click isolates, another hides, a third gives back.
    *  MICRO-PL09 p.0 · it folds into one line, shows the first rows and «+N altri»,
@@ -41361,17 +41299,9 @@ function openShelfUriForm(anchor: HTMLElement): void {
     form.style.transform = "translateX(-50%)";
   }
   uri.focus();
-  // …and it closes the way every menu closes: the next click elsewhere
-  setTimeout(() => document.addEventListener("click", function away(event) {
-    if (!form.isConnected) {
-      document.removeEventListener("click", away);
-      return;
-    }
-    if (!form.contains(event.target as Node)) {
-      form.remove();
-      document.removeEventListener("click", away);
-    }
-  }), 0);
+  // MICRO-SEG13 · as every menu: a press outside, Esc, its «+» again — but an
+  // address typed in it keeps it open (a work window: Esc asks first)
+  floating(form, { work: true, close: () => form.remove(), opener: anchor, name: "shelf-uri" });
 }
 
 /**
@@ -54099,17 +54029,7 @@ let ccardEl: HTMLElement | null = null;
 /** MICRO-D-GIS-DOCUMENTI p.8 · the card closes with its ✕, Esc and a click
  *  outside it (a dialog the card opened is not «outside») */
 function closeContainerCard(): void { ccardEl?.remove(); ccardEl = null; }
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || !ccardEl || document.querySelector(".modal.app-dialog")) return;
-  e.preventDefault();
-  e.stopPropagation();
-  closeContainerCard();
-}, true);
-document.addEventListener("pointerdown", (e) => {
-  const tgt = e.target as Element | null;
-  if (!ccardEl || !tgt || ccardEl.contains(tgt) || tgt.closest?.(".modal, .app-dialog, .ctx-menu")) return;
-  closeContainerCard();
-}, true);
+// (MICRO-SEG13 · a press outside and Esc close it: `floating`, where it opens)
 async function containerLinksOf(gid: string): Promise<CardLinks | null> {
   const st = store;
   if (!st) return null;
@@ -54272,6 +54192,8 @@ async function openContainerCard(gid: string): Promise<void> {
   card.appendChild(foot);
   document.body.appendChild(card);
   ccardEl = card;
+  // each action applies at once (no draft): a light panel
+  floating(card, { close: () => { if (ccardEl === card) closeContainerCard(); else card.remove(); }, name: "container" });
 }
 
 /** A container's own menu (its header «⋯»): rename, empty, remove when empty. */
@@ -57741,7 +57663,7 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
     void navigator.clipboard?.writeText(entry.path).then(() => toast(t("storage.pathCopied")), () => toast(entry.path));
   });
   document.body.appendChild(menu);
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
 }
 
 // ── MICRO-INGRESSO-ASSET-1 · «Fai entrare un asset» ─────────────────────────
@@ -57833,7 +57755,7 @@ function showBlendObjectMenu(blend: string, object: string, master: string | nul
   };
   menu.append(header, b);
   document.body.appendChild(menu);
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
 }
 
 /** the masters of the graph an object of a .blend already stands for */
@@ -58323,13 +58245,8 @@ async function openStoragePlaces(win: Win, anchor?: HTMLElement): Promise<void> 
     void addStorageRoot(win);
   });
   menu.appendChild(other);
-  // …and it closes the way every menu closes: the next click elsewhere
-  setTimeout(() => document.addEventListener("click", function away(event) {
-    if (!menu.contains(event.target as Node)) {
-      menu.remove();
-      document.removeEventListener("click", away);
-    }
-  }), 0);
+  // …and it closes the way every menu closes (MICRO-SEG13: `floating`)
+  floating(menu, { close: () => menu.remove(), opener: anchor ?? null, name: "storage-places" });
 }
 
 /** Which button opened it, so pressing the same one again closes the menu. */
@@ -61917,6 +61834,8 @@ function wireBarDropdown(
     build?.();
     menu.classList.remove("hidden");
     placeBarMenu(toggle, menu);
+    // MICRO-SEG13 · a window head's «▾»: a press outside, Esc, the «▾» again
+    floating(menu, { close: () => { menu.classList.add("hidden"); closeAllSubmenus(); }, opener: toggle, name: "bar" });
   });
 }
 
@@ -62210,8 +62129,7 @@ function openGraphPicker(anchor: HTMLElement): void {
   const menu = doc.createElement("div");
   menu.className = "et-move-menu gl-menu";
   menu.dataset.menu = "graph-pick";
-  const close = (): void => { menu.remove(); doc.removeEventListener("pointerdown", away, true); };
-  const away = (e: Event): void => { if (!menu.contains(e.target as Node)) close(); };
+  const close = (): void => { menu.remove(); };
   const groups: Array<[string, GraphSlot[]]> = emtree.files.map((f) => [f.name, emtree.slotsOf(f.id)]);
   const loose = emtree.slots.filter((sl) => !sl.fileId || !emtree.file(sl.fileId));
   if (loose.length) groups.push([t("emtree.noFileGroup"), loose]);
@@ -62241,7 +62159,7 @@ function openGraphPicker(anchor: HTMLElement): void {
   const mw = menu.offsetWidth || 220;
   menu.style.left = `${Math.round(Math.max(4, Math.min(r.left, view.innerWidth - mw - 4)))}px`;
   menu.style.top = `${Math.round(r.bottom + 2)}px`;
-  setTimeout(() => doc.addEventListener("pointerdown", away, true), 0);
+  floating(menu, { close, opener: anchor, name: "graph-pick" });   // MICRO-SEG13
 }
 
 /** The active graph's name as the windows say it (or «no graph»). */
@@ -62989,7 +62907,7 @@ function showWorkspaceAddMenu(x: number, y: number): void {
       tp.hintKey ? t(tp.hintKey) : "", () => { void addWorkspaceModel(tp.id); }, tp.id);
   }
   document.body.appendChild(menu);
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
 }
 /** AUDIT N11 · a user's space goes with a toast that brings it back */
 function removeSpace(id: string, label: string): void {
@@ -63019,7 +62937,7 @@ function showWorkspaceTabMenu(x: number, y: number, w: (typeof WORKSPACES)[numbe
     workspaceModified(w.id) ? undefined : t("ws.notModified"));
   else item(t("ws.removeItem"), () => removeSpace(w.id, workspaceLabel(w, t)));
   document.body.appendChild(menu);
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
 }
 renderWorkspaceBar();
 onLocaleChange(renderWorkspaceBar);
@@ -63390,7 +63308,7 @@ function showLaneMenu(clientX: number, clientY: number, lane: { id: string; labe
     });
   }
   document.body.appendChild(menu);
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
 }
 
 (document.getElementById("graph-layout") as HTMLSelectElement).addEventListener(
@@ -64998,6 +64916,12 @@ function hideContextMenu(): void {
   ctxMenuEl?.remove();
   ctxMenuEl = null;
 }
+/** MICRO-SEG13 · the one context menu is a floating panel: a press outside or
+ *  Esc closes it, and the press does nothing else */
+function ctxFloating<T extends HTMLElement>(menu: T): T {
+  floating(menu, { close: () => { if ((ctxMenuEl as HTMLElement | null) === menu) hideContextMenu(); else menu.remove(); }, name: "ctx" });
+  return menu;
+}
 /** Il genitore irrisolto che sta dietro questo nodo della scena, o null.
  *
  *  Chiesto alla CATENA e non al nodo disegnato: il nodo porta un marcatore di
@@ -65075,7 +64999,7 @@ function showMissingParentMenu(
   // LO STESSO elemento del menu del documento: la chiusura al pointerdown fuori
   // esiste già una volta sola (window listener, più in basso), e un secondo
   // meccanismo di chiusura sarebbe un secondo modo di lasciare un menu aperto.
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
 }
 
 /** Delete the node selection — the Delete key and the context menu's «Elimina»,
@@ -65514,8 +65438,10 @@ function openContinuityForm(unitId: string, x: number, y: number): void {
   bar.append(ok, no);
   box.appendChild(bar);
   { const h = store ? multiHint(multiScopeFor(store, unitId), hasContinuity) : null; if (h) box.appendChild(h); }
-  box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); box.remove(); } });
   document.body.appendChild(box);
+  // MICRO-SEG13 · a work window: Esc (from anywhere now) and a press outside close
+  // it while nothing was chosen in it; after that Esc asks first
+  floating(box, { work: true, close: () => box.remove(), name: "continuity" });
   epSel.focus();
 }
 
@@ -66155,17 +66081,10 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
   menu.appendChild(sepDel);
   item(t("ctx.delete"), () => deleteSelectedNodes(), "ctx-danger");
   document.body.appendChild(menu);
-  ctxMenuEl = keepOnScreen(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
 }
 
-// close the menu on any pointerdown outside it
-window.addEventListener(
-  "pointerdown",
-  (e) => {
-    if (ctxMenuEl && !ctxMenuEl.contains(e.target as Node)) hideContextMenu();
-  },
-  true,
-);
+// (MICRO-SEG13 · a press outside closes the menu: `ctxFloating`, the one rule)
 
 /**
  * AUDIT N1 · WHERE A KEY BELONGS. A node shortcut (Backspace/Delete, arrows,
@@ -67482,7 +67401,9 @@ function renderToolsPlugins(): void {
       e.stopPropagation();
       const willOpen = flyout.classList.contains("hidden");
       closeAllSubmenus();
-      if (willOpen) flyout.classList.remove("hidden");
+      if (!willOpen) return;
+      flyout.classList.remove("hidden");
+      floating(flyout, { close: () => flyout.classList.add("hidden"), opener: toggle, name: "dd-sub" });
     });
     sub.append(toggle, flyout);
     ext.after(sub);
