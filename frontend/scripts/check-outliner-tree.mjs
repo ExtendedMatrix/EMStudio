@@ -300,4 +300,30 @@ if (path) {
     "…a row per stack: its eye, its count, a click selects its node");
   ok(!flat(facts).some((r) => r.key.endsWith("/plyr")), "no stack drawn: no branch");
 }
+// MICRO-SEG17 · the Sheets' Outliner: the stratigraphic units alone (the datamodel's
+// family), organised as ever; no other dimension, no paradata, no RMSF under a find;
+// a pick elsewhere of a node that is not a unit opens nothing
+{
+  const ty = O.stratigraphicTypes();
+  for (const t of ["US", "USVs", "USVn", "SF", "VSF", "USD", "serSU"])
+    ok(ty.includes(t), `${t} is a stratigraphic unit by the datamodel`);
+  for (const t of ["document", "extractor", "combiner", "property", "author", "EpochNode", "representation_model", "BR"])
+    ok(!ty.includes(t), `${t} is not`);
+  if (process.env.DUMP) console.log(ty.join(" "));
+  eq(O.countUnits(doc), 5, "five units (the removed one apart)");
+  eq(O.countUnits(null), 0, "no graph, no unit");
+  const rows = run({ strata: true, sync3d: true, paradata: true, dims: ["documents", "authors", "models"] });
+  eq(rows.filter((r) => r.kind === "dim").map((r) => r.label), ["Units"], "one dimension: the units (whatever the window's dimensions)");
+  const L = labels(rows); if (process.env.DUMP) console.log(L.join("\n"));
+  ok(L.includes("      Età romana") && L.includes("        US1") && L.includes("          US2 ·grey"), "…by epoch, the containers indented, as ever");
+  ok(!rows.some((r) => r.id === "RMSF1"), "…no RMSF under the find");
+  ok(rows.filter((r) => r.kind === "node").every((r) => ["US1", "US2", "USV10", "SF1", "US9"].includes(r.id)), "…every node row a unit");
+  eq(rows.find((r) => r.kind === "dim").count, "2 / 5", "…the count of the units (synced: present / all; SF1 has its RMSF)");
+  const alpha = run({ strata: true, hierarchy: "alpha" });
+  eq(alpha.filter((r) => r.kind === "node").map((r) => r.label), ["SF1", "US1", "US2", "US9", "USV10"], "alphabetical: the units alone");
+  const b = { sources, opts: { ...O.DEFAULT_OPTS, strata: true }, texts, toggled: new Set() };
+  eq(O.opensForNode(b, "D1"), [], "a document picked elsewhere opens nothing here");
+  eq(O.opensForNode(b, "RMSF1"), [], "…nor a model");
+  eq(O.opensForNode({ ...b, opts: O.DEFAULT_OPTS }, "D1"), ["s1|dim:documents"], "(without the filter the document's branch opens)");
+}
 console.log(`check-outliner-tree: ${checks} checks OK`);

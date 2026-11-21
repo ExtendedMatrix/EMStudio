@@ -87,6 +87,12 @@ export interface UnifiedDeps {
   vocabMark?: (row: URow) => { state: string; glyph: string; tip: string } | null;
   /** MICRO-PL07 p.0 · a GIS layer's tools (opacity, a DEM's surface and contours) */
   gisMenu?: (row: URow, anchor: HTMLElement) => void;
+  /** MICRO-SEG17 · the Sheets' filter, said at the head of the list: its words
+   *  («Stratigraphic units — 116», or that everything is shown), the switch's
+   *  word and tooltip, its state; null: no filter here (another workspace) */
+  strata?: () => { label: string; button: string; title: string; on: boolean } | null;
+  /** …the switch pressed («Show all» / back to the units alone) */
+  toggleStrata?: () => void;
 }
 
 /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · what the old Outliner of the scene did on
@@ -193,6 +199,31 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   };
   drawColHead();
 
+  // MICRO-SEG17 · a discreet line above the columns: the Sheets' filter and its switch
+  const strataBar = document.createElement("div");
+  strataBar.className = "uo-strata";
+  strataBar.dataset.uoStrata = "1";
+  root.insertBefore(strataBar, colHead);
+  const drawStrata = (): void => {
+    const s = d.strata?.() ?? null;
+    strataBar.hidden = !s;
+    strataBar.textContent = "";
+    if (!s) return;
+    strataBar.classList.toggle("uo-strata-on", s.on);
+    const lab = document.createElement("span");
+    lab.className = "uo-strata-l";
+    lab.textContent = s.label;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "uo-strata-b";
+    b.dataset.uoStrataToggle = "1";
+    b.textContent = s.button;
+    b.title = s.title;
+    b.setAttribute("aria-pressed", s.on ? "false" : "true");
+    b.addEventListener("click", (e) => { e.stopPropagation(); d.toggleStrata?.(); });
+    strataBar.append(lab, b);
+  };
+
   let rows: URow[] = [];
   /** p.5 · per row, the epoch whose branch it is in (its colour behind the row) and the band's parity */
   let bands: Array<{ epoch: string; odd: boolean; first: boolean } | null> = [];
@@ -215,6 +246,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   };
 
   const build = (): void => {
+    drawStrata();
     const opts = d.opts();
     rows = flattenOutliner({ sources: d.sources(), opts, texts: d.texts(), toggled: d.toggled(), geoMark: d.geoMark });
     // MICRO-A-PROPRIO-EREDITATO · the epochs' colours only when the Outliner is
@@ -896,6 +928,8 @@ export function outlinerSelector(opts: () => OutlinerOpts, set: (o: OutlinerOpts
       item(w.grey, o.absent === "grey", "radio", () => set({ ...opts(), absent: "grey" }), "absent:grey");
       item(w.filter, o.absent === "filter", "radio", () => set({ ...opts(), absent: "filter" }), "absent:filter");
       if (w.geoOwn) item(w.geoOwn, !!o.geoOwn, "check", () => set({ ...opts(), geoOwn: !opts().geoOwn }), "geo-own");
+      // MICRO-SEG17 · the Sheets' units alone: no dimension to choose (its line says «Show all»)
+      if (o.strata) return;
       head(w.dims);
       for (const dm of DIMS) {
         if (dm === "paradata") {

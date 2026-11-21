@@ -232,7 +232,7 @@ import {
 } from "./theme";
 import { buildNodeList, outlinerMark, type NodeListCallbacks } from "./nodelist";
 // MICRO-OUTLINER-UNICO · the one Outliner (sources → graphs → every dimension)
-import { emptyFacts, type Dim, type OutlinerOpts, type OutlinerSourceIn, type ThreeFacts, type URow } from "./outliner-tree";
+import { countUnits, emptyFacts, type Dim, type OutlinerOpts, type OutlinerSourceIn, type ThreeFacts, type URow } from "./outliner-tree";
 import { buildOutline } from "./outline";
 import { epochKind, epochsOf as epochsOfNode, planDoes, planEpochs, type EpochPlan, type EpochVerb } from "./epoch-moves";
 import { mountUnifiedOutliner, outlinerSelector, readOpts, type SpaceRowDeps } from "./unified-outliner";
@@ -13266,16 +13266,24 @@ function unifiedOptsOf(win: Win): OutlinerOpts {
   // in Fonti the Outliner took the place of the Documents sheet: its documents open first
   return { ...o, query: unifiedQuery.get(win.id) ?? "", ...(win.id.startsWith("provenance:") ? { firstOpen: "documents" as Dim } : {}),
     // MICRO-SPAZIO-CONTAINER p.8 · in the Space the dimensions are the 3D's, the epoch above them
-    ...(win.id.startsWith("space:") ? { space: true } : {}) };
+    ...(win.id.startsWith("space:") ? { space: true } : {}),
+    // MICRO-SEG17 · in the Sheets the stratigraphic units alone, unless «Show all»
+    ...(uoStrataHere(win) && !uoStrataAll(win) ? { strata: true } : {}) };
 }
+/** MICRO-SEG17 · the Outliners that filter to the stratigraphic units: the ones of
+ *  the Sheets workspace (the sheets describe the units, and only them). The
+ *  other workspaces are as they were */
+function uoStrataHere(win: Win): boolean { return uoWorkspaceOf(win) === "sheets"; }
+/** …«Show all» pressed in this window (its state, remembered with the window) */
+function uoStrataAll(win: Win): boolean { return winCurrent(win, "outliner.strataAll") === true; }
 const UO_SYNC_KEY = "emstudio.outlinerSync";
 function uoWorkspaceOf(win: Win): string { return win.id.split(":")[0] || win.id; }
 function uoWorkspaceSync(): Record<string, boolean> {
   try { const v = JSON.parse(localStorage.getItem(UO_SYNC_KEY) ?? "{}"); return v && typeof v === "object" ? v : {}; } catch { return {}; }
 }
 function setUnifiedOpts(win: Win, o: OutlinerOpts): void {
-  const { query, space, ...keep } = o;
-  void query; void space;
+  const { query, space, strata, ...keep } = o;
+  void query; void space; void strata;
   try { localStorage.setItem(UO_SYNC_KEY, JSON.stringify({ ...uoWorkspaceSync(), [uoWorkspaceOf(win)]: !!o.sync3d })); } catch { /* full */ }
   setWinCurrent(win, "outliner.opts", keep);
   unifiedApis.get(win.id)?.refresh();
@@ -14437,6 +14445,19 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
                                  outOfStep: (n, theirs, ref) => t("al.epochsOut", { n: String(n), theirs, ref }), follows: t("uo.c.follows"),
                                  ownChoice: (e) => t("uo.c.ownChoice", { epochs: e }) } }),
     opts: () => unifiedOptsOf(win),
+    // MICRO-SEG17 · the Sheets' filter said at the head, and its switch (per window)
+    strata: () => {
+      if (!uoStrataHere(win)) return null;
+      const on = !uoStrataAll(win);
+      return on
+        ? { on, label: t("uo.strata.label", { n: String(countUnits(store?.doc)) }), button: t("uo.strata.showAll"), title: t("uo.strata.showAllTitle") }
+        : { on, label: t("uo.strata.allLabel"), button: t("uo.strata.only"), title: t("uo.strata.onlyTitle") };
+    },
+    toggleStrata: () => {
+      setWinCurrent(win, "outliner.strataAll", uoStrataAll(win) ? null : true);
+      unifiedApis.get(win.id)?.refresh();
+      renderAreaHeaders();
+    },
     toggled: () => new Set((winCurrent(win, "outliner.toggled") as string[] | null) ?? []),
     setToggled: (s) => setWinCurrent(win, "outliner.toggled", s.size ? [...s] : null),
     selectedId: () => selectedId,

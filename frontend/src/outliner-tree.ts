@@ -35,7 +35,7 @@
  */
 import { buildOutline } from "./outline";
 import { presenceIndex } from "./epoch-presence";
-import { classIsA, classOf } from "./rules";
+import { classIsA, classOf, typesOfClass } from "./rules";
 import type { EmDocument, EmNode } from "./types";
 
 export type Dim = "units" | "documents" | "authors" | "epochs" | "models" | "proxies" | "gis" | "paradata" | "other" | "aux";
@@ -69,6 +69,11 @@ export interface OutlinerOpts {
   space?: boolean;
   /** MICRO-PL00 · only the objects with a georeference of their own (and the rows above them) */
   geoOwn?: boolean;
+  /** MICRO-SEG17 · the Outliner of the SHEETS: the stratigraphic units alone (the
+   *  family the sheets describe, by the datamodel's classes: `isUnitType`),
+   *  organised as ever — no other dimension, no paradata, no RMSF under a find.
+   *  Set by the window (never persisted in its options) unless «Show all» */
+  strata?: boolean;
   query: string;
 }
 
@@ -268,13 +273,33 @@ const byName = (a: EmNode, b: EmNode): number => collator.compare(nameOf(a), nam
 
 const is = (n: EmNode, cls: string): boolean => classIsA(classOf(n.node_type), cls);
 
+/** MICRO-SEG17 · a stratigraphic UNIT, as the datamodel says it: a
+ *  `StratigraphicNode` that is not a `ContinuityNode` (the continuity mark is
+ *  not a unit). The one test of the «units» dimension, and of the Sheets' Outliner */
+export const isUnitType = (t: string | undefined): boolean => {
+  const c = classOf(t);
+  return classIsA(c, "StratigraphicNode") && !classIsA(c, "ContinuityNode");
+};
+
+/** MICRO-SEG17 · the node types of the stratigraphic units, read from the datamodel */
+export function stratigraphicTypes(): string[] {
+  return typesOfClass("StratigraphicNode").filter(isUnitType).sort();
+}
+
+/** MICRO-SEG17 · how many stratigraphic units a graph holds (the removed ones apart) */
+export function countUnits(doc: EmDocument | null | undefined): number {
+  let n = 0;
+  for (const x of doc?.graph.nodes ?? []) if (!removed(x) && isUnitType(x.node_type)) n++;
+  return n;
+}
+
 /** Which dimension a node is listed in (null: listed as the child of another,
  *  or not a thing of the graph to list). By the datamodel's classes. */
 export function dimOf(n: EmNode, gisIds: Set<string>): Dim | null {
   const t = n.node_type;
   if (t === "representation_model_doc" || t === "representation_model_sf") return null;   // under its owner
   if (gisIds.has(n.id)) return "gis";
-  if (is(n, "StratigraphicNode") && !is(n, "ContinuityNode")) return "units";
+  if (isUnitType(t)) return "units";
   if (is(n, "DocumentNode")) return "documents";
   if (is(n, "AuthorNode")) return "authors";
   if (t === "EpochNode") return "epochs";
@@ -311,7 +336,6 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     if (l) l.push(n); else lists.set(d, [n]);
   }
   const k = (s: string) => `${g.slot}|${s}`;
-  const isUnitType = (t: string | undefined) => { const c = classOf(t); return classIsA(c, "StratigraphicNode") && !classIsA(c, "ContinuityNode"); };
   let olMemo: ReturnType<typeof buildOutline> | null = null;
   const outlineOf = () => (olMemo ??= buildOutline(doc, live, isUnitType));
 
@@ -480,7 +504,8 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     const units = lists.get("units") ?? [];
     const present = (n: EmNode) => facts.proxies.has(n.id) || (facts.rmsf.get(n.id)?.length ?? 0) > 0;
     const mk = (n: EmNode): TNode => {
-      const sub = (facts.rmsf.get(n.id) ?? []).map((rm) => byId.get(rm)).filter((x): x is EmNode => !!x)
+      // MICRO-SEG17 · in the Sheets the units alone: an RMSF is a model
+      const sub = (opts.strata ? [] : facts.rmsf.get(n.id) ?? []).map((rm) => byId.get(rm)).filter((x): x is EmNode => !!x)
         .map((rm) => ({ row: { key: k(`units/${n.id}/rmsf:${rm.id}`), kind: "sub" as const, label: nameOf(rm), id: rm.id, slot: g.slot,
           glyph: String(rm.node_type), eye: `rm:${rm.id}` }, present: true, match: nameOf(rm).toLowerCase() }));
       return leaf(n, `units/${n.id}`, present(n), facts.proxies.has(n.id) ? { eye: `proxy:${n.id}` } : {}, sub);
@@ -772,7 +797,8 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
   };
   const out: TNode[] = [];
   for (const d of DIMS) {
-    const shown = d === "paradata" ? paradataShown(opts) : opts.dims.includes(d);
+    // MICRO-SEG17 · the Sheets' Outliner: the units, nothing else
+    const shown = opts.strata ? d === "units" : d === "paradata" ? paradataShown(opts) : opts.dims.includes(d);
     if (!shown) continue;
     if (d === "aux" && !g.aux.length) continue;
     if (d === "gis" && !facts.gis.length) continue;
