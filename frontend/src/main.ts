@@ -14530,7 +14530,12 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
       const c = String(((n?.data ?? {}) as Record<string, unknown>).color ?? "").trim();
       return /^#[0-9a-f]{3,8}$/i.test(c) || /^(rgb|hsl)a?\(/i.test(c) ? c : n ? "var(--text-muted)" : null;
     },
-    columnWords: { arrow: t("s3.arrow"), eye: t("uo.eye"), pin: t("uo.pinHead") },
+    // MICRO-SEG21 · the three columns' words (the padlock went to the row's menu)
+    columnWords: { arrow: t("uo.col.arrow"), eye: t("uo.col.eye"), isolate: t("uo.col.isolate"),
+                   eyeOn: t("uo.col.eyeOn"), eyeOff: t("uo.col.eyeOff"), arrowOn: t("uo.col.arrowOn"), arrowOff: t("uo.col.arrowOff"),
+                   isolateOn: t("uo.col.isolateOn"), isolateOff: t("uo.col.isolateOff"), pinned: t("uo.col.pinned") },
+    // H, Shift+H, Alt+H from the Outliner: the Space's own (`spaceHide`)
+    hideKey: (mode) => spaceHide(mode),
     // MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · a row dropped on an epoch: moved (or, with Alt, extended)
     epochDrop: (r: URow, epoch: string, extend: boolean) => { if (r.id) void epochGesture(r.id, extend ? "extend" : "move", epoch, r.epochAt || null); },
     chapterDropLabel: (r: URow, chapter: string) => (r.id && r.slot === emtree.activeId && store?.node(r.id) ? t("uo.dropChapter", { chapter }) : null),
@@ -14753,6 +14758,17 @@ function outlinerKeyMenu(r: URow, at: { x: number; y: number }): void {
       setSpace3dPrefs({ ...p, hidden: [...new Set([...p.hidden, ...keys])] });
       setSpaceSel(withoutKeys(spaceSel(), (k) => keys.includes(k)));
     } },
+    // MICRO-SEG21 · the padlock left the row's columns: lock / unlock the position here
+    ...(key.startsWith("x3d:") ? [] : [(() => {
+      const pinnedNow = space3dPrefs().pinned ?? [];
+      const all = keys.every((k) => pinnedNow.includes(k));
+      return { label: t(all ? "uo.sp.unpin" : "uo.sp.pin"), act: "pin", run: () => {
+        const p = space3dPrefs();
+        const s2 = new Set(p.pinned ?? []);
+        for (const k of keys) if (all) s2.delete(k); else s2.add(k);
+        setSpace3dPrefs({ ...p, pinned: [...s2] });
+      } };
+    })()]),
     { label: t(keys.length > 1 ? "uo.sp.isolateMany" : "s3.isolate"), act: "isolate", run: () => {
       if (keys.length === 1) { spaceIsolated = spaceIsolated === key ? null : key; refreshSurfaces("scene"); return; }
       // several: what is not selected and drawn now is hidden (Shift+H, as Blender)

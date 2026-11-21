@@ -74,8 +74,12 @@ export interface UnifiedDeps {
   containerDropLabel?: (row: URow, groupId: string, from: string | null, add: boolean) => string | null;
   /** MICRO-RITOCCHI-CHIARI p.5 · an epoch's colour (the Matrix's lane, its band), for its branch */
   epochColor?: (epochId: string) => string | null;
-  /** …the words of the columns' heading (Blender's Outliner: arrow, eye, padlock) */
-  columnWords?: { arrow: string; eye: string; pin: string };
+  /** MICRO-SEG21 · the words of the fixed columns: the heading's (Blender's
+   *  Outliner: isolate, arrow, eye) and each icon's, on and off */
+  columnWords?: ColumnWords;
+  /** MICRO-SEG21 · H hides the selection, Shift+H the rest, Alt+H shows all —
+   *  Blender's keys, from the Outliner too (the Space's own `spaceHide`) */
+  hideKey?: (mode: "selected" | "unselected" | "reveal") => void;
   /** p.9 · «Completa il container…» on a container's row */
   card?: (row: URow) => void;
   /** p.4 · the Space's controls on a row that has something in the scene */
@@ -137,6 +141,31 @@ export interface SpaceRowDeps {
   blendState?: (id: string) => { sign: string; state: string; title: string } | null;
 }
 
+/** MICRO-SEG21 · the tooltips of the fixed columns */
+export interface ColumnWords {
+  arrow: string; eye: string; isolate: string;
+  eyeOn: string; eyeOff: string; arrowOn: string; arrowOff: string; isolateOn: string; isolateOff: string;
+  /** the quiet padlock beside the name of an object whose position is locked */
+  pinned: string;
+}
+
+/** MICRO-SEG21 · the icons of the fixed columns, drawn as the design system's
+ *  (viewBox 16, a 1.4 line, round ends): an eye open / shut (thinner than the
+ *  viewport bar's), the mouse's arrow (full: selectable; an empty outline,
+ *  attenuated: not), the isolate's target (the ◎ it was, the inner disc full
+ *  when on). The same SVG in the heading and on every row. */
+const SVG = (body: string): string =>
+  `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+export const COL_ICONS = {
+  eyeOn: SVG(`<path d="M1.6 8C3.2 5.2 5.4 3.8 8 3.8s4.8 1.4 6.4 4.2c-1.6 2.8-3.8 4.2-6.4 4.2S3.2 10.8 1.6 8Z"/><circle cx="8" cy="8" r="1.9"/>`),
+  eyeOff: SVG(`<path d="M1.6 6.6C3.2 9 5.4 10.2 8 10.2s4.8-1.2 6.4-3.6"/><path d="M3.8 9.1 2.8 10.6M8 10.2v1.9M12.2 9.1l1 1.5"/>`),
+  arrowOn: SVG(`<path d="M4 2.2v10.4l2.7-2.5 1.9 4.1 1.7-.8-1.9-4h3.6Z" fill="currentColor"/>`),
+  arrowOff: SVG(`<path d="M4 2.2v10.4l2.7-2.5 1.9 4.1 1.7-.8-1.9-4h3.6Z"/>`),
+  isolateOn: SVG(`<circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="8" r="2.2" fill="currentColor"/>`),
+  isolateOff: SVG(`<circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="8" r="2.2"/>`),
+  pin: `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7.2" width="9" height="6.6" rx="1.2"/><path d="M5.6 7.2V5.3a2.4 2.4 0 0 1 4.8 0v1.9"/></svg>`,
+} as const;
+
 export interface UnifiedApi {
   refresh: () => void;
   setSelected: (id: string | null, reveal?: boolean) => void;
@@ -170,8 +199,9 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   host.appendChild(root);
 
   // MICRO-RITOCCHI-CHIARI p.4 · the columns' heading, as Blender's Outliner: the
-  // icons of the fixed columns at the right of every row (↖ selectable, ◉ visible,
-  // 🔒 position locked — in the Space; the eye alone elsewhere)
+  // icons of the fixed columns at the right of every row. MICRO-SEG21 · from the
+  // right as Blender's: the eye (visible), the arrow (selectable), the isolate —
+  // in the Space; the eye alone elsewhere. The padlock is in the row's menu now.
   const colHead = document.createElement("div");
   colHead.className = "uo-colhead";
   colHead.dataset.uoColhead = "1";
@@ -185,16 +215,17 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     colHead.appendChild(fill);
     const cols = document.createElement("span");
     cols.className = "uo-cols";
-    const cell = (glyph: string, title: string, k: string) => {
+    const cell = (svg: string, title: string, k: string) => {
       const c = document.createElement("span");
       c.className = `uo-col uo-col-${k}`;
-      c.textContent = glyph;
+      c.innerHTML = svg;
       c.title = title;
+      c.setAttribute("aria-label", title);
       cols.appendChild(c);
     };
-    if (d.space) cell("↖", W?.arrow ?? "", "arrow");
-    cell("◉", W?.eye ?? "", "eye");
-    if (d.space) cell("🔒", W?.pin ?? "", "pin");
+    if (d.space) cell(COL_ICONS.isolateOff, W?.isolate ?? "", "isolate");
+    if (d.space) cell(COL_ICONS.arrowOn, W?.arrow ?? "", "arrow");
+    cell(COL_ICONS.eyeOn, W?.eye ?? "", "eye");
     colHead.appendChild(cols);
   };
   drawColHead();
@@ -325,6 +356,29 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       lab.append(" ", ds);
     }
     el.appendChild(lab);
+    if (r.note) {
+      // MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 · a member living in another epoch: where.
+      // MICRO-SEG21 · an informative sign (⟲ survives from an earlier epoch, ⟂ its
+      // epochs, «solo studio»…) sits quietly beside the name, only where it applies
+      const n = document.createElement("span");
+      n.className = "uo-note";
+      n.dataset.note = "1";
+      n.textContent = r.note;
+      if (r.noteTitle) { n.title = r.noteTitle; n.setAttribute("aria-label", r.noteTitle); }
+      el.appendChild(n);
+    }
+    // MICRO-SEG21 · the padlock left the columns: on a locked object, a quiet sign
+    // beside the name (unlocked from the row's menu, as the lock)
+    if (d.space && r.skey && !r.ghost && d.space.pinned?.(r.skey)) {
+      const k = document.createElement("span");
+      k.className = "uo-pinmark";
+      k.dataset.pinned = "1";
+      k.innerHTML = COL_ICONS.pin;
+      const w = d.columnWords?.pinned ?? "";
+      k.title = w;
+      k.setAttribute("aria-label", w);
+      el.appendChild(k);
+    }
     // p.5 · the epoch's colour behind its branch (the Matrix's band)
     const band = bands[i];
     const bc = band && d.epochColor ? d.epochColor(band.epoch) : null;
@@ -347,15 +401,6 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     }
     if (r.alt) el.classList.add("uo-alt");
     if (r.ghost) el.classList.add("uo-ghost");
-    if (r.note) {
-      // MICRO-OUTLINER-EPOCHE-TOOLTIP p.1 · a member living in another epoch: where
-      const n = document.createElement("span");
-      n.className = "uo-note";
-      n.dataset.note = "1";
-      n.textContent = r.note;
-      if (r.noteTitle) n.title = r.noteTitle;
-      tail.appendChild(n);
-    }
     if (r.followGroup && d.follow) {
       const f = document.createElement("button");
       f.type = "button";
@@ -433,21 +478,8 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
         c.textContent = `${alt} ▾`;
         tail.appendChild(c);
       }
-      if (r.skey && !r.skey.startsWith("x3d:")) {
-        const iso = document.createElement("button");
-        iso.type = "button";
-        iso.className = "uo-mini" + (S.isolated() === r.skey ? " on" : "");
-        iso.dataset.sp = "isolate";
-        iso.textContent = "◎";
-        iso.title = S.words.isolate;
-        const fr = document.createElement("button");
-        fr.type = "button";
-        fr.className = "uo-mini";
-        fr.dataset.sp = "frame";
-        fr.textContent = "⤢";
-        fr.title = S.words.frame;
-        tail.append(iso, fr);
-      }
+      // MICRO-SEG21 · the isolate is a fixed column now (below); «Frame» is the
+      // row's double click and its menu, never an icon that comes with the hover
     }
     el.appendChild(tail);
     const tip = r.desc ? `${r.label} — ${r.desc}` : r.label;
@@ -488,46 +520,43 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       tail.appendChild(m);
     }
     // p.4 · the fixed columns, right-aligned, ALWAYS there (off, or empty when the
-    // row has nothing of the kind) so they stack in vertical lines: ↖ selectable,
-    // ◉ visible, 🔒 position locked (in the Space); the eye alone elsewhere
+    // row has nothing of the kind) so they stack in vertical lines. MICRO-SEG21 ·
+    // the same three on every row, selected, under the mouse or neither — from the
+    // left: the isolate, the arrow (selectable), the eye (visible), in the Space;
+    // the eye alone elsewhere. Selection and hover change the row's background
+    // (and the icons' intensity), never how many there are nor where.
     const cols = document.createElement("span");
     cols.className = "uo-cols";
+    const W = d.columnWords;
     const blank = (k: string) => { const x = document.createElement("span"); x.className = `uo-col uo-col-${k} uo-col-none`; cols.appendChild(x); };
+    const col = (k: string, on: boolean, svg: string, title: string, data: [string, string]): HTMLButtonElement => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `uo-col uo-col-${k} uo-${k}` + (on ? " uo-col-on" : ` uo-${k}-off`);
+      b.dataset[data[0]] = data[1];
+      b.innerHTML = svg;
+      b.title = title;
+      b.setAttribute("aria-label", title);
+      b.setAttribute("aria-pressed", String(on));
+      cols.appendChild(b);
+      return b;
+    };
     if (S) {
+      if (r.skey && !r.ghost && !r.skey.startsWith("x3d:")) {
+        const on = S.isolated() === r.skey;
+        col("isolate", on, on ? COL_ICONS.isolateOn : COL_ICONS.isolateOff,
+          (on ? W?.isolateOn : W?.isolateOff) ?? S.words.isolate, ["sp", "isolate"]);
+      } else blank("isolate");
       if (r.skey && !r.ghost) {
         const lk = S.lockOpen(r.skey);
-        const a = document.createElement("button");
-        a.type = "button";
-        a.className = "uo-col uo-col-arrow uo-arrow" + (lk ? "" : " uo-arrow-off");
-        a.dataset.sp = "arrow";
-        a.textContent = "↖";
-        a.title = S.words.arrow;
-        cols.appendChild(a);
+        col("arrow", lk, lk ? COL_ICONS.arrowOn : COL_ICONS.arrowOff, (lk ? W?.arrowOn : W?.arrowOff) ?? S.words.arrow, ["sp", "arrow"]);
       } else blank("arrow");
     }
     if (r.eye || r.gis) {
       const on = r.ghost && S ? S.forced(r.eye!) : r.eye ? d.eyeOpen(r.eye) : d.gisOpen(r.gis!);
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "uo-col uo-col-eye uo-eye" + (on ? "" : " uo-eye-off");
-      b.dataset.eye = r.eye ?? `gis:${r.gis}`;
-      b.textContent = on ? "◉" : "○";
-      b.title = d.word("eye");
-      cols.appendChild(b);
+      const title = r.ghost && S ? S.words.ghost : (on ? W?.eyeOn : W?.eyeOff) ?? d.word("eye");
+      col("eye", on, on ? COL_ICONS.eyeOn : COL_ICONS.eyeOff, title, ["eye", r.eye ?? `gis:${r.gis}`]);
     } else blank("eye");
-    if (S) {
-      if (r.skey && !r.ghost && S.pinned && S.togglePin) {
-        const pin = S.pinned(r.skey);
-        const k = document.createElement("button");
-        k.type = "button";
-        k.className = "uo-col uo-col-pin uo-pin" + (pin ? " uo-pin-on" : "");
-        k.dataset.sp = "pin";
-        k.textContent = pin ? "🔒" : "🔓";
-        k.title = pin ? S.pinWords?.on ?? "" : S.pinWords?.off ?? "";
-        k.setAttribute("aria-pressed", String(pin));
-        cols.appendChild(k);
-      } else blank("pin");
-    }
     // MICRO-PL07 p.0 · a GIS layer's «⋯»: its opacity, a DEM's surface and contours
     // (they were in the Space's «Visibilità ▾», which keeps only what is seen)
     if (r.kind === "source" || r.kind === "graph" || r.kind === "aux" || (r.kind === "gis" && !!r.gis && !!d.gisMenu)) {
@@ -625,12 +654,10 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       const S = d.space;
       const what = sp.dataset.sp;
       if (what === "arrow" && r.skey) S.toggleLock(r.skey);
-      else if (what === "pin" && r.skey) S.togglePin?.(r.skey);
       else if (what === "lod") S.chipMenu(r, box(sp));
       else if (what === "alt") S.altMenu(r, box(sp));
       else if (what === "fail") S.failMenu(r, box(sp));
       else if (what === "isolate") S.isolate(r);
-      else if (what === "frame") S.frame(r);
       paint(true);
       return;
     }
@@ -756,6 +783,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     const r = rowOf(e.target);
     if (!r || (e.target as HTMLElement).closest("[data-tw],[data-eye],[data-menu]")) return;
     if (r.id && d.frame) d.frame(r);
+    else if (r.skey && d.space) d.space.frame(r);   // MICRO-SEG21 · a sketch: framed too
     else if (r.parent && !r.id) toggleOpen(r);
   });
   layer.addEventListener("contextmenu", (e) => {
@@ -778,6 +806,14 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   });
   // ↑ ↓ move the selection over the rows that select, ← → close and open
   root.addEventListener("keydown", (e) => {
+    // MICRO-SEG21 · H hides, Shift+H hides the rest, Alt+H shows all (Blender's):
+    // by the key's place — on a Mac Alt+H types «˙»
+    if ((e.code === "KeyH" || e.key === "h" || e.key === "H") && !e.metaKey && !e.ctrlKey
+        && !(e.target as HTMLElement).closest("input,textarea,select,[contenteditable]")) {
+      const mode = e.altKey ? (e.shiftKey ? null : "reveal") : e.shiftKey ? "unselected" : "selected";
+      if (mode && hideByKey(mode)) { e.preventDefault(); e.stopPropagation(); paint(true); }
+      return;
+    }
     // MICRO-SEG10 p.4 · from the row lit (the one clicked), not from the node's first row
     const sel = d.selectedId();
     const si = selIndex(sel);
@@ -799,6 +835,18 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
       if (r.parent && r.open === (e.key === "ArrowLeft")) { e.preventDefault(); toggleOpen(r); }
     }
   });
+
+  /** MICRO-SEG21 · H / Shift+H / Alt+H here: the Space's verbs in the Space; elsewhere
+   *  H shuts the eye of the row lit and Alt+H opens them all (no «the rest»: the
+   *  eye-only Outliners have no selection of objects) */
+  const hideByKey = (mode: "selected" | "unselected" | "reveal"): boolean => {
+    if (d.space || mode === "reveal") { if (!d.hideKey) return false; d.hideKey(mode); return true; }
+    if (mode !== "selected") return false;
+    const r = rows[selIndex(d.selectedId())];
+    if (!r?.eye || !d.eyeOpen(r.eye)) return false;
+    d.toggleEye(r.eye);
+    return true;
+  };
 
   const reveal = (i: number): void => {
     const top = i * ROW_H;

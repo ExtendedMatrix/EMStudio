@@ -11671,7 +11671,8 @@ td.al-cloud { color: var(--accent-ink); }
 .uo-badge { flex: none; font-size: 9.5px; line-height: 14px; height: 15px; padding: 0 6px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--src-color, var(--border)); background: none; color: inherit; text-transform: lowercase; }
 .uo-badge-active { background: var(--src-color, var(--accent)); color: #fff; border-color: transparent; cursor: default; font-weight: 600; }
-.uo-badge-activate { opacity: 0; }
+/* MICRO-SEG21 · always there, quiet; the hover only raises its intensity */
+.uo-badge-activate { opacity: 0.45; }
 .uo-row:hover .uo-badge-activate, .uo-badge-activate:focus-visible { opacity: 0.85; }
 #name-strip[data-src-kind] { box-shadow: inset 4px 0 0 var(--active-src, transparent); }
 #name-strip .ns-file { color: var(--active-src, inherit); }
@@ -11788,7 +11789,7 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 
 /* MICRO-OUTLINER-EPOCHE-TOOLTIP · the container as a branch, a member out of its
    epoch, the drag between epochs, the Space's controls on the one Outliner */
-.uo-note { font-size: 10.5px; color: var(--text-muted); margin-left: 4px; white-space: nowrap; border: 1px dashed var(--border-strong); border-radius: 8px; padding: 0 5px; }
+.uo-note { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
 .uo-warn { background: none; border: 0; padding: 0 3px; color: #c27a00; cursor: pointer; font-size: 12px; }
 .uo-alt .uo-label::after { content: " · alt"; font-size: 10px; color: var(--text-muted); }
 .uo-ghost { opacity: 0.55; font-style: italic; }
@@ -11799,13 +11800,10 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
   background: var(--accent, #2f6fdf); color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); white-space: nowrap; }
 .uo-dragtag.uo-dragtag-extend { background: #2b8a3e; }
 .uo-dragtag.uo-dragtag-none { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border); }
-.uo-arrow, .uo-mini, .uo-fail, .uo-chip { background: none; border: 0; padding: 0 3px; cursor: pointer; color: inherit; font-size: 11.5px; line-height: 1; }
+.uo-arrow, .uo-fail, .uo-chip { background: none; border: 0; padding: 0 3px; cursor: pointer; color: inherit; font-size: 11.5px; line-height: 1; }
 .uo-arrow-off { opacity: 0.3; }
 .uo-fail { color: #c92a2a; }
 .uo-chip { border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; font-size: 10px; white-space: nowrap; }
-.uo-mini { opacity: 0; }
-.uo-row:hover .uo-mini, .uo-row.uo-sel .uo-mini, .uo-mini.on { opacity: 0.85; }
-.uo-mini.on { color: var(--accent, #2f6fdf); }
 .uo-version-row .uo-label { font-size: 11.5px; }
 .uo-version-row.uo-drawn .uo-label { font-weight: 600; }
 .uo-uses { font-size: 10px; color: var(--text-muted); margin-left: 4px; white-space: nowrap; }
@@ -11825,9 +11823,7 @@ body.al-dragging, body.al-dragging * { cursor: grabbing !important; user-select:
 /* the Space's controls on a narrow Outliner: the name keeps a few letters, the chips give way first */
 .uo-row .uo-label { min-width: 4.5em; }
 .uo-chip, .uo-note { flex: 0 1 auto; min-width: 2.2em; max-width: 72px; overflow: hidden; text-overflow: ellipsis; }
-.uo-arrow, .uo-mini, .uo-fail, .uo-warn { flex: none; }
-.uo-mini { display: none; }
-.uo-row:hover .uo-mini, .uo-row.uo-sel .uo-mini, .uo-mini.on { display: inline; }
+.uo-arrow, .uo-fail, .uo-warn { flex: none; }
 
 /* MICRO-FOTO-DOCUMENTI-BBOX B · «Immagini dell'unità» by road, lazy thumbnails */
 .insp-unit-images .insp-ui-bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 4px; }
@@ -12052,15 +12048,11 @@ button.gr-model-name.link { background: none; border: 0; padding: 0; cursor: poi
 .uo-col { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
   font-size: 11px; line-height: 1; background: none; border: 0; color: inherit; }
 button.uo-col { cursor: pointer; }
-.uo-row .uo-col.uo-eye, .uo-row .uo-col.uo-arrow { padding: 0; }
-.uo-pin { opacity: .28; filter: grayscale(1); font-size: 10px; }
-.uo-pin.uo-pin-on { opacity: .95; }
-.uo-row:hover .uo-pin:not(.uo-pin-on) { opacity: .6; }
+.uo-row .uo-col.uo-eye, .uo-row .uo-col.uo-arrow, .uo-row .uo-col.uo-isolate { padding: 0; }
 .uo-colhead { flex: none; display: flex; align-items: center; height: 18px; border-bottom: 1px solid var(--border);
   font-size: 10.5px; color: var(--text-muted); background: var(--bg-panel); }
 .uo-colhead-fill { flex: 1; }
 .uo-colhead .uo-col { cursor: default; opacity: .75; }
-.uo-colhead .uo-col-pin { filter: grayscale(1); font-size: 10px; }
 .uo-scroll { scrollbar-gutter: stable; }
 .uo-colhead { padding-right: var(--uo-gutter, 0px); }
 /* MICRO-SEG17 · the Sheets' filter, a discreet line at the head of the Outliner */
@@ -12759,3 +12751,23 @@ td.plg-col { color: var(--muted, #888); }
 .tile-bar.win-header.hdr-tight { gap: 3px; }
 .tile-bar.hdr-tight .scn-bar, .tile-bar.hdr-tight .scn-bar-lead, .tile-bar.hdr-tight .scn-bar-tail { gap: 3px; }
 .tile-bar.hdr-tight .scn-tg { padding: 1px 5px; }
+
+/* MICRO-SEG21 · the same three columns on every row (isolate · arrow · eye in the
+   Space, the eye alone elsewhere), line icons of the design system in the text's
+   ink: on ≈ 0.8, off ≈ 0.32; hover and selection raise the intensity of what is
+   on, never add or move an icon. The isolate on takes the accent. */
+.uo-col > svg { display: block; width: 14px; height: 14px; pointer-events: none; }
+.uo-row .uo-col { color: var(--text); opacity: 0.8; }
+.uo-row .uo-col.uo-eye-off, .uo-row .uo-col.uo-arrow-off, .uo-row .uo-col.uo-isolate-off { opacity: 0.32; }
+.uo-row:hover .uo-col.uo-col-on, .uo-row.uo-sel .uo-col.uo-col-on { opacity: 1; }
+.uo-row:hover .uo-col:not(.uo-col-on):not(.uo-col-none) { opacity: 0.5; }
+.uo-row .uo-col:hover { opacity: 1 !important; }
+.uo-row .uo-col.uo-isolate.uo-col-on { color: var(--accent, #2f6fdf); }
+.uo-row .uo-col:focus-visible { outline: 1px solid var(--accent, #2f6fdf); outline-offset: -1px; border-radius: 3px; }
+.uo-colhead .uo-col { color: var(--text-muted); opacity: 0.85; }
+/* the informative signs beside the name: the name gives way, the marks keep the right */
+.uo-row .uo-label { flex: 0 1 auto; }
+.uo-row > .uo-note { flex: 0 1 auto; min-width: 1.2em; max-width: 96px; overflow: hidden; text-overflow: ellipsis; opacity: 0.85; }
+.uo-pinmark { flex: none; display: inline-flex; color: var(--text-muted); opacity: 0.8; }
+.uo-pinmark > svg { display: block; }
+.uo-row > .uo-marks { margin-left: auto; }
