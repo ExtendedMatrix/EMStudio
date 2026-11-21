@@ -83,7 +83,6 @@ export const KEYMAP: KeyRow[] = [
   { id: "s3sidebar", keys: "N", scope: "space" },
   { id: "s3frameSel", keys: ". · F", scope: "space" },
   { id: "s3frameAll", keys: "Home", scope: "space" },
-  { id: "s3outliner", keys: "T", scope: "space" },
   { id: "s3add", keys: "⇧A", scope: "space" },
   { id: "s3grs", keys: "G · R · S", scope: "space" },
   { id: "s3axisPlane", keys: "X Y Z · ⇧X ⇧Y ⇧Z", scope: "space" },

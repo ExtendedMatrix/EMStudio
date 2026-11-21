@@ -183,7 +183,7 @@ export const DRAG_PX = 4;
 
 /** The keys of the Space, with the 3D in focus. The value is the action. */
 export type SpaceKeyAction =
-  | "frame-selection" | "frame-all" | "outliner" | "box-zoom" | "cursor-reset"
+  | "frame-selection" | "frame-all" | "box-zoom" | "cursor-reset"
   | "add-menu" | "grab" | "rotate" | "scale" | "delete" | "cancel" | "back"
   /** MICRO-SPAZIO-3D-2 · N, the «Vista» panel on the right */
   | "sidebar"
@@ -214,7 +214,7 @@ export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boo
   switch (k) {
     case ".": case "f": case "F": return "frame-selection";
     case "Home": return "frame-all";
-    case "t": case "T": return "outliner";
+    // MICRO-SEG14 p.2 · T opened the scene's own Outliner: retired with it
     case "n": case "N": return "sidebar";
     case "a": case "A": return "select-all";
     case "h": case "H": return "hide";
@@ -537,19 +537,91 @@ export function viewBetween(from: CamState, to: CamState, t: number): CamState {
   const target = add(from.target, mul(sub(to.target, from.target), e));
   const a = sub(from.pos, from.target), b = sub(to.pos, to.target);
   const la = len(a) || 1, lb = len(b) || 1;
-  const ua = norm(a), ub = norm(b);
+  return { pos: add(target, mul(turnBetween(norm(a), norm(b), e), la + (lb - la) * e)), target };
+}
+
+/** the direction `e` of the way from `ua` to `ub` on the unit sphere; opposite
+ *  directions turn through the side (about the vertical) or, Top ⇄ Bottom,
+ *  through the front */
+function turnBetween(ua: V3, ub: V3, e: number): V3 {
   const c = Math.max(-1, Math.min(1, dot(ua, ub)));
-  let dir: V3;
-  if (c > 0.9999995) dir = ub;
-  else {
-    // a unit vector ⟂ ua in the plane of the turn; opposite views turn through
-    // the side (about the vertical) or, Top ⇄ Bottom, through the front
-    const through = (p: V3): V3 => norm(sub(p, mul(ua, dot(p, ua))));
-    const w: V3 = c >= -0.9999 ? through(ub) : Math.abs(ua[1]) < 0.9 ? norm([ua[2], 0, -ua[0]]) : through(blenderToThree([0, -1, 0]));
-    const ang = Math.acos(c) * e;
-    dir = norm(add(mul(ua, Math.cos(ang)), mul(w, Math.sin(ang))));
-  }
-  return { pos: add(target, mul(dir, la + (lb - la) * e)), target };
+  if (c > 0.9999995) return ub;
+  // a unit vector ⟂ ua in the plane of the turn
+  const through = (p: V3): V3 => norm(sub(p, mul(ua, dot(p, ua))));
+  const w: V3 = c >= -0.9999 ? through(ub) : Math.abs(ua[1]) < 0.9 ? norm([ua[2], 0, -ua[0]]) : through(blenderToThree([0, -1, 0]));
+  const ang = Math.acos(c) * e;
+  return norm(add(mul(ua, Math.cos(ang)), mul(w, Math.sin(ang))));
+}
+
+// ── the flight (MICRO-SEG14 p.1) ─────────────────────────────────────────────
+// E.D., 21 Nov 2026: «quando faccio doppio clic per volare in un punto voglio
+// una transizione di viaggio, non teletrasporto, altrimenti perdo la
+// percezione dello spostamento». The double click, «frame the selection»,
+// «go to the node» from the Matrix and the Outliner fly: position and pivot
+// together, eased in and out, 0.6–1.5 s by the way travelled.
+
+/** The double click's arrival: this fraction of the depth of the point clicked. */
+export const FLY_FRACTION = 0.3;
+export const FLY_MIN_MS = 600;
+export const FLY_MAX_MS = 1500;
+
+/** The nearest a flight comes to a surface: the distance at which a strip of
+ *  `DETAIL_SPAN` metres fills the view (≈ 0.69 m at 40°). */
+export function flyMinDistance(fovDeg: number): number {
+  return DETAIL_SPAN / (2 * Math.tan((fovDeg * Math.PI) / 360));
+}
+
+/**
+ * The double click · where a flight to a surface point ends: the view does not
+ * turn, the point is the new pivot, and the camera stops at a fraction
+ * (`FLY_FRACTION`) of the point's depth — never nearer than `flyMinDistance`.
+ * A double click after another comes nearer each time (110 m → 33 → 10 → 3 →
+ * 0.9 → 0.69). A camera already nearer than the minimum keeps its distance (it
+ * is only recentred). The size of the object clicked is NOT a floor: measured
+ * on Templu Mare v11 (MICRO-SEG14), a large proxy «kept whole in view» held the
+ * camera where it was (110.8 m → 109.8 m) — no journey at all.
+ */
+export function flyArrival(cam: CamState, point: V3, fovDeg: number): CamState {
+  const dir = norm(sub(cam.target, cam.pos));
+  const minD = flyMinDistance(fovDeg);
+  const depth = dot(sub(point, cam.pos), dir);
+  const d = !(depth > 0) ? minD : depth <= minD ? depth : Math.max(minD, depth * FLY_FRACTION);
+  return { pos: sub(point, mul(dir, d)), target: point };
+}
+
+/** How long a flight lasts: by the way the pivot travels and by the zoom, both
+ *  measured against the nearer of the two distances — 0.6 s for a short hop,
+ *  1.5 s at most. */
+export function flightMs(from: CamState, to: CamState): number {
+  const la = len(sub(from.pos, from.target)), lb = len(sub(to.pos, to.target));
+  const ref = Math.max(1e-3, Math.min(la, lb));
+  const slide = len(sub(to.target, from.target)) / ref;
+  const zoom = Math.abs(Math.log2(Math.max(1e-3, la) / Math.max(1e-3, lb)));
+  const turn = Math.acos(Math.max(-1, Math.min(1, dot(norm(sub(from.pos, from.target)), norm(sub(to.pos, to.target))))));
+  const ms = FLY_MIN_MS + 120 * Math.log2(1 + slide) + 110 * zoom + 200 * turn;
+  return Math.round(Math.min(FLY_MAX_MS, Math.max(FLY_MIN_MS, ms)));
+}
+
+/** ease in and out (cubic) */
+export function easeInOut(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/**
+ * A flight's camera at `t` in [0, 1]: eased in and out; the pivot slides on a
+ * straight line, the direction turns on the sphere (as `viewBetween`), the
+ * distance from the pivot changes GEOMETRICALLY — a flight from 60 m to 2 m
+ * halves it at a steady pace, so the last metres are not a jump.
+ */
+export function flightBetween(from: CamState, to: CamState, t: number): CamState {
+  if (t <= 0) return from;
+  if (t >= 1) return to;
+  const e = easeInOut(t);
+  const target = add(from.target, mul(sub(to.target, from.target), e));
+  const a = sub(from.pos, from.target), b = sub(to.pos, to.target);
+  const la = len(a) || 1e-6, lb = len(b) || 1e-6;
+  const dist = la * Math.pow(lb / la, e);
+  return { pos: add(target, mul(turnBetween(norm(a), norm(b), e), dist)), target };
 }
 
 export type KeypadAction = { view: AlignedView } | "toggle-ortho" | "camera" | "frame-selection";

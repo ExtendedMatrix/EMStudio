@@ -632,7 +632,12 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
     const c = ctx.camState();
     const reduce = (() => { try { return !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches; } catch { return false; } })();
     if (geoHands) geoHands.enabled = false;
-    if (reduce) { ctx.applyCam(to); enter(then, "hand", false); if (then !== "site") northNow(); return; }
+    // MICRO-SEG14 p.1 · «Reduce motion»: the short jump in a fade, as the Space's flights
+    if (reduce) {
+      ctx.applyCam(to); enter(then, "hand", false); if (then !== "site") northNow();
+      try { ctx.renderer.domElement.animate?.([{ opacity: 0.25 }, { opacity: 1 }], { duration: 220, easing: "ease-out" }); } catch { /* no Web Animations */ }
+      return;
+    }
     flight = { from: c, to, t0: 0, ms: flyMs(c.pos, to.pos, centre), then };
   };
 

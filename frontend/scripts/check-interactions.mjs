@@ -1903,7 +1903,7 @@ test("S3.labels3", "Spazio · MICRO-GIZMO-ASSI · le etichette separate: modelli
 // MICRO-PANNELLI-LATERALI (E.D. 17 Oct 2026) · the two side panels as Blender's:
 // the same triangle on both edges, squeezed under 80 px a panel closes, its
 // triangle dragged inwards opens it at the width it had; no button in the bar
-test("S3.sides", "Spazio · MICRO-PANNELLI-LATERALI · i due pannelli come Blender: lo stesso triangolino sui due bordi (T e N), stretti sotto 80 px si chiudono, il triangolino trascinato verso l'interno li riapre alla larghezza di prima; nessun pulsante dell'Outliner nella barra; il gizmo resta nell'angolo della scena", async () => {
+test("S3.sides", "Spazio · MICRO-PANNELLI-LATERALI · i due pannelli come Blender (MICRO-SEG14: per la persona niente pannello della scena né T, solo il seam di prova lo disegna): lo stesso triangolino sui due bordi, stretti sotto 80 px si chiudono, il triangolino trascinato verso l'interno li riapre alla larghezza di prima; nessun pulsante dell'Outliner nella barra; il gizmo resta nell'angolo della scena", async () => {
   const { p, ctx, errors } = await gizmoScene();
   const box = (sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect();
     return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, shown: getComputedStyle(e).display !== "none", text: e.textContent, title: e.title ?? null }; }, sel);
@@ -1914,37 +1914,49 @@ test("S3.sides", "Spazio · MICRO-PANNELLI-LATERALI · i due pannelli come Blend
   const corner = await p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + 60, y: c.y + c.height - 60 }; });
   const key = async (k) => { await p.mouse.click(corner.x, corner.y); await p.keyboard.press(k); await p.waitForTimeout(300); };
   const noBarButton = await p.evaluate(() => !document.querySelector(".scn-bar [data-outliner]") && ![...document.querySelectorAll(".scn-bar button")].some((b) => b.textContent === "☰"));
+  // MICRO-SEG14 p.2 · the person's Space: the scene's own Outliner is retired —
+  // no panel, no triangle, no «retiring» note, and T does nothing
+  await p.evaluate(() => window.__EM_DRAG__.sceneOwnOutliner(false)); await p.waitForTimeout(400);
+  const sPerson = await state();
+  await key("t");
+  const sPersonT = await state();
+  const retiringNote = await p.evaluate(() => !!document.querySelector("[data-sol-retiring], .sol-retiring"));
+  // the page cases' seam draws it again (the rest of this case drives it)
+  await p.evaluate(() => window.__EM_DRAG__.sceneOwnOutliner(true)); await p.waitForTimeout(400);
   const s0 = await state();
   const gap0 = await gizmoGap();
-  // T and N: the shortcuts stay
-  await key("t");
-  const sT = await state();
-  const tab = await box(".scn-tab"), ntab = await box(".scn-ntab");
-  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-pannelli-chiusi-triangolini.png` }).catch(() => {});
+  // N: the shortcut stays
   await key("n");
   const sN = await state();
   const gapN = await gizmoGap();
-  await key("n"); await key("t");
+  await key("n");
   const sBack = await state();
-  // the triangle's click opens: the left one, then the right one
-  await key("t");
-  await p.click(".scn-tab");  await p.waitForTimeout(250);
-  const sTabClick = await state();
-  await p.click(".scn-ntab"); await p.waitForTimeout(250);
-  const sNtabClick = await state();
   // squeeze the Outliner: to 120 px it holds at 160; under 80 it closes, the width kept
   const w0 = (await box(".scn-outliner")).w;
   let g = await box(".scn-grip");
   const ox = (await box(".scn-outliner")).x;
-  await p.mouse.move(g.x + 2, g.y + 100); await p.mouse.down();
-  await p.mouse.move(ox + 120, g.y + 100, { steps: 6 });
-  const held = (await box(".scn-outliner")).w;
-  await p.mouse.move(ox + 40, g.y + 100, { steps: 6 });
-  const midDrag = await state();
-  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-pannello-sinistro-stretto.png` }).catch(() => {});
-  await p.mouse.up(); await p.waitForTimeout(250);
+  const squeeze = async (shot) => {
+    g = await box(".scn-grip");
+    await p.mouse.move(g.x + 2, g.y + 100); await p.mouse.down();
+    await p.mouse.move(ox + 120, g.y + 100, { steps: 6 });
+    const held = (await box(".scn-outliner")).w;
+    await p.mouse.move(ox + 40, g.y + 100, { steps: 6 });
+    const midDrag = await state();
+    if (shot) await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-pannello-sinistro-stretto.png` }).catch(() => {});
+    await p.mouse.up(); await p.waitForTimeout(250);
+    return { held, midDrag };
+  };
+  const { held, midDrag } = await squeeze(true);
   const sSqueezed = await state();
   const pSqueezed = await prefs();
+  const tab = await box(".scn-tab"), ntab = await box(".scn-ntab");
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-pannelli-chiusi-triangolini.png` }).catch(() => {});
+  // the triangle's click opens: the left one, then the right one
+  await p.click(".scn-tab");  await p.waitForTimeout(250);
+  const sTabClick = await state();
+  await p.click(".scn-ntab"); await p.waitForTimeout(250);
+  const sNtabClick = await state();
+  await squeeze(false);
   // the triangle dragged inwards: open again, at the width it had
   const tb = await box(".scn-tab");
   await p.mouse.move(tb.x + 4, tb.y + tb.h / 2); await p.mouse.down(); await p.mouse.move(tb.x + 60, tb.y + tb.h / 2, { steps: 6 }); await p.mouse.up();
@@ -1969,16 +1981,17 @@ test("S3.sides", "Spazio · MICRO-PANNELLI-LATERALI · i due pannelli come Blend
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const conds = {
     noBarButton,
+    personNoPanel: same(sPerson, { outl: false, npanel: false, tab: false, ntab: true }),
+    personTNothing: same(sPersonT, sPerson) && !retiringNote,
     start: same(s0, { outl: true, npanel: false, tab: false, ntab: true }),
-    T: same(sT, { outl: false, npanel: false, tab: true, ntab: true }),
-    sameTriangle: tab.text === "›" && ntab.text === "‹" && tab.title === "Apri l'Outliner (T)" && Math.abs(tab.h - ntab.h) < 1 && Math.abs(tab.w - ntab.w) < 1.5 && Math.abs(tab.y - ntab.y) < 1,
-    N: same(sN, { outl: false, npanel: true, tab: true, ntab: false }),
+    sameTriangle: tab.text === "›" && ntab.text === "‹" && tab.title === "Apri l'Outliner" && Math.abs(tab.h - ntab.h) < 1 && Math.abs(tab.w - ntab.w) < 1.5 && Math.abs(tab.y - ntab.y) < 1,
+    N: same(sN, { outl: true, npanel: true, tab: false, ntab: false }),
     back: same(sBack, { outl: true, npanel: false, tab: false, ntab: true }),
     tabClick: same(sTabClick, { outl: true, npanel: false, tab: false, ntab: true }),
     ntabClick: same(sNtabClick, { outl: true, npanel: true, tab: false, ntab: false }),
     held: held === 160,
     closedWhileDragging: midDrag.outl === false && midDrag.tab === true,
-    squeezed: same(sSqueezed, { outl: false, npanel: true, tab: true, ntab: false }) && pSqueezed?.shown === false && pSqueezed?.width === w0,
+    squeezed: same(sSqueezed, { outl: false, npanel: false, tab: true, ntab: true }) && pSqueezed?.shown === false && pSqueezed?.width === w0,
     dragOpen: sDragOpen.outl === true && sDragOpen.tab === false && wAgain === w0,
     nSqueezed: sNSqueezed.npanel === false && sNSqueezed.ntab === true,
     nDragOpen: sNDragOpen.npanel === true && nwAgain === nw0,
@@ -1986,7 +1999,7 @@ test("S3.sides", "Spazio · MICRO-PANNELLI-LATERALI · i due pannelli come Blend
     errors: !errors.length,
   };
   return { pass: Object.values(conds).every(Boolean),
-    detail: { conds, s0, sT, tab, ntab, sN, sBack, sTabClick, sNtabClick, w0, held, midDrag, sSqueezed, pSqueezed, sDragOpen, wAgain, nw0, sNSqueezed, sNDragOpen, nwAgain, gaps: [gap0, gapN, gapNClosed, gapNOpen], errors } };
+    detail: { conds, sPerson, sPersonT, s0, tab, ntab, sN, sBack, sTabClick, sNtabClick, w0, held, midDrag, sSqueezed, pSqueezed, sDragOpen, wAgain, nw0, sNSqueezed, sNDragOpen, nwAgain, gaps: [gap0, gapN, gapNClosed, gapNOpen], errors } };
 });
 // MICRO-PANNELLI-LATERALI p.2 (E.D. 17 Oct 2026) · «Associa a un'unità» in the
 // Inspector, not a dropdown over the scene; the right click on a sketch as
@@ -8682,7 +8695,8 @@ test("WM1.loadfail", "WINDOWS-MODELLI p.1 · un modello che non arriva lo dice: 
   const { p, ctx, errors, drawn } = await wmOpen({ refuse: true });
   await p.waitForTimeout(6000);   // the tileset's root waits 8 s before it is given up on
   const log = await p.evaluate(() => window.__EM_DRAG__.log().map((e) => `${e.level} ${e.message}`));
-  const marks = await p.evaluate(() => [...document.querySelectorAll(".sol-fail")].map((e) => e.title));
+  // MICRO-SEG14 p.2 · the marks are the one Outliner's (the scene's own panel is retired)
+  const marks = await p.evaluate(() => [...document.querySelectorAll(".uo-fail, .sol-fail")].map((e) => e.title));
   // a refused model is marked, the scene is drawn again and asks again before
   // it settles on the label: what is drawn is read when the ten labels are
   // there (measured: read at the opening, some were still «pending» — they all
@@ -8703,7 +8717,7 @@ test("WM1.loadfail", "WINDOWS-MODELLI p.1 · un modello che non arriva lo dice: 
 
 test("WM2.port", "WINDOWS-MODELLI p.2 · la pagina come il desktop (IPC simulato): la porta è quella decisa dalla shell (8765 di un altro programma → la successiva); con l'em.json in C:/Users/Utente/OneDrive - CNR/… ogni richiesta — modelli, tileset.json e tessere, proxy — va a quella base e mai alla 8765, nella forma C:/…; il XX sec è disegnato (10 RM, il tileset, 5 proxy), nessun segno di modello mancato", async () => {
   const { p, ctx, errors, asked, drawn, bport } = await wmOpen({ tauri: true });
-  const marks = await p.evaluate(() => document.querySelectorAll(".sol-fail").length);
+  const marks = await p.evaluate(() => document.querySelectorAll(".uo-fail, .sol-fail").length);
   const warn = await p.evaluate(() => window.__EM_DRAG__.log().filter((e) => /Modello non caricato/.test(e.message)).length);
   await ctx.close();
   const at = asked.filter((a) => a.path.startsWith("/fs/at/"));
@@ -9071,9 +9085,15 @@ const poPickRow = async (p, name) => {
   return id;
 };
 
-test("PO4.arrows", "PANNELLI-OVERLAY p.4 · le frecce nelle liste: GT16, Tabular Documents, scelta D.02, ↓ → D.03 (selezione e Inspector), ancora ↓ → D.04; Units, ↑ dalla seconda riga → la prima; la riga resta in vista sotto la testa; nel pannello laterale dello Spazio ↓ passa alla riga dopo; una cella in scrittura tiene le sue frecce", async () => {
+test("PO4.arrows", "PANNELLI-OVERLAY p.4 · le frecce nelle liste: GT16, Tabular Documents, scelta D.02, ↓ → D.03 (selezione e Inspector), ancora ↓ → D.04; Units, ↑ dalla seconda riga → la prima; la riga resta in vista sotto la testa; nell'Outliner, sulle righe dello Spazio, ↓ passa alla riga dopo (MICRO-SEG14: il pannello laterale della scena è in pensione); una cella in scrittura tiene le sue frecce", async () => {
   if (!existsSync(PO_V4)) return { pass: false, detail: { missing: PO_V4 } };
-  const { p, ctx, errors } = await poOpen({ doc: null });
+  // MICRO-SEG14 p.2 · the Space's side panel is retired: its arrows are the one
+  // Outliner's now — the same layout with an Outliner window under the Inspector
+  const lay = JSON.parse(PO_LAYOUT(0.3));
+  lay.space.wins.push({ id: "space:outliner", type: "outliner", state: {} });
+  lay.space.layout.b = { kind: "split", dir: "col", ratio: 0.5, a: { kind: "leaf", winId: "space:inspector" }, b: { kind: "leaf", winId: "space:outliner" } };
+  const { p, ctx, errors } = await open({ locale: "en", w: 1728, h: 1000, doc: null,
+    init: { "emstudio.windows": JSON.stringify(lay), "emstudio.workspaces.rev": "5", "emstudio.workspace": "space" } });
   await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(PO_V4, "utf8")), PO_V4]);
   await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
   await p.waitForTimeout(1500);
@@ -9107,14 +9127,15 @@ test("PO4.arrows", "PANNELLI-OVERLAY p.4 · le frecce nelle liste: GT16, Tabular
   await poPickRow(p, names[1]);
   await p.keyboard.press("ArrowUp"); await p.waitForTimeout(500);
   out.units = { names, up: await poName(p) };
-  // the Space's side panel
-  const keys = await p.evaluate(() => [...document.querySelectorAll(".sol-row")].filter((r) => /^proxy:/.test(r.dataset.key ?? "") && r.getBoundingClientRect().height > 0).slice(0, 2).map((r) => r.dataset.key));
+  // the Space's rows in the one Outliner (MICRO-SEG14 p.2: the scene's own panel is retired)
+  const keys = await p.evaluate(() => [...document.querySelectorAll(".uo-row[data-skey^='proxy:']")].filter((r) => r.getBoundingClientRect().height > 0).slice(0, 2).map((r) => r.dataset.skey));
   if (keys.length === 2) {
-    await p.click(`.sol-row[data-key="${keys[0]}"]`); await p.waitForTimeout(400);
+    await p.click(`.uo-row[data-skey="${keys[0]}"] .uo-label`); await p.waitForTimeout(400);
     const s0 = await p.evaluate(() => window.__EM_DRAG__.selected()[0]);
-    const nextKey = await p.evaluate(() => { const ls = [...document.querySelectorAll(".sol-row")]; const i = ls.findIndex((l) => l.classList.contains("active")); return ls[i + 1]?.dataset.key ?? null; });
+    const nextKey = keys[1];
     await p.keyboard.press("ArrowDown"); await p.waitForTimeout(500);
-    out.space = { s0, nextKey, active: await p.evaluate(() => document.querySelector(".sol-row.active")?.dataset.key ?? null) };
+    const sel = await p.evaluate(() => window.__EM_DRAG__.selected()[0]);
+    out.space = { s0, nextKey, active: sel ? `proxy:${sel}` : null };
   }
   await p.screenshot({ path: SHOT("po4-arrows") }).catch(() => {});
   await ctx.close();

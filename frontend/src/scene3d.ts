@@ -51,7 +51,7 @@ import { createTilesLayer, formatBytes, governTiles, isTilesetUrl, tilesBar, til
 import { createErrorGovernor, ERROR_PROFILES, type ErrorChoice, type ErrorGovernor, type Hardware } from "./tiles-error";
 import type { OverlayKey, OverlayValueKey } from "./overlays";
 import {
-  alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, freeAxes, modalHeader, threeToBlender, type ModalWords, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
+  alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, freeAxes, modalHeader, threeToBlender, type ModalWords, clipPlanes, flyArrival, flightBetween, flightMs, DRAG_PX, dragIntent, dragZoomFactor,
   frameSphere, grabPan, isMacPlatform, keypadAction, modalKey, modalLabel, modalValue, orthoBoxZoom, orthoHalf, orthoZoom,
   pointerIntent, sceneCentre, spaceKeyAction, PICK_WAIT_MS, DOUBLE_MS, startModal, wheelFactor, zoomTowards,
   gizmoHit, gizmoLayout, gizmoView, viewBetween, GIZMO_AXES, type GizmoAxis,
@@ -255,7 +255,8 @@ export interface SpaceSceneHandle {
    *  there leaves the memory: the files' cache, the GPU's geometries and
    *  textures, the tilesets, the flow's versions, the chip's counter */
   update(items: SceneItem[], o?: { release?: boolean }): void;
-  frame(): void;
+  /** frame what is drawn; `smooth`: a flight (MICRO-SEG14) */
+  frame(smooth?: boolean): void;
   /** MICRO-TESTATE-COERENTI p.6 · does the camera see anything of what is drawn?
    *  null when nothing has a box yet */
   inView?(): boolean | null;
@@ -560,7 +561,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   let rebuild: (() => void) | null = null;
   /** MICRO-PL09 p.0 · the next rebuild gives back what is not in use (`update(…, {release})`) */
   let releaseNext = false;
-  let frameIt: (() => void) | null = null;
+  let frameIt: ((smooth?: boolean) => void) | null = null;
   let cleanup: (() => void) | null = null;
   const drawn = new Map<string, Drawn>();
   const ov = (k: OverlayKey): boolean => opts.overlay?.(k) ?? (k !== "s3_proxy_wire" && k !== "s3_axis_z" && k !== "s3_labels_sketch" && k !== "s3_stats");
@@ -591,6 +592,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __spaceGizmo?: () => unknown;
     __spaceCamMatrix?: () => unknown;
     __spaceSetCam?: (c: CamState) => void;
+    __spaceFlights?: () => { flying: boolean; log: Array<{ why: string; at: number; ms: number; to: CamState; reduced: boolean }> };
     __spaceCamState?: () => CamState;
     __spaceTiles?: () => unknown;
     __spaceTilesUp?: () => unknown;
@@ -1469,15 +1471,35 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
        *  Blender's «Smooth View» (none with the system's «Reduce motion»): it
        *  ends on the very camera the keypad gives, and a gesture ends it at once */
       const VIEW_MS = 200;
-      let anim: { from: CamState; to: CamState; t0: number; view: AlignedView | null } | null = null;
+      // MICRO-SEG14 p.1 · a FLIGHT (`fly`: the double click, «frame the
+      // selection», «go to the node») lasts its own `ms` and, ended early by
+      // the person's hand, leaves the camera where it is — not at its end
+      let anim: { from: CamState; to: CamState; t0: number; view: AlignedView | null; fly?: boolean; ms?: number } | null = null;
       const reduceMotion = (): boolean => { try { return !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
       const finishAnim = () => {
         if (!anim) return;
         const a = anim;
         anim = null;
-        applyCam(a.to);
+        if (!a.fly) applyCam(a.to);
         aligned = a.view;
         showView();
+      };
+      /** «Reduce motion» (the system's): no flight, a short jump in a fade */
+      const fadeJump = () => {
+        try { renderer.domElement.animate?.([{ opacity: 0.25 }, { opacity: 1 }], { duration: 220, easing: "ease-out" }); } catch { /* no Web Animations */ }
+      };
+      /** MICRO-SEG14 p.1 · the camera flies to `to` (position and pivot
+       *  together, eased in and out, 0.6–1.5 s by the way); a flight under way
+       *  goes on from where it is now */
+      const flights: Array<{ why: string; at: number; ms: number; to: CamState; reduced: boolean }> = [];
+      const flyCam = (to: CamState, why: string, view: AlignedView | null = anim ? anim.view : aligned) => {
+        const reduced = reduceMotion();
+        const from = camState();
+        const ms = reduced ? 0 : flightMs(from, to);
+        flights.push({ why, at: Math.round(performance.now()), ms, to, reduced });
+        if (flights.length > 20) flights.shift();
+        if (reduced) { anim = null; applyCam(to); aligned = view; showView(); fadeJump(); return; }
+        anim = { from, to, t0: 0, view, fly: true, ms };
       };
       const stepAnim = (now: number) => {
         if (!anim) return;
@@ -1485,9 +1507,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // starts at its first frame, not when it was asked: else it is over
         // before it is drawn (measured: 210 ms of redraw, then one jump)
         if (!anim.t0) anim.t0 = now;
-        const t = (now - anim.t0) / VIEW_MS;
-        if (t >= 1) { finishAnim(); return; }
-        applyCam(viewBetween(anim.from, anim.to, t));
+        const t = (now - anim.t0) / (anim.ms ?? VIEW_MS);
+        if (t >= 1) { const a = anim; finishAnim(); if (a.fly) applyCam(a.to); return; }
+        applyCam(anim.fly ? flightBetween(anim.from, anim.to, t) : viewBetween(anim.from, anim.to, t));
       };
       /** keypad 1 3 7 (Ctrl: the opposite) and the gizmo's ends: Blender's six
        *  views, around the pivot — ONE function for both */
@@ -1510,11 +1532,21 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         showView();
       };
       const getNav = (): SceneNavPrefs => opts.nav?.() ?? { emulate3: false, emulateNumpad: false, autoPerspective: true, middleSeen: false, leftSelects: false };
-      frameIt = () => {
+      frameIt = (smooth = false) => {
         const b = extent();
         const c = b.getCenter(new THREE.Vector3());
         const s = b.getSize(new THREE.Vector3());
         const sp = Math.max(s.x, s.y, s.z) || 1;
+        // MICRO-SEG14 p.1 · «frame the selection» with nothing selected flies
+        // too; Home and the bar's ⤢ stay a plain reframing (a reset)
+        if (smooth) {
+          const to = aligned || isOrtho
+            ? frameSphere(camState(), arr(c), b.getBoundingSphere(new THREE.Sphere()).radius, FOV, persp.aspect)
+            : { pos: arr(c.clone().add(new THREE.Vector3(sp * 0.9, sp * 0.7, sp * 1.5))), target: arr(c) };
+          framed = true;
+          flyCam(to, "frame-all");
+          return;
+        }
         if (aligned || isOrtho) {
           // MICRO-SPAZIO-3D-2 · an aligned or orthographic view keeps its direction
           const keep = framed;
@@ -1874,6 +1906,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         balls: navLayout.map((e) => { const r = balls.get(e.axis)!.getBoundingClientRect(); return { axis: e.axis, x: r.left + r.width / 2, y: r.top + r.height / 2, depth: Math.round(e.depth * 1000) / 1000 }; }),
         cost: { n: navCost.n, avg: navCost.n ? navCost.sum / navCost.n : 0, max: navCost.max, last: navCost.last } });
       probe.__spaceCamMatrix = () => { camera.updateMatrixWorld(true); return { ortho: isOrtho, view: aligned, world: [...camera.matrixWorld.elements], proj: [...camera.projectionMatrix.elements] }; };
+      // MICRO-SEG14 p.1 · the flights asked (why, when, how long), and the one under way
+      probe.__spaceFlights = () => ({ flying: !!anim?.fly, log: flights.slice() });
       probe.__spaceSetCam = (c: CamState) => { finishAnim(); if (isOrtho) { orthoAuto = false; setOrtho(false); } applyCam(c); if (aligned) { aligned = null; showView(); } };
       probe.__spaceCamState = () => camState();
       /** MICRO-FOTO-DOCUMENTI-BBOX D · the frame of a box [min, max], as SHIFT+D frames */
@@ -1908,14 +1942,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const frameBox = (b: any, smooth = false) => {
         const sphere = b.getBoundingSphere(new THREE.Sphere());
         const to = frameSphere(camState(), arr(sphere.center), sphere.radius, FOV, persp.aspect);
-        // MICRO-PROVA-DEV48 p.4 · a pick from another window: the same passage
-        // as an aligned view's, the view kept (an aligned one stays aligned)
-        if (smooth && !reduceMotion()) {
-          // a passage under way goes on from where it is now, toward the new end
-          const view = anim ? anim.view : aligned;
-          anim = { from: camState(), to, t0: 0, view };
-          return;
-        }
+        // MICRO-PROVA-DEV48 p.4 · a pick from another window: the view kept (an
+        // aligned one stays aligned). MICRO-SEG14 p.1 · a flight, no longer the
+        // 200 ms of an aligned view
+        if (smooth) { flyCam(to, "frame"); return; }
         finishAnim();
         applyCam(to);
       };
@@ -3706,6 +3736,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
 
       const onDown = (e: PointerEvent) => {
         if (geo?.ownsPointer()) return;   // MICRO-GEOGLOBO · the globe's hands
+        // MICRO-SEG14 p.1 · the person's hand ends a flight where it is
+        if (anim?.fly) finishAnim();
         lastMouse = { x: e.clientX, y: e.clientY };
         // the capture phase, before OrbitControls and the gizmo: a modal's click
         // and a box's drag are not an orbit
@@ -3949,7 +3981,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (opts.onTool?.(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh) } : null, true)) return;
         if (!hh) return;
         opts.onBeforeJump?.();
-        applyCam(detailZoom(camState(), arr(hh.point), FOV));
+        // MICRO-SEG14 p.1 · a journey, not a teleport: the camera flies to a
+        // fraction of the point's depth (`flyArrival`)
+        finishAnim();
+        flyCam(flyArrival(camState(), arr(hh.point), FOV), "double-click");
       };
       let padGrab: { p: V3; until: number } | null = null;
       const onWheel = (e: WheelEvent) => {
@@ -4000,6 +4035,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!opts.isFocused?.() && !modal) return;
         const t = e.target as HTMLElement | null;
         if (t && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t.isContentEditable)) return;
+        // MICRO-SEG14 p.1 · a key (not a modifier alone) ends a flight where it is
+        if (anim?.fly && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) finishAnim();
         const stop = () => { e.preventDefault(); e.stopPropagation(); };
         // MICRO-RITOCCHI-CHIARI p.3 · a point mark moving owns the keyboard too
         if (markMove) {
@@ -4027,7 +4064,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (kp === "toggle-ortho") { finishAnim(); orthoAuto = false; setOrtho(!isOrtho); return; }
           if (kp === "frame-selection") {
             const keys = selectedKeysNow();
-            if (!keys.length || !api.frameKeys?.(keys)) frameIt?.();
+            if (!keys.length || !api.frameKeys?.(keys, true)) frameIt?.(true);
             return;
           }
           setAligned(kp.view);
@@ -4038,7 +4075,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         switch (a) {
           case "frame-selection": {
             const keys = selectedKeysNow();
-            if (!keys.length || !api.frameKeys?.(keys)) frameIt?.();
+            if (!keys.length || !api.frameKeys?.(keys, true)) frameIt?.(true);
             stop();
             return;
           }
@@ -4167,7 +4204,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         },
         frameCursor: () => {
           const r = Math.max(0.5, v3(camState().pos).distanceTo(controls.target) * 0.15);
-          applyCam(frameSphere(camState(), cursorAt, r, FOV, persp.aspect));
+          flyCam(frameSphere(camState(), cursorAt, r, FOV, persp.aspect), "frame-cursor");
         },
         armBoxZoom: () => { boxArmed = true; boxMode = "zoom"; host.classList.add("scn-armed"); },
         syncSketches,
@@ -4297,7 +4334,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       if (o?.release) releaseNext = true;
       rebuild?.();
     },
-    frame() { frameIt?.(); },
+    frame(smooth?: boolean) { frameIt?.(smooth); },
     inView: () => api.inView?.() ?? null,
     dispose() {
       disposed = true;

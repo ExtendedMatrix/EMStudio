@@ -123,6 +123,12 @@ export interface SpaceRowDeps {
    *  «Visibilità ▾» (its name, for the mark), null when on; and a click on the mark */
   categoryOff?: (key: string) => { key: string; label: string; title: string } | null;
   categoryOn?: (cat: string) => void;
+  /** MICRO-SEG14 p.2 · what the retired scene panel still said alone: the
+   *  object whose alternative is drawn in its place («replaced by …», the
+   *  words whole), and a record's state against its .blend (the last «Check
+   *  against the graph») */
+  substitutedBy?: (key: string) => string | null;
+  blendState?: (id: string) => { sign: string; state: string; title: string } | null;
 }
 
 export interface UnifiedApi {
@@ -135,6 +141,9 @@ export interface UnifiedApi {
   /** MICRO-PL07 p.0 · the Space's summary clicked: the epoch's branch opened,
    *  scrolled to the top and lit for a moment; false when no row is the epoch */
   revealEpoch: (epochId: string) => boolean;
+  /** MICRO-SEG14 p.2 · the first row `match` finds, opened, scrolled to the top
+   *  and flashed (the Space's «sketches» in its summary); false: none */
+  revealRow: (match: (r: URow) => boolean) => boolean;
   destroy: () => void;
 }
 
@@ -334,6 +343,26 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     }
     const S = d.space;
     if (S && (r.skey || r.kind === "node")) {
+      const sub = r.skey && S.substitutedBy ? S.substitutedBy(r.skey) : null;
+      if (sub) {
+        el.classList.add("uo-subst");
+        const x = document.createElement("span");
+        x.className = "uo-subst-mark";
+        x.dataset.subst = "1";
+        x.textContent = "⇄";
+        x.title = sub;
+        x.setAttribute("aria-label", sub);
+        tail.appendChild(x);
+      }
+      const bs = r.id && !r.version && S.blendState ? S.blendState(r.id) : null;
+      if (bs) {
+        const b = document.createElement("span");
+        b.className = `sol-blend sol-blend-${bs.state}`;
+        b.dataset.blend = bs.state;
+        b.textContent = bs.sign;
+        b.title = bs.title;
+        tail.appendChild(b);
+      }
       const fst = r.skey && !r.ghost ? S.fileState?.(r) ?? null : null;
       if (fst) {
         const f = document.createElement("span");
@@ -748,6 +777,19 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => paint()) : null;
   ro?.observe(scroll);
 
+  const revealRow = (match: (r: URow) => boolean): boolean => {
+    let i = rows.findIndex(match);
+    if (i < 0) return false;
+    if (rows[i].parent && !rows[i].open) { toggleOpen(rows[i]); i = rows.findIndex(match); }
+    if (i < 0) return false;
+    scroll.scrollTop = i * ROW_H;
+    flashKey = rows[i].key;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { flashKey = null; paint(true); }, 1600);
+    paint(true);
+    return true;
+  };
+
   build();
   paint(true);
 
@@ -784,18 +826,8 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     },
     rows: () => rows,
     paintNow: () => paint(),
-    revealEpoch(epochId) {
-      let i = rows.findIndex((r) => r.id === epochId && r.kind === "group" && r.glyph === "EpochNode");
-      if (i < 0) return false;
-      if (rows[i].parent && !rows[i].open) { toggleOpen(rows[i]); i = rows.findIndex((r) => r.id === epochId && r.kind === "group" && r.glyph === "EpochNode"); }
-      if (i < 0) return false;
-      scroll.scrollTop = i * ROW_H;
-      flashKey = rows[i].key;
-      clearTimeout(flashTimer);
-      flashTimer = setTimeout(() => { flashKey = null; paint(true); }, 1600);
-      paint(true);
-      return true;
-    },
+    revealEpoch: (epochId) => revealRow((r) => r.id === epochId && r.kind === "group" && r.glyph === "EpochNode"),
+    revealRow,
     destroy() { clearTimeout(flashTimer); ro?.disconnect(); root.remove(); },
   };
 }

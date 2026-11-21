@@ -119,7 +119,7 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 {
   const k = (key, m = {}) => N.spaceKeyAction({ key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...m }, true);
   eq([k("."), k("f"), k("F"), k("Home"), k("t"), k("B", { shiftKey: true }), k("C", { shiftKey: true }), k("A", { shiftKey: true })],
-    ["frame-selection", "frame-selection", "frame-selection", "frame-all", "outliner", "box-zoom", "cursor-reset", "add-menu"], "the keys");
+    ["frame-selection", "frame-selection", "frame-selection", "frame-all", null, "box-zoom", "cursor-reset", "add-menu"], "the keys");
   eq([k("g"), k("r"), k("s"), k("x"), k("Escape"), k("[", { metaKey: true }), k("ArrowLeft", { altKey: true })],
     ["grab", "rotate", "scale", "delete", "cancel", "back", "back"], "G R S X Esc, and «Indietro»");
   eq([k("s", { metaKey: true }), k("z", { metaKey: true })], [null, null], "⌘S and ⌘Z are not the Space's");
@@ -236,6 +236,43 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
     near(Math.hypot(...m.pos.map((v, i) => v - m.target[i])), Math.hypot(...A.pos.map((v, i) => v - A.target[i])), 1e-9, `${a} → ${b}: halfway, the same distance from the pivot`);
     ok(m.pos.every(Number.isFinite), `${a} → ${b}: halfway, a finite camera (opposite views turn through the side)`);
   }
+}
+
+// ── MICRO-SEG14 p.1 · the flight: a journey, not a teleport ─────────────────
+{
+  const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+  const far = { pos: [0, 30, 60], target: [0, 0, 0] };         // the temple seen whole, ~67 m
+  const stone = [4, 0.5, 3];
+  const a = N.flyArrival(far, stone, 40);
+  eq(a.target, stone, "the double click: the point clicked is the new pivot");
+  const depth = N.dot(N.sub(stone, far.pos), N.norm(N.sub(far.target, far.pos)));
+  near(dist(a.pos, stone), depth * N.FLY_FRACTION, 1e-9, "…the camera stops at a fraction of the point's depth, not glued to the mesh");
+  ok(dist(a.pos, stone) > 10, "…from the whole temple, still metres away (it was 0.69 m: E.D.'s 0801 screenshots)");
+  near(N.dot(N.norm(N.sub(a.target, a.pos)), N.norm(N.sub(far.target, far.pos))), 1, 1e-12, "…the view does not turn");
+  // a double click after another comes nearer, never under the minimum
+  let c = far, steps = 0;
+  while (steps < 20) { const n = N.flyArrival(c, stone, 40); if (dist(n.pos, c.pos) < 1e-9) break; c = n; steps++; }
+  near(dist(c.pos, stone), N.flyMinDistance(40), 1e-9, `…double click after double click: ${steps} hops down to the minimum, never nearer`);
+  const close = { pos: [4, 0.5, 3.4], target: stone };
+  near(dist(N.flyArrival(close, stone, 40).pos, stone), 0.4, 1e-9, "…a camera already nearer than the minimum keeps its distance");
+  // the duration: 0.6 s for a hop, at most 1.5 s, longer for a longer way
+  const ms = N.flightMs(far, a);
+  ok(ms >= N.FLY_MIN_MS && ms <= N.FLY_MAX_MS, `the flight lasts 0.6–1.5 s (${ms} ms)`);
+  const hop = N.flightMs(far, { pos: [0.5, 30, 60], target: [0.5, 0, 0] });
+  ok(hop < ms, `…a short slide is quicker (${hop} ms) than the dive to a stone (${ms} ms)`);
+  eq(N.flightMs(far, { pos: [5e6, 30, 60], target: [5e6, 0, 0] }), N.FLY_MAX_MS, "…and never longer than 1.5 s");
+  // the way: eased, pivot and position together, distance geometric
+  eq(N.flightBetween(far, a, 0), far, "t = 0 is the start");
+  eq(N.flightBetween(far, a, 1), a, "t = 1 is the arrival, exactly");
+  const m = N.flightBetween(far, a, 0.5);
+  near(dist(m.pos, m.target), Math.sqrt(dist(far.pos, far.target) * dist(a.pos, a.target)), 1e-9, "halfway: the geometric mean of the two distances");
+  ok(N.easeInOut(0.1) < 0.1 && N.easeInOut(0.9) > 0.9, "eased in and out");
+  let prev = Infinity, mono = true;
+  for (let i = 0; i <= 20; i++) { const d = dist(N.flightBetween(far, a, i / 20).pos, stone); if (d > prev + 1e-9) mono = false; prev = d; }
+  ok(mono, "the camera nears the point at every frame: no overshoot, no jump");
+  let jump = 0;
+  for (let i = 1; i <= 60; i++) jump = Math.max(jump, dist(N.flightBetween(far, a, i / 60).pos, N.flightBetween(far, a, (i - 1) / 60).pos));
+  ok(jump < dist(far.pos, a.pos) / 10, `no frame carries the camera more than a tenth of the way (${jump.toFixed(2)} m at 60 frames)`);
 }
 
 console.log(`check-space-nav: ${checks} checks passed`);

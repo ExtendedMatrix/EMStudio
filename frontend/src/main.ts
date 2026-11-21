@@ -2724,8 +2724,10 @@ window.__EM_SCENE__ = () => {
   /** MICRO-OUTLINER-UNICO · every Outliner rebuilt now (its cost, measured), its rows */
   uoRefresh: () => { for (const a of unifiedApis.values()) a.refresh(); },
   uoPaint: () => { for (const a of unifiedApis.values()) a.paintNow(); },
-  /** …and the Space's own Outliner beside it (T), for the cases that drive it */
-  sceneOwnOutliner: (on: boolean) => setSpace3dPrefs({ ...space3dPrefs(), tWithOutliner: on, ...(on ? { shown: true } : {}) }),
+  /** …and the Space's own (retired) Outliner beside it, for the page cases that
+   *  still drive it — MICRO-SEG14 p.2: a PROBE seam only, never persisted; the
+   *  person no longer has a way to it (no T, no triangle) */
+  sceneOwnOutliner: (on: boolean) => { sceneOwnProbe = on; setSpace3dPrefs({ ...space3dPrefs(), ...(on ? { shown: true } : {}) }); refreshSurfaces("scene"); },
   /** …and the EMTree as a window again, under the Outliner (its Overview, the files' verbs) */
   openEMTreeWindow: () => openEMTreeWindow(),
   /** the warnings' table (the status bar's ⚠ → «Apri la tabella degli avvisi») */
@@ -13235,10 +13237,11 @@ const unifiedApis = new Map<string, ReturnType<typeof mountUnifiedOutliner>>();
 const unifiedQuery = new Map<string, string>();
 const unifiedSearchEls = new Map<string, HTMLInputElement>();
 
-/** an Outliner window in this workspace: the Space's own Outliner steps aside */
-function unifiedOutlinerOnScreen(): boolean {
-  return windowsOf().some((w) => w.type === "outliner");
-}
+/** MICRO-SEG14 p.2 · the Space's own Outliner is retired: drawn only for the
+ *  page cases that still drive it (`__EM_DRAG__.sceneOwnOutliner`), never for
+ *  the person, never persisted */
+let sceneOwnProbe = false;
+
 
 function unifiedOptsOf(win: Win): OutlinerOpts {
   const saved = winCurrent(win, "outliner.opts");
@@ -14433,7 +14436,7 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
       const key = r.eye ?? (r.id && unifiedFacts().proxies.has(r.id) ? `proxy:${r.id}` : null);
       if (!key) { if (r.id) unifiedReveal(r.id); return; }
       let framed = false;
-      for (const h of sceneHandles.values()) framed = h.frameKeys([key]) || framed;
+      for (const h of sceneHandles.values()) framed = h.frameKeys([key], true) || framed;
       if (!framed && key.startsWith("proxy:")) openUnitInSpace(key.slice(6));
     },
     geoMark: (id) => geoMarks().get(id) ?? null,
@@ -14654,7 +14657,7 @@ function spaceRowDeps(): SpaceRowDeps {
     failMenu: (r, at) => spaceMenu(at.x, at.y, r.label, failMenuEntries({ failed: r.skey ? modelFailureOf(r.skey) : undefined })),
     isolated: () => spaceIsolated,
     isolate: (r) => { if (!r.skey) return; spaceIsolated = spaceIsolated === r.skey ? null : r.skey; refreshSurfaces("scene"); refreshSurfaces("outliner"); },
-    frame: (r) => { if (!r.skey) return; let ok = false; for (const h of sceneHandles.values()) ok = h.frameKeys([r.skey]) || ok; if (!ok) toast(t("uo.sp.notDrawn")); },
+    frame: (r) => { if (!r.skey) return; let ok = false; for (const h of sceneHandles.values()) ok = h.frameKeys([r.skey], true) || ok; if (!ok) toast(t("uo.sp.notDrawn")); },
     chooseVersion: (r) => {
       if (!r.version) return;
       const rm = currentSpace()?.rms.find((x) => x.id === r.version!.rm);
@@ -14672,6 +14675,9 @@ function spaceRowDeps(): SpaceRowDeps {
       setSpace3dPrefs({ ...p, pinned: [...s2] });
     },
     pinWords: { on: t("uo.pinOn"), off: t("uo.pinOff") },
+    // MICRO-SEG14 p.2 · the two marks the retired scene panel said alone
+    substitutedBy: (k) => { const by = spaceSubstituted.get(k); return by ? `${t("alt.substitutedBy")} ${by}` : null; },
+    blendState: (id) => blendStateOfNode(id),
     words: { arrow: t("s3.arrow"), isolate: t("s3.isolate"), frame: t("s3.frame"), ghost: t("uo.x3dGhost") },
   };
 }
@@ -14703,7 +14709,7 @@ function outlinerKeyMenu(r: URow, at: { x: number; y: number }): void {
   const isProxy = key.startsWith("proxy:");
   spaceMenu(at.x, at.y, keys.length > 1 ? tn("uo.sp.selected", keys.length) : r.label, [
     { label: t(isProxy ? "uo.sp.goUnit" : "uo.sp.goModel"), act: "go", run: () => unifiedReveal(id) },
-    { label: t("s3.frame"), act: "frame", run: () => { for (const h of sceneHandles.values()) h.frameKeys(keys); } },
+    { label: t("s3.frame"), act: "frame", run: () => { for (const h of sceneHandles.values()) h.frameKeys(keys, true); } },
     "sep",
     { label: tn("uo.sp.hide", keys.length), act: "hide", run: () => {
       const p = space3dPrefs();
@@ -32201,7 +32207,7 @@ function openUnitInSpace(unitId: string): void {
   const t0 = Date.now();
   const tryFrame = () => {
     const h = sceneHandles.get(id);
-    if (h?.frameKeys([`proxy:${unitId}`])) return;
+    if (h?.frameKeys([`proxy:${unitId}`], true)) return;
     if (Date.now() - t0 < 15000) setTimeout(tryFrame, 250);
   };
   setTimeout(tryFrame, 250);
@@ -32232,7 +32238,7 @@ function openRmInSpace(rmId: string): void {
   const t0 = Date.now();
   const tryFrame = () => {
     const h = sceneHandles.get(id);
-    if (h?.frameKeys([`rm:${rmId}`])) return;
+    if (h?.frameKeys([`rm:${rmId}`], true)) return;
     if (Date.now() - t0 < 15000) setTimeout(tryFrame, 250);
   };
   setTimeout(tryFrame, 250);
@@ -32919,7 +32925,7 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
       { label: t("det.blender"), act: "blender-detail", run: () => { void blenderOnDetail(win, sk.id); } },
       { label: t("det.proxy"), act: "proxy-detail", run: () => { void proxyOnDetail(win, sk.id); } },
       "sep",
-      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`sketch:${sk.id}`]) },
+      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`sketch:${sk.id}`], true) },
       { label: t("s3.isolate"), act: "isolate", run: () => isolate(`sketch:${sk.id}`) },
       "sep",
       { label: t("s3.menuGrab"), act: "grab", run: () => h.startModal("grab") },
@@ -32933,7 +32939,7 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
   if (m.kind === "proxy" && m.id) {
     const id = m.id;
     spaceMenu(m.x, m.y, String(st.node(id)?.name ?? id), [
-      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`proxy:${id}`]) },
+      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`proxy:${id}`], true) },
       { label: t("s3.isolate"), act: "isolate", run: () => isolate(`proxy:${id}`) },
       { label: t("s3.showInGraph"), act: "graph", run: () => jumpTo(id) },
       { label: t("s3.selectUnit"), act: "select", run: () => { select(id); refreshInspector(); } },
@@ -32954,7 +32960,7 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
     spaceMenu(m.x, m.y, rm?.name ?? String(st.node(id)?.name ?? id), [
       { label: t("s3.solo"), act: "solo", disabled: !rm?.documentId,
         run: () => { if (rm?.documentId) requestDoc(rm.documentId, { from: win, reading: null }); } },
-      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`rm:${id}`]) },
+      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`rm:${id}`], true) },
       { label: t("s3.isolate"), act: "isolate", run: () => isolate(`rm:${id}`) },
       { label: t("s3.showInGraph"), act: "graph", run: () => jumpTo(id) },
       { label: t("s3.selectModel"), act: "select", run: () => { select(id); refreshInspector(); } },
@@ -33799,7 +33805,7 @@ function renderSketchInspector(host: HTMLElement, sketchId: string): void {
   };
   btn("associate", t("s3.associate"), () => revealAssociate());
   btn("create-unit", t("s3.createUnit"), () => { void createUnitFromSketch(win, sk.id); });
-  btn("frame", t("s3.frame"), () => sceneHandles.get(win.id)?.frameKeys([`sketch:${sk.id}`]));
+  btn("frame", t("s3.frame"), () => sceneHandles.get(win.id)?.frameKeys([`sketch:${sk.id}`], true));
   // MICRO-RIFINITURE p.4 (E.D., 6 Nov 2026) · the cube as a DETAIL: Blender on
   // the models it meets, and a proxy modelled on it with its extractor
   btn("blender-detail", t("det.blender"), () => { void blenderOnDetail(win, sk.id); });
@@ -35408,15 +35414,8 @@ function renderOutlinerAndLayers(el: HTMLElement, win: Win, ...rest: [Parameters
   // MICRO-TESTATE-COERENTI p.1 · the «Livelli della scena» are no longer here:
   // «Visibilità ▾» in the 3D window's head is the one place of the categories
   void win;
-  // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · the one Outliner does what this panel did
-  // (the scene's view): it stays behind T for one more version, and says so
-  if (unifiedOutlinerOnScreen()) {
-    const r = document.createElement("div");
-    r.className = "sol-retiring";
-    r.dataset.solRetiring = "1";
-    r.textContent = t("s3.retiring");
-    el.querySelector(".sol-head")?.before(r);
-  }
+  // MICRO-SEG14 p.2 · the panel is retired (the Outliner does all it did): its
+  // note «this panel is retiring» went with it
 }
 /** MICRO-PROVA-DEV47 p.3b · the level and the mode of a model, its chip
  *  («LOD2 · uso», «auto · LOD0»); null: no level to say */
@@ -35549,7 +35548,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     },
     frame: () => {
       const keys = [...spaceSelectedKeys(sp)].filter((x) => !x.startsWith("epoch:"));
-      if (!keys.length || !h?.frameKeys(keys)) h?.frame();
+      if (!keys.length || !h?.frameKeys(keys, true)) h?.frame(true);
     },
     search: (q) => { spaceQuery = q; refreshSurfaces("scene"); },
     clearSelection: () => setSpaceSel(EMPTY_SEL),
@@ -36788,14 +36787,14 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // MICRO-PROVA-DEV48 p.5 · what a file holds, counted at its load: the measures' cache
     onMeasured: (url, m) => { keepMeasure(url, m); modelsSheetLater(); },
     // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
-    onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel(); } },
+    onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (sceneOwnProbe && space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel(); } },
     // MICRO-TILESET-CONTENITORE p.3 · the strip says what a container draws; the N panel's line follows
     altLine: (x) => wholeAltOf(x.group) ? wholeLine(x) : t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
       levels: x.side === "tileset" ? (x.levels ? t(/–/.test(x.levels) ? "alt.levels" : "alt.level", { l: x.levels }) : "…") : x.levels || "…" }),
     onAltLine: () => { for (const el of document.querySelectorAll<HTMLElement>("[data-np=alt-line], [data-alt=line]")) { const g = el.dataset.group; const h = sceneHandles.get(win.id); const l = g && h ? h.altLine(g) : null; if (l) el.textContent = l; } },
     // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
     // MICRO-PROVA-DEV47 p.3 · …and the Inspector (its title's level) when the model drawn again is the one it shows
-    onVersionDrawn: (rmId) => { drawnAgain.add(rmId); modelsSheetLater(); if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel();
+    onVersionDrawn: (rmId) => { drawnAgain.add(rmId); modelsSheetLater(); if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (sceneOwnProbe && space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel();
       if (selectedId && drawnAgain.has(selectedId)) refreshInspector(); drawnAgain.clear(); }); } },
     panelFolded: (k) => (space3dPrefs().collapsed ?? []).includes(k),
     onPanelFold: (k, c) => foldPanel(k, c, false),
@@ -36880,10 +36879,6 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     markMoveHint: t("x3d.moveHint"),
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
-      if (a === "outliner") { const p = space3dPrefs();
-        // MICRO-OUTLINER-UNICO · beside the one Outliner, the first T brings the
-        // scene's back; from then on T opens and closes it as before
-        setSpace3dPrefs(unifiedOutlinerOnScreen() && !p.tWithOutliner ? { ...p, tWithOutliner: true, shown: true } : { ...p, shown: !p.shown }); return true; }
       if (a === "sidebar") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, nShown: !p.nShown }); return true; }
       if (a === "add-menu") {
         const r = host.getBoundingClientRect();
@@ -37655,15 +37650,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const sum = sp && epochId ? sp.summary(epochId) : null;
     // the Outliner
     const prefs = space3dPrefs();
-    // MICRO-OUTLINER-UNICO · with an Outliner window in the workspace the
-    // scene's own steps aside (T brings it back, for its versions, its
-    // alternatives and its sketches: `tWithOutliner`)
-    const uni = unifiedOutlinerOnScreen();
-    // brought back with T, it behaves as before: squeezed it closes, its triangle reopens it
-    const showT = uni ? !!prefs.tWithOutliner && prefs.shown : prefs.shown;
+    // MICRO-SEG14 p.2 · the scene's own Outliner is retired (E.D., 21 Nov 2026:
+    // «il pannello può sparire»): the one Outliner window does all it did. Only
+    // the page cases' seam still draws it (squeezed it closes, its triangle reopens it)
+    const showT = sceneOwnProbe && prefs.shown;
     outl.classList.toggle("hidden", !showT);
     grip.classList.toggle("hidden", !showT);
-    tab.classList.toggle("hidden", uni ? !prefs.tWithOutliner || prefs.shown : prefs.shown);
+    tab.classList.toggle("hidden", !sceneOwnProbe || prefs.shown);
     if (showT) renderSpaceOutliner(outl, win, sp);
     npanel.classList.toggle("hidden", !prefs.nShown);
     ngrip.classList.toggle("hidden", !prefs.nShown);
@@ -37959,14 +37952,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     });
     overlay.querySelector<HTMLButtonElement>("[data-sum=sketches]")?.addEventListener("click", (e) => {
       e.stopPropagation();
-      const p = space3dPrefs();
-      setSpace3dPrefs({ ...p, shown: true, toggled: p.toggled.filter((k) => k !== "sketches") });
-      requestAnimationFrame(() => {
-        const row = outl.querySelector<HTMLElement>(".sol-row[data-key='sketches']");
-        row?.scrollIntoView({ block: "center" });
-        row?.classList.add("flash");
-        setTimeout(() => row?.classList.remove("flash"), 1200);
-      });
+      // MICRO-SEG14 p.2 · the sketches' row in the one Outliner (the scene's own is retired)
+      let shown = false;
+      for (const a of unifiedApis.values()) shown = a.revealRow((r) => r.key.endsWith("sp/sketches")) || shown;
+      if (!shown) toast(t("uo.sp.noOutliner"));
     });
     overlay.querySelector<HTMLButtonElement>("[data-action=link-3dobj]")?.addEventListener("click", (e) => {
       e.stopPropagation();
