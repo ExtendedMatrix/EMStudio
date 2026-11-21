@@ -120,17 +120,31 @@ export function tabOutcome(before: string, answer: string[] | CompleteAnswer): {
   return { replace: p.length > tail.length ? p : null, tail, list: items, signature: sig };
 }
 
-/** The list Tab prints: in columns, each possibility's mark and its name (the
- *  last part of a dotted name, as Blender prints it), WHOLE. MICRO-SEG12 (E.D.,
- *  21 Nov 2026) · no description beside it any more — a docstring's first line
- *  cut with «…» on every name was not Blender's list: what a name is is said
- *  only when it is the one possibility (or after «name(»). */
+/** The list Tab prints: each possibility's mark (what kind it is: ƒ a
+ *  function…), its name (the last part of a dotted name, as Blender prints
+ *  it) WHOLE, and what it is. MICRO-SEG14 p.3 (E.D., 21 Nov 2026: «ci può
+ *  stare che sia verboso e dica cosa è anche con simboli (tipo function), non
+ *  è male») · the description is back beside the name, SEG12 had taken it
+ *  away: it may be shortened (`shortDetail`), the name never. */
 export function completeLines(list: CompleteItem[]): Line[] {
   if (!list.length) return [];
-  return [{ kind: "complete", text: "", items: list.map((i) => {
-    const { detail: _d, ...rest } = i;
-    return { ...rest, label: i.label ?? (i.text.split(".").pop() ?? i.text).replace(/\($/, "") };
-  }) }];
+  return [{ kind: "complete", text: "", items: list.map((i) => ({ ...i, label: i.label ?? (i.text.split(".").pop() ?? i.text).replace(/\($/, "") })) }];
+}
+
+/** MICRO-SEG14 p.3 · a description as the list says it: its first line, its
+ *  first sentence, at most `max` characters cut at a word with «…» (the
+ *  whole text stays in the row's tooltip). */
+export const DETAIL_MAX = 72;
+export function shortDetail(d: string | undefined, max = DETAIL_MAX): string {
+  if (!d) return "";
+  let s = d.split("\n").find((x) => x.trim())?.trim() ?? "";
+  const dot = s.search(/[.!?](\s|$)/);
+  if (dot > 0) s = s.slice(0, dot + 1);
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max - 1);
+  const sp = cut.lastIndexOf(" ");
+  // (a docstring's own «…» at the cut is not doubled)
+  return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[\s,;:…]+$/, "")}…`;
 }
 
 /** MICRO-SEG12 · the columns' width: the longest name, its mark and a gap
@@ -425,13 +439,24 @@ function lineEl(el: El, l: Line, t: ConsoleHost["t"]): HTMLElement {
   // MICRO-SEG02 · Tab's list: a mark per kind, the name, what it is
   if (l.kind === "complete" && l.items?.length) {
     const grid = el("div", "pyc-matches");
+    // MICRO-SEG14 p.3 · with descriptions: one possibility per row, the names
+    // in a column as wide as the longest (never cut), what it is beside;
+    // without any (a wheel without docstrings): SEG12's columns of names
+    const described = l.items.some((i) => !!i.detail);
+    grid.classList.toggle("pyc-described", described);
     grid.style.setProperty("--pyc-colw", `${columnWidth(l.items)}ch`);
+    grid.style.setProperty("--pyc-namew", `${Math.max(...l.items.map((i) => (i.label ?? i.text).length)) + 1}ch`);
     for (const it of l.items) {
       const r = el("div", `pyc-m pyc-mk-${it.kind || "none"}`);
       r.dataset.kind = it.kind || "";
       const mark = el("span", "pyc-mark", KIND_MARK[it.kind] ?? "·");
       if (it.kind) mark.title = t(`pyc.kind.${it.kind}`);
       r.append(mark, el("span", "pyc-mname", it.label ?? it.text));
+      if (described) {
+        const d = el("span", "pyc-mdetail", shortDetail(it.detail));
+        if (it.detail) r.title = `${it.kind ? `${t(`pyc.kind.${it.kind}`)} · ` : ""}${it.label ?? it.text} — ${it.detail}`;
+        r.append(d);
+      }
       grid.append(r);
     }
     row.append(grid);

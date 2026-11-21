@@ -12567,6 +12567,11 @@ button.uo-col { cursor: pointer; }
 .pyc-line.pyc-k-sig { color: var(--ok-ink); }
 .pyc-line.pyc-k-sig .pyc-detail { color: var(--ok-ink); font-style: italic; }
 /* the Script Editor's list (CodeMirror autocomplete) in the chrome's colours */
+/* MICRO-SEG14 p.3 · with descriptions: one per row, the name whole in its
+   column, the description beside (cut with an ellipsis if the window is narrow) */
+.pyc-matches.pyc-described { grid-template-columns: 100%; }
+.pyc-described .pyc-mname { flex: 0 0 var(--pyc-namew, 16ch); }
+.pyc-mdetail { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
 .cm-tooltip.cm-tooltip-autocomplete { background: var(--bg-panel); border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 0.78rem; }
 .cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent); color: var(--bg-panel); }
 .cm-completionDetail { color: var(--text-faint); font-style: normal; margin-left: 0.8em; }

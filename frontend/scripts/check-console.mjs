@@ -309,10 +309,24 @@ ok(ev.defaultPrevented === false, "a plain key is the textarea's");
   const t5 = r5.querySelector(".pyc-input");
   put(t5, "em.graph.");
   key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick();
-  eq([...r5.querySelectorAll(".pyc-out .pyc-m")].map((m) => m.textContent.slice(1)), ["chronology", "id", "a_rather_long_name_of_thirty_two"],
-     "Tab Tab on «em.graph.»: the names only, whole (no docstring beside them)");
-  ok(!r5.querySelector(".pyc-mdetail") && /36ch/.test(r5.querySelector(".pyc-matches").style.getPropertyValue("--pyc-colw")),
-     "…columns as wide as the longest name (32 + mark and gap)");
+  // MICRO-SEG14 p.3 (E.D. revisited SEG12) · the mark, the name WHOLE and a short description
+  eq([...r5.querySelectorAll(".pyc-out .pyc-m .pyc-mname")].map((m) => m.textContent), ["chronology", "id", "a_rather_long_name_of_thirty_two"],
+     "Tab Tab on «em.graph.»: the names whole");
+  eq([...r5.querySelectorAll(".pyc-out .pyc-m")].map((m) => m.querySelector(".pyc-mark").textContent), ["ƒ", "•", "="], "…each with the mark of its kind (ƒ a function)");
+  eq([...r5.querySelectorAll(".pyc-out .pyc-m .pyc-mdetail")].map((m) => m.textContent), ["The core's computation…", "The graph's id, or None.", ""],
+     "…and what it is beside it (none for a name without a docstring)");
+  ok(r5.querySelector(".pyc-matches").classList.contains("pyc-described") && /33ch/.test(r5.querySelector(".pyc-matches").style.getPropertyValue("--pyc-namew")),
+     "…one per row, the names' column as wide as the longest (32 + a gap): never cut");
+  {
+    const long = "Compute the chronology of every unit of the graph, from the core, with the epochs, the horizons and the relations between them. Second sentence.";
+    const sd = M.shortDetail(long);
+    ok(sd.length <= M.DETAIL_MAX && sd.endsWith("…") && long.startsWith(sd.slice(0, -1)), `shortDetail: a long docstring shortened at a word («${sd}»)`);
+    eq(M.shortDetail("First line. Second.\nMore"), "First line.", "shortDetail: the first sentence of the first line");
+    eq(M.shortDetail(undefined), "", "shortDetail: nothing for nothing");
+    ok(!/……/.test(M.shortDetail("Nodes of a ``type`` (``US``, ``property``, ``representation_model``… and the others of the datamodel)")), "shortDetail: a docstring's own «…» at the cut is not doubled");
+    const lines = M.completeLines([{ text: "em.a", kind: "function", detail: "x" }]);
+    eq(lines[0].items[0].detail, "x", "completeLines keeps the description (SEG12 dropped it)");
+  }
   const n5 = st5.lines.length;
   key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick(); key(t5, "Tab"); await tick();
   eq(st5.lines.length, n5, "Tab again on the same line: the list is NOT printed twice");
