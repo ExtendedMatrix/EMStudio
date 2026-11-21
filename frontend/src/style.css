@@ -12771,3 +12771,37 @@ td.plg-col { color: var(--muted, #888); }
 .uo-pinmark { flex: none; display: inline-flex; color: var(--text-muted); opacity: 0.8; }
 .uo-pinmark > svg { display: block; }
 .uo-row > .uo-marks { margin-left: auto; }
+
+/* MICRO-SEG22 · sections and subsections: titles inside a chapter, numbered
+   1, 1.1, 1.1.1 (the number is computed, never part of the text written) */
+.nv-num { color: var(--text-muted); font-variant-numeric: tabular-nums; margin-right: 0.45em; font-weight: 600; user-select: none; }
+.nv-heading { margin: 1.1em 0 0.25em; color: var(--text); line-height: 1.3; }
+.nv-heading .nv-num { margin-right: 0.15em; }
+.nv-heading.nv-h1 { font-size: 16px; font-weight: 650; }
+.nv-heading.nv-h2 { font-size: 14.5px; font-weight: 600; font-style: italic; }
+.nv-heading .nv-heading-text[contenteditable="true"] { outline: none; border-radius: var(--radius-sm); }
+.nv-heading .nv-heading-text[contenteditable="true"]:focus { box-shadow: 0 0 0 2px var(--accent-wash, rgba(191,144,0,.25)); }
+.nv-print .nv-heading.nv-h1, .nv-paper .nv-heading.nv-h1 { font-size: 17px; }
+.nv-print .nv-heading.nv-h2, .nv-paper .nv-heading.nv-h2 { font-size: 15px; }
+/* C · paragraphs written as titles by hand: one bar, and a line on each */
+.nv-hints { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0 12px; padding: 6px 10px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--bg-panel); font-size: 12.5px; color: var(--text); }
+.nv-hints-text { flex: 1 1 18em; }
+.nv-hint-row { font-size: 11.5px; color: var(--text-muted); margin: 2px 0 0 2px; display: flex; gap: 6px; align-items: center; }
+/* the Inspector's «Transform into…» */
+.ninsp-tf { padding: 8px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+.ninsp-tf-seg { display: flex; flex-wrap: wrap; gap: 0; }
+.ninsp-tf-seg .ninsp-tf-btn { border-radius: 0; margin: 0 -1px 0 0; padding: 2px 8px; font-size: 11.5px; }
+.ninsp-tf-seg .ninsp-tf-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.ninsp-tf-seg .ninsp-tf-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; margin-right: 0; }
+.ninsp-tf-seg .ninsp-tf-btn.on { background: var(--accent-wash, rgba(191,144,0,.18)); color: var(--text); opacity: 1; box-shadow: inset 0 -2px 0 var(--accent); }
+.ninsp-tf-seg .ninsp-tf-btn:disabled:not(.on) { opacity: 0.45; }
+.ninsp-numbering { flex-direction: row; align-items: center; gap: 4px; color: var(--text); font-size: 12px; }
+/* the Index's tree */
+.nidx-sub { list-style: none; margin: 0 0 2px; padding: 0; }
+.nidx-row.nidx-h { padding-top: 2px; padding-bottom: 2px; font-size: 12px; }
+.nidx-hli.nidx-l1 > .nidx-row { padding-left: 18px; }
+.nidx-hli.nidx-l2 > .nidx-row { padding-left: 32px; color: var(--text-muted); }
+.nidx-hli.nidx-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.nidx-hli.nidx-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+.nidx-row.nidx-drop-into { box-shadow: inset 0 0 0 2px var(--accent); }
+.nv-ctx-tf { margin-top: 2px; }

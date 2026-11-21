@@ -14,6 +14,7 @@
  * fails the day one of them moves — so the preview cannot drift from the file.
  */
 import { canonicalViewType, VIEW_TYPES } from "./narrative-edit";
+import { outlineNumbers } from "./narrative-outline";
 import type { EmDocument, EmNode } from "./types";
 
 /** `latex_exporter.CITED_VIEW_TYPES`: a printed page CITES these. */
@@ -72,6 +73,8 @@ getattr(index["{ref}"], "data", {{}})`,
 
 export interface ProjBlock {
   block_type?: string;
+  /** MICRO-SEG22 · a heading's level: 1 section, 2 subsection */
+  level?: number;
   text?: string;
   ref?: string;
   view_type?: string;
@@ -238,7 +241,8 @@ export function segmentsOf(text: string, nameOf: (id: string) => string | null):
 }
 
 export type PrintItem =
-  | { kind: "chapter"; chapter: number; title: string }
+  | { kind: "chapter"; chapter: number; title: string; number: string }
+  | { kind: "heading"; chapter: number; block: number; level: number; number: string; segments: Segment[] }
   | { kind: "prose"; chapter: number; block: number; segments: Segment[]; marked: boolean }
   | { kind: "withheld"; chapter: number; block: number }
   | { kind: "citation"; chapter: number; block: number; ref: string; name: string; key: number }
@@ -261,9 +265,18 @@ export function printItems(chapters: ProjChapter[], index: Map<string, EmNode>,
     return n ? String(n.name || n.id) : null;
   };
   let fig = 0;
+  const numbers = outlineNumbers(chapters);
   chapters.forEach((c, ci) => {
-    items.push({ kind: "chapter", chapter: ci, title: String(c.title ?? "") });
+    items.push({ kind: "chapter", chapter: ci, title: String(c.title ?? ""), number: numbers.get(String(ci)) ?? "" });
     (c.blocks ?? []).forEach((b, bi) => {
+      if (b.block_type === "heading") {
+        // MICRO-SEG22 · a section's or subsection's title (bake: `kind="heading"`)
+        const text = String(b.text ?? "");
+        if (!text.trim()) return;
+        items.push({ kind: "heading", chapter: ci, block: bi, level: (b.level ?? 1) >= 2 ? 2 : 1,
+                     number: numbers.get(`${ci}:${bi}`) ?? "", segments: segmentsOf(text, nameOf) });
+        return;
+      }
       if ((b.block_type ?? "prose") === "prose") {
         const text = String(b.text ?? "");
         if (isUnvalidated(b) && !opts.force) {
@@ -308,7 +321,11 @@ export type NbCell =
 /** What the notebook will contain — `ipynb_exporter.build_notebook`, as cells
  *  (the loader and report cells shortened to their first lines). */
 export function notebookCells(title: string, chapters: ProjChapter[], index: Map<string, EmNode>,
-                              opts: { force?: boolean } = {}): NbCell[] {
+                              opts: { force?: boolean; numbered?: boolean } = {}): NbCell[] {
+  // MICRO-SEG22 · chapter «##», section «###», subsection «####», numbered as
+  // `ipynb_exporter` numbers them unless the story says `numbering: false`
+  const numbers = outlineNumbers(chapters);
+  const lead = (key: string): string => (opts.numbered !== false && numbers.get(key) ? `${numbers.get(key)} ` : "");
   const nameOf = (id: string): string | null => {
     const n = index.get(id);
     return n ? String(n.name || n.id) : null;
@@ -319,8 +336,16 @@ export function notebookCells(title: string, chapters: ProjChapter[], index: Map
     { cell_type: "code", source: "report = api.narrative_report(graph)\n…\nreport['broken_citations']" },
   ];
   chapters.forEach((c, ci) => {
-    cells.push({ cell_type: "markdown", source: `## ${String(c.title ?? "")}` });
+    cells.push({ cell_type: "markdown", source: `## ${lead(String(ci))}${String(c.title ?? "")}` });
     (c.blocks ?? []).forEach((b, bi) => {
+      if (b.block_type === "heading") {
+        const text = String(b.text ?? "").trim();
+        if (!text) return;
+        const plain = segmentsOf(text, nameOf).map((s) => ("text" in s ? s.text : s.mention)).join("");
+        cells.push({ cell_type: "markdown", chapter: ci, block: bi,
+                     source: `${(b.level ?? 1) >= 2 ? "####" : "###"} ${lead(`${ci}:${bi}`)}${plain}` });
+        return;
+      }
       if ((b.block_type ?? "prose") === "prose") {
         const text = String(b.text ?? "").trim();
         if (!text) return;

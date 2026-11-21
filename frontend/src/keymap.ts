@@ -117,6 +117,12 @@ export const KEYMAP: KeyRow[] = [
   { id: "fieldTab", keys: "Tab", scope: "field" },
   { id: "proseSlash", keys: "/", scope: "field" },
   { id: "proseLink", keys: "[[", scope: "field" },
+  // MICRO-SEG22 · «Transform into…» in the Narrative's Write (⌘ is Ctrl on
+  // Windows and Linux; AltGr+digit stays a character)
+  { id: "nvTfChapter", keys: "⌘⌥1", scope: "field" },
+  { id: "nvTfSection", keys: "⌘⌥2", scope: "field" },
+  { id: "nvTfSubsection", keys: "⌘⌥3", scope: "field" },
+  { id: "nvTfParagraph", keys: "⌘⌥0", scope: "field" },
   { id: "menuArrows", keys: "↑ ↓ → ← Enter", scope: "menu" },
   { id: "buttonSpace", keys: "Space · Enter", scope: "menu" },
 ];

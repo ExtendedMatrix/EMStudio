@@ -15,6 +15,7 @@ import { blockStatus, bylineOf } from "./narrative-authorship";
 import type { EditableChapter } from "./narrative-edit";
 import { isUnwrittenProse, narrativesIn } from "./narrative";
 import type { EmDocument } from "./types";
+import { headingSpan, outlineOf } from "./narrative-outline";
 
 export interface IndexHooks {
   narrativeId: string | null;
@@ -45,12 +46,20 @@ export interface IndexHooks {
   laneLabel?(id: string): string;
   /** p.9 · the «+ Aggiungi…» menu, drawn by the caller under its button */
   onAddMenu?(anchor: HTMLElement): void;
+  /** MICRO-SEG22 · a section or subsection picked in the tree (the page goes
+   *  there, the Inspector shows it) */
+  onPickPart?(chapter: number, block: number): void;
+  /** MICRO-SEG22 · a heading dragged in the tree, WITH its blocks: to chapter
+   *  `toChapter`, before block `toAt` (the number of blocks = the end) */
+  onMoveSpan?(chapter: number, block: number, toChapter: number, toAt: number): void;
   /** p.9 · the coverage section open (remembered by the caller) */
   coverageOpen?: boolean;
   onCoverageToggle?(open: boolean): void;
 }
 
 const CHAPTER_DRAG = "application/x-em-chapter";
+/** MICRO-SEG22 · what a dragged heading carries: `chapter:block` */
+const HEADING_DRAG = "application/x-em-heading";
 
 /** Does a chapter match a find? Its title, and the text of its prose. */
 export function chapterMatches(ch: { title?: string; blocks?: { block_type?: string; text?: string; caption?: string }[] },
@@ -145,6 +154,10 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
     hooks.onQuery?.(find.value);
   });
   const list = el("ol", "nidx-ch");
+  // MICRO-SEG22 · the tree: chapter › section › subsection, numbered as the page
+  const tree = outlineOf(nr.chapters);
+  const plain = (text: string): string => text.replace(/\[\[\s*([^[\]\n]+?)\s*\]\]/g,
+    (_m, id: string) => String(index.get(id)?.name ?? id));
   nr.chapters.forEach((ch, i) => {
     const li = el("li");
     const b = el("button", "nidx-row" + (hooks.current === i ? " on" : "")) as HTMLButtonElement;
@@ -184,6 +197,80 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
     if (meta.childElementCount) b.appendChild(meta);
     b.addEventListener("click", () => hooks.onPick(i));
     li.appendChild(b);
+    // MICRO-SEG22 · its sections and subsections, under it
+    const heads = tree.filter((r) => r.chapter === i && r.block != null);
+    if (heads.length) {
+      const sub = el("ol", "nidx-sub");
+      for (const r of heads) {
+        const hli = el("li", `nidx-hli nidx-l${r.level}`);
+        const hb = el("button", `nidx-row nidx-h nidx-h${r.level}`) as HTMLButtonElement;
+        hb.type = "button";
+        hb.dataset.chapter = String(i);
+        hb.dataset.block = String(r.block);
+        hb.appendChild(el("span", "nidx-n", r.number));
+        hb.append(" ");
+        hb.appendChild(el("span", "nidx-t", plain(r.title) || t("nidx.untitled")));
+        hb.addEventListener("click", (e) => { e.stopPropagation(); hooks.onPickPart?.(i, r.block!); });
+        hli.appendChild(hb);
+        if (hooks.onMoveSpan) {
+          hli.draggable = true;
+          hli.title = t("nidx.dragHeading");
+          hli.dataset.nidxHeading = `${i}:${r.block}`;
+          hli.addEventListener("dragstart", (e) => {
+            e.stopPropagation();
+            e.dataTransfer?.setData(HEADING_DRAG, `${i}:${r.block}`);
+            if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+            hli.classList.add("nidx-dragging");
+          });
+          hli.addEventListener("dragend", () => hli.classList.remove("nidx-dragging"));
+          // before this heading (upper half) or after all it heads (lower half)
+          const at = (e: DragEvent): number => {
+            const rr = hli.getBoundingClientRect();
+            return e.clientY > rr.top + rr.height / 2
+              ? headingSpan((ch.blocks ?? []) as { block_type?: string; level?: number }[], r.block!)[1] : r.block!;
+          };
+          hli.addEventListener("dragover", (e) => {
+            if (!(e.dataTransfer?.types ?? []).includes(HEADING_DRAG)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const after = at(e) !== r.block;
+            hli.classList.toggle("nidx-drop-before", !after);
+            hli.classList.toggle("nidx-drop-after", after);
+          });
+          hli.addEventListener("dragleave", () => hli.classList.remove("nidx-drop-before", "nidx-drop-after"));
+          hli.addEventListener("drop", (e) => {
+            const raw = e.dataTransfer?.getData(HEADING_DRAG);
+            hli.classList.remove("nidx-drop-before", "nidx-drop-after");
+            if (!raw) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const [fc, fb] = raw.split(":").map(Number);
+            hooks.onMoveSpan?.(fc, fb, i, at(e));
+          });
+        }
+        sub.appendChild(hli);
+      }
+      li.appendChild(sub);
+    }
+    // MICRO-SEG22 · a heading dropped on a chapter's row goes to its end
+    if (hooks.onMoveSpan) {
+      b.addEventListener("dragover", (e) => {
+        if (!(e.dataTransfer?.types ?? []).includes(HEADING_DRAG)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        b.classList.add("nidx-drop-into");
+      });
+      b.addEventListener("dragleave", () => b.classList.remove("nidx-drop-into"));
+      b.addEventListener("drop", (e) => {
+        const raw = e.dataTransfer?.getData(HEADING_DRAG);
+        b.classList.remove("nidx-drop-into");
+        if (!raw) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const [fc, fb] = raw.split(":").map(Number);
+        hooks.onMoveSpan?.(fc, fb, i, (ch.blocks ?? []).length);
+      });
+    }
     // p.10 · dragged in the list: a line where it falls, the drop moves it
     if (hooks.onMoveChapter) {
       li.draggable = true;

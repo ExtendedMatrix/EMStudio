@@ -19,11 +19,15 @@ import type { EmNode } from "./types";
 import { t } from "./i18n";
 
 export interface EditableBlock {
-  block_type: "prose" | "embed";
+  /** MICRO-SEG22 · `heading`: the title of a section (`level` 1) or of a
+   *  subsection (`level` 2), in `text` — s3Dgraphy `BLOCK_HEADING` */
+  block_type: "prose" | "embed" | "heading";
   text?: string;
   ref?: string;
   view_type?: string;
   options?: Record<string, unknown>;
+  level?: number;
+  authored_by?: string;
 }
 
 export interface EditableChapter {
@@ -31,6 +35,7 @@ export interface EditableChapter {
   anchor?: string;
   canonical?: boolean;
   blocks?: EditableBlock[];
+  authored_by?: string;
 }
 
 /**
@@ -228,6 +233,41 @@ export function addProse(store: DocumentStore, narrativeId: string,
     if (!c) return;
     (c.blocks ??= []).push({ block_type: "prose", text });
   });
+}
+
+/** MICRO-SEG22 · a section's or subsection's title, written in the page or in
+ *  the Inspector: one gesture, one undo step. A title cannot be emptied (a
+ *  heading with no words prints nothing): Delete removes it. */
+export function setHeading(store: DocumentStore, narrativeId: string,
+                           chapterIndex: number, blockIndex: number, text: string): void {
+  const next = text.replace(/\s+/g, " ").trim();
+  if (!next) return;
+  editChapters(store, narrativeId, (cs) => {
+    const b = cs[chapterIndex]?.blocks?.[blockIndex];
+    if (b && b.block_type === "heading") b.text = next;
+  });
+}
+
+/** MICRO-SEG22 · a new section (1) or subsection (2) at `at` in a chapter. */
+export function insertHeading(store: DocumentStore, narrativeId: string,
+                              chapterIndex: number, at: number, level: 1 | 2, text: string): void {
+  editChapters(store, narrativeId, (cs) => {
+    const c = cs[chapterIndex];
+    if (!c) return;
+    const blocks = (c.blocks ??= []);
+    blocks.splice(Math.max(0, Math.min(blocks.length, at)), 0, { block_type: "heading", text, level });
+  });
+}
+
+/** MICRO-SEG22 · the story numbered (1, 1.1, 1.1.1) or not: `data.numbering`,
+ *  absent when on (the default), `false` when off. */
+export function setNumbering(store: DocumentStore, narrativeId: string, on: boolean): void {
+  const node = store.node(narrativeId);
+  if (!node) return;
+  const data = { ...((node.data ?? {}) as Record<string, unknown>) };
+  if ((data.numbering !== false) === on) return;
+  if (on) delete data.numbering; else data.numbering = false;
+  store.updateNode(narrativeId, { data });
 }
 
 export function setProse(store: DocumentStore, narrativeId: string,

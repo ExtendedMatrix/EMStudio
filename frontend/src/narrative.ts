@@ -26,6 +26,7 @@ import { onFirstVisible } from "./lazy";
 import { blockStatus, bylineOf, narrativeAuthors } from "./narrative-authorship";
 import type { AuthorRef, BlockStatus } from "./narrative-authorship";
 import { canonicalViewType } from "./narrative-edit";
+import { kindOfDigit, numberingOn, outlineNumbers, type HeadingHint, type PartKind } from "./narrative-outline";
 import { chainCard, isChainNode } from "./hdto-card";
 import { mentionsIn, notebookCells, printItems, scene3dRefKind, type ProjChapter, type SceneRefKind } from "./narrative-projection";
 import {
@@ -95,7 +96,10 @@ export type ViewerFactory = (host: HTMLElement, spec: ModelSpec) => void;
 
 /** A block as it is serialised by s3Dgraphy (`narrative_node.Block`). */
 interface NarrativeBlock {
-  block_type: "prose" | "embed";
+  /** MICRO-SEG22 · `heading`: a section's (`level` 1) or subsection's
+   *  (`level` 2) title in `text` */
+  block_type: "prose" | "embed" | "heading";
+  level?: number;
   text?: string;
   ref?: string;
   view_type?: string;
@@ -122,6 +126,8 @@ export interface Narrative {
   lang?: string;
   templateId?: string;
   chapters: NarrativeChapter[];
+  /** MICRO-SEG22 · numbered 1, 1.1, 1.1.1 (`data.numbering` not false) */
+  numbered: boolean;
 }
 
 /** The view types this build actually draws.
@@ -150,6 +156,7 @@ export function narrativesIn(doc: EmDocument | null): Narrative[] {
         templateId:
           typeof data.template_id === "string" ? data.template_id : undefined,
         chapters: (data.chapters as NarrativeChapter[]) ?? [],
+        numbered: numberingOn(data),
       };
     });
 }
@@ -621,7 +628,8 @@ function notYetRendered(viewType: string, node: EmNode | null,
 export function citedContext(blocks: NarrativeBlock[], at: number): TableContext {
   const all: string[] = [], above: string[] = [];
   blocks.forEach((b, i) => {
-    const ids = b.block_type === "prose" ? mentionsIn(b.text) : b.ref ? [b.ref] : [];
+    const ids = b.block_type === "prose" || b.block_type === "heading" ? mentionsIn(b.text)
+      : b.ref ? [b.ref] : [];
     for (const id of ids) {
       if (!all.includes(id)) all.push(id);
       if (i < at && !above.includes(id)) above.push(id);
@@ -1018,6 +1026,26 @@ export interface PageHooks {
   /** p.10 · a chapter dragged by its title onto another place (`to` = the
    *  index it goes before; the number of chapters = the end) */
   onMoveChapter?(from: number, to: number): void;
+  /** MICRO-SEG22 · «Transform into…» from the keyboard (Ctrl/Cmd+Alt+1/2/3/0)
+   *  on a chapter's title (`block` null), a heading or a paragraph */
+  onTransform?(chapter: number, block: number | null, to: PartKind): void;
+  /** MICRO-SEG22 · a section's or subsection's title written in the page */
+  onSetHeading?(chapter: number, block: number, text: string): void;
+  /** MICRO-SEG22 C · paragraphs that start with «#»: proposed, once, as titles
+   *  (already filtered of the ones the author left as they are) */
+  headingHints?: HeadingHint[];
+  onApplyHint?(hint: HeadingHint): void;
+  onApplyAllHints?(): void;
+  onDismissHints?(): void;
+}
+
+/** MICRO-SEG22 · Ctrl/Cmd+Alt+digit → the kind it transforms into, or null.
+ *  AltGr on Windows/Linux arrives as Ctrl+Alt: a key pressed WITH AltGr is a
+ *  character being typed (² ³ } on many layouts), never a transform. */
+export function transformKeyOf(e: KeyboardEvent): PartKind | null {
+  if (!e.altKey || !(e.metaKey || e.ctrlKey) || e.shiftKey) return null;
+  if (typeof e.getModifierState === "function" && e.getModifierState("AltGraph")) return null;
+  return kindOfDigit(e.code ?? "");
 }
 
 /** p.10 · what a dragged chapter carries (its index), apart from a node */
@@ -1369,6 +1397,51 @@ export function renderNarrativeView(
     return g;
   };
 
+  // MICRO-SEG22 · the outline's numbers (1, 1.1, 1.1.1), shown unless the
+  // story says `numbering: false`; never part of the text being written
+  const numbers = outlineNumbers(current.chapters);
+  const numbered = current.numbered;
+  const numberEl = (key: string): HTMLElement | null => {
+    if (!numbered || !numbers.get(key)) return null;
+    const n = el("span", "nv-num", numbers.get(key));
+    n.setAttribute("contenteditable", "false");
+    n.title = t("nv.numComputed");
+    return n;
+  };
+  // MICRO-SEG22 C · paragraphs written as titles by hand («### …»): proposed,
+  // ONCE, with «Transform» for all of them; each one also carries its own
+  // «Transform» on its row. Nothing is transformed without being asked.
+  const hints = writing ? (page.headingHints ?? []) : [];
+  if (hints.length) {
+    const bar = el("div", "nv-hints");
+    bar.dataset.nvHints = String(hints.length);
+    bar.appendChild(el("span", "nv-hints-text", t("nv.tf.hintsBar", { n: String(hints.length) })));
+    if (page.onApplyAllHints) {
+      const all = el("button", "insp-btn nv-hints-all", t("nv.tf.hintsAll", { n: String(hints.length) })) as HTMLButtonElement;
+      all.type = "button";
+      all.dataset.nvHintsAct = "all";
+      all.addEventListener("click", (e) => { e.stopPropagation(); page.onApplyAllHints!(); });
+      bar.appendChild(all);
+    }
+    if (page.onDismissHints) {
+      const no = el("button", "insp-btn nv-hints-no", t("nv.tf.hintsLeave")) as HTMLButtonElement;
+      no.type = "button";
+      no.dataset.nvHintsAct = "leave";
+      no.title = t("nv.tf.hintsLeaveTitle");
+      no.addEventListener("click", (e) => { e.stopPropagation(); page.onDismissHints!(); });
+      bar.appendChild(no);
+    }
+    paper.appendChild(bar);
+  }
+  const transformKeys = (e: KeyboardEvent, ci: number, bi: number | null, before?: () => void): boolean => {
+    const to = page.onTransform ? transformKeyOf(e) : null;
+    if (!to) return false;
+    e.preventDefault();
+    before?.();
+    page.onTransform!(ci, bi, to);
+    return true;
+  };
+
   current.chapters.forEach((chapter, ci) => {
     const section = el("section", "nv-chapter");
     section.dataset.chapter = String(ci);
@@ -1378,6 +1451,8 @@ export function renderNarrativeView(
 
     const h = el("div", "nv-chapter-head");
     const title = el("h2", "nv-chapter-title", chapter.title || "(untitled)");
+    const chNum = numberEl(String(ci));
+    if (chNum) h.appendChild(chNum);
     h.appendChild(title);
     if (chapter.canonical) {
       const badge = el("span", "nv-badge", "★");
@@ -1451,12 +1526,17 @@ export function renderNarrativeView(
       title.setAttribute("contenteditable", "true");
       title.spellcheck = false;
       title.classList.add("nv-editable");
-      title.addEventListener("blur", () => {
+      let settledTitle = chapter.title;
+      const commitTitle = (): void => {
         const next = (title.textContent || "").trim();
-        if (next && next !== chapter.title) editor!.renameChapter(ci, next);
-      });
+        if (next && next !== settledTitle) { settledTitle = next; editor!.renameChapter(ci, next); }
+      };
+      title.addEventListener("blur", commitTitle);
       title.addEventListener("keydown", (e) => {
         e.stopPropagation();
+        // MICRO-SEG22 · Ctrl/Cmd+Alt+2/3/0: the chapter into a section, a
+        // subsection, a paragraph of the chapter above (what was typed first)
+        if (transformKeys(e, ci, null, commitTitle)) return;
         if (e.key === "Enter" || e.key === "Escape") {
           e.preventDefault();
           title.blur();
@@ -1501,7 +1581,12 @@ export function renderNarrativeView(
     blocks.forEach((block, bi) => {
       if (writing && page.onInsert) section.appendChild(gutter(ci, bi));
       let body: HTMLElement;
-      if (block.block_type === "prose") {
+      if (block.block_type === "heading") {
+        // MICRO-SEG22 · a section (h3) or a subsection (h4): the paragraphs
+        // after it are its own, by their place. Written in place in Scrivi.
+        body = headingInPlace(block, index, ci, bi, writing, numberEl(`${ci}:${bi}`), page,
+          writing ? undefined : onReveal, transformKeys);
+      } else if (block.block_type === "prose") {
         body = writing
           ? editableInPlace(block.text ?? "", index, ci, bi, editor!, page)
           : renderProseWithMentions(block.text ?? "", index, false, onReveal);
@@ -1560,6 +1645,19 @@ export function renderNarrativeView(
         inv.appendChild(ask);
         row.appendChild(inv);
       }
+      // MICRO-SEG22 C · this paragraph looks like a title: its own «Transform»
+      const hint = hints.find((x) => x.chapter === ci && x.block === bi);
+      if (hint && page.onApplyHint) {
+        const hb = el("div", "nv-hint-row");
+        hb.appendChild(el("span", undefined, t("nv.tf.hintRow", { marks: hint.marks, kind: t(`nv.tf.kind.${hint.to}`) })));
+        const go = el("button", "nv-mini nv-hint-go", t("nv.tf.transform")) as HTMLButtonElement;
+        go.type = "button";
+        go.dataset.nvHint = `${ci}:${bi}`;
+        go.addEventListener("click", (e) => { e.stopPropagation(); page.onApplyHint!(hint); });
+        hb.appendChild(go);
+        row.appendChild(hb);
+      }
+      if (block.block_type === "heading") row.classList.add("nv-heading-row", `nv-h${(block.level ?? 1) >= 2 ? 2 : 1}-row`);
       if (writing) {
         row.classList.add("nv-selectable");
         if (sel && sel.chapter === ci && sel.block === bi) row.classList.add("nv-sel");
@@ -1568,7 +1666,7 @@ export function renderNarrativeView(
           row.addEventListener("contextmenu", (e) => {
             // a right click inside a paragraph keeps the browser's own menu
             // (spelling) unless it is on the row's margin
-            if ((e.target as Element | null)?.closest?.(".nv-prose-edit") && !e.altKey) return;
+            if ((e.target as Element | null)?.closest?.(".nv-prose-edit, .nv-heading-text") && !e.altKey) return;
             e.preventDefault();
             page.onContextMenu!(ci, bi, e.clientX, e.clientY);
           });
@@ -1694,6 +1792,16 @@ function editableInPlace(text: string, index: Map<string, EmNode>, ci: number, b
       box.blur();
       return;
     }
+    // MICRO-SEG22 · Ctrl/Cmd+Alt+1/2/3: this paragraph becomes a title — what
+    // was typed is committed first, then transformed (one more undo step)
+    const to = page.onTransform ? transformKeyOf(e) : null;
+    if (to) {
+      e.preventDefault();
+      const next = serializeProse(box);
+      if (next !== settled) { settled = next; editor.setProse(ci, bi, next); }
+      page.onTransform!(ci, bi, to);
+      return;
+    }
     if (e.key === "/" && !serializeProse(box).trim() && page.onInsert) {
       e.preventDefault();
       page.onInsert(ci, bi, box, true);
@@ -1717,6 +1825,63 @@ function editableInPlace(text: string, index: Map<string, EmNode>, ci: number, b
   return box;
 }
 
+/**
+ * MICRO-SEG22 · a section's or subsection's title, as the reader sees it (h3,
+ * h4, its number before it, its mentions as names) and, in Scrivi, written in
+ * place with the gesture of a chapter's title: click, type, Enter or leave —
+ * one undo step. Ctrl/Cmd+Alt+1/2/3/0 transform it.
+ */
+function headingInPlace(block: NarrativeBlock, index: Map<string, EmNode>, ci: number, bi: number,
+                        writing: boolean, num: HTMLElement | null, page: PageHooks,
+                        onReveal: ((id: string) => void) | undefined,
+                        transformKeys: (e: KeyboardEvent, ci: number, bi: number | null, before?: () => void) => boolean): HTMLElement {
+  const sub = (block.level ?? 1) >= 2;
+  const h = el(sub ? "h4" : "h3", `nv-heading ${sub ? "nv-h2" : "nv-h1"}`);
+  h.dataset.level = sub ? "2" : "1";
+  // the number, then a real space (a copied title reads «2.1 Title»)
+  if (num) h.append(num, " ");
+  const text = String(block.text ?? "");
+  const title = el("span", "nv-heading-text");
+  const inner = renderProseWithMentions(text, index, writing, onReveal).firstElementChild;
+  if (inner) while (inner.firstChild) title.appendChild(inner.firstChild);
+  h.appendChild(title);
+  if (!writing) return h;
+  title.setAttribute("contenteditable", "true");
+  title.spellcheck = true;
+  title.classList.add("nv-editable");
+  title.dataset.block = `${ci}:${bi}`;
+  const read = (): string => serializeProse(title).replace(/\s+/g, " ").trim();
+  let settled = read();
+  let cancelled = false;
+  const restore = (): void => {
+    title.textContent = "";
+    const again = renderProseWithMentions(text, index, true).firstElementChild;
+    if (again) while (again.firstChild) title.appendChild(again.firstChild);
+  };
+  title.addEventListener("click", (e) => e.stopPropagation());
+  title.addEventListener("focus", () => page.onSelectPart?.({ chapter: ci, block: bi }));
+  title.addEventListener("blur", () => {
+    if (cancelled) { cancelled = false; restore(); return; }
+    const next = read();
+    // a title cannot be emptied (Delete removes the heading): back to its words
+    if (!next) { restore(); return; }
+    if (next !== settled) { settled = next; page.onSetHeading?.(ci, bi, next); }
+  });
+  title.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (transformKeys(e, ci, bi, () => {
+      const next = read();
+      if (next && next !== settled) { settled = next; page.onSetHeading?.(ci, bi, next); }
+    })) return;
+    if (e.key === "Enter" || e.key === "Escape") {
+      e.preventDefault();
+      if (e.key === "Escape") cancelled = true;
+      title.blur();
+    }
+  });
+  return h;
+}
+
 // ── STAMPA · the page as DOCX and LaTeX will print it ──────────────────────
 function renderPrintPreview(container: HTMLElement, nr: Narrative, index: Map<string, EmNode>,
                             page: PageHooks): void {
@@ -1726,10 +1891,18 @@ function renderPrintPreview(container: HTMLElement, nr: Narrative, index: Map<st
   sheet.appendChild(el("h1", "nv-title", nr.name));
   if (nr.description) sheet.appendChild(el("p", "nv-lede", nr.description));
   const { items, bibliography } = printItems(nr.chapters as ProjChapter[], index);
-  let n = 0;
+  // MICRO-SEG22 · chapter, section, subsection at their levels, numbered as
+  // the exporters number them (or not, `numbering: false`)
+  const lead = (num: string): string => (nr.numbered && num ? `${num} ` : "");
   for (const it of items) {
     if (it.kind === "chapter") {
-      sheet.appendChild(el("h2", "nv-chapter-title", `${++n}. ${it.title}`));
+      sheet.appendChild(el("h2", "nv-chapter-title", `${lead(it.number)}${it.title}`));
+    } else if (it.kind === "heading") {
+      const h = el(it.level >= 2 ? "h4" : "h3", `nv-heading ${it.level >= 2 ? "nv-h2" : "nv-h1"}`);
+      h.appendChild(document.createTextNode(lead(it.number)));
+      for (const sgm of it.segments)
+        h.appendChild("text" in sgm ? document.createTextNode(sgm.text) : el("em", undefined, sgm.mention));
+      sheet.appendChild(h);
     } else if (it.kind === "prose") {
       const p = el("p", "nv-print-prose");
       for (const sgm of it.segments)
@@ -1778,14 +1951,16 @@ function renderNotebookPreview(container: HTMLElement, nr: Narrative, index: Map
   const nb = el("div", "nv-nb");
   nb.title = t("nv.previewComputed");
   let i = 1;
-  for (const c of notebookCells(nr.name, nr.chapters as ProjChapter[], index)) {
+  for (const c of notebookCells(nr.name, nr.chapters as ProjChapter[], index, { numbered: nr.numbered })) {
     const cell = el("div", `nv-nb-cell nv-nb-${c.cell_type}`);
     if (c.cell_type === "code") {
       cell.appendChild(el("span", "nv-nb-n", `[${i++}]`));
       cell.appendChild(el("pre", undefined, c.source));
     } else {
       const src = c.source;
-      if (src.startsWith("## ")) cell.appendChild(el("h2", "nv-chapter-title", src.slice(3)));
+      if (src.startsWith("#### ")) cell.appendChild(el("h4", "nv-heading nv-h2", src.slice(5)));
+      else if (src.startsWith("### ")) cell.appendChild(el("h3", "nv-heading nv-h1", src.slice(4)));
+      else if (src.startsWith("## ")) cell.appendChild(el("h2", "nv-chapter-title", src.slice(3)));
       else if (src.startsWith("# ")) cell.appendChild(el("h1", "nv-title", src.slice(2)));
       else cell.appendChild(el("p", undefined, src.replace(/^> ?/gm, "")));
       if (src.startsWith(">")) cell.classList.add("nv-nb-quote");

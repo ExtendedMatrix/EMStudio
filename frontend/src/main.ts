@@ -152,7 +152,7 @@ import {
   unknownCapabilities,
 } from "./connectors";
 import type { ConnectorVersions } from "./connectors";
-import { narrativesIn, queryInputFor, renderNarrativeView, setQueryContext } from "./narrative";
+import { narrativesIn, queryInputFor, renderNarrativeView, setQueryContext, transformKeyOf } from "./narrative";
 import * as nq from "./narrative-query";
 import { acceptInvite, canManage, pendingJoin } from "./members";
 
@@ -167,6 +167,8 @@ import type { NarrativeEditor } from "./narrative";
 import * as nauth from "./narrative-authorship";
 import type { AuthorRef, DraftResult } from "./narrative-authorship";
 import * as nedit from "./narrative-edit";
+import * as nout from "./narrative-outline";
+import { isMacPlatform as isMacForKeys } from "./space-nav";
 import {
   documentDiagnostics,
   logError,
@@ -27175,6 +27177,15 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
     pending: () => (ch ? nauth.pendingInChapter(ch).length : 0),
     onVerifyChapter: () => verifyChapter(narrativeId, chapter),
     onMove: (d) => {
+      // MICRO-SEG22 · a heading moves with its blocks, past its sibling
+      if (block != null && (ch?.blocks ?? [])[block]?.block_type === "heading") {
+        let landed: { chapter: number; block: number } | null = null;
+        nedit.editChapters(st, narrativeId, (cs) => { landed = nout.moveHeadingBy(cs, chapter, block, d); });
+        if (landed) setNarrativeSelection(narrativeId, landed);
+        else toast(t(d < 0 ? "nv.tf.noSiblingAbove" : "nv.tf.noSiblingBelow"));
+        refreshInspector();
+        return;
+      }
       if (block == null) {
         nedit.moveChapter(st, narrativeId, chapter, d);
         const to = Math.max(0, Math.min(chapters.length - 1, chapter + d));
@@ -27212,6 +27223,12 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
     draftLang: () => draftLangOf(narrativeId, chapter),
     onSetDraftLang: (lang) => { draftLangChoice.set(`${narrativeId}:${chapter}`, lang); refreshInspector(); },
     hasDraft: () => (ch?.blocks ?? []).some((b) => !!(b as { ai_generated?: boolean }).ai_generated),
+    // MICRO-SEG22
+    onTransform: (to) => transformNarrativePart(narrativeId, chapter, block, to),
+    transformWhy: (to) => nout.transformRefusal(chapters, chapter, block, to),
+    onSetHeading: (text) => block != null && nedit.setHeading(st, narrativeId, chapter, block, text),
+    onSetNumbering: (on) => nedit.setNumbering(st, narrativeId, on),
+    modKeys: transformModKeys(),
   });
 }
 
@@ -27305,6 +27322,29 @@ function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTML
     // p.8 · a chapter is created where one writes: its title goes HERE
     { key: "b|chapter", label: t("nv.blk.chapterHere"), detail: t("nv.blk.chapterHereHint"),
       run: () => newChapterHere(narrativeId, c, at) },
+    // MICRO-SEG22 · a section, a subsection: a title here, the blocks after it
+    // are its own
+    ...([1, 2] as const).map((level): AddMenuEntry => ({
+      key: level === 1 ? "b|section" : "b|subsection",
+      label: t(level === 1 ? "nv.blk.section" : "nv.blk.subsection"),
+      detail: t("nv.blk.headingHint"),
+      run: () => {
+        st.batch(() => {
+          if (replace) nedit.deleteBlock(st, narrativeId, c, at);
+          nedit.insertHeading(st, narrativeId, c, at, level, t(level === 1 ? "nv.newSection" : "nv.newSubsection"));
+        });
+        setNarrativeSelection(narrativeId, { chapter: c, block: at });
+        window.setTimeout(() => {
+          const h = activeNarrativeHost()?.querySelector<HTMLElement>(`.nv-block-row[data-block="${c}:${at}"] .nv-heading-text`);
+          if (!h) return;
+          h.focus();
+          const r = document.createRange();
+          r.selectNodeContents(h);
+          window.getSelection()?.removeAllRanges();
+          window.getSelection()?.addRange(r);
+        }, 60);
+      },
+    })),
   ];
   const nodes = st.liveNodes().filter((n) => LINK_GROUP_ORDER.includes(linkGroupOf(n.node_type) as never));
   const cite = nodes.map((n): AddMenuEntry => ({
@@ -27368,6 +27408,111 @@ function newChapterHere(narrativeId: string, after: number, at?: number): void {
   if (made < 0) return;
   setNarrativeSelection(narrativeId, { chapter: made, block: null });
   focusChapterTitle(made);
+}
+
+// ── MICRO-SEG22 · sections, subsections, «Transform into…» ─────────────────
+
+function chaptersOfNarrative(narrativeId: string): nedit.EditableChapter[] {
+  return ((((store?.node(narrativeId)?.data ?? {}) as Record<string, unknown>).chapters ?? []) as nedit.EditableChapter[]);
+}
+
+/** The modifier of the transform keys, as drawn on this platform. */
+function transformModKeys(): string {
+  return isMacForKeys() ? "⌘⌥" : "Ctrl+Alt+";
+}
+
+/** «Transform into…»: one undo step; the part transformed stays the one
+ *  selected, and when it came from the keyboard its words keep the caret. */
+function transformNarrativePart(narrativeId: string, c: number, b: number | null,
+                                to: nout.PartKind, caret = false): void {
+  if (!store) return;
+  const why = nout.transformRefusal(chaptersOfNarrative(narrativeId), c, b, to);
+  if (why) { if (why !== "same") toast(t(why)); return; }
+  // from the keyboard the caret is in the words being transformed: the page
+  // holds its repaint while a field has the focus («il focus è sacro»,
+  // shell/hold.ts), so the focus leaves first (the page's editors have already
+  // committed what was typed) and comes back to the transformed part after
+  if (caret) (document.activeElement as HTMLElement | null)?.blur?.();
+  let landed: { chapter: number; block: number | null } | null = null;
+  nedit.editChapters(store, narrativeId, (cs) => { landed = nout.transformPart(cs, c, b, to); });
+  if (!landed) return;
+  const where = landed as { chapter: number; block: number | null };
+  logInfo(t("nv.tf.done", { kind: t(`nv.tf.kind.${to}`) }), [narrativeId]);
+  setNarrativeSelection(narrativeId, where);
+  if (caret) focusNarrativePart(where.chapter, where.block);
+}
+
+/** The words of a part, in the page, with the caret at their end. */
+function focusNarrativePart(ci: number, bi: number | null): void {
+  const go = (tries: number): void => {
+    const host = activeNarrativeHost();
+    const target = bi == null
+      ? host?.querySelector<HTMLElement>(`.nv-chapter[data-chapter="${ci}"] .nv-chapter-title`)
+      : host?.querySelector<HTMLElement>(`.nv-block-row[data-block="${ci}:${bi}"] [contenteditable="true"]`);
+    if (!target) { if (tries > 0) window.setTimeout(() => go(tries - 1), 60); return; }
+    target.focus();
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  };
+  window.setTimeout(() => go(20), 40);
+}
+
+/** …and on the part SELECTED in Scrivi with no words under the caret (a row
+ *  clicked, the Inspector's part): the same keys. In a field they are the
+ *  field's (the page's editors handle their own). */
+document.addEventListener("keydown", (e) => {
+  if (!nvSel || !nvFocus || nvSel.chapter < 0 || !store) return;
+  const tg = e.target as HTMLElement | null;
+  if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return;
+  const to = transformKeyOf(e);
+  if (!to) return;
+  const story = windowsOf().find((w) => w.type === "narrative" && narrativeEditingOf(w));
+  if (!story) return;
+  e.preventDefault();
+  e.stopPropagation();
+  transformNarrativePart(nvSel.narrativeId, nvSel.chapter, nvSel.block, to);
+});
+
+/** A heading moved WITH its blocks (the Index's drag): one undo step. */
+function moveNarrativeSpan(narrativeId: string, c: number, b: number, toC: number, toAt: number): void {
+  if (!store) return;
+  let landed: { chapter: number; block: number } | null = null;
+  nedit.editChapters(store, narrativeId, (cs) => { landed = nout.moveSpan(cs, c, b, toC, toAt); });
+  if (!landed) return;
+  setNarrativeSelection(narrativeId, landed);
+  logInfo(t("nv.tf.moved"), [narrativeId]);
+}
+
+/** C · the «#» paragraphs the author has left as they are (this browser). */
+const HINTS_LEFT_KEY = "emstudio.narrative.headingHintsLeft";
+function hintsLeft(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(HINTS_LEFT_KEY) ?? "[]") as string[]); }
+  catch { return new Set(); }
+}
+function headingHintsFor(narrativeId: string): nout.HeadingHint[] {
+  const left = hintsLeft();
+  const chapters = chaptersOfNarrative(narrativeId);
+  return nout.markdownHeadingHints(chapters).filter((h) =>
+    !left.has(nout.hintKey(narrativeId, String(chapters[h.chapter]?.blocks?.[h.block]?.text ?? ""))));
+}
+function leaveHeadingHints(narrativeId: string): void {
+  const left = hintsLeft();
+  const chapters = chaptersOfNarrative(narrativeId);
+  for (const h of nout.markdownHeadingHints(chapters))
+    left.add(nout.hintKey(narrativeId, String(chapters[h.chapter]?.blocks?.[h.block]?.text ?? "")));
+  try { localStorage.setItem(HINTS_LEFT_KEY, JSON.stringify([...left].slice(-2000))); } catch { /* full */ }
+  refreshNarrativeView();
+}
+function applyAllHeadingHints(narrativeId: string): void {
+  if (!store) return;
+  const hints = headingHintsFor(narrativeId);
+  let n = 0;
+  nedit.editChapters(store, narrativeId, (cs) => { n = nout.applyHints(cs, hints); });
+  if (n) logInfo(t("nv.tf.hintsDone", { n: String(n) }), [narrativeId]);
 }
 
 /** The chapter's title in the page, being written (all of it selected). */
@@ -27898,7 +28043,7 @@ function citeSectionFor(host: HTMLElement): void {
   const ch = chapters[ci];
   if (!ch) return;
   const citedIn = chapters.filter((c) => (c.blocks ?? []).some((b) =>
-    b.ref === node.id || (b.block_type === "prose" && String(b.text ?? "").includes(`[[${node.id}]]`))))
+    b.ref === node.id || ((b.block_type === "prose" || b.block_type === "heading") && String(b.text ?? "").includes(`[[${node.id}]]`))))
     .map((c) => String(c.title ?? ""));
   const vt = nedit.defaultViewType(node);
   renderCiteSection(host, {
@@ -27999,6 +28144,13 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
       onIngress: () => { void ingressFromNarrative(); },
       onContextMenu: (c, b, x, y) => { if (current) openNarrativeContextMenu(current.id, c, b, x, y); },
       onMoveChapter: (from, to) => { if (current) moveChapterKeepingView(current.id, from, to); },
+      // MICRO-SEG22 · titles, «Transform into…», the «#» paragraphs proposed once
+      onTransform: (c, b, to) => { if (current) transformNarrativePart(current.id, c, b, to, true); },
+      onSetHeading: (c, b, text) => { if (current && store) nedit.setHeading(store, current.id, c, b, text); },
+      headingHints: current && narrativeEditingOf(win) ? headingHintsFor(current.id) : [],
+      onApplyHint: (h) => { if (current) transformNarrativePart(current.id, h.chapter, h.block, h.to); },
+      onApplyAllHints: () => { if (current) applyAllHeadingHints(current.id); },
+      onDismissHints: () => { if (current) leaveHeadingHints(current.id); },
       onScaffold: () => {
         if (!store) return;
         const nid = scaffoldNarrativeFromGraph(store);   // one batch: one undo step
@@ -28072,6 +28224,22 @@ function openNarrativeContextMenu(narrativeId: string, c: number, b: number | nu
     item(t("nv.ctx.mention"), "mention", () => mentionAt(narrativeId, c, b + 1, anchor()));
     sep();
     item(t("nv.ctx.chapterHere"), "chapter-here", () => newChapterHere(narrativeId, c, b), b === 0 ? t("nv.ctx.chapterHereFirst") : undefined);
+  }
+  // MICRO-SEG22 · «Transform into…»: the four kinds, the shortcut beside each;
+  // a refused one says why. Not on an embed (it has no words to be a title).
+  const parts = chaptersOfNarrative(narrativeId);
+  if (nout.kindOfPart(parts, c, b) !== "embed") {
+    sep();
+    const sub = document.createElement("div");
+    sub.className = "ctx-header nv-ctx-tf";
+    sub.textContent = t("nv.tf.into");
+    menu.appendChild(sub);
+    for (const k of nout.PART_KINDS) {
+      const why = nout.transformRefusal(parts, c, b, k);
+      if (why === "same") continue;
+      item(`${t(`nv.tf.kind.${k}`)}   ${transformModKeys()}${nout.KIND_DIGIT[k]}`, `tf-${k}`,
+        () => transformNarrativePart(narrativeId, c, b, k), why ? t(why) : undefined);
+    }
   }
   document.body.appendChild(menu);
   ctxMenuEl = ctxFloating(keepOnScreen(menu));
@@ -39074,6 +39242,13 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
     ...(s && narrId ? {
       onMoveChapter: (from: number, to: number) => moveChapterKeepingView(narrId, from, to),
       onAddMenu: (anchor: HTMLElement) => openIndexAddMenu(narrId, anchor),
+      // MICRO-SEG22 · the tree's sections: picked, and dragged with their blocks
+      onPickPart: (c: number, b: number) => {
+        setNarrativeSelection(narrId, { chapter: c, block: b });
+        const host = story ? narrativeHostOf(story) : null;
+        host?.querySelector<HTMLElement>(`.nv-block-row[data-block="${c}:${b}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+      },
+      onMoveSpan: (c: number, b: number, toC: number, toAt: number) => moveNarrativeSpan(narrId, c, b, toC, toAt),
     } : {}),
     laneLabel: (id) => (s ? narrativeLanes(s.doc).find((l) => l.id === id)?.long : undefined) ?? id,
     coverageOpen: nidxCoverageOpen,

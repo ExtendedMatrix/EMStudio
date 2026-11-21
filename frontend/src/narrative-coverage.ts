@@ -61,7 +61,8 @@ export function citations(doc: EmDocument | null): CitationRow[] {
       if (!b || typeof b !== "object") return;
       if (b.block_type === "embed") {
         if (b.ref) rows.push({ narrative_id: n.id, chapter: ci, block: bi, ref: String(b.ref), view_type: String(b.view_type ?? ""), kind: "embed" });
-      } else if ((b.block_type ?? "prose") === "prose") {
+      } else if ((b.block_type ?? "prose") === "prose" || b.block_type === "heading") {
+        // MICRO-SEG22 · a heading's title may mention a node: `query.citations` too
         for (const ref of mentionIds(b.text))
           rows.push({ narrative_id: n.id, chapter: ci, block: bi, ref, view_type: "", kind: "mention" });
       }

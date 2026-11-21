@@ -27,6 +27,8 @@ import { QUERY_ORDERS, QUERY_SCOPES, QUERY_TYPES, queryOf } from "./narrative-qu
 import { helpGlyph, lineWithHelp } from "./help-glyph";
 import { TABLE_SORTS, tableColumns } from "./narrative-embeds";
 import type { EmDocument, EmNode } from "./types";
+import { KIND_DIGIT, PART_KINDS, kindOfPart, outlineNumbers, type PartKind } from "./narrative-outline";
+import type { EditableChapter } from "./narrative-edit";
 
 export interface NarrInspectorHooks {
   doc: EmDocument;
@@ -70,6 +72,43 @@ export interface NarrInspectorHooks {
   onSetDraftLang?(lang: string): void;
   /** p.16 · a chapter that already has an AI draft: «Rigenera in …» */
   hasDraft?(): boolean;
+  /** MICRO-SEG22 · «Transform into…» the selected part; `transformWhy` is the
+   *  i18n key of why a kind is refused («same» = what it already is) */
+  onTransform?(to: PartKind): void;
+  transformWhy?(to: PartKind): string | null;
+  /** MICRO-SEG22 · a heading's title */
+  onSetHeading?(text: string): void;
+  /** MICRO-SEG22 · the story numbered 1, 1.1, 1.1.1 or not */
+  onSetNumbering?(on: boolean): void;
+  /** the modifier as drawn on this platform («⌘⌥» on a Mac, «Ctrl+Alt+» elsewhere) */
+  modKeys?: string;
+}
+
+/** MICRO-SEG22 · «Transform into…»: the four kinds side by side, the current
+ *  one lit, a refused one greyed with why, its shortcut in the tooltip. */
+function transformRow(host: HTMLElement, h: NarrInspectorHooks): void {
+  if (!h.onTransform) return;
+  const row = el("div", "ninsp-tf");
+  row.dataset.nvset = "transform";
+  row.appendChild(el("span", "ninsp-k", t("nv.tf.into")));
+  const seg = el("div", "ninsp-tf-seg");
+  for (const k of PART_KINDS) {
+    const why = h.transformWhy?.(k) ?? null;
+    const b = button(t(`nv.tf.kind.${k}`), () => h.onTransform!(k), "insp-btn ninsp-tf-btn");
+    b.dataset.nvTf = k;
+    const keys = `${h.modKeys ?? "⌘⌥"}${KIND_DIGIT[k]}`;
+    if (why === "same") {
+      b.classList.add("on");
+      b.disabled = true;
+      b.title = `${t("nv.tf.isAlready")} · ${keys}`;
+    } else if (why) {
+      b.disabled = true;
+      b.title = t(why);
+    } else b.title = `${t("nv.tf.makeIt", { kind: t(`nv.tf.kind.${k}`) })} · ${keys}`;
+    seg.appendChild(b);
+  }
+  row.appendChild(seg);
+  host.appendChild(row);
 }
 
 /** p.16 · the languages a story is written in, named in the reader's own */
@@ -180,6 +219,19 @@ function renderStoryInspector(root: HTMLElement, h: NarrInspectorHooks): void {
     if (!cur.declared && cur.lang)
       s.appendChild(el("p", "ninsp-dim", t("ninsp.langRead", { lang: langName(cur.lang) })));
   }
+  // MICRO-SEG22 · numbering on (1, 1.1, 1.1.1) or off — in Write, Read,
+  // Print and every export
+  if (h.onSetNumbering) {
+    const nl = el("label", "ninsp-l ninsp-inline ninsp-numbering");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.nvset = "numbering";
+    cb.checked = nr.numbered;
+    cb.addEventListener("change", () => h.onSetNumbering!(cb.checked));
+    nl.append(cb, ` ${t("ninsp.numbering")}`);
+    s.appendChild(nl);
+    s.appendChild(el("p", "ninsp-note", t("ninsp.numberingNote")));
+  }
   const info = section(wrap, t("ninsp.computed"));
   if (nr.templateId) field(info, t("ninsp.template"), nr.templateId);
   field(info, t("ninsp.chapters"), String(nr.chapters.length));
@@ -206,7 +258,10 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
 
   const head = el("div", "ninsp-head");
   const q = queryOf(block);
+  const numbers = outlineNumbers(nr.chapters);
   const what = !block ? `${t("ninsp.chapter")} ${h.chapter + 1}`
+    : block.block_type === "heading"
+      ? `${t((block.level ?? 1) >= 2 ? "nv.tf.kind.subsection" : "nv.tf.kind.section")} ${numbers.get(`${h.chapter}:${h.block}`) ?? ""}`.trim()
     : block.block_type === "prose" ? t("ninsp.paragraph")
     : q ? `${t("nq.kindLabel")} · ${t(`nq.title.${q.query}`)}`
     : t("ninsp.embedOf", { view: h.viewTypeLabel(String(block.view_type ?? "")) });
@@ -214,8 +269,26 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
   head.appendChild(el("div", "ninsp-dim",
     `${nr.name} · ${ch.title}${h.block != null ? ` · ${h.block + 1}` : ""}`));
   wrap.appendChild(head);
+  // MICRO-SEG22 · «Transform into…», on every part that has words
+  if (kindOfPart(nr.chapters as EditableChapter[], h.chapter, h.block) !== "embed") transformRow(wrap, h);
 
-  if (!block) {
+  if (block && block.block_type === "heading") {
+    // ── MICRO-SEG22 · a section's or subsection's title ────────────────────
+    const s = section(wrap);
+    textField(s, t("ninsp.title"), "heading", String(block.text ?? ""), (v) => { if (v.trim()) h.onSetHeading?.(v.trim()); });
+    const cites = document.createDocumentFragment();
+    const ids = mentionsIn(block.text);
+    if (!ids.length) cites.append("—");
+    ids.forEach((id, i) => {
+      if (i) cites.append(" ");
+      const l = button(nameOf(id), () => h.onReveal(id), "link");
+      l.disabled = !index.has(id);
+      cites.append(l);
+    });
+    field(s, t("ninsp.cites"), cites);
+    if (block.authored_by) field(s, t("ninsp.signed"), nameOf(block.authored_by));
+    s.appendChild(el("p", "ninsp-note", t("nv.tf.headingNote")));
+  } else if (!block) {
     // ── the chapter ────────────────────────────────────────────────────────
     const s = section(wrap);
     // NARRATIVA-BLOCCHI p.1 · the title is written in the page AND here: one
