@@ -27986,12 +27986,19 @@ async function renderFigureStill(node: EmNode, kind: string, w = 1280, h = 800,
   try {
     handle = mountSpaceScene(host, { ...narrativeSceneOptions(() => false), onMeasured: () => { measured = true; } });
     handle.update(items);
-    // a model says when it has come (`onMeasured`); proxies alone are drawn
-    // from the graph, with no file to wait for
-    const files = items.some((i) => i.kind === "rm");
+    // a model says when it has come (`onMeasured`); a proxy's shape is a file
+    // too, read with no such word: wait until something drawn has a box
     const t0 = Date.now();
-    while (!measured && Date.now() - t0 < (files ? waitMs : 3000)) await sleep(200);
-    await sleep(files ? 1500 : 300);       // the rest of the files, a moment
+    const drawn = () => measured || (handle?.inView?.() ?? null) !== null;
+    // …and what the Space knows of the proxies' shapes may still be coming
+    // (the geometry summary): the items are asked again while waiting
+    let asked = t0;
+    while (!drawn() && Date.now() - t0 < waitMs) {
+      await sleep(200);
+      if (Date.now() - asked > 2000) { asked = Date.now(); handle.update(narrativeSceneItems(node)); }
+    }
+    if (!drawn()) return null;
+    await sleep(1500);                     // the rest of the files, a moment
     applyFigureView(handle, kind);
     await sleep(450);                       // an aligned view's passage
     const canvas = host.querySelector<HTMLCanvasElement>("canvas.scn-canvas") ?? host.querySelector("canvas");
