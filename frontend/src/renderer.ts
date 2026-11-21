@@ -74,6 +74,9 @@ export interface RenderState {
   selectedId: string | null;
   /** multi-selection set (D3); the primary is still `selectedId` */
   selectedIds?: Set<string> | null;
+  /** MICRO-SEG10 p.4 · the scene node (an instance's own id) picked on the canvas:
+   *  of a unit drawn in several places, that box is the one lit */
+  selectedInstance?: string | null;
   /** P4.3 · node id → who else has it selected, in a live room. Awareness, never
    *  a lock: nothing consults this before allowing an edit. */
   peerSelections?: Map<string, string[]> | null;
@@ -1046,6 +1049,19 @@ export function render(
     n.id === state.selectedId ||
     n.instanceOf === state.selectedId ||
     (state.selectedIds?.has(n.id) ?? false);
+  // MICRO-SEG10 p.4 · a unit drawn in several places (a document's instances):
+  // the instance picked on the canvas, else the master's own box, else the first
+  let litInst: string | null = null;
+  if (state.selectedId) {
+    const sid = state.selectedId;
+    const many = scene.nodes.filter((n) => n.id === sid || n.instanceOf === sid);
+    if (many.length > 1) {
+      const want = state.selectedInstance ?? null;
+      litInst = want && many.some((n) => n.id === want) ? want : (many.find((n) => n.id === sid) ?? many[0]).id;
+    }
+  }
+  const isSame = (n: { id: string; instanceOf?: string }): boolean =>
+    litInst !== null && n.id !== litInst && (n.id === state.selectedId || n.instanceOf === state.selectedId);
   const hz = state.horizon ?? null;
   for (const n of shown) {
     if (n.collapsed) continue; // PD1 · shown as a bottom-left tablet, not a node
@@ -1115,10 +1131,16 @@ export function render(
         ctx.restore();
       }
       if (isSel(n) || n.id === state.hoverId) {
-        const active = n.id === state.selectedId || n.instanceOf === state.selectedId;
+        // MICRO-SEG10 p.4 · of a unit drawn more than once, the instance picked is
+        // lit; the others say «same unit» with a thin dashed outline
+        const same = isSame(n) && n.id !== state.hoverId;
+        const active = (n.id === state.selectedId || n.instanceOf === state.selectedId) && !isSame(n);
+        ctx.save();
+        if (same) ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
         ctx.strokeStyle = active ? accentColor() : isSel(n) ? canvasTheme().selectSoft : canvasTheme().hoverSoft;
-        ctx.lineWidth = (active ? 3.6 : isSel(n) ? 2.6 : 1.6) / vp.scale;
+        ctx.lineWidth = (active ? 3.6 : same ? 1.4 : isSel(n) ? 2.6 : 1.6) / vp.scale;
         ctx.strokeRect(n.x - 2, n.y - 2, n.w + 4, n.h + 4);
+        ctx.restore();
       }
       continue;
     }
@@ -1241,10 +1263,16 @@ export function render(
         ctx.fillText(String(n.useCount), bx, by + r * 0.05);
       }
       if (isSel(n) || n.id === state.hoverId) {
-        const active = n.id === state.selectedId || n.instanceOf === state.selectedId;
+        // MICRO-SEG10 p.4 · of a unit drawn more than once, the instance picked is
+        // lit; the others say «same unit» with a thin dashed outline
+        const same = isSame(n) && n.id !== state.hoverId;
+        const active = (n.id === state.selectedId || n.instanceOf === state.selectedId) && !isSame(n);
+        ctx.save();
+        if (same) ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
         ctx.strokeStyle = active ? accentColor() : isSel(n) ? canvasTheme().selectSoft : canvasTheme().hoverSoft;
-        ctx.lineWidth = (active ? 3.6 : isSel(n) ? 2.6 : 1.6) / vp.scale;
+        ctx.lineWidth = (active ? 3.6 : same ? 1.4 : isSel(n) ? 2.6 : 1.6) / vp.scale;
         ctx.strokeRect(x0 - 3, y0 - 3, iw + 6, ih + 6);
+        ctx.restore();
       }
       continue;
     }
@@ -1304,10 +1332,16 @@ export function render(
         }
       }
       if (isSel(n) || n.id === state.hoverId) {
-        const active = n.id === state.selectedId || n.instanceOf === state.selectedId;
+        // MICRO-SEG10 p.4 · of a unit drawn more than once, the instance picked is
+        // lit; the others say «same unit» with a thin dashed outline
+        const same = isSame(n) && n.id !== state.hoverId;
+        const active = (n.id === state.selectedId || n.instanceOf === state.selectedId) && !isSame(n);
+        ctx.save();
+        if (same) ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
         ctx.strokeStyle = active ? accentColor() : isSel(n) ? canvasTheme().selectSoft : canvasTheme().hoverSoft;
-        ctx.lineWidth = (active ? 3.6 : isSel(n) ? 2.6 : 1.6) / vp.scale;
+        ctx.lineWidth = (active ? 3.6 : same ? 1.4 : isSel(n) ? 2.6 : 1.6) / vp.scale;
         ctx.strokeRect(n.x - 3, n.y - 3, n.w + 6, n.h + 6);
+        ctx.restore();
       }
       continue;
     }
@@ -1457,10 +1491,16 @@ export function render(
         }
       }
       if (isSel(n) || n.id === state.hoverId) {
-        const active = n.id === state.selectedId || n.instanceOf === state.selectedId;
+        // MICRO-SEG10 p.4 · of a unit drawn more than once, the instance picked is
+        // lit; the others say «same unit» with a thin dashed outline
+        const same = isSame(n) && n.id !== state.hoverId;
+        const active = (n.id === state.selectedId || n.instanceOf === state.selectedId) && !isSame(n);
+        ctx.save();
+        if (same) ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
         ctx.strokeStyle = active ? accentColor() : isSel(n) ? canvasTheme().selectSoft : canvasTheme().hoverSoft;
-        ctx.lineWidth = (active ? 3.6 : isSel(n) ? 2.6 : 1.6) / vp.scale;
+        ctx.lineWidth = (active ? 3.6 : same ? 1.4 : isSel(n) ? 2.6 : 1.6) / vp.scale;
         ctx.strokeRect(ix - 3, iy - 3, iw + 6, ih + 6);
+        ctx.restore();
       }
       continue;
     }

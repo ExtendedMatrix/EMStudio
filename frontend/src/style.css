@@ -12031,6 +12031,10 @@ button.uo-col { cursor: pointer; }
 .uo-row.uo-band.uo-band-first { border-top: 1px solid color-mix(in srgb, var(--ep-color) 55%, var(--border)); }
 .uo-row.uo-band:hover { background: color-mix(in srgb, var(--ep-color) 22%, var(--bg-hover)); }
 .uo-row.uo-band.uo-sel { background: var(--bg-accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+/* MICRO-SEG10 p.3 · the unit selected, listed in another place of the tree: a light
+   dotted underline in the accent — it says «same unit», it does not compete with the row lit */
+.uo-row.uo-same .uo-label { text-decoration: underline dotted color-mix(in srgb, var(--accent) 60%, transparent);
+  text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .scn-modal.scn-modal-ctrl { outline: 2px solid var(--accent, #2f6fdf); }
 /* p.1 · in a narrow head the empty part gives way before the search field does
    (it still takes every pixel left over: the double-click target) */

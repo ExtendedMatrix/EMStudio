@@ -3665,6 +3665,7 @@ function paintGraphWindow(p: GraphPaint): void {
       hoverId: live?.hoverId ?? null,
       selectedId: selId,
       selectedIds: selIds,
+      selectedInstance: pickedInstance,   // MICRO-SEG10 p.4
       edgeVisible,
       hoverEdgeIdx: live?.hoverEdgeIdx ?? null,
       selectedEdgeIdx,
@@ -3966,6 +3967,9 @@ function centerOn(nodeId: string): void {
 //: canvas's own pointer events is being handled: a pick made ON the graph never
 //: moves the view (it would jump under the mouse). Cleared after the event.
 let pickOnCanvas = false;
+/** MICRO-SEG10 p.4 · the box picked on a canvas (an instance's own id): of a unit
+ *  drawn in several places, the one lit (the renderer checks it is of the selection) */
+let pickedInstance: string | null = null;
 
 /** Is the node wholly inside the focused graph window? null: not in its scene. */
 function nodeWhollyInView(nodeId: string): boolean | null {
@@ -14433,6 +14437,8 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     toggled: () => new Set((winCurrent(win, "outliner.toggled") as string[] | null) ?? []),
     setToggled: (s) => setWinCurrent(win, "outliner.toggled", s.size ? [...s] : null),
     selectedId: () => selectedId,
+    contextEpoch: () => spaceEpochId,   // MICRO-SEG10 p.2 · the epoch in front
+    sameWord: () => t("uo.sameUnit"),
     pick: (r, e) => unifiedPick(r, e),
     frame: (r) => {
       const key = r.eye ?? (r.id && unifiedFacts().proxies.has(r.id) ? `proxy:${r.id}` : null);
@@ -64496,7 +64502,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       if (ghostC) { hideContextMenu(); showMissingParentMenu(e.clientX, e.clientY, ghostC); }
       else if (hit && (e.shiftKey || e.metaKey || e.ctrlKey))
         toggleSelect(hit.instanceOf ?? hit.id);
-      else select(hit ? (hit.instanceOf ?? hit.id) : null);
+      else { if (hit) pickedInstance = hit.id; select(hit ? (hit.instanceOf ?? hit.id) : null); }
     } else if (mode === "node" && dragNodeId && dragMoving) {
       // drag ended → ONE commit: the reassignment, if the target changed, and
       // the position the node was dropped at, in a single undo step
@@ -64662,7 +64668,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     // right-clicking a node outside the current selection selects it first
-    if (hit && !selectedIds.has(hit.id)) select(hit.instanceOf ?? hit.id);
+    if (hit && !selectedIds.has(hit.id)) { pickedInstance = hit.id; select(hit.instanceOf ?? hit.id); }
     if (!selectedIds.size) {
       hideContextMenu();
       return;

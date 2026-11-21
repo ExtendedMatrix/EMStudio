@@ -17,6 +17,8 @@ import {
 
 export const ROW_H = 22;
 const OVERSCAN = 8;
+/** the rows that carry a node's selection */
+const SELECTS = (r: URow): boolean => r.kind === "node" || r.kind === "sub" || r.kind === "group" || r.kind === "gis";
 
 export interface UnifiedDeps {
   sources: () => OutlinerSourceIn[];
@@ -25,6 +27,11 @@ export interface UnifiedDeps {
   toggled: () => Set<string>;
   setToggled: (s: Set<string>) => void;
   selectedId: () => string | null;
+  /** MICRO-SEG10 p.2 · the epoch in front (the Space's): of the rows of one unit,
+   *  the one under it is lit when the selection comes from elsewhere */
+  contextEpoch?: () => string | null;
+  /** MICRO-SEG10 p.3 · the tip of a row of the unit selected, listed elsewhere */
+  sameWord?: () => string;
   /** a row picked (a node; ⌘/Ctrl adds it to the selection) */
   pick: (row: URow, e: MouseEvent) => void;
   /** a double click: the node framed where it is drawn (the Space) */
@@ -185,6 +192,17 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   let flashKey: string | null = null;
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
   let queued = false;
+  /** MICRO-SEG10 · the ROW of the selection (its path: source/graph/epoch/group…/id),
+   *  not only its node: a unit is listed under several epochs and containers */
+  let pickedKey: string | null = null;
+  /** true while the Outliner's own pick goes round the app and comes back to
+   *  `setSelected` (synchronously): that row is where the pointer is, nothing moves */
+  let selfPick = false;
+  const pickSelf = (r: URow, go: () => void): void => {
+    pickedKey = r.key;
+    selfPick = true;
+    try { go(); } finally { selfPick = false; }
+  };
 
   const build = (): void => {
     const opts = d.opts();
@@ -208,13 +226,18 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     spacer.style.height = `${rows.length * ROW_H}px`;
   };
 
-  const rowEl = (r: URow, i: number, sel: string | null, keys: ReadonlySet<string> | null): HTMLElement => {
+  const rowEl = (r: URow, i: number, sel: string | null, keys: ReadonlySet<string> | null, selKey: string | null): HTMLElement => {
     const el = document.createElement("div");
     el.className = `uo-row uo-${r.kind}`;
     if (r.absent) el.classList.add("uo-absent");
     if (r.active) el.classList.add("uo-active");
     if (r.skey && keys) { if (keys.has(r.skey)) el.classList.add("uo-sel"); }
-    else if (r.id && r.id === sel && (r.kind === "node" || r.kind === "sub" || r.kind === "group" || r.kind === "gis")) el.classList.add("uo-sel");
+    else if (r.key === selKey) el.classList.add("uo-sel");
+    // MICRO-SEG10 p.3 · the same unit in another place of the tree: a light sign
+    else if (r.id && r.id === sel && selKey && SELECTS(r)) {
+      el.classList.add("uo-same");
+      el.dataset.same = "1";
+    }
     if (r.skey) el.dataset.skey = r.skey;
     if (flashKey && r.key === flashKey) el.classList.add("uo-flash");
     el.style.top = `${i * ROW_H}px`;
@@ -368,6 +391,7 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     const tip = r.desc ? `${r.label} — ${r.desc}` : r.label;
     el.title = r.absent ? `${tip} — ${d.word("absent")}` : r.title ? `${tip} — ${r.title}` : tip;
     if (r.ghost && S) el.title = `${tip} — ${S.words.ghost}`;
+    if (el.dataset.same && d.sameWord) el.title = `${el.title} — ${d.sameWord()}`;
     if (r.color) el.style.setProperty("--src-color", r.color);
     if (r.badge) {
       // MICRO-PIU-FONTI · ONE active source, changed explicitly: the badge says
@@ -457,17 +481,39 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     return el;
   };
 
+  /** MICRO-SEG10 · which row is THE selection's: the one remembered when it is
+   *  of the node selected, else the first row in sight of the node under the
+   *  epoch in front, else the first; -1 when no row in sight is of the node */
+  const selIndex = (sel: string | null): number => {
+    if (!sel) return -1;
+    if (pickedKey) {
+      const i = rows.findIndex((r) => r.key === pickedKey && r.id === sel && SELECTS(r));
+      if (i >= 0) return i;
+    }
+    const ctx = d.contextEpoch?.() ?? null;
+    let first = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.id !== sel || !SELECTS(r)) continue;
+      if (first < 0) first = i;
+      if (!ctx) break;
+      if (r.epochAt === ctx || bands[i]?.epoch === ctx) return i;
+    }
+    return first;
+  };
+
   const paint = (force = false): void => {
     const h = scroll.clientHeight || 600;
     const from = Math.max(0, Math.floor(scroll.scrollTop / ROW_H) - OVERSCAN);
     const to = Math.min(rows.length, Math.ceil((scroll.scrollTop + h) / ROW_H) + OVERSCAN);
     const keys = d.selectedKeys?.() ?? null;
     const sel = d.selectedId();
-    const selSig = `${sel}|${keys ? [...keys].join(",") : ""}`;
+    const selKey = rows[selIndex(sel)]?.key ?? null;
+    const selSig = `${sel}|${selKey}|${keys ? [...keys].join(",") : ""}`;
     if (!force && from === drawnFrom && to === drawnTo && selSig === drawnSel && gen === drawnGen) return;
     drawnFrom = from; drawnTo = to; drawnSel = selSig; drawnGen = gen;
     const frag = document.createDocumentFragment();
-    for (let i = from; i < to; i++) frag.appendChild(rowEl(rows[i], i, sel, keys));
+    for (let i = from; i < to; i++) frag.appendChild(rowEl(rows[i], i, sel, keys, selKey));
     layer.replaceChildren(frag);
     // the heading's columns over the rows' (a scrollbar that takes room shifts the rows)
     colHead.style.paddingRight = `${Math.max(0, scroll.offsetWidth - scroll.clientWidth)}px`;
@@ -529,8 +575,8 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     if (r.version && d.space) { d.space.chooseVersion(r); paint(true); return; }
     const badge = t.closest<HTMLElement>("[data-badge]");
     if (badge) { e.stopPropagation(); if (r.badge === "activate") d.activate?.(r); return; }
-    if (r.skey && d.pickKey) { d.pickKey(r, e, rows.filter((x) => x.skey).map((x) => x.skey!)); paint(true); return; }
-    if (r.id || r.kind === "graph" || r.kind === "source") { d.pick(r, e); paint(true); return; }
+    if (r.skey && d.pickKey) { const all = rows.filter((x) => x.skey).map((x) => x.skey!); pickSelf(r, () => d.pickKey!(r, e, all)); paint(true); return; }
+    if (r.id || r.kind === "graph" || r.kind === "source") { pickSelf(r, () => d.pick(r, e)); paint(true); return; }
     if (r.parent) toggleOpen(r);
   });
   // MICRO-OUTLINER-EPOCHE-TOOLTIP p.2 · a row dragged onto an epoch: a plain
@@ -670,15 +716,17 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   });
   // ↑ ↓ move the selection over the rows that select, ← → close and open
   root.addEventListener("keydown", (e) => {
+    // MICRO-SEG10 p.4 · from the row lit (the one clicked), not from the node's first row
     const sel = d.selectedId();
-    const at = rows.findIndex((r) => r.id === sel && (r.kind === "node" || r.kind === "sub"));
+    const si = selIndex(sel);
+    const at = si >= 0 && (rows[si].kind === "node" || rows[si].kind === "sub") ? si : -1;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       const step = e.key === "ArrowDown" ? 1 : -1;
       for (let i = at + step; i >= 0 && i < rows.length; i += step) {
         const r = rows[i];
         if (r.id && (r.kind === "node" || r.kind === "sub")) {
           e.preventDefault();
-          if (r.skey && d.pickKey) d.pickKey(r, new MouseEvent("click"), []); else d.pick(r, new MouseEvent("click"));
+          pickSelf(r, () => { if (r.skey && d.pickKey) d.pickKey(r, new MouseEvent("click"), []); else d.pick(r, new MouseEvent("click")); });
           reveal(i);
           paint(true);
           return;
@@ -705,17 +753,31 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
   return {
     refresh() { build(); paint(true); },
     setSelected(id, rev = true) {
-      if (id && rev) {
-        const b = { sources: d.sources(), opts: d.opts(), texts: d.texts(), toggled: d.toggled() };
-        const open = opensForNode(b, id);
-        if (open.length) {
-          const s = new Set(d.toggled());
-          for (const k of open) if (s.has(k)) s.delete(k); else s.add(k);
-          d.setToggled(s);
-          build();
+      // MICRO-SEG10 · the row clicked here stays the row, and the list does not
+      // move a pixel (the old way opened and scrolled to the node's FIRST row)
+      const self = selfPick;
+      selfPick = false;
+      if (id) {
+        let i = selIndex(id);
+        if (!(self && i >= 0 && rows[i].key === pickedKey)) {
+          // from elsewhere: a row in sight is enough; only when none is, the
+          // branches around the node's first row open
+          if (i < 0 && rev) {
+            const b = { sources: d.sources(), opts: d.opts(), texts: d.texts(), toggled: d.toggled() };
+            const open = opensForNode(b, id);
+            if (open.length) {
+              const s = new Set(d.toggled());
+              for (const k of open) if (s.has(k)) s.delete(k); else s.add(k);
+              d.setToggled(s);
+              build();
+            }
+            i = selIndex(id);
+          }
+          if (i >= 0) {
+            pickedKey = rows[i].key;
+            if (rev) reveal(i);
+          }
         }
-        const i = rows.findIndex((r) => r.id === id && (r.kind === "node" || r.kind === "sub"));
-        if (i >= 0) reveal(i);
       }
       paint(true);
     },
