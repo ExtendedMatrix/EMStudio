@@ -26,6 +26,7 @@ import { onFirstVisible } from "./lazy";
 import { blockStatus, bylineOf, narrativeAuthors } from "./narrative-authorship";
 import type { AuthorRef, BlockStatus } from "./narrative-authorship";
 import { canonicalViewType } from "./narrative-edit";
+import { anchorsOf } from "./narrative-lanes";
 import { kindOfDigit, numberingOn, outlineNumbers, type HeadingHint, type PartKind } from "./narrative-outline";
 import { chainCard, isChainNode } from "./hdto-card";
 import { mentionsIn, notebookCells, printItems, scene3dRefKind, type ProjChapter, type SceneRefKind } from "./narrative-projection";
@@ -1037,6 +1038,37 @@ export interface PageHooks {
   onApplyHint?(hint: HeadingHint): void;
   onApplyAllHints?(): void;
   onDismissHints?(): void;
+  /** MICRO-SEG23 · the name of a lane the graph does not hold (a horizon of
+   *  the container), null when nobody knows it */
+  laneName?(id: string): string | null;
+  /** MICRO-SEG23 · a chip of what a part narrates clicked: the Matrix frames
+   *  that epoch, horizon or activity */
+  onFrameLane?(id: string): void;
+}
+
+/**
+ * MICRO-SEG23 · while writing, a chip under a chapter's or a section's title
+ * for every lane it narrates (an epoch, a horizon, an activity), in the order
+ * ticked; a click frames it in the Matrix. Reading and printing draw nothing
+ * more than before.
+ */
+function laneChips(ids: string[], index: Map<string, EmNode>, page: PageHooks,
+                   onReveal: ((id: string) => void) | undefined): HTMLElement {
+  const row = el("div", "nv-lanes");
+  for (const id of ids) {
+    const node = index.get(id);
+    const name = node ? String(node.name || node.id) : page.laneName?.(id) ?? null;
+    const chip = el("button", name ? "nv-anchor nv-lane-chip" : "nv-anchor nv-anchor-missing nv-lane-chip",
+      name ?? t("nv.laneMissing")) as HTMLButtonElement;
+    chip.type = "button";
+    chip.dataset.nvLane = id;
+    chip.title = name ? `${t("nv.laneChip", { name })} — ${t("nv.frameLane")}` : t("nv.laneNotHere", { id });
+    const go = page.onFrameLane ?? onReveal;
+    chip.disabled = !name || !go;
+    chip.addEventListener("click", (e) => { e.stopPropagation(); if (name) go?.(id); });
+    row.appendChild(chip);
+  }
+  return row;
 }
 
 /** MICRO-SEG22 · Ctrl/Cmd+Alt+digit → the kind it transforms into, or null.
@@ -1459,7 +1491,9 @@ export function renderNarrativeView(
       badge.title = t("nidx.canonical");
       h.appendChild(badge);
     }
-    if (chapter.anchor) {
+    if (!writing && chapter.anchor) {
+      // MICRO-SEG23 · while writing the lanes are chips UNDER the title
+      // (`laneChips`); reading keeps exactly what it drew.
       // NARRATIVE-DESK · the lane is a CHIP WITH ITS NAME, never the UUID. The
       // chapter usually takes its title from the lane, and then the chip would
       // say the same word twice: it is not drawn. A lane that is not in this
@@ -1567,6 +1601,8 @@ export function renderNarrativeView(
       h.insertBefore(grip, h.firstChild);
     }
     section.appendChild(h);
+    if (writing && anchorsOf(chapter as never).length)
+      section.appendChild(laneChips(anchorsOf(chapter as never), index, page, onReveal));
     // RIFINITURE · in Leggi a click on the chapter (not on a link, a button, an
     // embed that goes to its node) opens the chapter's Inspector, as the head does
     if (!writing && page.onSelectPart)
@@ -1586,6 +1622,13 @@ export function renderNarrativeView(
         // after it are its own, by their place. Written in place in Scrivi.
         body = headingInPlace(block, index, ci, bi, writing, numberEl(`${ci}:${bi}`), page,
           writing ? undefined : onReveal, transformKeys);
+        // MICRO-SEG23 · what the section narrates, chips under its title
+        const lanes = writing ? anchorsOf(block as never) : [];
+        if (lanes.length) {
+          const wrap = el("div", "nv-heading-wrap");
+          wrap.append(body, laneChips(lanes, index, page, onReveal));
+          body = wrap;
+        }
       } else if (block.block_type === "prose") {
         body = writing
           ? editableInPlace(block.text ?? "", index, ci, bi, editor!, page)

@@ -298,6 +298,8 @@ import { linkGroupOf, throughExtractor } from "./add-menu";
 import { bindParams, declOf, registerScriptAction, registerScriptForm, runsWithoutWindow, scriptActionOf, scriptCatalog, scriptFormOf } from "./script-commands";
 import { refsForViewType, scene3dRefKind, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
 import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
+import { laneTree, missingActivityHeadings, type HorizonLike, type LaneItem, type LaneMode } from "./narrative-lanes";
+import type { LanePickerHooks } from "./narrative-lane-picker";
 import { citedContext, setDocumentContent, setSceneFactory, setSitePicker, type NarrativeSelection, type Reading, type SceneFactory } from "./narrative";
 import { documentEmbed as documentEmbedRaw, epochStart, sceneContent, sceneContentLine, tableRows, type TableContext } from "./narrative-embeds";
 import { openSitePicker } from "./site-picker";
@@ -27168,7 +27170,7 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
     onRenameNarrative: (name) => nedit.renameNarrative(st, narrativeId, name),
     onSetDescription: (text) => nedit.setNarrativeDescription(st, narrativeId, text),
     onSetQuery: (patch) => block != null && nedit.setBlockOptions(st, narrativeId, chapter, block, patch),
-    onSetAnchor: (a) => nedit.setChapterAnchor(st, narrativeId, chapter, a),
+    lanePicker: lanePickerFor(narrativeId, chapters, chapter, block),
     onSignMe: () => signChapterAsMe(narrativeId, chapter),
     onToggleCanonical: () => nedit.toggleCanonical(st, narrativeId, chapter),
     canGenerate: () => !!ch?.anchor,
@@ -28151,6 +28153,9 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
       onApplyHint: (h) => { if (current) transformNarrativePart(current.id, h.chapter, h.block, h.to); },
       onApplyAllHints: () => { if (current) applyAllHeadingHints(current.id); },
       onDismissHints: () => { if (current) leaveHeadingHints(current.id); },
+      // MICRO-SEG23 · the chips of what a part narrates
+      laneName: (id) => laneNameOf(id),
+      onFrameLane: (id) => frameLane(id),
       onScaffold: () => {
         if (!store) return;
         const nid = scaffoldNarrativeFromGraph(store);   // one batch: one undo step
@@ -39123,6 +39128,79 @@ function renderInspectorChronology(host: HTMLElement): void {
 /** p.9 · the Index's coverage section, open or closed (closed by default) */
 let nidxCoverageOpen = false;
 
+// ── MICRO-SEG23 · «Narrates»: a tree in order of time, with ticks ────────────
+
+/** Epochs or horizons in the picker — the session's choice, never in the file. */
+let laneMode: LaneMode = "epochs";
+
+/** The horizons of the periodization the views read (the container's). */
+function laneHorizons(): HorizonLike[] {
+  const per = chosenPeriodization(horizonsRead(), horizonView);
+  return (per?.horizons ?? []).map((h) => ({ id: h.id, name: h.name, start: h.start, end: h.end }));
+}
+
+/** The name of a lane: a node of the graph, else a horizon of the container. */
+function laneNameOf(id: string): string | null {
+  const n = store?.node(id);
+  if (n) return String(n.name || n.id);
+  for (const p of horizonsRead().list) {
+    const h = p.horizons.find((x) => x.id === id);
+    if (h) return h.name;
+  }
+  return null;
+}
+
+/** A chip clicked: the Matrix frames the epoch or the activity; a horizon
+ *  (not a node of the graph) frames the oldest epoch its interval overlaps. */
+function frameLane(id: string): void {
+  if (store?.node(id)) { revealFromNarrative(id); return; }
+  const h = horizonsRead().list.flatMap((p) => p.horizons).find((x) => x.id === id);
+  if (!h || !store) { toast(t("toast.nodeGone")); return; }
+  const epoch = laneTree(store.doc, "epochs").find((e) => {
+    if (e.kind !== "epoch") return false;
+    const s0 = e.start ?? e.end, e0 = e.end ?? e.start;
+    return s0 !== null && e0 !== null && (h.start === null || e0 >= h.start) && (h.end === null || s0 <= h.end);
+  });
+  if (epoch) revealFromNarrative(epoch.id);
+  else toast(t("nlp.noEpochInHorizon", { name: h.name }));
+}
+
+/** The picker of the selected part: a chapter, a section or a subsection. */
+function lanePickerFor(narrativeId: string, chapters: nedit.EditableChapter[],
+                       chapter: number, block: number | null): LanePickerHooks | undefined {
+  if (!store) return undefined;
+  const st = store;
+  const ch = chapters[chapter];
+  if (!ch) return undefined;
+  const b = block != null ? ch.blocks?.[block] : undefined;
+  if (block != null && b?.block_type !== "heading") return undefined;
+  const horizons = laneHorizons();
+  const subKind: LanePickerHooks["subKind"] = block == null ? "section" : (b!.level ?? 1) >= 2 ? null : "subsection";
+  // the run the new titles would join: the chapter, or the section's span
+  const run = (): readonly unknown[] => {
+    const blocks = ch.blocks ?? [];
+    if (block == null) return blocks;
+    const [a, z] = nout.headingSpan(blocks, block);
+    return blocks.slice(a + 1, z);
+  };
+  return {
+    tree: (mode) => laneTree(st.doc, mode, horizons),
+    hasHorizons: horizons.length > 0,
+    mode: laneMode,
+    onMode: (m) => { laneMode = m; refreshInspector(); },
+    selected: nedit.partAnchors(chapters, chapter, block),
+    onSet: (ids) => nedit.setPartAnchors(st, narrativeId, chapter, block, ids),
+    subKind,
+    missingUnder: (item: LaneItem) => missingActivityHeadings(item, run()),
+    onWithActivities: (item, acts) => {
+      if (nedit.narrateWithActivities(st, narrativeId, chapter, block, item.id, acts.map((a) => ({ id: a.id, name: a.name }))))
+        logInfo(t(subKind === "section" ? "nlp.madeSections" : "nlp.madeSubsections",
+          { n: String(acts.length), name: item.name }), [narrativeId]);
+    },
+    nameOf: (id) => laneNameOf(id),
+  };
+}
+
 /**
  * MICRO-NARRATIVE-MODULI p.15 (E.D., 13 Nov 2026) · the lanes a chapter may
  * narrate, GROUPED BY EPOCH: an epoch, then its activities under it (an
@@ -39134,7 +39212,7 @@ function narrativeLanes(doc: EmDocument): { id: string; label: string; group: st
   const nodes = (doc.graph.nodes ?? []).filter((n) => !((n.data ?? {}) as Record<string, unknown>).removed);
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const epochs = nodes.filter((n) => n.node_type === "EpochNode")
-    .sort((a, b) => epochStart(b) - epochStart(a));
+    .sort((a, b) => epochStart(a) - epochStart(b));   // MICRO-SEG23 · oldest first, as the story
   const acts = nodes.filter((n) => n.node_type === "ActivityNodeGroup");
   const epochOfAct = (id: string): string | null => {
     const e = (doc.graph.edges ?? []).find((x) => x.source === id && x.edge_type === "has_first_epoch"

@@ -29,6 +29,7 @@ import { TABLE_SORTS, tableColumns } from "./narrative-embeds";
 import type { EmDocument, EmNode } from "./types";
 import { KIND_DIGIT, PART_KINDS, kindOfPart, outlineNumbers, type PartKind } from "./narrative-outline";
 import type { EditableChapter } from "./narrative-edit";
+import { renderLanePicker, type LanePickerHooks } from "./narrative-lane-picker";
 
 export interface NarrInspectorHooks {
   doc: EmDocument;
@@ -47,7 +48,9 @@ export interface NarrInspectorHooks {
   onSetDescription(text: string): void;
   /** NARRATIVA-BLOCCHI p.2 · a query block's question (scope, types, order) */
   onSetQuery(patch: Record<string, unknown>): void;
-  onSetAnchor(anchor: string | null): void;
+  /** MICRO-SEG23 · «Narrates»: the tree in order of time, with ticks, for the
+   *  selected chapter or section / subsection (absent: no picker) */
+  lanePicker?: LanePickerHooks;
   onSignMe(): void;
   onToggleCanonical(): void;
   canGenerate(): boolean;
@@ -286,6 +289,8 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
       cites.append(l);
     });
     field(s, t("ninsp.cites"), cites);
+    // MICRO-SEG23 · a section or a subsection narrates too
+    if (h.lanePicker) renderLanePicker(s, h.lanePicker);
     if (block.authored_by) field(s, t("ninsp.signed"), nameOf(block.authored_by));
     s.appendChild(el("p", "ninsp-note", t("nv.tf.headingNote")));
   } else if (!block) {
@@ -296,34 +301,8 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
     // per gesture — the Inspector shows it and writes it (AUDIT N9 left this
     // hook unconnected, «one place to edit»; E.D. asks for both)
     textField(s, t("ninsp.title"), "title", ch.title ?? "", (v) => { if (v.trim()) h.onRename(v.trim()); });
-    const ll = el("label", "ninsp-l", t("ninsp.lane"));
-    const ls = document.createElement("select");
-    ls.dataset.nvset = "anchor";
-    const none = document.createElement("option");
-    none.value = "";
-    none.textContent = `— ${t("ninsp.noLane")}`;
-    ls.appendChild(none);
-    // MICRO-NARRATIVE-MODULI p.15 · an epoch, its activities under it (an
-    // optgroup per epoch, the epoch itself its first choice), then the rest
-    const groups = new Map<string, HTMLElement>();
-    for (const lane of h.lanes) {
-      const o = document.createElement("option");
-      o.value = lane.id;
-      o.textContent = lane.group && lane.group !== lane.label ? `  ${lane.label}` : lane.label;
-      o.selected = lane.id === ch.anchor;
-      if (!lane.group) { ls.appendChild(o); continue; }
-      let g = groups.get(lane.group);
-      if (!g) {
-        g = document.createElement("optgroup");
-        (g as HTMLOptGroupElement).label = lane.group;
-        groups.set(lane.group, g);
-        ls.appendChild(g);
-      }
-      g.appendChild(o);
-    }
-    ls.addEventListener("change", () => h.onSetAnchor(ls.value || null));
-    ll.appendChild(ls);
-    s.appendChild(ll);
+    // MICRO-SEG23 · what the chapter narrates: a tree in order of time, ticks
+    if (h.lanePicker) renderLanePicker(s, h.lanePicker);
     // the signature: the identity of the header, nothing to pick
     const who = document.createDocumentFragment();
     who.append(ch.authored_by ? nameOf(ch.authored_by) : t("ninsp.nobody"), " ");

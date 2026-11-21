@@ -17,6 +17,8 @@ import type { DocumentStore } from "./model";
 import { narrativeViewTypes } from "./rules";
 import type { EmNode } from "./types";
 import { t } from "./i18n";
+import { anchorsOf, setAnchorsOn } from "./narrative-lanes";
+import { headingSpan } from "./narrative-outline";
 
 export interface EditableBlock {
   /** MICRO-SEG22 · `heading`: the title of a section (`level` 1) or of a
@@ -33,6 +35,9 @@ export interface EditableBlock {
 export interface EditableChapter {
   title: string;
   anchor?: string;
+  /** MICRO-SEG23 · every lane the chapter narrates, `anchor` the first —
+   *  written only when more than one (s3Dgraphy `set_anchors`) */
+  anchors?: string[];
   canonical?: boolean;
   blocks?: EditableBlock[];
   authored_by?: string;
@@ -161,6 +166,70 @@ export function setChapterAnchor(store: DocumentStore, narrativeId: string,
     if (anchor) cs[index].anchor = anchor;
     else delete cs[index].anchor;
   });
+}
+
+/**
+ * MICRO-SEG23 · what a chapter (`block` null) or a section / subsection (a
+ * heading block) narrates — several ids, in the order ticked; the compatible
+ * shape (`anchor` the first, `anchors` when more than one). One undo step.
+ */
+export function setPartAnchors(store: DocumentStore, narrativeId: string,
+                               chapter: number, block: number | null, ids: string[]): void {
+  editChapters(store, narrativeId, (cs) => {
+    const c = cs[chapter];
+    if (!c) return;
+    if (block == null) { setAnchorsOn(c as unknown as Record<string, unknown>, ids); return; }
+    const b = c.blocks?.[block];
+    if (!b || b.block_type !== "heading") return;
+    const opts = { ...(b.options ?? {}) };
+    setAnchorsOn(opts, ids);
+    if (Object.keys(opts).length) b.options = opts; else delete b.options;
+  });
+}
+
+/** The ids a part narrates (a chapter, or a heading of it). */
+export function partAnchors(chapters: EditableChapter[], chapter: number, block: number | null): string[] {
+  const c = chapters[chapter];
+  if (!c) return [];
+  return block == null ? anchorsOf(c as never) : anchorsOf(c.blocks?.[block] as never);
+}
+
+/**
+ * MICRO-SEG23 · «the epoch with all its activities as subsections»: the part
+ * narrates the epoch (added to what it narrates), and under it a title is born
+ * for each activity given — a SECTION under a chapter, a SUBSECTION under a
+ * section — with the activity's name and «Narrates» set to it, at the end of
+ * the part's run (a chapter's blocks, a section's span). One undo step; a
+ * subsection cannot have titles under it (refused: false).
+ */
+export function narrateWithActivities(store: DocumentStore, narrativeId: string,
+                                      chapter: number, block: number | null, epochId: string,
+                                      activities: { id: string; name: string }[]): boolean {
+  let done = false;
+  editChapters(store, narrativeId, (cs) => {
+    const c = cs[chapter];
+    if (!c) return;
+    const blocks = (c.blocks ??= []);
+    let level: 1 | 2;
+    let at: number;
+    let host: Record<string, unknown>;
+    if (block == null) {
+      level = 1;
+      at = blocks.length;
+      host = c as unknown as Record<string, unknown>;
+    } else {
+      const b = blocks[block];
+      if (!b || b.block_type !== "heading" || (b.level ?? 1) >= 2) return;
+      level = 2;
+      at = headingSpan(blocks, block)[1];
+      host = (b.options = { ...(b.options ?? {}) });
+    }
+    setAnchorsOn(host, [...anchorsOf(host as never), epochId]);
+    blocks.splice(at, 0, ...activities.map((a): EditableBlock =>
+      ({ block_type: "heading", text: a.name, level, options: { anchor: a.id } })));
+    done = true;
+  });
+  return done;
 }
 
 /**

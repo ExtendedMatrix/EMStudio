@@ -18,6 +18,7 @@
  * a rule, that check is where it shows.
  */
 import type { EmDocument, EmNode } from "./types";
+import { narratedParts } from "./narrative-lanes";
 
 const MENTION = /\[\[\s*([^[\]\n]+?)\s*\]\]/g;
 const EPOCH_TYPES = ["EpochNode", "epoch"];
@@ -38,7 +39,7 @@ export interface CitationRow {
 }
 
 interface Block { block_type?: string; text?: string; ref?: string; view_type?: string }
-interface Chapter { title?: string; anchor?: string; blocks?: Block[] }
+interface Chapter { title?: string; anchor?: string; anchors?: string[]; blocks?: Block[] }
 
 function chaptersOf(n: EmNode): Chapter[] {
   const c = ((n.data ?? {}) as { chapters?: unknown }).chapters;
@@ -81,6 +82,29 @@ function citedBy(doc: EmDocument | null): Map<string, Set<string>> {
   return out;
 }
 
+/** MICRO-SEG23 · `query.narrated`: every «Narrates» binding of every story — a
+ *  chapter's or a section's epoch, horizon, activity — with its position
+ *  (`block` null for the chapter). Narrating is not citing. */
+export interface NarratedRow { narrative_id: string; chapter: number; block: number | null; ref: string }
+export function narrated(doc: EmDocument | null): NarratedRow[] {
+  const rows: NarratedRow[] = [];
+  for (const n of doc?.graph?.nodes ?? []) {
+    if (n.node_type !== "narrative") continue;
+    for (const r of narratedParts(chaptersOf(n))) rows.push({ narrative_id: n.id, ...r });
+  }
+  return rows;
+}
+
+function narratedBy(doc: EmDocument | null): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const r of narrated(doc)) {
+    const s = out.get(r.ref) ?? new Set<string>();
+    s.add(r.narrative_id);
+    out.set(r.ref, s);
+  }
+  return out;
+}
+
 const pyCmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 export interface CoverageRow {
@@ -89,6 +113,8 @@ export interface CoverageRow {
   kind: "epoch";
   narratives: number;
   direct_citations: number;
+  /** MICRO-SEG23 · the narratives bound to it by «Narrates» */
+  narrated: number;
   members: number;
   narrative_ids: string[];
 }
@@ -108,15 +134,22 @@ export function epochMembers(doc: EmDocument | null): Map<string, Set<string>> {
 /** `query.interpretive_coverage(graph, kind="epoch")`. */
 export function interpretiveCoverage(doc: EmDocument | null): CoverageRow[] {
   const cited = citedBy(doc);
+  // MICRO-SEG23 · a story that NARRATES the epoch (or one of its members, an
+  // activity) touches it as a citation does — s3Dgraphy's rule
+  const bound = narratedBy(doc);
+  const touched = new Map<string, Set<string>>();
+  for (const [k, v] of cited) touched.set(k, new Set(v));
+  for (const [k, v] of bound) { const s = touched.get(k) ?? new Set<string>(); v.forEach((x) => s.add(x)); touched.set(k, s); }
   const members = epochMembers(doc);
   const rows: CoverageRow[] = [];
   for (const n of doc?.graph?.nodes ?? []) {
     if (!EPOCH_TYPES.includes(n.node_type)) continue;
-    const touching = new Set(cited.get(n.id) ?? []);
-    const direct = touching.size;
-    for (const m of members.get(n.id) ?? []) for (const x of cited.get(m) ?? []) touching.add(x);
+    const touching = new Set(touched.get(n.id) ?? []);
+    const direct = (cited.get(n.id) ?? new Set()).size;
+    for (const m of members.get(n.id) ?? []) for (const x of touched.get(m) ?? []) touching.add(x);
     rows.push({ id: n.id, name: String(n.name ?? n.id), kind: "epoch", narratives: touching.size,
-                direct_citations: direct, members: (members.get(n.id) ?? new Set()).size,
+                direct_citations: direct, narrated: (bound.get(n.id) ?? new Set()).size,
+                members: (members.get(n.id) ?? new Set()).size,
                 narrative_ids: [...touching].sort(pyCmp) });
   }
   return rows.sort((a, b) => a.narratives - b.narratives || pyCmp(a.name, b.name));
@@ -171,7 +204,8 @@ export function storyCoverage(doc: EmDocument | null, narrativeId: string,
   const index = new Map(nodes.map((n) => [n.id, n]));
   const here = new Set(citations(doc).filter((r) => r.narrative_id === narrativeId).map((r) => r.ref));
   const narr = index.get(narrativeId);
-  const anchors = new Set(narr ? chaptersOf(narr).map((c) => c.anchor).filter(Boolean) as string[] : []);
+  // MICRO-SEG23 · every lane the story narrates, a chapter's or a section's
+  const anchors = new Set(narr ? narratedParts(chaptersOf(narr)).map((r) => r.ref) : []);
   const members = epochMembers(doc);
   const cov = new Map(interpretiveCoverage(doc).map((r) => [r.id, r]));
   const epochs = nodes.filter((n) => EPOCH_TYPES.includes(n.node_type)).map((e) => {
