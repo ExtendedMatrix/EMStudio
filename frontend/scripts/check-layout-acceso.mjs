@@ -15,7 +15,7 @@
 //  · «Disponi» with a filter tighter than the default (E.D.'s preferences, or
 //    the authors' ring hidden): the ARCHIVE is laid out (one undo step) and the
 //    reopened file shows what «Disponi» showed;
-//  · «Disponi riducendo gli incroci» from the Matrix's «⋯»: one undo step, and
+//  · «Disponi riducendo gli incroci» from the layout icon's arrow (MICRO-SEG15; it was the Matrix's «⋯»): one undo step, and
 //    the view it leaves crosses less than the plain «Disponi»'s (it says both);
 //  · a node with no epoch reached from a lane (G): in that lane, marked
 //    «senza epoca» (the scene's mark, the tooltip).
@@ -170,20 +170,22 @@ await frame();
 await setDropAsOrder(true);
 ok((await H(() => JSON.parse(localStorage.getItem("emstudio.settings") ?? "{}")?.interaction?.dropAsOrder)) === true, "the preference saved on again");
 
-// 5 · «Disponi riducendo gli incroci» from the Matrix's «⋯»: one undo step
+// 5 · «Disponi riducendo gli incroci» from the layout icon's arrow: one undo step
 {
   const archBefore = await H(() => JSON.stringify(Object.values(JSON.parse(window.__EM_DRAG__.docJson()).graphs)[0].layout?.positions ?? {}));
   const d0 = await H(() => window.__EM_DRAG__.undoDepth());
+  // MICRO-SEG15 · on the layout icon's arrow now (the Matrix's «⋯» had it twice)
   const opened = await H(() => {
-    const t = [...document.querySelectorAll(".win-more")].find((b) => b.getBoundingClientRect().width > 0);
+    const t = [...document.querySelectorAll("[data-act='layout-menu']")].find((b) => b.getBoundingClientRect().width > 0);
     t?.click();
     return !!t;
   });
   await page.waitForTimeout(300);
-  const item = await H(() => { const b = [...document.querySelectorAll(".dd-menu button")].find((x) => x.textContent?.trim() === "Disponi riducendo gli incroci" && x.getBoundingClientRect().width > 0); b?.click(); return !!b; });
-  ok(opened && item, "«Disponi riducendo gli incroci» in the Matrix's «⋯», beside «Disponi»");
-  const both = await H(() => [...document.querySelectorAll(".dd-menu button")].map((x) => x.textContent?.trim()));
+  const both = await H(() => [...document.querySelectorAll("[data-menu='layout'] button")].map((x) => x.textContent?.trim()));
+  const item = await H(() => { const b = [...document.querySelectorAll("[data-menu='layout'] button")].find((x) => /^Disponi riducendo gli incroci/.test(x.textContent?.trim() ?? "") && x.getBoundingClientRect().width > 0); b?.click(); return !!b; });
+  ok(opened && item, "«Disponi riducendo gli incroci» on the layout icon's arrow, beside «Disponi»");
   ok(both.includes("Disponi"), "«Disponi» in the same menu");
+  ok(!(await H(() => [...document.querySelectorAll(".win-more")].some((b) => b.getBoundingClientRect().width > 0 && b.closest(".tile-area")?.querySelector("[data-act='layout-menu']")))), "the Matrix's «⋯», empty, is not shown");
   let tst = "";
   for (let i = 0; i < 40 && !/incroci/.test(tst); i++) { tst = await toastText(); if (!/incroci/.test(tst)) await page.waitForTimeout(150); }
   ok(/incroci/.test(tst), `it says so («${tst}»)`);

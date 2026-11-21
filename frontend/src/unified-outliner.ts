@@ -861,7 +861,9 @@ export function outlinerSelector(opts: () => OutlinerOpts, set: (o: OutlinerOpts
   btn.className = "win-act uo-sel-btn";
   btn.dataset.uoSelector = "1";
   const o0 = opts();
-  btn.textContent = o0.sync3d ? "☰ 3D" : "☰";
+  // MICRO-SEG15 · in a tight head «3D» goes first (level 1): the button stays lit
+  btn.innerHTML = o0.sync3d ? `☰<span class="hdr-long"> 3D</span>` : "☰";
+  btn.dataset.hdrCompact = "1";
   btn.classList.toggle("win-act-on", o0.sync3d);
   btn.title = w.selector;
   btn.setAttribute("aria-label", w.selector);

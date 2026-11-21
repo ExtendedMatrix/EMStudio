@@ -12663,3 +12663,48 @@ td.plg-col { color: var(--muted, #888); }
 .beta-mark { display: inline-block; margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-sm);
   font-size: 0.68rem; font-weight: 500; line-height: 1.35; letter-spacing: 0.02em; text-transform: lowercase;
   color: var(--text-muted); background: var(--bg-sunken); vertical-align: middle; cursor: help; }
+
+/* ── MICRO-SEG15 (E.D., 21 Nov 2026) · heads with fixed places, as Blender's ──
+   No head scrolls sideways: a head too tight gives way in one order (`fitHeader`):
+   labels → icons (`data-hdr-compact`, class `hdr-compact`), then verbs into «⋯»
+   (`data-hdr-folded`), then the magnifier, then the main command narrower. */
+.hdr-short { display: none; }
+.hdr-compact .hdr-long, .hdr-compact.hdr-long { display: none; }
+.hdr-compact .hdr-short { display: inline; }
+.hdr-compact[data-hdr-hide] { display: none !important; }
+[data-hdr-folded] { display: none !important; }
+.win-type.hdr-compact .win-type-label { display: none; }
+.win-header .wi-chip.wi-restore.hdr-compact { padding: 0 7px; }
+/* the Space: the centre's strip takes the room of its content, never less (the
+   head overflows and `fitHeader` acts, instead of the strip scrolling) */
+.win-header > .win-strip.win-strip-scene { flex: 0 0 auto; min-width: auto; }
+.win-strip-scene > .scn-bar { flex: 0 0 auto; overflow: visible; flex-wrap: nowrap; }
+.scn-bar-lead { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 0.76rem; }
+.scn-bar-lead .scn-tg { padding: 1px 7px; white-space: nowrap; }
+.scn-bar-tail .scn-tg { white-space: nowrap; }
+.win-strip-scene .scn-seg.hdr-compact .scn-ep-pick { max-width: 76px; }
+.win-header .win-bands-seg.hdr-compact button { padding: 1px 6px; }
+/* the Matrix's layout: a button with its arrow */
+.win-header .win-act[data-act="layout"]:has(+ .win-act-caret) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.win-header .win-act-caret { height: 30px; width: 16px; padding: 0; margin-left: -5px; flex: none; background: var(--bg-elevated); border: 1px solid var(--border);
+  border-left: 0; border-radius: 0 var(--radius-lg) var(--radius-lg) 0; color: var(--text-muted); font-size: 10px; cursor: pointer; }
+.win-header .win-act-caret:hover { color: var(--text); border-color: var(--brand-ink); }
+.win-header .win-act[data-act="layout"][data-hdr-folded] + .win-act-caret { display: none; }
+/* Globe / Plan / Site in the column under the gizmo */
+.scn-geo-col { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(128, 128, 128, 0.35); }
+.scn-geo-col.hidden { display: none; }
+.scn-nav-btn.scn-geo-btn, .scn-nav-btn.scn-geo-mode { cursor: pointer; font: 700 11px var(--font-ui, system-ui, sans-serif); }
+.scn-nav-btn.scn-geo-btn { font-size: 13px; }
+.scn-nav-btn.scn-geo-btn[data-geo-chip="missing"] { opacity: 0.55; }
+.scn-nav-btn.scn-geo-btn[aria-pressed="true"], .scn-nav-btn.scn-geo-mode[aria-pressed="true"] {
+  background: var(--accent); color: var(--on-accent, #fff); box-shadow: 0 0 0 1px var(--accent); }
+.scn-nav-btn.scn-geo-mode:disabled { opacity: 0.45; cursor: default; }
+/* the hardware profile, a word of the information line */
+.scn-topline > .scn-hw-info { pointer-events: auto; flex: none; border: 0; background: transparent; padding: 0 2px; color: var(--scene-ink);
+  font: 600 0.7rem var(--font-ui, inherit); text-shadow: 0 0 3px var(--scene-bg-top); cursor: pointer; border-bottom: 1px dotted currentColor; border-radius: 0; line-height: 1.4; }
+.scn-topline > .scn-hw-info:hover { color: var(--accent); }
+[data-hdr-more-empty][hidden] { display: none !important; }
+/* the last step of a tight head: closer controls */
+.tile-bar.win-header.hdr-tight { gap: 3px; }
+.tile-bar.hdr-tight .scn-bar, .tile-bar.hdr-tight .scn-bar-lead, .tile-bar.hdr-tight .scn-bar-tail { gap: 3px; }
+.tile-bar.hdr-tight .scn-tg { padding: 1px 5px; }

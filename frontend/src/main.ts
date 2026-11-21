@@ -9498,7 +9498,10 @@ function bandsControl(win: Win): HTMLElement {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.dataset.bandsSet = b;
-    btn.textContent = t(`bands.${b}`);
+    // MICRO-SEG15 · tight, the initial (level 6), the word in the tooltip
+    btn.innerHTML = `<span class="hdr-long">${escapeHtml(t(`bands.${b}`))}</span><span class="hdr-short" aria-hidden="true">${escapeHtml(t(`bands.${b}Short`))}</span>`;
+    btn.setAttribute("aria-label", t(`bands.${b}`));
+    if (!btn.title) btn.title = t(`bands.${b}`);
     btn.setAttribute("aria-pressed", String(bandsOfWin(win.id) === b));
     const none = b === "horizons" && !read.list.length;
     if (none) {
@@ -9512,8 +9515,16 @@ function bandsControl(win: Win): HTMLElement {
     });
     seg.appendChild(btn);
   }
+  seg.dataset.hdrCompact = "6";
   box.appendChild(seg);
-  box.appendChild(betaMark());
+  // MICRO-SEG15 · the first word to go when the head is tight (level 1)
+  // MICRO-SEG15 · a very narrow head: the switch leaves for «⋯» (its two choices), last
+  box.dataset.hdrFoldLate = "1";
+  box.setAttribute("aria-label", t("bands.title"));
+  const beta = betaMark();
+  beta.dataset.hdrCompact = "1";
+  beta.dataset.hdrHide = "1";
+  box.appendChild(beta);
   if (bandsOfWin(win.id) !== "horizons" || !read.list.length) return box;
   const per = bandsPerOfWin(win.id);
   const sel = document.createElement("select");
@@ -32170,6 +32181,8 @@ const sceneHandles = new Map<string, SpaceSceneHandle>();
 const sceneBars = new Map<string, HTMLElement>();
 /** MICRO-TESTATE-COERENTI p.3 · the tail of a 3D window's bar (Visibilità ▾ · 🔍 · ⋯), at the end of its head */
 const sceneTails = new Map<string, HTMLElement>();
+/** MICRO-SEG15 · the left zone of each Space's head («Colori ▾», «Visibilità ▾») */
+const sceneLeads = new Map<string, HTMLElement>();
 /** MICRO-RIFINITURE p.6 · per Space window, the «Livelli» section of its data panel */
 const spaceLayerSections = new Map<string, () => HTMLElement>();
 /** MICRO-TESTATE-COERENTI p.1/p.2 · per 3D window, open its «Visibilità ▾» (on a category) */
@@ -36584,7 +36597,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   wrap.className = "scn";
   const bar = document.createElement("div");
   bar.className = "scn-bar";
-  oneLine(bar);
+  // MICRO-SEG15 · the bar does not scroll sideways any more (`one-line` gone):
+  // the head gives way by `fitHeader`, the same rule as every head
   // MICRO-SPAZIO-COMPATTO p.1 · the bar lives in the window's header: a press on
   // it is not the header's (no drag of the window, no magnify on a double click)
   for (const ev of ["pointerdown", "dblclick"]) bar.addEventListener(ev, (e) => e.stopPropagation());
@@ -36595,6 +36609,14 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   tail.className = "scn-bar-tail";
   tail.dataset.hdr = "filters";
   sceneTails.set(win.id, tail);
+  // MICRO-SEG15 (E.D., 21 Nov 2026) · three fixed zones. LEFT, how you look:
+  // after the type of window, «Colori ▾» and «Visibilità ▾» — never moved, never
+  // in «⋯»; the CENTRE is time (the bar: Epochs / Horizons, ← epoch →); the
+  // RIGHT the actions (the tail: «+», ⌖, the search, «⋯», then ⛶/Restore)
+  const lead = document.createElement("span");
+  lead.className = "scn-bar-lead";
+  lead.dataset.hdr = "context";
+  sceneLeads.set(win.id, lead);
   const placeBar = () => {
     const strip = body.closest<HTMLElement>(".tile-area")?.querySelector<HTMLElement>(":scope > .tile-bar .win-strip-scene");
     if (strip && bar.parentElement !== strip) strip.appendChild(bar);
@@ -36603,6 +36625,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const sep = head?.querySelector<HTMLElement>(":scope > .win-sep");
     if (head && sep) { if (tail.previousElementSibling !== sep) sep.after(tail); }
     else if (tail.parentElement !== bar) bar.appendChild(tail);
+    // the left zone: right before the centre's strip (after the type, «+ ▾», «?»)
+    if (head && strip) { if (lead.nextElementSibling !== strip) strip.before(lead); }
+    else if (lead.parentElement !== bar) bar.prepend(lead);
   };
   // MICRO-SPAZIO-3D · the Outliner on the left (T), the scene on the right
   const row = document.createElement("div");
@@ -36920,10 +36945,48 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   topline.appendChild(overlay);
   host.appendChild(topline);
   // (the scene makes its view's name and its stats once its engine is up: they join the line then)
+  // MICRO-SEG15 (E.D., 21 Nov 2026: «desktop non lo trovavo») · the hardware
+  // profile the scene loads for, a word of the information line — «User ·
+  // Perspective · 495K ▲ · 60 FPS · desktop ▾» — that opens the choice
+  const hwInfo = document.createElement("button");
+  hwInfo.type = "button";
+  hwInfo.className = "scn-hw-info";
+  for (const ev of ["pointerdown", "dblclick", "wheel"]) hwInfo.addEventListener(ev, (e) => e.stopPropagation());
+  hwInfo.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const r = hwInfo.getBoundingClientRect();
+    openHardwareMenu(r.left, r.bottom + 4);
+  });
+  const paintHwInfo = (): void => {
+    const hw = hardwareProfile();
+    hwInfo.dataset.hw = hw;
+    hwInfo.textContent = `${hardwareWord(hw)} ▾`;
+    const why = t(space3dPrefs().hardware ? "hw.titleChosen" : "hw.titleRead", { hw: hardwareWord(hw), why: (detectHardware(), hardwareWhy) });
+    hwInfo.title = why;
+    hwInfo.setAttribute("aria-label", `${t("hw.infoLabel", { hw: hardwareWord(hw) })} — ${why}`);
+  };
+  topline.insertBefore(hwInfo, overlay);
+  // MICRO-SEG15 · Globe / Plan / Site out of the bar: round buttons in the
+  // column under the axes' gizmo (with zoom, hand, frame, grid), the active one
+  // pressed; refilled at each refresh of the bar
+  const geoCol = document.createElement("div");
+  geoCol.className = "scn-geo-col";
+  geoCol.dataset.geoCol = win.id;
+  geoCol.setAttribute("role", "group");
+  geoCol.setAttribute("aria-label", t("geo.modes"));
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) geoCol.addEventListener(ev, (e) => e.stopPropagation());
+  const placeGeoCol = (): void => {
+    geoCol.replaceChildren(...geoSpace.navButtons());
+    geoCol.classList.toggle("hidden", !geoCol.childElementCount);
+    const col = host.querySelector<HTMLElement>(":scope > .scn-nav .scn-nav-col");
+    if (col && geoCol.parentElement !== col) col.appendChild(geoCol);
+  };
   const gather = () => {
     const vEl = host.querySelector<HTMLElement>(":scope > .scn-view"), sEl = host.querySelector<HTMLElement>(":scope > .scn-stats");
     if (vEl) topline.prepend(vEl);
-    if (sEl) topline.insertBefore(sEl, overlay);
+    if (sEl && sEl.nextElementSibling !== hwInfo) topline.insertBefore(sEl, hwInfo);
+    const col = host.querySelector<HTMLElement>(":scope > .scn-nav .scn-nav-col");
+    if (col && geoCol.parentElement !== col) col.appendChild(geoCol);
   };
   gather();
   const gatherer = new MutationObserver(gather);
@@ -37137,10 +37200,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     visMenu = m;
     if (territory) m.querySelector<HTMLElement>('[data-vis-row="territory"]')?.classList.add("vis-flash");
     // MICRO-SEG13 · the head is redrawn while it is open: its «Visibility ▾» by selector
-    floating(m, { close: closeVis, opener: () => tail.querySelector<HTMLElement>("[data-vis]"), openerSel: "[data-vis]", name: "vis" });
+    floating(m, { close: closeVis, opener: () => lead.querySelector<HTMLElement>("[data-vis]"), openerSel: "[data-vis]", name: "vis" });
   };
   visOpeners.set(win.id, (cat?: OverlayKey) => {
-    const b = tail.querySelector<HTMLElement>("[data-vis]");
+    const b = lead.querySelector<HTMLElement>("[data-vis]");
     if (!b) return;
     if (!visMenu) openVis(b);
     if (cat) visMenu?.querySelector<HTMLElement>(`[data-vis-row="${cat}"]`)?.classList.add("vis-flash");
@@ -37568,7 +37631,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // the globe's chip turns the territory on and off no more: that is a category,
     // switched in «Visibilità ▾» (it opens there, on «Territorio / GIS»)
     const gt = (e.target as HTMLElement).closest<HTMLElement>("[data-geo='toggle']");
-    if (gt) { e.stopPropagation(); const v2 = tail.querySelector<HTMLElement>("[data-vis]"); if (v2) { closeVis(); openVis(v2, true); } return; }
+    if (gt) { e.stopPropagation(); const v2 = lead.querySelector<HTMLElement>("[data-vis]"); if (v2) { closeVis(); openVis(v2, true); } return; }
     if (geoSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     if (gisSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     const hwb = (e.target as HTMLElement).closest<HTMLElement>("[data-hw]");
@@ -37584,10 +37647,22 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     if (b.dataset.act === "back") { goBack(); return; }
     if (b.dataset.act === "more") {
       const r = b.getBoundingClientRect();
-      spaceMenu(r.left, r.bottom + 4, t("lay.moreHead"), [
-        { label: `⤢ ${t("space.frame")}`, act: "frame", run: () => handle.frame() },
-        { label: t("geo.goSite"), act: "go-site", disabled: !geoSpace.isOn(), run: () => { geoSpace.goToSite(); } },
-      ]);
+      // MICRO-SEG15 · first what a tight head put away («In the bar»), then the
+      // camera modes when the column that holds them is hidden (the gizmo off)
+      const head = b.closest<HTMLElement>(".tile-bar") ?? bar;
+      const folded = foldedItems(head);
+      const out: Array<{ label: string; act: string; run: () => void; disabled?: boolean } | "sep"> = [];
+      folded.forEach((v, i) => out.push({ label: v.label, act: `folded-${i}`, disabled: v.disabled, run: v.run }));
+      if (folded.length) out.push("sep");
+      const colHidden = !geoCol.isConnected || !geoCol.offsetParent;
+      if (colHidden && geoSpace.isOn()) {
+        for (const m of geoCol.querySelectorAll<HTMLButtonElement>("[data-geo-mode]"))
+          out.push({ label: `${m.getAttribute("aria-pressed") === "true" ? "● " : "○ "}${m.getAttribute("aria-label") ?? ""}`, act: `geo-${m.dataset.geoMode}`, disabled: m.disabled, run: () => m.click() });
+        out.push("sep");
+      }
+      out.push({ label: `⤢ ${t("space.frame")}`, act: "frame", run: () => handle.frame() },
+        { label: t("geo.goSite"), act: "go-site", disabled: !geoSpace.isOn(), run: () => { geoSpace.goToSite(); } });
+      spaceMenu(r.left, r.bottom + 4, t("lay.moreHead"), out);
       return;
     }
     if (b.dataset.previewClose) {
@@ -37613,8 +37688,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   };
   bar.addEventListener("click", onBar);
   tail.addEventListener("click", onBar);
+  lead.addEventListener("click", onBar);
+  geoCol.addEventListener("click", onBar);
   // MICRO-PL09 p.0 · a right click on «Colori» opens the quick menu
-  tail.addEventListener("contextmenu", (e) => {
+  lead.addEventListener("contextmenu", (e) => {
     const cb = (e.target as HTMLElement).closest<HTMLElement>("[data-colours]");
     if (!cb) return;
     e.preventDefault(); e.stopPropagation();
@@ -37670,8 +37747,14 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     back.className = "scn-tg";
     back.dataset.act = "back";
     back.textContent = "←";
+    // MICRO-SEG15 · the second verb to leave for «⋯» in a tight head
+    back.dataset.hdrFold = "2";
+    back.setAttribute("aria-label", t("fonte.backEmpty"));
     const lab = document.createElement("span");
     lab.className = "scn-lbl";
+    // MICRO-SEG15 · «EPOCH»: the word the switch beside it already says — the first to go
+    lab.dataset.hdrCompact = "1";
+    lab.dataset.hdrHide = "1";
     // MICRO-LAB orizzonti come bande · the switch, and the word for what follows
     const hzOn = spaceBandsWin() !== null;
     lab.textContent = t(hzOn ? "bands.spaceHorizon" : "space.epoch");
@@ -37727,6 +37810,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       }
       pick.title = flat[i]?.title ?? "";
       seg.append(arrow(-1), pick, arrow(1));
+      // MICRO-SEG15 · the main command: the last to narrow, never in «⋯»
+      seg.dataset.hdrCompactLate = "1";
     };
     if (epochsHere.length > SPACE_EPOCH_BUTTONS || hasSubs) asMenu();
     else for (const e of epochsHere) {
@@ -37752,13 +37837,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     fr.dataset.frame = "1";
     fr.textContent = "⤢";
     fr.title = t("space.frame");
-    // MICRO-GIS-BASE (E.D., 2 Nov 2026) · the hardware profile the scene loads for: seen, and changed here
-    const hwb = document.createElement("button");
-    hwb.type = "button";
-    hwb.className = "scn-tg scn-hw";
-    hwb.dataset.hw = hardwareProfile();
-    hwb.textContent = t("hw.chip", { hw: hardwareWord(hardwareProfile()) });
-    hwb.title = t(space3dPrefs().hardware ? "hw.titleChosen" : "hw.titleRead", { hw: hardwareWord(hardwareProfile()), why: (detectHardware(), hardwareWhy) });
+    // MICRO-GIS-BASE (E.D., 2 Nov 2026) · the hardware profile the scene loads for:
+    // MICRO-SEG15 · seen and changed in the information line now (`hwInfo`)
     // MICRO-RIFINITURE p.6 (E.D., 6 Nov 2026: «la barra è troppo affollata») · in the
     // bar the epoch, the view (Globe / Plan / Site, with the territory) and the
     // profile ⚙; Models, Proxies, Territory, Layers and GIS are sections of the
@@ -37775,7 +37855,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     vis.dataset.vis = String(off.length);
     vis.dataset.hdr = "filters";
     vis.dataset.visOffHere = String(offHere.length);
-    vis.textContent = offHere.length ? `${t("vis.title")} · ${tn("vis.off", offHere.length)} ▾` : `${t("vis.title")} ▾`;
+    const visWords = offHere.length ? `${t("vis.title")} · ${tn("vis.off", offHere.length)}` : t("vis.title");
+    // MICRO-SEG15 · tight, the eye (level 3) and the count of what is off
+    vis.innerHTML = `<span class="hdr-long">${escapeHtml(visWords)}</span><span class="hdr-short" aria-hidden="true">👁${offHere.length ? `·${offHere.length}` : ""}</span> ▾`;
+    vis.dataset.hdrCompact = "3";
+    vis.setAttribute("aria-label", visWords);
     vis.title = off.length ? `${t("vis.offList")}: ${off.map((k) => t(`vis.cat.${k}`)).join(", ")}` : t("vis.tip");
     const more = document.createElement("button");
     more.type = "button";
@@ -37786,8 +37870,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     more.dataset.hdr = "more";
     seg.classList.toggle("scn-seg-hz", hzOn);
     // Epochs ⇄ Horizons (beta, MICRO-COR11); EXPERIMENTAL · the site's marks («Funzioni sperimentali» on)
-    bar.append(back, bands, lab, seg, ...geoSpace.barButtons(),
-      ...(EXPERIMENTAL ? spaceButtons(win.id) : []), hwb);
+    // MICRO-SEG15 · Globe / Plan / Site went to the column under the gizmo
+    // (`placeGeoCol`), the hardware profile to the information line (`hwInfo`)
+    bar.append(back, bands, lab, seg, ...(EXPERIMENTAL ? spaceButtons(win.id) : []));
     // MICRO-E p.6 · «Colori ▾»: the mode said when it is not EM's
     const csNow = spaceColoursOf(win.id);
     const colb = document.createElement("button");
@@ -37797,8 +37882,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // MICRO-PL09 p.0 (E.D., 18 Nov 2026: «non trovo come cambiare i colori a mano») ·
     // the button opens the window «Colori» itself; the quick menu is the ▾ beside
     // it (or a right click on it)
-    colb.textContent = csNow.mode === "em" ? t("col.title") : `${t("col.title")} · ${t(`col.mode.${csNow.mode}`)}`;
-    colb.title = t("col.tipWindow");
+    const colWords = csNow.mode === "em" ? t("col.title") : `${t("col.title")} · ${t(`col.mode.${csNow.mode}`)}`;
+    // MICRO-SEG15 · tight, the palette glyph (level 2), the words in the tooltip
+    colb.innerHTML = `<span class="hdr-long">${escapeHtml(colWords)}</span><span class="hdr-short" aria-hidden="true">◐</span>`;
+    colb.title = `${colWords} — ${t("col.tipWindow")}`;
+    colb.setAttribute("aria-label", colWords);
     const colm = document.createElement("button");
     colm.type = "button";
     colm.className = "scn-tg scn-col-menu";
@@ -37808,6 +37896,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const colPair = document.createElement("span");
     colPair.className = "scn-col-pair";
     colPair.append(colb, colm);
+    colPair.dataset.hdrCompact = "2";
     // MICRO-E p.1 · «+»: the one door, the epoch shown proposed
     const plus = document.createElement("button");
     plus.type = "button";
@@ -37815,6 +37904,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     plus.dataset.doorPlus = "1";
     plus.textContent = "+";
     plus.title = t("door.plusHint");
+    plus.setAttribute("aria-label", t("door.plusHint"));
+    plus.dataset.hdrFold = "3";
     // MICRO-P-GEOREF-PER-GRAFO · ⌖ the card «Georeferenziazione»: the graph's system and its models'
     const geoB = document.createElement("button");
     geoB.type = "button";
@@ -37825,22 +37916,31 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     geoB.textContent = "⌖";
     geoB.title = ge === null ? t("gr.openNone") : t("gr.open", { epsg: String(ge) });
     geoB.dataset.grEpsg = ge === null ? "" : String(ge);
+    geoB.setAttribute("aria-label", geoB.title);
+    // MICRO-SEG15 · the first verb to leave for «⋯» in a tight head
+    geoB.dataset.hdrFold = "1";
     geoB.addEventListener("click", (e) => { e.stopPropagation(); if (grCardEl) closeGeorefCard(); else openGeorefCard(); });
-    tail.replaceChildren(plus, geoB, colPair, vis, sceneSearch(win), more);
+    lead.replaceChildren(colPair, vis);
+    tail.replaceChildren(plus, geoB, sceneSearch(win), more);
+    placeGeoCol();
+    paintHwInfo();
     gisSpace.refresh();
     layerSpace.refresh();
     placeBar();
     // p.3 · «when the bar is not enough»: the buttons wrapped (the bar is taller
     // than one row) or run past its edge → the menu, for this drawing
+    // MICRO-SEG15 · «its edge» is the whole head's now (the bar does not scroll)
     if (!seg.classList.contains("scn-seg-menu") && epochsHere.length > 1) {
       const first = seg.firstElementChild as HTMLElement | null;
       const last = seg.lastElementChild as HTMLElement | null;
       const box = bar.getBoundingClientRect();
+      const headEl = bar.closest<HTMLElement>(".tile-bar");
       if (first && last && box.width > 0 && (last.offsetTop > first.offsetTop
-          || last.getBoundingClientRect().right > box.right + 1 || bar.scrollWidth > bar.clientWidth + 1
+          || (headEl ? headEl.scrollWidth > headEl.clientWidth + 1 : bar.scrollWidth > bar.clientWidth + 1)
           || seg.getBoundingClientRect().top > (lab.getBoundingClientRect().bottom || box.top) - 1))
         asMenu();
     }
+    refitHead(bar);
     renderBackButtons();
     // CAMPAGNA · the preview, said in the bar and closable; drawn whatever the
     // graph says (a tileset opened from the Storage needs no epoch)
@@ -38158,7 +38258,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     }, 12000);
   };
   refresh();
-  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); layerSpace.destroy(); if (layerSpaces.get(win.id) === layerSpace) layerSpaces.delete(win.id); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); lead.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); if (sceneLeads.get(win.id) === lead) sceneLeads.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); layerSpace.destroy(); if (layerSpaces.get(win.id) === layerSpace) layerSpaces.delete(win.id); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
 }
 
 /** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
@@ -60914,29 +61014,117 @@ function measureSearchMin(): void {
 }
 
 /**
- * MICRO-TIL001 · a head that does not fit its window. In order: (1) the
- * window's one-click verbs (`.win-act`, from the right) leave the bar for its
- * «⋯», which lists them under «In the bar» while they are out; (2) only then
- * the search field becomes a magnifier. Never a field with its word cut. Run
- * after every head is built and when an area changes size.
+ * MICRO-TIL001 · a head that does not fit its window.
+ * MICRO-SEG15 (E.D., 21 Nov 2026: «desktop non lo trovavo. Meglio avere delle
+ * cose fisse a sinistra») · NO head scrolls sideways: every control has a fixed
+ * place, and a head too tight gives way in one order, the same everywhere:
+ *  (1) LABELS BECOME ICONS — the elements marked `data-hdr-compact="n"` take the
+ *      class `hdr-compact`, level after level (1 first); what they show then is
+ *      their `.hdr-short` (or nothing, `data-hdr-hide`), their name staying in
+ *      the tooltip and in `aria-label`;
+ *  (2) THE VERBS LEAVE FOR «⋯» — the elements marked `data-hdr-fold="n"` (1
+ *      first, anywhere in the head) and then the window's one-click verbs
+ *      (`.win-act`, from the right); the «⋯» lists them under «In the bar»
+ *      while they are out (a «⋯» with nothing else in it shows up for that);
+ *  (3) the search field becomes a magnifier;
+ *  (4) last, the main command narrows (`data-hdr-compact-late`: the Space's
+ *      epoch selector), never into «⋯».
+ * Run after every head is built, when an area changes size and when a window
+ * redraws the part of the head it owns (`refitHead`).
  */
 function fitHeader(bar: HTMLElement): void {
   for (const b of bar.querySelectorAll<HTMLElement>("[data-hdr-folded]")) { b.hidden = false; delete b.dataset.hdrFolded; }
-  const search = bar.querySelector<HTMLElement>(":scope > .win-search");
+  for (const b of bar.querySelectorAll<HTMLElement>(".hdr-compact")) b.classList.remove("hdr-compact");
+  for (const m of bar.querySelectorAll<HTMLElement>("[data-hdr-more-empty]")) m.hidden = true;
+  bar.classList.remove("hdr-tight");
+  const search = bar.querySelector<HTMLElement>(":scope > .win-search, :scope .scn-bar-tail > .win-search");
   search?.classList.remove("win-search-icon");
   const over = (): boolean => bar.scrollWidth > bar.clientWidth + 1;
+  bar.dataset.hdrFit = "0";
   if (!over() || bar.classList.contains("hz-bar") || bar.classList.contains("win-chain-bar")) return;
-  if (bar.querySelector(":scope > .win-menu")) {
-    // never the ⛶ (it is not a verb of the window's content: it is the window)
-    const verbs = [...bar.querySelectorAll<HTMLElement>(":scope > .win-act")]
-      .filter((v) => hdrRoleOf(v) !== "max" && !v.classList.contains("win-max")).reverse();
-    for (const v of verbs) {
-      v.hidden = true;
-      v.dataset.hdrFolded = "1";
-      if (!over()) return;
+  // (1) labels → icons, level by level
+  const marked = [...bar.querySelectorAll<HTMLElement>("[data-hdr-compact]")];
+  const levels = [...new Set(marked.map((m) => Number(m.dataset.hdrCompact) || 0))].sort((a, b) => a - b);
+  for (const lv of levels) {
+    for (const m of marked) if ((Number(m.dataset.hdrCompact) || 0) === lv) m.classList.add("hdr-compact");
+    bar.dataset.hdrFit = `c${lv}`;
+    if (!over()) return;
+  }
+  // (2) verbs into «⋯»: the marked ones first, then the window's `.win-act`
+  const marks = [...bar.querySelectorAll<HTMLElement>("[data-hdr-fold]")]
+    .sort((a, b) => (Number(a.dataset.hdrFold) || 0) - (Number(b.dataset.hdrFold) || 0));
+  // never the ⛶ (it is not a verb of the window's content: it is the window)
+  const verbs = bar.querySelector(":scope > .win-menu")
+    ? [...bar.querySelectorAll<HTMLElement>(":scope > .win-act")]
+        .filter((v) => hdrRoleOf(v) !== "max" && !v.classList.contains("win-max") && !v.dataset.hdrFold).reverse()
+    : [];
+  const folds = [...marks, ...verbs];
+  // (a head with a «⋯» of its own — the Space's — lists them there: never two «⋯»)
+  const showEmptyMore = (): void => {
+    if (bar.querySelector('[data-hdr="more"]:not([data-hdr-more-empty])')) return;
+    for (const m of bar.querySelectorAll<HTMLElement>("[data-hdr-more-empty]")) m.hidden = false;
+  };
+  if (folds.length) showEmptyMore();
+  for (const v of folds) {
+    v.hidden = true;
+    v.dataset.hdrFolded = "1";
+    bar.dataset.hdrFit = "fold";
+    if (!over()) return;
+  }
+  // (3) the magnifier
+  if (search && !search.classList.contains("win-search-open")) search.classList.add("win-search-icon");
+  bar.dataset.hdrFit = "search";
+  if (!over()) return;
+  // (4) the main command, narrower — last
+  for (const m of bar.querySelectorAll<HTMLElement>("[data-hdr-compact-late]")) m.classList.add("hdr-compact");
+  bar.classList.add("hdr-tight");
+  bar.dataset.hdrFit = "late";
+  if (!over()) return;
+  // (5) a very narrow window: the switches beside the main command
+  // (`data-hdr-fold-late`: Epochs / Horizons) leave for «⋯», each choice an
+  // item, and last the window's «?» (its text, in «⋯», said in a toast)
+  const late = [...bar.querySelectorAll<HTMLElement>("[data-hdr-fold-late]")]
+    .sort((a, b) => (Number(a.dataset.hdrFoldLate) || 0) - (Number(b.dataset.hdrFoldLate) || 0))
+    .concat([...bar.querySelectorAll<HTMLElement>(":scope > .win-help")]);
+  if (late.length) showEmptyMore();
+  for (const v of late) {
+    v.hidden = true;
+    v.dataset.hdrFolded = "1";
+    bar.dataset.hdrFit = "fold-late";
+    if (!over()) return;
+  }
+}
+/** MICRO-SEG15 · what a tight head put away, as the items of its «⋯» («In the
+ *  bar»): a folded button is one item; a folded group (Epochs / Horizons) one
+ *  item per choice, the pressed one marked ● */
+function foldedItems(head: HTMLElement): Array<{ label: string; title: string; disabled: boolean; run: () => void }> {
+  const out: Array<{ label: string; title: string; disabled: boolean; run: () => void }> = [];
+  const nameOf = (v: HTMLElement): string => (v.getAttribute("aria-label") || v.title || v.textContent || "").trim();
+  for (const v of head.querySelectorAll<HTMLElement>("[data-hdr-folded]")) {
+    const kids = v.tagName === "BUTTON" ? [] : [...v.querySelectorAll<HTMLButtonElement>("button")];
+    if (v.classList.contains("win-help")) {
+      const full = nameOf(v);
+      out.push({ label: `? ${t("win.helpItem")}`, title: full, run: () => toast(full), disabled: false });
+      continue;
+    }
+    if (!kids.length) {
+      const full = nameOf(v);
+      out.push({ label: full.split(/ — |: /)[0], title: full, run: () => v.click(),
+                 disabled: (v as HTMLButtonElement).disabled === true || v.getAttribute("aria-disabled") === "true" });
+      continue;
+    }
+    for (const k of kids) {
+      const on = k.getAttribute("aria-pressed");
+      out.push({ label: `${on === "true" ? "● " : on === "false" ? "○ " : ""}${nameOf(k).split(/ — |: /)[0]}`, title: nameOf(k), run: () => k.click(),
+                 disabled: k.disabled });
     }
   }
-  if (search && !search.classList.contains("win-search-open")) search.classList.add("win-search-icon");
+  return out;
+}
+/** a window redrew the part of its head it owns (the Space's bar): fit it again */
+function refitHead(el: Element | null): void {
+  const bar = el?.closest<HTMLElement>(".tile-bar");
+  if (bar) fitHeader(bar);
 }
 /** the one observer of the heads (a function, not a const: a head can be built
  *  while this module is still being evaluated — no temporal dead zone) */
@@ -60975,6 +61163,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // says what it is, and its menu ends with the one verb that removes it.
   const typeDd = document.createElement("div");
   typeDd.className = "dropdown win-type";
+  // MICRO-SEG15 · fixed at the left, never in «⋯»: tight, its icon alone (level 4)
+  typeDd.dataset.hdrCompact = "4";
   const typeTog = document.createElement("button");
   typeTog.className = "dd-toggle win-type-toggle";
   // MICRO-CONTENTS-4 §1 · on the Chain the tooltip spells DTC out first
@@ -60985,6 +61175,7 @@ function buildAreaHeader(win: Win): DocumentFragment {
     `<span class="win-type-icon">${typeIcon}</span>` +
     `<span class="win-type-label">${escapeHtml(typeName)}</span>` +
     `<span class="win-type-caret">▾</span>`;
+  typeTog.setAttribute("aria-label", `${typeName} — ${t("win.typeTitle")}`);
   const typeMenu = document.createElement("div");
   typeMenu.className = "dd-menu hidden";
   const chain = isChainWin(win);
@@ -61113,6 +61304,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
     seg.className = "win-seg";
     seg.setAttribute("role", "group");
     seg.setAttribute("aria-label", t("win.modeTitle"));
+    // MICRO-SEG15 · a very narrow head: the modes leave for «⋯» (each one an
+    // item, the current marked), after Epochs / Horizons and before the «?»
+    seg.dataset.hdrFoldLate = "2";
     for (const m of modes.items) {
       const b = document.createElement("button");
       b.type = "button";
@@ -61246,10 +61440,14 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // dropdown per group, named with words the bar already said («Graph ▾» with
   // one item, beside the type «Graph ▾» and the mode «Matrix ▾»).
   const menus = WINDOW_MENUS[type];
-  // MICRO-PULIZIA p.4 · a «⋯» with nothing in it is not drawn
-  if (menus.some((m) => m.items(win).length)) {
+  // MICRO-PULIZIA p.4 · a «⋯» with nothing in it is not drawn — MICRO-SEG15:
+  // not shown; it is there, hidden, for the verbs a tight head puts away
+  // (`fitHeader` shows it then, and only then)
+  const menuEmpty = !menus.some((m) => m.items(win).length);
+  {
     const dd = document.createElement("div");
     dd.className = "dropdown win-menu";
+    if (menuEmpty) { dd.dataset.hdrMoreEmpty = "1"; dd.hidden = true; }
     const toggle = document.createElement("button");
     toggle.className = "dd-toggle win-menu-toggle win-more";
     toggle.textContent = "⋯";
@@ -61261,7 +61459,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
     wireBarDropdown(toggle, list, () => {
       list.innerHTML = "";
       // MICRO-TIL001 · the bar's verbs that a tight head put away (`fitHeader`)
-      const folded = [...(dd.parentElement?.querySelectorAll<HTMLButtonElement>(":scope > .win-act[data-hdr-folded]") ?? [])];
+      // (the verb's name, its tooltip's first sentence; the whole tooltip as the item's)
+      const folded = dd.parentElement ? foldedItems(dd.parentElement) : [];
       if (folded.length) {
         const g = document.createElement("div");
         g.className = "dd-group";
@@ -61269,13 +61468,11 @@ function buildAreaHeader(win: Win): DocumentFragment {
         list.appendChild(g);
         for (const v of folded) {
           const b = document.createElement("button");
-          b.dataset.foldedVerb = v.dataset.act ?? "";
-          // the verb's name (its tooltip's first sentence); the whole tooltip as the item's
-          const full = v.getAttribute("aria-label") || v.title || v.textContent || "";
-          b.textContent = full.split(/ — |: /)[0];
-          b.title = full;
-          if (v.getAttribute("aria-disabled") === "true") b.classList.add("dd-disabled");
-          b.addEventListener("click", () => v.click());
+          b.dataset.foldedVerb = "1";
+          b.textContent = v.label;
+          b.title = v.title;
+          if (v.disabled) b.classList.add("dd-disabled");
+          b.addEventListener("click", v.run);
           list.appendChild(b);
         }
       }
@@ -61414,18 +61611,46 @@ function buildAreaHeader(win: Win): DocumentFragment {
     // MICRO-PULIZIA p.4 · an icon of its own (no word «Layout»), its name in
     // the tooltip and for the screen reader; beside it, «Compact the
     // properties (whole graph)», which left the «⋯»
-    act("", t("win.layoutTitle"), false, () => {});
+    // MICRO-SEG15 (E.D., 21 Nov 2026: «questo menù Layout non è ridondante con i
+    // pulsanti?») · a button with its arrow, the Matrix's «⋯» group gone: a
+    // click = Layout; ▾ = «Layout» / «Layout reducing the crossings»; Alt+click
+    // = reducing the crossings; Shift+click drops the manual arrangement (it was
+    // Alt's). In the Graph and the DTC the arrow is not drawn (one layout there)
+    act("", `${t("win.layoutTitle")} ${t("win.layoutKeys")}`, false, () => {});
     { const b = frag.lastElementChild as HTMLButtonElement | null;
       if (b) {
         b.dataset.act = "layout";
         b.innerHTML = WIN_ICON_RELAYOUT;
         // MICRO-CONTENTS-4 F6 · the tooltip is one sentence; the screen reader
         // hears the command's name first, the sentence after
-        b.setAttribute("aria-label", `${t("menu.relayout")} — ${t("win.layoutTitle")}`);
+        b.setAttribute("aria-label", `${t("menu.relayout")} — ${t("win.layoutTitle")} ${t("win.layoutKeys")}`);
         b.addEventListener("click", (e) => {
-          const fresh = (e as MouseEvent).altKey;
-          focusThen(win, () => void layoutAll(fresh));
+          const me = e as MouseEvent;
+          focusThen(win, () => void layoutAll(me.shiftKey, me.altKey && winMode(win) === "matrix"));
         });
+        if (winMode(win) === "matrix") {
+          const caret = document.createElement("button");
+          caret.type = "button";
+          // not a `.win-act` of its own: it leaves for «⋯» with its button (CSS)
+          caret.className = "win-act-caret";
+          caret.dataset.act = "layout-menu";
+          caret.textContent = "▾";
+          caret.title = t("win.layoutMenu");
+          caret.setAttribute("aria-label", t("win.layoutMenu"));
+          caret.setAttribute("aria-haspopup", "menu");
+          caret.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const r = caret.getBoundingClientRect();
+            const why = store ? null : t("menu.noGraph");
+            const go = (reduce: boolean) => () => { if (why) { toast(why); return; } focusThen(win, () => void layoutAll(false, reduce)); };
+            const m = spaceMenu(r.left, r.bottom + 2, t("menu.matrixLayout"), [
+              { label: t("toolbar.layout"), act: "layout", run: go(false) },
+              { label: t("win.layoutReduceItem"), act: "layout-reduce", run: go(true) },
+            ]);
+            m.dataset.menu = "layout";
+          });
+          frag.appendChild(caret);
+        }
       } }
     // MICRO-CONTENTS-2 F7 · not in the Chain: the DTC has no properties to
     // compact, and the icon fell off the bar there (x = 1604 on 1600)
@@ -61554,6 +61779,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
   if (hs) frag.appendChild(hs);
   const tl = type === "scene" ? sceneTails.get(win.id) : undefined;
   if (tl) frag.appendChild(tl);
+  // MICRO-SEG15 · the Space's left zone, right before its strip (a rebuilt head keeps it)
+  const ld = type === "scene" ? sceneLeads.get(win.id) : undefined;
+  if (ld) { const st = [...frag.children].find((c) => c.classList.contains("win-strip-scene")); if (st) frag.insertBefore(ld, st); else frag.appendChild(ld); }
   if (maximizedWin() !== win.id && windowsOf().length > 1 && !isDetachedWin(win.id)) {
     const max = document.createElement("button");
     max.className = "win-act win-max";
@@ -61569,8 +61797,11 @@ function buildAreaHeader(win: Win): DocumentFragment {
   if (maximizedWin() === win.id) {
     const restore = document.createElement("button");
     restore.className = "wi-chip wi-restore";
-    restore.textContent = `⤡ ${t("win.restore")}`;
+    // MICRO-SEG15 · tight, «⤡» alone (level 5), its name in the tooltip
+    restore.dataset.hdrCompact = "5";
+    restore.innerHTML = `⤡<span class="hdr-long"> ${escapeHtml(t("win.restore"))}</span>`;
     restore.title = t("win.unmaximize");
+    restore.setAttribute("aria-label", t("win.unmaximize"));
     restore.addEventListener("click", (e) => {
       e.stopPropagation();
       magnifyWindow(win.id);
@@ -62308,17 +62539,9 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
     // MICRO-V (E.D., 18 Nov 2026) · the Matrix's «⋯»: «Disponi» and, beside it,
     // «Disponi riducendo gli incroci» — the crossing reduction (D) on request,
     // never at the opening nor in every «Disponi»
-    {
-      label: "menu.matrixLayout",
-      items: (win) => {
-        if (winMode(win) !== "matrix" || hzWin(win.id)) return [];
-        const why = (): string | null => (store ? null : t("menu.noGraph"));
-        return [
-          { label: "toolbar.layout", disabledReason: why, run: () => focusThen(win, () => void layoutAll(false)) },
-          { label: "menu.relayoutReduce", disabledReason: why, run: () => focusThen(win, () => void layoutAll(false, true)) },
-        ];
-      },
-    },
+    // MICRO-SEG15 · the Matrix's «Layout» group left the «⋯»: it was the bar's
+    // icon twice; both are on the icon's arrow now (`layout-menu`), and the
+    // Matrix's «⋯» is empty and not shown — nothing twice in one head
     {
       label: "Layout",
       items: (win) => {

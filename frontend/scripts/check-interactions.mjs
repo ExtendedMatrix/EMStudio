@@ -2749,7 +2749,7 @@ if (process.env.TEMPLU) test("S3.proxyDel", "Spazio · MICRO-PROVA-DEV47 p.5 · 
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, unit, g0, insp, ask, gCancel, menu, gDel, file, fileStays, gUndo, askX, gX, beforeX, back, errors } };
 });
-test("S3.oneLine", "Spazio · MICRO-PROVA-DEV47 p.6 · le intestazioni delle finestre (la riga EPOCA / Modelli / Proxy / ⤢ dello Spazio e le barre di ogni finestra: Tabular, Graph, Inspector) restano su UNA riga a 1100, 800 e 500 px con due finestre 3D affiancate; ciò che non entra scorre di lato con la rotella (e due dita), una sfumatura al bordo dice che c'è altro; il menu del tipo di finestra si apre ancora intero", async () => {
+test("S3.oneLine", "Spazio · MICRO-PROVA-DEV47 p.6 · le intestazioni delle finestre (la riga EPOCA / Modelli / Proxy / ⤢ dello Spazio e le barre di ogni finestra: Tabular, Graph, Inspector) restano su UNA riga a 1100, 800 e 500 px con due finestre 3D affiancate; MICRO-SEG15: la testata dello Spazio non scorre più, cede (etichette → icone, verbi nel «⋯»), Colori, Visibilità e l'epoca sempre in vista; scorre solo, ultima risorsa, sotto la larghezza delle tre zone fisse; il menu del tipo di finestra si apre ancora intero", async () => {
   const out = {};
   for (const w of [1100, 800, 500]) {
     const { p, ctx, errors } = await open({ doc: "spazio", w, h: 800 });
@@ -2766,12 +2766,16 @@ test("S3.oneLine", "Spazio · MICRO-PROVA-DEV47 p.6 · le intestazioni delle fin
     }));
     const r = { bars, errors: errors.length };
     if (w === 1100) {
-      // the wheel over a Space bar that does not fit: it moves sideways, and the left fade comes
-      const wheel = await p.evaluate(() => { const b = [...document.querySelectorAll(".scn-bar.one-line")].find((x) => x.scrollWidth > x.clientWidth + 1); if (!b) return null;
-        const r0 = b.getBoundingClientRect(); b.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, deltaMode: 0, clientX: r0.x + 20, clientY: r0.y + 10, bubbles: true, cancelable: true }));
-        return { left: b.scrollLeft, fadeL: b.classList.contains("ol-left") }; });
-      await p.waitForTimeout(200);
-      const fadeL = await p.evaluate(() => [...document.querySelectorAll(".scn-bar.one-line")].some((b) => b.classList.contains("ol-left")));
+      // MICRO-SEG15 · a Space head does not scroll sideways any more: it gives way
+      // (labels → icons, verbs → «⋯»), the epoch selector always in sight
+      const wheel = await p.evaluate(() => [...document.querySelectorAll(".scn-host")].map((h) => {
+        const bar = h.closest(".tile-area")?.querySelector(":scope > .tile-bar"); if (!bar) return null;
+        const ep = bar.querySelector(".scn-seg:not(.win-bands-seg)"); const r = ep?.getBoundingClientRect(), br = bar.getBoundingClientRect();
+        const inBar = (e) => { const q = e?.getBoundingClientRect(); return !!q && q.width > 0 && q.left >= br.left - 1 && q.right <= br.right + 1; };
+        return { w: Math.round(br.width), over: bar.scrollWidth - bar.clientWidth, epochIn: !!r && r.width > 0 && r.left >= br.left - 1 && r.right <= br.right + 1, fit: bar.dataset.hdrFit,
+          leftIn: inBar(bar.querySelector("[data-colours]")) && inBar(bar.querySelector("[data-vis]")) };
+      }).filter(Boolean));
+      const fadeL = true;
       await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-intestazione-stretta.png` }).catch(() => {});
       // the type menu of a header that scrolls: whole, over everything
       await p.evaluate(() => { const b = [...document.querySelectorAll(".tile-bar.one-line")].find((x) => x.scrollWidth > x.clientWidth + 1) ?? document.querySelector(".tile-bar.one-line"); b.querySelector(".win-type-toggle")?.click(); });
@@ -2787,7 +2791,10 @@ test("S3.oneLine", "Spazio · MICRO-PROVA-DEV47 p.6 · le intestazioni delle fin
   const ok = (r) => r.bars.length >= 4 && r.bars.every((b) => b.lines <= 1 && b.h <= 46) && !r.errors;
   const conds = { w1100: ok(out[1100]), w800: ok(out[800]), w500: ok(out[500]),
     fadeRight: [1100, 800, 500].every((w) => out[w].bars.filter((b) => b.over).every((b) => b.fadeR)) && out[800].bars.some((b) => b.over),
-    wheel: (out[1100].wheel?.left ?? 0) > 0 && out[1100].fadeL, menu: !!out[1100].menu?.own && out[1100].menu.h > 40 };
+    // (two 3D windows side by side at 1100: ~330 px each, below what the three
+    // fixed zones need — the head has taken every step, «Colori», «Visibilità»
+    // and the epoch still in sight; what is left over scrolls, the last resort)
+    spaceFits: (out[1100].wheel ?? []).length > 0 && out[1100].wheel.every((x) => x.epochIn && x.leftIn && (x.over <= 1 || x.fit === "fold-late")) && out[1100].fadeL, menu: !!out[1100].menu?.own && out[1100].menu.h > 40 };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, out } };
 });
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
@@ -7570,15 +7577,19 @@ test("PU3.views", "PULIZIA p.3 · viste del grafo: niente «Grafo completo»; «
   return { pass, detail: { ...r, errors } };
 });
 
-test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'icona (senza «Layout»), accanto Compatta le proprietà; niente «+»; Uniforma le grafie in Strumenti; ⇧C adatta come 0; il «⋯» solo dove ha qualcosa (la Matrix: Disponi e Disponi riducendo gli incroci; il Grafo: l'algoritmo)", async () => {
+test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'icona (senza «Layout»), accanto Compatta le proprietà; niente «+»; Uniforma le grafie in Strumenti; ⇧C adatta come 0; il «⋯» solo dove ha qualcosa (MICRO-SEG15: la Matrix ha Disponi / Disponi riducendo gli incroci sulla freccina dell'icona, il suo «⋯» vuoto non si vede; prima: Disponi e Disponi riducendo gli incroci; il Grafo: l'algoritmo)", async () => {
   const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
   const bar = () => p.evaluate(() => {
     const b = document.querySelector('.tile-area[data-win="canvas:1"] .tile-bar');
     const acts = [...b.querySelectorAll(".win-act")].map((x) => ({ act: x.dataset.act ?? null, text: x.textContent.trim(), aria: x.getAttribute("aria-label") ?? "", title: x.title, svg: !!x.querySelector("svg") }));
-    const tg = b.querySelector(".win-more");
+    // MICRO-SEG15 · a «⋯» with nothing in it is there but hidden (for what a tight head puts away)
+    const tg = [...b.querySelectorAll(".win-more")].find((x) => x.offsetParent);
     let items = [];
     if (tg) { tg.click(); items = [...tg.parentElement.querySelectorAll(".dd-menu button:not([data-folded-verb])")].map((x) => x.textContent.trim()); tg.click(); }
-    return { acts, more: !!tg, items, text: b.innerText };
+    const caret = b.querySelector("[data-act='layout-menu']");
+    let caretItems = null;
+    if (caret) { caret.click(); caretItems = [...document.querySelectorAll("[data-menu='layout'] button")].map((x) => x.textContent.trim()); document.querySelector("[data-menu='layout']")?.remove(); }
+    return { acts, more: !!tg, items, caretItems, text: b.innerText };
   });
   const matrix = await bar();
   await p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="canvas:1"] .tile-bar button')].find((b) => b.offsetParent && !b.closest(".dd-menu") && b.textContent.trim() === "Grafo")?.click());
@@ -7601,9 +7612,11 @@ test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'ico
   const lay = matrix.acts.find((a) => a.act === "layout"), comp = matrix.acts.find((a) => a.act === "compact-all");
   const pass = !!lay && lay.svg && !lay.text && /Ricalcola layout/.test(lay.aria) && !!comp && comp.svg && /Compatta le proprietà/.test(comp.aria)
     && !matrix.acts.some((a) => a.text === "+") && !/Disponi|Layout\b/.test(matrix.text)
-    // MICRO-V-LAYOUT-ACCESO (E.D., 18 Nov 2026, 628d9c5) · the Matrix's «⋯» has
-    // something now: «Disponi» and «Disponi riducendo gli incroci»; the Graph's, the algorithm
-    && matrix.more && JSON.stringify(matrix.items) === JSON.stringify(["Disponi", "Disponi riducendo gli incroci"])
+    // MICRO-SEG15 (E.D., 21 Nov 2026) · «Disponi» and «Disponi riducendo gli
+    // incroci» are on the layout icon's arrow; the Matrix's «⋯», empty, is not shown;
+    // the Graph's «⋯», the algorithm
+    && !matrix.more && JSON.stringify(matrix.caretItems) === JSON.stringify(["Disponi", "Disponi riducendo gli incroci (Alt+clic)"])
+    && /Alt\+clic/.test(lay.aria)
     && graph.more && ["Layered", "Radial", "Force"].every((a) => graph.items.some((i) => i.endsWith(a)))
     && tools.includes("btn-tool-uniform") && !!fit0 && zoomed !== fit0 && fitC === fit0 && !errors.length;
   return { pass, detail: { matrix, graphMore: graph.more, fit0, zoomed, fitC, tools, errors } };
@@ -9883,7 +9896,7 @@ const geoOpen = async () => {
   return { p, ctx, errors, asked };
 };
 const geoOn = async (p) => {
-  await p.click('.scn-bar [data-geo="toggle"]');
+  await p.click('.scn-geo-col [data-geo="toggle"]');
   await p.waitForFunction(() => document.querySelector(".scn-host")?.__geo?.()?.ready, null, { timeout: 30000 });
 };
 const geoState = (p) => p.evaluate(() => document.querySelector(".scn-host").__geo());
@@ -9898,7 +9911,7 @@ test("GG4.off", "GEOGLOBO · spento di default: lo Spazio del GT16 si apre come 
   const { p, ctx, errors, asked } = await geoOpen();
   await p.waitForTimeout(1500);
   const out = { geo: await p.evaluate(() => !!document.querySelector(".scn-host").__geo), asked: asked.length,
-    bar: await p.evaluate(() => ({ toggle: document.querySelector('.scn-bar [data-geo="toggle"]')?.getAttribute("aria-pressed"), modes: document.querySelectorAll(".scn-bar [data-geo-mode]").length })), errors };
+    bar: await p.evaluate(() => ({ toggle: document.querySelector('.scn-geo-col [data-geo="toggle"]')?.getAttribute("aria-pressed"), modes: document.querySelectorAll(".scn-geo-col [data-geo-mode]").length })), errors };
   await ctx.close();
   return { pass: !out.geo && out.asked === 0 && out.bar.toggle === "false" && out.bar.modes === 0 && !errors.length, detail: out };
 });
@@ -9909,7 +9922,7 @@ test("GG1.globe", "GEOGLOBO p.1 · il GT16 sul globo: «Territory» misura l'anc
   const out = {};
   await geoOn(p);
   out.anchor = await p.evaluate(() => document.querySelector(".scn-host").__geoSpace().anchor);
-  await p.click('.scn-bar [data-geo-mode="globe"]');
+  await p.click('.scn-geo-col [data-geo-mode="globe"]');
   await p.waitForTimeout(300);
   let g = await geoIdle(p);
   out.globe = { mode: g.mode, alt: Math.round(g.altitude) };
@@ -9937,11 +9950,11 @@ test("GG1.globe", "GEOGLOBO p.1 · il GT16 sul globo: «Territory» misura l'anc
     await p.waitForTimeout(40);
   }
   out.up = (await geoState(p)).lastSwitch;
-  await p.click('.scn-bar [data-geo="site"]');
+  await p.click('.scn-geo-col [data-geo="site"]');
   await p.waitForTimeout(300);
   g = await geoIdle(p);
   out.landed = { mode: g.mode, alt: Math.round(g.altitude) };
-  out.pressed = await p.evaluate(() => document.querySelector('.scn-bar [data-geo-mode][aria-pressed="true"]')?.dataset.geoMode);
+  out.pressed = await p.evaluate(() => document.querySelector('.scn-geo-col [data-geo-mode][aria-pressed="true"]')?.dataset.geoMode);
   out.errors = errors;
   await ctx.close();
   const d = out.down, u = out.up;
@@ -10039,7 +10052,7 @@ test("GG6.hands", "GLOBO-INTERAZIONE p.2 · le mani di Google Earth nel Globo e 
   };
   const grabErr = async (x0, y0, dx, dy) => { const P = await pick(x0, y0); await drag(x0, y0, dx, dy); const s = P ? await scr(P) : null; return s ? Math.hypot(s.x - x0 - dx, s.y - y0 - dy) : null; };
   // the globe: north up after the flight, the compass shown
-  await p.click('.scn-bar [data-geo-mode="globe"]');
+  await p.click('.scn-geo-col [data-geo-mode="globe"]');
   await p.waitForTimeout(300);
   let g = await geoIdle(p);
   out.globe = { mode: g.mode, heading: g.pose?.heading, compass: g.compass };
@@ -10086,7 +10099,7 @@ test("GG6.hands", "GLOBO-INTERAZIONE p.2 · le mani di Google Earth nel Globo e 
   g = await geoState(p);
   out.compassDbl = { heading: g.pose.heading, pitch: g.pose.pitch };
   // the plan: the same hands
-  await p.click('.scn-bar [data-geo-mode="plan"]');
+  await p.click('.scn-geo-col [data-geo-mode="plan"]');
   await p.waitForTimeout(300);
   g = await geoIdle(p);
   out.plan = { mode: g.mode, heading: g.pose.heading, hands: g.hands.enabled };
@@ -10096,7 +10109,7 @@ test("GG6.hands", "GLOBO-INTERAZIONE p.2 · le mani di Google Earth nel Globo e 
   out.planTurn = { heading: g.pose.heading, pitch: g.pose.pitch, mode: g.mode };
   // the globe again, just over 3 km above the site: a wheel burst down past it keeps the globe's hands until it ends
   await p.click(".scn-host .geo-compass");
-  await p.click('.scn-bar [data-geo-mode="globe"]');
+  await p.click('.scn-geo-col [data-geo-mode="globe"]');
   await p.waitForTimeout(300);
   await geoIdle(p);
   const s3 = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([0, 0, 0]));
@@ -10479,7 +10492,7 @@ test("GR1.level", "GEOREF-GRAFO p.0a · l'orbita del Sito resta in bolla: GT16, 
   await grSpace(p);
   await geoOn(p);
   const out = { steps: [] };
-  const go = async (m) => { await p.click(`.scn-bar [data-geo-mode="${m}"]`); await p.waitForTimeout(300); await geoIdle(p, 30000); await p.waitForTimeout(400); };
+  const go = async (m) => { await p.click(`.scn-geo-col [data-geo-mode="${m}"]`); await p.waitForTimeout(300); await geoIdle(p, 30000); await p.waitForTimeout(400); };
   const orbit = async () => {
     const nav = await (await p.$(".scn-host .scn-nav-box")).boundingBox();
     const x0 = nav.x + nav.width / 2, y0 = nav.y + nav.height / 2;
@@ -10569,7 +10582,7 @@ test("GR2.clip", "GEOREF-GRAFO p.0b · il terreno non copre il rilievo: GT16 (EP
   out.m25 = (await st()).clip;
   out.saved = await H(() => Object.entries(localStorage).filter(([k]) => k.startsWith("emstudio.geo.")).map(([, v]) => { const j = JSON.parse(v); return [j.clip, j.clipMargin]; }));
   out.docSays = await H(() => /clipMargin/.test(window.__EM_DRAG__.docJson()));
-  await p.click('.scn-bar [data-geo-mode="plan"]');
+  await p.click('.scn-geo-col [data-geo-mode="plan"]');
   await p.waitForTimeout(300); await geoIdle(p, 30000); await p.waitForTimeout(500);
   out.plan = (await st()).clip;
   out.errors = errors;

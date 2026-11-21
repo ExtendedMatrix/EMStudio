@@ -55,6 +55,10 @@ export interface GeoSpace {
   /** the bar's buttons, for the Space's bar (drawn at each refresh): since
    *  MICRO-RIFINITURE p.6 only the view (Globe / Plan / Site), with the territory on */
   barButtons(): HTMLElement[];
+  /** MICRO-SEG15 · the same commands as round buttons for the column under the
+   *  Space's gizmo: 🌐 (the territory: on → «Visibilità ▾», missing → why), then
+   *  Globe / Plan / Site with the territory on, the active one pressed */
+  navButtons(): HTMLElement[];
   /** MICRO-RIFINITURE p.6 · the territory as a section of the data panel: on/off,
    *  its opacity, «Livelli» of the globe (the panel, inside the section) */
   section(): HTMLElement;
@@ -635,6 +639,38 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
         seg.appendChild(b);
       }
       out.push(seg);
+      return out;
+    },
+    navButtons() {
+      const [chip, modes] = api.barButtons();
+      const out: HTMLElement[] = [];
+      const tb = chip?.querySelector<HTMLButtonElement>("button[data-geo]");
+      if (tb) {
+        const g = document.createElement("button");
+        g.type = "button";
+        g.className = "scn-nav-btn scn-geo-btn";
+        g.dataset.geo = tb.dataset.geo ?? "why";
+        g.dataset.geoChip = chip.dataset.geoChip ?? "";
+        g.setAttribute("aria-pressed", tb.getAttribute("aria-pressed") ?? "false");
+        g.textContent = "🌐";
+        const help = chip.querySelector<HTMLElement>(".geo-chip-help")?.title ?? "";
+        g.title = [tb.title, help].filter(Boolean).join("\n");
+        g.setAttribute("aria-label", `${tb.textContent?.replace(/^🌐\s*/, "") ?? ""} — ${tb.title}`);
+        out.push(g);
+      }
+      for (const m of modes?.querySelectorAll<HTMLButtonElement>("button[data-geo-mode]") ?? []) {
+        const k = m.dataset.geoMode as GeoMode;
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "scn-nav-btn scn-geo-mode";
+        b.dataset.geoMode = k;
+        b.textContent = t(`geo.modeShort.${k}`);
+        b.title = `${t(`geo.mode.${k}`)} — ${t(`geo.modeHint.${k}`)}`;
+        b.setAttribute("aria-label", t(`geo.mode.${k}`));
+        b.setAttribute("aria-pressed", m.getAttribute("aria-pressed") ?? "false");
+        b.disabled = m.disabled;
+        out.push(b);
+      }
       return out;
     },
     section() {
