@@ -12789,10 +12789,8 @@ td.plg-col { color: var(--muted, #888); }
 .nv-hint-row { font-size: 11.5px; color: var(--text-muted); margin: 2px 0 0 2px; display: flex; gap: 6px; align-items: center; }
 /* the Inspector's «Transform into…» */
 .ninsp-tf { padding: 8px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
-.ninsp-tf-seg { display: flex; flex-wrap: wrap; gap: 0; }
-.ninsp-tf-seg .ninsp-tf-btn { border-radius: 0; margin: 0 -1px 0 0; padding: 2px 8px; font-size: 11.5px; }
-.ninsp-tf-seg .ninsp-tf-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
-.ninsp-tf-seg .ninsp-tf-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; margin-right: 0; }
+.ninsp-tf-seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 4px; }
+.ninsp-tf-seg .ninsp-tf-btn { padding: 2px 8px; font-size: 11.5px; }
 .ninsp-tf-seg .ninsp-tf-btn.on { background: var(--accent-wash, rgba(191,144,0,.18)); color: var(--text); opacity: 1; box-shadow: inset 0 -2px 0 var(--accent); }
 .ninsp-tf-seg .ninsp-tf-btn:disabled:not(.on) { opacity: 0.45; }
 .ninsp-numbering { flex-direction: row; align-items: center; gap: 4px; color: var(--text); font-size: 12px; }
