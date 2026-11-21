@@ -37,6 +37,9 @@ export interface Horizon {
   start: number | null;
   end: number | null;
   color: string;
+  /** MICRO-SEG16 · the `data.order` the file carries, read for compatibility
+   *  only: the ORDER of the horizons is their dates' (`byDate`). Written for a
+   *  new horizon (its place in time), never rewritten behind the person. */
   order: number;
   /** EM Tools' CronoFilter flag (in use); a horizon not in use starts hidden */
   enabled: boolean;
@@ -77,7 +80,20 @@ function num(v: unknown): number | null {
 /** A tombstoned node or edge (P4.1) is not there. */
 const live = (x: { removed?: unknown }): boolean => !x.removed;
 
-/** The periodizations of the member, each with its horizons in order. */
+/**
+ * MICRO-SEG16 (E.D., 21 Nov 2026: «non deve seguire le epoche dalle date?») ·
+ * horizons are intervals of time and their order is their DATES': by «From»,
+ * then by «To», oldest first — an open «From» is the oldest, an open «To» the
+ * latest. The file's `order` only breaks a tie of identical dates, then the
+ * name. Views that list them newest on top (the Matrix's bands, the panel)
+ * read this order backwards.
+ */
+export function byDate(a: Horizon, b: Horizon): number {
+  return (a.start ?? -Infinity) - (b.start ?? -Infinity) || (a.end ?? Infinity) - (b.end ?? Infinity)
+    || a.order - b.order || a.name.localeCompare(b.name);
+}
+
+/** The periodizations of the member, each with its horizons in time order. */
 export function readPeriodizations(section: unknown): PeriodizationsRead {
   const sec = (section ?? {}) as Section;
   const nodes = ((sec.nodes ?? []) as RawNode[]).filter((n) => n && live(n));
@@ -102,8 +118,7 @@ export function readPeriodizations(section: unknown): PeriodizationsRead {
         enabled: d.enabled !== false && d.enabled !== "false",
       });
     }
-    horizons.sort((a, b) => a.order - b.order || (a.start ?? -Infinity) - (b.start ?? -Infinity)
-      || a.name.localeCompare(b.name));
+    horizons.sort(byDate);
     list.push({ id: p.id, name: String(p.name ?? p.id), description: String(p.description ?? ""),
                 source: (p.data?.source as string | undefined) ?? null, horizons });
   }
@@ -204,20 +219,45 @@ export function intervalsFrom(chronology: Record<string, { start: number | null;
   return m;
 }
 
-/** The order to write after moving horizon `id` by `dir` in its periodization:
- *  `[[id, order], …]` for the two horizons that swap, or [] at an end. */
-export function reorderPlan(per: Periodization, id: string, dir: -1 | 1): Array<[string, number]> {
-  const hs = per.horizons;
-  const i = hs.findIndex((h) => h.id === id);
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= hs.length) return [];
-  // renumber densely first, so equal orders in a hand-written file still move
-  const plan: Array<[string, number]> = [];
-  hs.forEach((h, k) => {
-    const want = k === i ? j : k === j ? i : k;
-    if (h.order !== want) plan.push([h.id, want]);
-  });
-  return plan;
+/** MICRO-SEG16 · what the panel says on a horizon's row: a «From» after its
+ *  «To», and against the horizon before and after it IN TIME, the years they
+ *  overlap or leave uncovered. Nothing is corrected: the person decides. */
+export type HorizonCheck =
+  | { kind: "inverted"; from: number; to: number }
+  | { kind: "overlap" | "gap"; other: string; years: number; from: number; to: number };
+
+export function horizonChecks(per: Periodization | null): Map<string, HorizonCheck[]> {
+  const out = new Map<string, HorizonCheck[]>();
+  const hs = per?.horizons ?? [];
+  const add = (id: string, c: HorizonCheck) => {
+    if (!out.has(id)) out.set(id, []);
+    out.get(id)!.push(c);
+  };
+  for (const h of hs)
+    if (h.start !== null && h.end !== null && h.start > h.end) add(h.id, { kind: "inverted", from: h.start, to: h.end });
+  for (let i = 1; i < hs.length; i++) {
+    const a = hs[i - 1], b = hs[i];
+    if (a.end === null || b.start === null) continue;   // an open bound: nothing to measure
+    if (a.end > b.start) {
+      const from = b.start, to = b.end === null ? a.end : Math.min(a.end, b.end);
+      add(a.id, { kind: "overlap", other: b.id, years: to - from, from, to });
+      add(b.id, { kind: "overlap", other: a.id, years: to - from, from, to });
+    } else if (a.end < b.start) {
+      const from = a.end, to = b.start;
+      add(a.id, { kind: "gap", other: b.id, years: to - from, from, to });
+      add(b.id, { kind: "gap", other: a.id, years: to - from, from, to });
+    }
+  }
+  return out;
+}
+
+/** MICRO-SEG16 · the interval «+ Horizon» proposes: right after the LAST in
+ *  time (From = its To), a hundred years long. */
+export function nextInterval(per: Periodization | null): { start: number; end: number } {
+  const hs = per?.horizons ?? [];
+  const last = hs[hs.length - 1];
+  const start = last ? (last.end ?? last.start ?? 0) : 0;
+  return { start, end: start + 100 };
 }
 
 /** A pleasant next colour for a new horizon (cycled; a person picks another). */

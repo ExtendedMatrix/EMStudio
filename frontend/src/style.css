@@ -10327,6 +10327,15 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .hz-num { width: 72px; }
 .hz-count { display: inline-block; min-width: 2em; text-align: right; opacity: .8; }
 .hz-acts { white-space: nowrap; }
+/* MICRO-SEG16 · the row that took its place by date flashes once; a row's
+   overlap / gap / inverted bounds are said beside it, never corrected */
+.hz-table tr.hz-moved td { animation: hz-moved 1.2s ease-out 1; }
+@keyframes hz-moved { from { background: color-mix(in srgb, var(--accent, #e0b84a) 35%, transparent); } to { background: transparent; } }
+.hz-warn { font-size: 11px; max-width: 340px; }
+.hz-warn-overlap, .hz-warn-inverted { color: var(--danger, #e06c5a); }
+.hz-warn-gap { color: var(--warn, #d9a441); }
+.hz-order-note { font-style: normal; }
+@media (prefers-reduced-motion: reduce) { .hz-table tr.hz-moved td { animation: none; outline: 1px solid var(--accent, #e0b84a); } }
 
 /* MICRO-LAB orizzonti come bande · the switch Epochs ⇄ Horizons in a window's
    bar. Horizons are drawn DASHED everywhere (the lanes' borders, the chip, the

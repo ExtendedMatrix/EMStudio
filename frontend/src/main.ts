@@ -14,7 +14,7 @@ import {
 import {
   chosenPeriodization, horizonMarks, HORIZON_TYPE, initialHidden, intervalsFrom, isPeriodizationsSection,
   MEMBERSHIP_EDGE, newPeriodizationsSection, nextSwatch, PERIODIZATION_TYPE, PERIODIZATIONS_MEMBER_ID,
-  readPeriodizations, reorderPlan,
+  readPeriodizations, nextInterval,
   type HorizonMarks, type HorizonView, type Periodization, type PeriodizationsRead,
 } from "./horizons";
 import { renderHorizonsPanel } from "./horizons-ui";
@@ -31065,12 +31065,13 @@ function horizonsPanelInto(body: HTMLElement): void {
       const st = periodizations({ create: false });
       const per = horizonsRead().list.find((p) => p.id === perId);
       if (!st || !per) return;
-      const last = per.horizons[per.horizons.length - 1];
-      const start = last?.end ?? 0;
+      // MICRO-SEG16 · right after the last in time (From = its To); `order`
+      // still written (its place in time), for readers that sort by it
+      const { start, end } = nextInterval(per);
       const name = t("hz.newHorizon", { n: String(per.horizons.length + 1) });
       st.batch(() => {
         const h = st.addNode({ id: st.newId(), node_type: HORIZON_TYPE, name,
-                               data: { start_time: start, end_time: start + 100,
+                               data: { start_time: start, end_time: end,
                                        color: nextSwatch(per), order: per.horizons.length, enabled: true } });
         st.addEdge(h.id, perId, MEMBERSHIP_EDGE);
       });
@@ -31083,19 +31084,22 @@ function horizonsPanelInto(body: HTMLElement): void {
       else if (field === "color") st.setField(id, "data.color", value);
       else {
         const v = value.trim() === "" ? null : Number(value);
-        if (v !== null && !Number.isFinite(v)) { toast(t("hz.notANumber")); return; }
+        if (v !== null && !Number.isFinite(v)) { toast(t("hz.notANumber")); refreshSurfaces("chronology"); return; }
+        // MICRO-SEG16 · «From» after «To» is refused, with its message, and the
+        // field shows the stored year again; nothing else is touched
+        const node = st.node(id) as { data?: Record<string, unknown> } | undefined;
+        const otherRaw = node?.data?.[field === "start_time" ? "end_time" : "start_time"];
+        const other = otherRaw === null || otherRaw === undefined || otherRaw === "" ? null : Number(otherRaw);
+        if (v !== null && other !== null && Number.isFinite(other)
+            && (field === "start_time" ? v > other : v < other)) {
+          toast(t("hz.refuseInverted", { from: String(field === "start_time" ? v : other),
+                                         to: String(field === "start_time" ? other : v) }));
+          refreshSurfaces("chronology");
+          return;
+        }
         if (v === null) st.clearField(id, `data.${field}`); else st.setField(id, `data.${field}`, v);
       }
       toastUndo(t("hz.didEdit", { name: String(st.node(id)?.name ?? id) }), st);
-    },
-    onMoveHorizon: (perId, id, dir) => {
-      const st = periodizations({ create: false });
-      const per = horizonsRead().list.find((p) => p.id === perId);
-      if (!st || !per) return;
-      const plan = reorderPlan(per, id, dir);
-      if (!plan.length) return;
-      st.batch(() => { for (const [hid, order] of plan) st.setField(hid, "data.order", order); });
-      toastUndo(t("hz.didMove", { name: String(st.node(id)?.name ?? id) }), st);
     },
     onDeleteHorizon: (id) => {
       const st = periodizations({ create: false });

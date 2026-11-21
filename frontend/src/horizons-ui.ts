@@ -3,7 +3,7 @@
  *
  * Which periodization (the session's choice; the file proposes one) and its
  * horizons with their colour and visibility — then creating,
- * editing, reordering and deleting horizons and periodizations. Every edit
+ * editing and deleting horizons and periodizations. Every edit
  * goes out through the hooks, and on the other side each is ONE undo step in
  * the horizons store (its ops go to the Log and, in a room, to the relay).
  *
@@ -13,12 +13,19 @@
  * has a band of its own, which is what «filter» was for), and the switch
  * Epochs ⇄ Horizons sits in the bar of each window. This panel edits them.
  *
+ * MICRO-SEG16 · the ORDER is the dates': no ↑ ↓. The rows are the horizons in
+ * time, newest on top as the Matrix's bands and the Chronology's epochs; a row
+ * whose «From»/«To» changes takes its place when the field is left (the
+ * `change` event: Enter or blur, never while typing) and flashes once. Each row
+ * says what is wrong with it — «From» after «To», the years it overlaps or
+ * leaves uncovered against its neighbours in time — and corrects nothing.
+ *
  * DOM only; the numbers come in (`HorizonsPanelData`).
  */
 import { askConfirm, askText } from "./app-dialog";
 import { t } from "./i18n";
 import { betaMark } from "./beta";
-import type { Periodization } from "./horizons";
+import { horizonChecks, type HorizonCheck, type Periodization } from "./horizons";
 
 export interface HorizonsPanelData {
   list: Periodization[];
@@ -43,7 +50,6 @@ export interface HorizonsPanelHooks {
   onDeletePeriodization(id: string): void;
   onAddHorizon(periodizationId: string): void;
   onSetHorizon(id: string, field: "name" | "start_time" | "end_time" | "color", value: string): void;
-  onMoveHorizon(periodizationId: string, id: string, dir: -1 | 1): void;
   onDeleteHorizon(id: string): void;
 }
 
@@ -61,6 +67,16 @@ function button(text: string, title: string, on: () => void, disabled = false): 
   b.disabled = disabled;
   b.addEventListener("click", on);
   return b;
+}
+
+/** MICRO-SEG16 · the row whose dates were just edited, and where it stood: if
+ *  the next drawing puts it elsewhere, it flashes there (once). */
+let lastDateEdit: { id: string; index: number; at: number } | null = null;
+
+function checkText(c: HorizonCheck, nameOf: (id: string) => string): string {
+  if (c.kind === "inverted") return t("hz.warnInverted", { from: String(c.from), to: String(c.to) });
+  return t(c.kind === "overlap" ? "hz.warnOverlap" : "hz.warnGap",
+           { b: nameOf(c.other), n: String(c.years), from: String(c.from), to: String(c.to) });
 }
 
 export function renderHorizonsPanel(host: HTMLElement, d: HorizonsPanelData, h: HorizonsPanelHooks): void {
@@ -111,14 +127,23 @@ export function renderHorizonsPanel(host: HTMLElement, d: HorizonsPanelData, h: 
     host.appendChild(box);
     return;
   }
+  box.appendChild(el("div", "hz-note hz-order-note", t("hz.orderNote")));
   const table = el("table", "hz-table");
   const thead = el("tr");
-  for (const k of ["hz.col.show", "hz.col.colour", "hz.col.name", "hz.col.start", "hz.col.end", "hz.col.units", ""])
+  for (const k of ["hz.col.show", "hz.col.colour", "hz.col.name", "hz.col.start", "hz.col.end", "hz.col.units", "", ""])
     thead.appendChild(el("th", undefined, k ? t(k) : ""));
   table.appendChild(thead);
-  chosen.horizons.forEach((hz, i) => {
+  const checks = horizonChecks(chosen);
+  const nameOf = (id: string) => chosen.horizons.find((x) => x.id === id)?.name ?? id;
+  const rows = [...chosen.horizons].reverse();   // newest on top
+  const flash = lastDateEdit && Date.now() - lastDateEdit.at < 4000 ? lastDateEdit : null;
+  rows.forEach((hz, i) => {
     const tr = el("tr");
     tr.dataset.hzRow = hz.id;
+    if (flash && flash.id === hz.id) {
+      if (flash.index !== i) tr.classList.add("hz-moved");
+      lastDateEdit = null;
+    }
     const vis = el("input");
     vis.type = "checkbox";
     vis.checked = !d.hidden.has(hz.id);
@@ -142,20 +167,27 @@ export function renderHorizonsPanel(host: HTMLElement, d: HorizonsPanelData, h: 
       x.value = v === null ? "" : String(v);
       x.disabled = !d.writable;
       x.dataset.hzNum = `${hz.id}|${field}`;
-      x.addEventListener("change", () => h.onSetHorizon(hz.id, field, x.value));
+      x.title = t(field === "start_time" ? "hz.startTip" : "hz.endTip");
+      x.addEventListener("change", () => {
+        lastDateEdit = { id: hz.id, index: i, at: Date.now() };
+        h.onSetHorizon(hz.id, field, x.value);
+      });
       return x;
     };
     const cells: Array<HTMLElement> = [vis, col, name, num(hz.start, "start_time"), num(hz.end, "end_time"),
       el("span", "hz-count", String(d.counts.get(hz.id) ?? 0))];
     for (const c of cells) { const td = el("td"); td.appendChild(c); tr.appendChild(td); }
     const acts = el("td", "hz-acts");
-    acts.append(
-      button("↑", t("hz.up"), () => h.onMoveHorizon(chosen.id, hz.id, -1), !d.writable || i === 0),
-      button("↓", t("hz.down"), () => h.onMoveHorizon(chosen.id, hz.id, 1),
-             !d.writable || i === chosen.horizons.length - 1),
-      button("×", t("hz.delete"), () => h.onDeleteHorizon(hz.id), !d.writable),
-    );
+    acts.append(button("×", t("hz.delete"), () => h.onDeleteHorizon(hz.id), !d.writable));
     tr.appendChild(acts);
+    const warn = el("td", "hz-warn");
+    const mine = checks.get(hz.id) ?? [];
+    if (mine.length) {
+      tr.classList.add("hz-row-warn");
+      warn.dataset.hzWarn = mine.map((c) => c.kind).join(" ");
+      for (const c of mine) warn.appendChild(el("div", `hz-warn-${c.kind}`, `⚠ ${checkText(c, nameOf)}`));
+    }
+    tr.appendChild(warn);
     table.appendChild(tr);
   });
   box.appendChild(table);

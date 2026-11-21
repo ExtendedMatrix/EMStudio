@@ -6,7 +6,7 @@
 // The bridge must run THIS s3Dgraphy (the lab's: `api.chronology` with the
 // epochs). HZ1 the Chronology shows the panel and the two periodizations;
 // HZ2 colour / filter mark the Matrix and the Graph from the bridge's
-// intervals; HZ3 create, edit, reorder, delete — each one undo step (⌘Z's own
+// intervals; HZ3 create, edit (the order is the dates', MICRO-SEG16), delete — each one undo step (⌘Z's own
 // path), each in the Log, each an op of the horizons store; HZ4 the save
 // carries the member with the edits; HZ5 in a room the member is addressed
 // like a graph (G1: `graph_id` in the envelope, and back to this store).
@@ -82,7 +82,7 @@ await shot("hz2-bands");
 await page.check(`[data-hz-show="${firstRow}"]`);
 await page.evaluate((w) => window.__EM_DRAG__.setBands("epochs", w), gwin);
 
-// ── HZ3 · create, edit, reorder, delete: undo, Log, ops ─────────────────────
+// ── HZ3 · create, edit, place by date, delete: undo, Log, ops ─────────────────────
 await page.evaluate(() => {
   window.__hzOps = [];
   window.__EM_DRAG__.horizonsStore().onOp((op) => window.__hzOps.push(op));
@@ -98,7 +98,15 @@ await page.waitForTimeout(300);
 ok(await nRows() === 5, "HZ3 ⌘Z's path takes the whole addition back in one step");
 await page.click("[data-hz-add]");
 await page.waitForTimeout(300);
-const newId = await page.$$eval("[data-hz-row]", (r) => r[r.length - 1].dataset.hzRow);
+// MICRO-SEG16 · newest on top: the new horizon (right after the last) is the first row
+const rowIds = async () => page.$$eval("[data-hz-row]", (r) => r.map((x) => x.dataset.hzRow));
+const newId = (await rowIds())[0];
+const starts = await page.$$eval("[data-hz-row]", (r) => r.map((x) => Number(x.querySelector('[data-hz-num$="|start_time"]').value)));
+const ends = await page.$$eval("[data-hz-row]", (r) => r.map((x) => Number(x.querySelector('[data-hz-num$="|end_time"]').value)));
+ok(starts[0] === ends[1], `HZ3 «+ Horizon» starts where the most recent ends (${starts[0]})`);
+ok(starts.every((v, i) => i === 0 || v <= starts[i - 1]), "HZ3 the rows go by date, newest on top");
+ok(await page.$$eval("[data-hz-panel] .hz-acts button", (b) => b.length > 0 && b.every((x) => x.textContent === "×")),
+   "HZ3 no ↑ ↓ on the rows: only ×");
 await page.fill(`[data-hz-name="${newId}"]`, "Età contemporanea");
 await page.press(`[data-hz-name="${newId}"]`, "Enter");
 await page.fill(`[data-hz-num="${newId}|end_time"]`, "2100");
@@ -106,15 +114,29 @@ await page.press(`[data-hz-num="${newId}|end_time"]`, "Enter");
 await page.waitForTimeout(300);
 const named = await page.$eval(`[data-hz-name="${newId}"]`, (x) => x.value);
 ok(named === "Età contemporanea", "HZ3 renamed in the panel");
-const up = await page.$$(`[data-hz-row="${newId}"] .hz-acts button`);
-await up[0].click();  // ↑
+// «From» after «To» is refused, with its message; the field shows the stored year again
+await page.fill(`[data-hz-num="${newId}|start_time"]`, "3000");
+await page.press(`[data-hz-num="${newId}|start_time"]`, "Enter");
 await page.waitForTimeout(300);
-const order = await page.$$eval("[data-hz-row]", (r) => r.map((x) => x.dataset.hzRow));
-ok(order.indexOf(newId) === order.length - 2, "HZ3 ↑ moves it one place up");
+ok(await page.$eval(`[data-hz-num="${newId}|start_time"]`, (x) => x.value) === String(starts[0]),
+   "HZ3 «From» after «To» refused: the stored year is back");
+ok(/3000/.test(await page.evaluate(() => document.body.innerText)), "HZ3 …with a message naming it");
+// dates between two existing horizons: the row takes its place by itself, flashes, and says the overlap
+const oldest = starts[starts.length - 1], second = starts[starts.length - 2];
+const mid = Math.round((oldest + second) / 2);
+await page.fill(`[data-hz-num="${newId}|start_time"]`, String(mid));
+await page.press(`[data-hz-num="${newId}|start_time"]`, "Enter");
+await page.waitForTimeout(300);
+const order = await rowIds();
+ok(order.indexOf(newId) === order.length - 2, `HZ3 From ${mid} between the two oldest: it moves there by itself`);
+ok(await page.$eval(`[data-hz-row="${newId}"]`, (x) => x.classList.contains("hz-moved")), "HZ3 …and its row flashes");
+const warn = await page.$eval(`[data-hz-row="${newId}"] .hz-warn`, (x) => ({ kinds: x.dataset.hzWarn ?? "", text: x.textContent }));
+ok(/overlap/.test(warn.kinds) && /\d+/.test(warn.text), `HZ3 the overlap is said on its row: ${warn.text}`);
+await shot("hz3-inserted");
 await page.evaluate(() => window.__EM_DRAG__.undoAny());
 await page.waitForTimeout(300);
-const order2 = await page.$$eval("[data-hz-row]", (r) => r.map((x) => x.dataset.hzRow));
-ok(order2.indexOf(newId) === order2.length - 1, "HZ3 one ⌘Z puts the order back (both swapped horizons)");
+const order2 = await rowIds();
+ok(order2.indexOf(newId) === 0, "HZ3 one ⌘Z puts its From back: on top again");
 const log = await page.evaluate(() => document.body.innerText);
 ok(/Età contemporanea/.test(log), "HZ3 the Log names the horizon edited");
 ops = await page.evaluate(() => window.__hzOps.map((o) => o.op));

@@ -30,7 +30,7 @@
  * The intervals are s3Dgraphy's (`Graph.chronology()` through the bridge), one
  * map per graph: nothing is computed here.
  */
-import { overlaps, type Horizon, type Interval, type Periodization } from "./horizons";
+import { byDate, overlaps, type Horizon, type Interval, type Periodization } from "./horizons";
 import type { EpochSummary, Space, SpaceEpoch } from "./space";
 import type { EmEdge, EmNode } from "./types";
 
@@ -118,10 +118,10 @@ export function bandOf(iv: Interval | undefined, visible: readonly Horizon[]): P
   return { band: HZ_LANE + byTime[0].id, also: byTime.slice(1).map((h) => h.id) };
 }
 
-/** The visible horizons of a periodization, newest first (the lane order). */
+/** The visible horizons of a periodization, newest first (the lane order) —
+ *  the time order of `byDate` backwards, as the Chronology's panel lists them. */
 export function visibleHorizons(per: Periodization | null, hidden: ReadonlySet<string>): Horizon[] {
-  return (per?.horizons ?? []).filter((h) => !hidden.has(h.id))
-    .sort((a, b) => (b.start ?? -Infinity) - (a.start ?? -Infinity) || a.order - b.order);
+  return (per?.horizons ?? []).filter((h) => !hidden.has(h.id)).sort((a, b) => byDate(b, a));
 }
 
 export function projectByHorizons(

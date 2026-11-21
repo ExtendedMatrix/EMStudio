@@ -1,6 +1,6 @@
 // MICRO-LAB orizzonti · reading by horizons: the member, the overlap rule
 // (the same cases as s3Dgraphy's tests/test_lab_orizzonti.py), the marks,
-// the reordering, the container routing, the origin of an edge.
+// the order by date (MICRO-SEG16), the container routing, the origin of an edge.
 //
 //   node scripts/check-horizons.mjs [path/to/em.json with periodizations]
 //
@@ -82,9 +82,43 @@ ok(m.fade.has("US1") && !m.fade.has("US2"), "filter: outside every visible horiz
 ok(!m.fade.has("US9"), "filter: an undated node is never faded");
 eq(H.horizonMarks(per, { ...view, mode: "off" }, intervals).tint.size, 0, "off draws nothing");
 
-// ── reordering ───────────────────────────────────────────────────────────────
-eq(H.reorderPlan(per, "H2", -1), [["H1", 1], ["H2", 0]], "up swaps two orders");
-eq(H.reorderPlan(per, "H1", -1), [], "the first cannot go up");
+// ── MICRO-SEG16 · the order is the dates', the file's `order` only a tie ─────
+const timeSec = {
+  graph_id: "periodizations", data: { em_collection: "Periodizations" },
+  nodes: [
+    { id: "P", node_type: "periodization", name: "P" },
+    // orders that contradict the dates: the dates win
+    { id: "A", node_type: "horizon", name: "A", data: { start_time: 0, end_time: 100, order: 2 } },
+    { id: "B", node_type: "horizon", name: "B", data: { start_time: 100, end_time: 300, order: 0 } },
+    { id: "C", node_type: "horizon", name: "C", data: { start_time: 300, end_time: 700, order: 1 } },
+    { id: "D", node_type: "horizon", name: "D", data: { start_time: 700, end_time: 2026, order: 3 } },
+  ],
+  edges: ["A", "B", "C", "D"].map((x) => ({ source: x, target: "P", edge_type: "is_in_periodization" })),
+};
+const tp = () => H.readPeriodizations(timeSec).list[0];
+eq(tp().horizons.map((h) => h.id), ["A", "B", "C", "D"], "by From, whatever `order` says");
+eq(H.horizonChecks(tp()).size, 0, "contiguous horizons: no overlap, no gap");
+eq(H.nextInterval(tp()), { start: 2026, end: 2126 }, "«+ Horizon» starts where the last ends");
+eq(H.nextInterval(null), { start: 0, end: 100 }, "…and at 0 in an empty periodization");
+// an horizon inserted with dates between two existing ones takes its place by itself
+timeSec.nodes.push({ id: "E", node_type: "horizon", name: "E", data: { start_time: 150, end_time: 250, order: 4 } });
+timeSec.edges.push({ source: "E", target: "P", edge_type: "is_in_periodization" });
+eq(tp().horizons.map((h) => h.id), ["A", "B", "E", "C", "D"], "inserted between B and C by its dates");
+let ck = H.horizonChecks(tp());
+eq(ck.get("E"), [
+  { kind: "overlap", other: "B", years: 100, from: 150, to: 250 },
+  { kind: "gap", other: "C", years: 50, from: 250, to: 300 },
+], "E overlaps B by 100 years and leaves 50 uncovered before C");
+eq(ck.get("B"), [{ kind: "overlap", other: "E", years: 100, from: 150, to: 250 }], "the overlap is said on both rows");
+// same From: the To decides, then the file's order
+timeSec.nodes.push({ id: "F", node_type: "horizon", name: "F", data: { start_time: 0, end_time: 50, order: 9 } });
+timeSec.edges.push({ source: "F", target: "P", edge_type: "is_in_periodization" });
+eq(tp().horizons.slice(0, 2).map((h) => h.id), ["F", "A"], "same From: the shorter (earlier To) first");
+timeSec.nodes.push({ id: "G", node_type: "horizon", name: "G", data: { start_time: 900, end_time: 800, order: 5 } });
+timeSec.edges.push({ source: "G", target: "P", edge_type: "is_in_periodization" });
+ck = H.horizonChecks(tp());
+eq(ck.get("G")[0], { kind: "inverted", from: 900, to: 800 }, "a From after its To is said, not corrected");
+ok(!("reorderPlan" in H), "no more ↑ ↓: reorderPlan is gone");
 
 // ── the container: the member is not a study graph, and it is written back ──
 const doc = { header: { format: "em.json", version: "1.0" },
