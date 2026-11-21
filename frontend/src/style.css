@@ -12387,6 +12387,10 @@ button.uo-col { cursor: pointer; }
 .ext-page .ext-chip { height: 22px; padding: 0 8px; border-radius: 999px; font-size: 11px; color: var(--text-muted); }
 .ext-page .ext-chip[aria-pressed="true"] { border-color: var(--accent-ink); color: var(--text); background: var(--bg-accent-soft); }
 .ext-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 20px 16px; display: flex; flex-direction: column; gap: 10px; }
+/* MICRO-SEG11 · a row that is a direct child of the scroll (the Development folder) has
+   overflow:hidden, so its min-height is 0: with a long list open it was squashed to its
+   border (2 px). The children keep their height and the scroll scrolls. */
+.ext-scroll > * { flex-shrink: 0; }
 .ext-page .ext-list { gap: 10px; }
 .ext-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
 .ext-group-h { display: flex; align-items: center; gap: 8px; margin-top: 2px; }

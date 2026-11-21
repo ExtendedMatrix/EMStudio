@@ -261,5 +261,9 @@ eq(left, [], "no «Add-ons» / «Componenti aggiuntivi» left for EMStudio's too
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 ok(/<h3 class="settings-page-title" data-i18n="settings.addons">Third-party tools<\/h3>/.test(html) && !/>Add-ons</.test(html), "the page's title in the markup");
 ok(/id="settings-sect-extensions"/.test(html) && /id="set-extensions"/.test(html), "Settings ▸ Extensions: its section");
+// MICRO-SEG11 · the Development folder is a row of the scroll itself, with overflow:hidden:
+// without this rule a long list open squashed it to its border (2 px, measured in the page)
+const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+ok(/\.ext-scroll > \* \{ flex-shrink: 0; \}/.test(css), "the rows of the scroll keep their height (the Development folder is not squashed)");
 
 console.log(`check-ext-page: ${checks} checks passed`);
