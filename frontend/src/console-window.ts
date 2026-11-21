@@ -29,11 +29,27 @@
  *     class, function, property, value); after «name(» the signature and the
  *     docstring's first lines; inside a string the domain's values (command
  *     ids, node ids and names, node types, epochs). `/py/complete`.
+ *     MICRO-SEG09 (E.D., 21 Nov 2026: «voglio poter vedere i diversi
+ *     possibili proseguimenti … quando premo due volte Tab, da quella linea in
+ *     giù, come avviene in Blender, e in verde») · the FIRST Tab only completes
+ *     (the one possibility, or the common start); the SECOND Tab in a row, on
+ *     the same text and caret, prints the possibilities under the line, in
+ *     columns, in green (`--ok-ink`), the line left as it was. Ctrl+Space is
+ *     the double Tab at once. A name completed to «name(» prints its
+ *     signature and docstring's first line, in green too;
+ *   · COLOURS (MICRO-SEG09 p.1) · the line typed with Python's colours (the
+ *     Script Editor's scheme: lezer's tok-* classes), the prompt «>>>»/«...»
+ *     its own ink, results (repr) in `--info-ink`, errors and tracebacks in
+ *     `--danger`, Python's warnings in `--warn-ink`, the system's words
+ *     (welcome, em.help()) faint. Every ink ≥ 4.5:1 on the transcript's
+ *     well in both themes (measured in the MICRO's report).
  *
  * Pure of `main.ts`: the page gives a {@link ConsoleHost}; the state lives here
  * so a rebuild of the window (a detach, the language) loses nothing.
  */
 import type { PyOutcome, PyProofWire } from "./py-session";
+import { pythonLanguage } from "@codemirror/lang-python";
+import { classHighlighter, highlightCode } from "@lezer/highlight";
 
 /** what a run's proof says (`em_py.proof_of`) */
 export type PyProof = PyProofWire;
@@ -62,7 +78,7 @@ export interface ConsoleHost {
  *  head and Help ▸ «Python API reference» open it. */
 export const PYTHON_API_URL = "https://docs.extendedmatrix.org/projects/emstudio-python-api/en/latest/";
 
-export type LineKind = "in" | "out" | "value" | "error" | "step" | "proof" | "info" | "script" | "complete" | "sig";
+export type LineKind = "in" | "out" | "value" | "error" | "warn" | "sys" | "step" | "proof" | "info" | "script" | "complete" | "sig";
 export interface Line { kind: LineKind; text: string; dry?: boolean; detail?: string[]; items?: CompleteItem[] }
 
 // ── MICRO-SEG02 p.4 · Tab as in Blender ─────────────────────────────────────
@@ -106,6 +122,72 @@ export function tabOutcome(before: string, answer: string[] | CompleteAnswer): {
 export function completeLines(list: CompleteItem[]): Line[] {
   if (!list.length) return [];
   return [{ kind: "complete", text: "", items: list.map((i) => ({ ...i, label: i.label ?? (i.text.split(".").pop() ?? i.text).replace(/\($/, "") })) }];
+}
+
+/** MICRO-SEG09 · Tab pressed again on the same text, caret where the first
+ *  left it: the second Tab of a double Tab (Blender, a shell). */
+export interface TabMark { value: string; caret: number }
+export function isSecondTab(last: TabMark | null, value: string, caret: number): boolean {
+  return !!last && last.value === value && last.caret === caret;
+}
+
+/** MICRO-SEG09 p.1 · a run's printed text, cut where its kind changes: a
+ *  Python traceback (from «Traceback (most recent call last):» to its last
+ *  line «XError: …») is an error, a warning of Python's `warnings`
+ *  («file:line: SomethingWarning: …» and the source line under it) a
+ *  warning, the rest plain output. */
+export function splitOutput(text: string): Line[] {
+  const rows = text.replace(/\n$/, "").split("\n");
+  const kinds: LineKind[] = [];
+  let inTb = false;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (/^Traceback \(most recent call last\):/.test(r)) inTb = true;
+    if (inTb) {
+      kinds.push("error");
+      // the traceback ends at its first unindented line after the header
+      if (!/^Traceback/.test(r) && !/^\s/.test(r) && r.trim()) inTb = false;
+      continue;
+    }
+    if (/^\S.*:\d+: \w*Warning: /.test(r) || /^\w*Warning: /.test(r)) {
+      kinds.push("warn");
+      // `warnings` prints the offending source line indented under it
+      if (i + 1 < rows.length && /^\s+\S/.test(rows[i + 1])) { kinds.push("warn"); i++; }
+      continue;
+    }
+    kinds.push("out");
+  }
+  const out: Line[] = [];
+  let j = 0;
+  for (let i = 0; i < rows.length; i++) {
+    if (i && kinds[i] !== kinds[i - 1]) {
+      out.push({ kind: kinds[i - 1], text: rows.slice(j, i).join("\n") });
+      j = i;
+    }
+  }
+  if (rows.length) out.push({ kind: kinds[rows.length - 1], text: rows.slice(j).join("\n") });
+  return out.filter((l) => l.kind !== "out" || l.text !== "" || out.length === 1);
+}
+
+/** MICRO-SEG09 p.1 · code as Python's prompt shows it, in pieces: the prompt
+ *  («>>> » on the first line, «... » after), then the code's tokens with
+ *  the classes of lezer's `classHighlighter` (the Script Editor's colours). */
+export interface CodePiece { text: string; cls: string }
+export function highlightEcho(code: string): CodePiece[] {
+  const src = code.replace(/\s+$/, "");
+  const out: CodePiece[] = [{ text: ">>> ", cls: "pyc-ps" }];
+  let tree;
+  try { tree = pythonLanguage.parser.parse(src); }
+  catch { out.push({ text: src.split("\n").join("\n... "), cls: "" }); return out; }
+  highlightCode(src, tree, classHighlighter,
+    (text, cls) => { if (text) out.push({ text, cls }); },
+    () => { out.push({ text: "\n", cls: "" }, { text: "... ", cls: "pyc-ps" }); });
+  return out;
+}
+
+/** `em.help()` (or `em.help(x)`): what it prints is the system's words. */
+export function isHelp(code: string): boolean {
+  return /^\s*em\.help\([^\n]*\)\s*$/.test(code);
 }
 
 /** the console's memory while the page lives */
@@ -294,7 +376,7 @@ export function proofLines(p: PyProof): string[] {
 /** What a run shows, after its echo. */
 export function outcomeLines(o: PyOutcome, t: ConsoleHost["t"], dry: boolean): Line[] {
   const out: Line[] = [];
-  if (o.output) out.push({ kind: "out", text: o.output.replace(/\n$/, "") });
+  if (o.output) out.push(...splitOutput(o.output));
   for (const s of o.steps ?? [])
     out.push({ kind: "step", text: t(s.volatile ? "pyc.stepProposal" : "pyc.step", { label: s.label, n: String(s.ids?.length ?? 0) })
       + (s.refused?.length ? ` · ${t("py.partial", { n: String(s.refused.length) })}` : "") });
@@ -302,7 +384,10 @@ export function outcomeLines(o: PyOutcome, t: ConsoleHost["t"], dry: boolean): L
     out.push({ kind: "proof", dry: true, text: t("pyc.proof", { label: p.label, nodes: String(p.counts.nodes),
       edges: String(p.counts.edges), ops: String(p.counts.ops) }), detail: proofLines(p) });
   if (o.value !== undefined && o.value !== null) out.push({ kind: "value", text: o.value });
-  if (!o.ok) out.push({ kind: "error", text: o.error || o.status });
+  // the error's words once: a traceback printed already ends with them
+  const last = out[out.length - 1];
+  if (!o.ok && !(last?.kind === "error" && o.error && last.text.trimEnd().endsWith(o.error.trim())))
+    out.push({ kind: "error", text: o.error || o.status });
   else if (dry && !(o.proofs ?? []).length && !(o.steps ?? []).length) out.push({ kind: "info", text: t("pyc.proofNone") });
   return out;
 }
@@ -337,7 +422,16 @@ function lineEl(el: El, l: Line, t: ConsoleHost["t"]): HTMLElement {
     row.append(grid);
     return row;
   }
-  row.append(el("span", "pyc-text", l.text));
+  if (l.kind === "in" && /^>>> /.test(l.text)) {
+    // MICRO-SEG09 · the echo with Python's colours (the text without prompts
+    // is the code: «>>> » and «... » are four characters each)
+    const code = l.text.split("\n").map((x) => x.slice(4)).join("\n");
+    const span = el("span", "pyc-text pyc-code");
+    for (const p of highlightEcho(code)) {
+      span.append(el("span", p.cls, p.text));
+    }
+    row.append(span);
+  } else row.append(el("span", "pyc-text", l.text));
   if (l.detail?.length) {
     const d = el("div", "pyc-detail");
     for (const x of l.detail) d.append(el("div", "", x));
@@ -480,7 +574,9 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     setBusy(true);
     try {
       const o = await host.run(code.replace(/\s+$/, ""), { dryRun: dry, history: keep });
-      add(outcomeLines(o, t, dry));
+      const ls = outcomeLines(o, t, dry);
+      // MICRO-SEG09 · em.help() is the system speaking: its text faint
+      add(isHelp(code) ? ls.map((l) => (l.kind === "out" ? { ...l, kind: "sys" as LineKind } : l)) : ls);
     } catch (e) {
       add([{ kind: "error", text: String((e as Error)?.message ?? e) }]);
     } finally {
@@ -489,31 +585,66 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     }
   }
 
-  async function tab(): Promise<void> {
+  // MICRO-SEG09 · where the last Tab left the line: a Tab again on the same
+  // text and caret is the second of a double Tab
+  let lastTab: TabMark | null = null;
+  const sigLine = (sg: CompleteSignature): Line => ({ kind: "sig", text: sg.text, ...(sg.doc ? { detail: [sg.doc] } : {}) });
+  const hint = (text: string): void => {
+    hideList();
+    list.append(el("span", "pyc-more", text));
+    list.hidden = false;
+    setTimeout(hideList, 1600);
+  };
+
+  /** Tab (`both` = Ctrl+Space, the double Tab at once). */
+  async function tab(both = false): Promise<void> {
     const pos = input.selectionStart ?? input.value.length;
     const before = input.value.slice(0, pos);
     const lineStart = before.slice(before.lastIndexOf("\n") + 1);
-    if (!lineStart.trim()) { input.setRangeText("    ", pos, pos, "end"); return; }
+    if (!lineStart.trim()) { input.setRangeText("    ", pos, pos, "end"); lastTab = null; return; }
+    const second = both || isSecondTab(lastTab, input.value, pos);
     // MICRO-SEG02 · the whole text before the cursor: a call opened on an
     // earlier line is still the call the cursor is in
     const answer = await host.complete(before).catch(() => [] as string[]);
+    // typed on while the bridge answered: this Tab is stale
+    if (input.value.slice(0, pos) !== before) return;
     const c = tabOutcome(before, answer);
     if (c.replace != null) {
       input.setRangeText(c.replace, pos - c.tail.length, pos, "end");
       state.draft = state.at < 0 ? input.value : state.draft;
     }
     hideList();
-    // as Blender: the possibilities, and a call's signature, PRINTED in the output
+    const caret = input.selectionStart ?? input.value.length;
+    // as Blender: the possibilities, and a call's signature, PRINTED under the
+    // line — on the second Tab; the first only completes
     const ls: Line[] = [];
-    if (c.list.length) ls.push(...completeLines(c.list.slice(0, 200)));
-    if (c.list.length > 200) ls.push({ kind: "info", text: `… +${c.list.length - 200}` });
-    if (c.signature && (!c.replace || c.list.length)) ls.push({ kind: "sig", text: c.signature.text, ...(c.signature.doc ? { detail: [c.signature.doc] } : {}) });
-    if (ls.length) { add([{ kind: "in", text: echo(input.value.slice(0, input.selectionStart ?? input.value.length)) }, ...ls]); return; }
-    if (c.replace == null) {
-      list.append(el("span", "pyc-more", t("pyc.noMatch")));
-      list.hidden = false;
-      setTimeout(hideList, 1200);
+    // the signature of the callable named before the caret (as after its «(»)
+    const sigOf = async (upTo: string): Promise<CompleteSignature | null> =>
+      asAnswer(await host.complete(upTo.endsWith("(") ? upTo : upTo + "(").catch(() => [] as string[])).signature ?? null;
+    if (second && c.list.length) {
+      ls.push(...completeLines(c.list.slice(0, 200)));
+      if (c.list.length > 200) ls.push({ kind: "complete", text: `… +${c.list.length - 200}` });
+      const upTo = input.value.slice(0, caret);
+      const named = completionTail(upTo);
+      // «g.node» with g.node( and g.nodes( possible: the one named is a function too
+      const sg = c.signature ?? (named && c.list.some((i) => i.text === named + "(") ? await sigOf(upTo) : null);
+      if (sg) ls.push(sigLine(sg));
+    } else if (c.signature && !c.list.length && (c.replace == null || second)) {
+      ls.push(sigLine(c.signature));   // nothing to complete: what the call wants
+    } else if (c.list.length === 0 && c.replace != null && /\($/.test(c.replace)) {
+      // a name completed to «name(»: its signature at once, as after a «(»
+      const sg = await sigOf(input.value.slice(0, caret));
+      if (sg) ls.push(sigLine(sg));
     }
+    if (ls.length) {
+      add([{ kind: "in", text: echo(input.value) }, ...ls]);
+      lastTab = null;
+      input.focus();
+      return;
+    }
+    lastTab = { value: input.value, caret };
+    if (c.list.length > 1) hint(t("pyc.tabAgain", { n: String(c.list.length) }));
+    else if (c.replace == null) hint(t("pyc.noMatch"));
   }
 
   const showSearch = (): void => {
@@ -569,8 +700,8 @@ export function mountConsole(doc: Document, host: ConsoleHost, state: ConsoleSta
     if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); void go(ev.shiftKey); return; }
     if (ev.key === "Enter" && !ev.shiftKey && !ev.altKey && pos === v.length && enterRuns(v)) { ev.preventDefault(); void go(false); return; }
     if (ev.key === "Tab" && !ev.shiftKey) { ev.preventDefault(); void tab(); return; }
-    // MICRO-SEG02 · Ctrl+Space does the same (for whom Tab is taken)
-    if ((ev.key === " " || ev.code === "Space") && ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); void tab(); return; }
+    // MICRO-SEG02 · Ctrl+Space (for whom Tab is taken) = the double Tab (MICRO-SEG09)
+    if ((ev.key === " " || ev.code === "Space") && ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); void tab(true); return; }
     if (ev.key === "Escape") { if (!list.hidden) { ev.preventDefault(); hideList(); } return; }
     if ((ev.key === "r" || ev.key === "R") && ev.ctrlKey && !ev.metaKey) { ev.preventDefault(); openSearch(); return; }
     // Ctrl+L, and ⌘L on the Mac (MICRO-TIL002)

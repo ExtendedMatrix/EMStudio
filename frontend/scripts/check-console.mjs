@@ -83,6 +83,27 @@ eq(M.outcomeLines({ ok: true, status: "done", output: "", steps: [], proofs: [],
 eq(M.outcomeLines({ ok: false, status: "refused", output: "", error: "il grafo è intatto", steps: [], proofs: [], requests: [] }, tt, false)
   .map((l) => [l.kind, l.text]), [["error", "il grafo è intatto"]], "a refusal: its words");
 
+// ── MICRO-SEG09 · colours: pure pieces ─────────────────────────────────────
+{
+  const tb = "a\nTraceback (most recent call last):\n  File \"<console>\", line 1, in <module>\nZeroDivisionError: division by zero\nb";
+  eq(M.splitOutput(tb).map((l) => [l.kind, l.text.split("\n").length]), [["out", 1], ["error", 3], ["out", 1]], "splitOutput: a traceback is an error, up to its last line");
+  eq(M.splitOutput("<console>:1: UserWarning: attento\n  warnings.warn('attento')\nok\n").map((l) => l.kind), ["warn", "out"],
+     "splitOutput: a Python warning (and its source line) is a warning");
+  eq(M.splitOutput("ciao\n"), [{ kind: "out", text: "ciao" }], "splitOutput: plain output stays one line of output");
+  const ol = M.outcomeLines({ ok: false, status: "error", output: "Traceback (most recent call last):\n  x\nNameError: name 'q' is not defined\n",
+    error: "NameError: name 'q' is not defined", steps: [], proofs: [], requests: [] }, tt, false);
+  ok(ol.every((l) => l.kind === "error"), "a run's traceback and its error: all red");
+  eq(ol.length, 1, "…the error's words not said twice (the traceback ends with them)");
+  const hp = M.highlightEcho("for n in g.nodes(type='US'):\n    print(n, 1)  # x");
+  eq(hp.filter((p) => p.cls === "pyc-ps").map((p) => p.text), [">>> ", "... "], "highlightEcho: the prompts «>>>» and «...»");
+  ok(hp.some((p) => p.text === "for" && /tok-keyword/.test(p.cls)) && hp.some((p) => p.text === "'US'" && /tok-string/.test(p.cls))
+     && hp.some((p) => p.text === "1" && /tok-number/.test(p.cls)) && hp.some((p) => /# x/.test(p.text) && /tok-comment/.test(p.cls)),
+     "highlightEcho: keywords, strings, numbers, comments with the editor's classes");
+  eq(hp.map((p) => p.text).join(""), ">>> for n in g.nodes(type='US'):\n...     print(n, 1)  # x", "highlightEcho: the text unchanged");
+  eq([M.isHelp("em.help()"), M.isHelp(" em.help(g) "), M.isHelp("x = em.help()")], [true, true, false], "isHelp");
+  eq([M.isSecondTab(null, "a", 1), M.isSecondTab({ value: "a", caret: 1 }, "a", 1), M.isSecondTab({ value: "a", caret: 1 }, "ab", 2)], [false, true, false], "isSecondTab: same text, same caret");
+}
+
 // ── the wiring ──────────────────────────────────────────────────────────────
 const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const main = read("frontend/src/main.ts"), html = read("frontend/index.html"), i18n = read("frontend/src/i18n.ts");
@@ -109,6 +130,11 @@ for (const k of new Set(used)) ok(keys.includes(k), `${k} used and translated`);
 ok(/"\/py\/history"/.test(bridge) && /^BRIDGE_LEVEL = (8[2-9]|9\d)/m.test(bridge) && /^LEVEL = (8[2-9]|9\d)/m.test(emPy), "the bridge: /py/history in the table, level 82 or later");
 ok(/const BRIDGE_LEVEL_WANTED = (8[2-9]|9\d);/.test(main), "the page wants 82 or later");
 ok(/^\.pyc \{/m.test(css), "its style");
+// MICRO-SEG09 · each kind its ink, from the chrome's roles
+for (const [k, v] of [["value", "--info-ink"], ["error", "--danger"], ["warn", "--warn-ink"], ["complete", "--ok-ink"], ["sig", "--ok-ink"], ["sys", "--text-faint"]])
+  ok(new RegExp(`\\.pyc-line\\.pyc-k-${k} \\{ color: var\\(${v}\\)`).test(css), `the ${k} lines in ${v}`);
+ok(/\.pyc-mname \{ color: var\(--ok-ink\)/.test(css) && /\.pyc \.tok-keyword/.test(css) && /\.pyc-ps \{ color: var\(--accent-ink\)/.test(css),
+   "Tab's list green, the typed line in Python's colours, the prompt its own ink");
 
 // ── the window in a DOM ─────────────────────────────────────────────────────
 const { document, window } = parseHTML("<!doctype html><html><body></body></html>");
@@ -136,7 +162,7 @@ const host = {
   run: async (code, opts) => { runs.push({ code, ...opts }); return code === "em.help()"
     ? { ok: true, status: "done", output: "em 1.0.0 · host: emstudio\n", steps: [], proofs: [], requests: [] }
     : { ok: true, status: "done", output: "", value: "2", steps: [], proofs: opts.dryRun ? [proof] : [], requests: [] }; },
-  complete: async (text) => (text.endsWith("em.wri") ? ["em.write("] : text.endsWith("('U") ? ["US1", "US2"] : []),
+  complete: async (text) => (text.endsWith("em.wri") ? ["em.write("] : /\('US?$/.test(text) ? ["US1", "US2"] : []),
   history: async () => [{ code: "g.node('US1')" }, { code: "len(g)" }],
   docName: () => "prova.em.json",
   openExternal: (url) => opened.push(url),
@@ -184,9 +210,17 @@ key(ta, "Tab"); await tick();
 eq(ta.value, "em.write(", "Tab completes the tail");
 put(ta, "g.node('U");
 key(ta, "Tab"); await tick();
-// MICRO-SEG02 · as Blender's console: the list PRINTED in the output, not a floating row
+// MICRO-SEG09 · the FIRST Tab only completes (the common start), says how many
+eq([ta.value, root.querySelectorAll(".pyc-out .pyc-m").length], ["g.node('US", 0],
+   "several matches, first Tab: their common start, nothing printed");
+ok(/pyc\.tabAgain.*"n":"2"/.test(root.querySelector(".pyc-complete").textContent), "…a hint: «2 possibilities · Tab again»");
+const nLines = state.lines.length;
+key(ta, "Tab"); await tick();
+// MICRO-SEG02/SEG09 · as Blender's console: the SECOND Tab prints the list under the line
 eq([ta.value, [...root.querySelectorAll(".pyc-out .pyc-m .pyc-mname")].map((x) => x.textContent)], ["g.node('US", ["US1", "US2"]],
-   "several matches: their common start, and the list printed in the output");
+   "second Tab in a row: the list printed in the output, the line left as it was");
+eq(state.lines.slice(nLines).map((l) => [l.kind, l.kind === "in" ? l.text : ""]), [["in", ">>> g.node('US"], ["complete", ""]],
+   "…under the line echoed whole");
 put(ta, "");
 key(ta, "Tab");
 eq(ta.value, "    ", "Tab at the start of a line indents");
@@ -222,6 +256,8 @@ ok(ev.defaultPrevented === false, "a plain key is the textarea's");
   const t3 = r3.querySelector(".pyc-input");
   put(t3, "em.app.");
   key(t3, "Tab"); await tick();
+  ok(!r3.querySelector(".pyc-out .pyc-m"), "Tab once on «em.app.»: nothing printed yet");
+  key(t3, "Tab"); await tick();
   const marks = [...r3.querySelectorAll(".pyc-out .pyc-m")].map((m) => [m.dataset.kind, m.querySelector(".pyc-mname").textContent]);
   eq(marks, [["property", "commands"], ["method", "select"], ["property", "space"]], "Tab on «em.app.»: the list printed, each with its kind");
   ok(r3.querySelector(".pyc-out .pyc-m .pyc-mark").title === "pyc.kind.property", "…the mark says the kind in words");
@@ -230,6 +266,28 @@ ok(ev.defaultPrevented === false, "a plain key is the textarea's");
   ok(ce.defaultPrevented, "Ctrl+Space does what Tab does");
   ok([...r3.querySelectorAll(".pyc-out .pyc-k-sig")].some((l) => /node\(ref: NodeRef\)/.test(l.textContent) && /By id or by name/.test(l.textContent)),
      "after «g.node(»: the signature and the docstring printed");
+  // MICRO-SEG09 · Ctrl+Space = the double Tab: the list at once
+  put(t3, "em.app.");
+  const before3 = r3.querySelectorAll(".pyc-out .pyc-k-complete").length;
+  key(t3, " ", { ctrlKey: true, code: "Space" }); await tick();
+  eq(r3.querySelectorAll(".pyc-out .pyc-k-complete").length, before3 + 1, "Ctrl+Space: the list printed at once");
+  // MICRO-SEG09 · a name completed to «name(»: its signature printed at once
+  const sigHost = { ...host, complete: async (text) => text.endsWith("g.nod") ? { tail: "g.nod", items: [{ text: "g.node(", kind: "method" }] }
+    : /\.node\($/.test(text) ? { tail: "", items: [], signature: sg }
+    : text.endsWith("x.node") ? { tail: "x.node", items: [{ text: "x.node(", kind: "method" }, { text: "x.nodes(", kind: "method" }] } : [] };
+  const st4 = M.newConsoleState();
+  const r4 = M.consoleContent(document, sigHost, st4);
+  document.body.append(r4); await tick();
+  const t4 = r4.querySelector(".pyc-input");
+  put(t4, "g.nod");
+  key(t4, "Tab"); await tick(); await tick();
+  ok(t4.value === "g.node(" && st4.lines.some((l) => l.kind === "sig" && /NodeRef/.test(l.text) && l.detail?.[0] === "By id or by name."),
+     "Tab on a function's name: «g.node(» and its signature with the docstring's first line");
+  put(t4, "x.node");
+  key(t4, "Tab"); await tick(); key(t4, "Tab"); await tick(); await tick();
+  ok(st4.lines.at(-1).kind === "sig" && st4.lines.at(-2).kind === "complete" && t4.value === "x.node",
+     "«x.node» with x.node( and x.nodes(: Tab Tab lists both, then the signature of the one named");
+  r4.remove();
   r3.remove();
 }
 // a rebuild (detach, language) loses nothing

@@ -12512,13 +12512,29 @@ button.uo-col { cursor: pointer; }
 .pyc-out { flex: 1 1 200px; min-height: 160px; overflow: auto; padding: 6px 8px; background: var(--bg-sunken); border: 1px solid var(--border);
   border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.4; user-select: text; }
 .pyc-line { white-space: pre-wrap; word-break: break-word; margin: 0 0 2px 0; }
-.pyc-line.pyc-k-in { color: var(--text); font-weight: 600; }
+/* MICRO-SEG09 p.1 · the console's inks, each from a role of the chrome and
+   ≥ 4.5:1 on the transcript's well (--bg-sunken) in both themes: the line
+   typed in Python's colours (the Script Editor's --py-*), the prompt in
+   --accent-ink, results in --info-ink (was --brand: 1.06:1 on dark), errors
+   and tracebacks in --danger, warnings in --warn-ink, the system faint,
+   Tab's possibilities and signatures in --ok-ink (green, as Blender). */
+.pyc-line.pyc-k-in { color: var(--text); }
 .pyc-line.pyc-k-out { color: var(--text); }
-.pyc-line.pyc-k-value { color: var(--brand); }
+.pyc-line.pyc-k-value { color: var(--info-ink); }
 .pyc-line.pyc-k-error { color: var(--danger); }
-.pyc-line.pyc-k-step { color: var(--ok); }
-.pyc-line.pyc-k-proof { color: var(--warn); }
+.pyc-line.pyc-k-warn { color: var(--warn-ink); }
+.pyc-line.pyc-k-step { color: var(--ok-ink); }
+.pyc-line.pyc-k-proof { color: var(--warn-ink); }
 .pyc-line.pyc-k-info { color: var(--text-faint); font-style: italic; }
+.pyc-line.pyc-k-sys { color: var(--text-faint); }
+.pyc-line.pyc-k-complete { color: var(--ok-ink); }
+.pyc-ps { color: var(--accent-ink); font-weight: 600; user-select: none; }
+.pyc .tok-keyword, .pyc .tok-bool, .pyc .tok-null { color: var(--py-kw); font-weight: 600; }
+.pyc .tok-string, .pyc .tok-string2 { color: var(--py-str); }
+.pyc .tok-comment { color: var(--py-com); font-style: italic; }
+.pyc .tok-number { color: var(--py-num); }
+.pyc .tok-variableName.tok-definition, .pyc .tok-propertyName.tok-definition, .pyc .tok-className { color: var(--py-fn); font-weight: 600; }
+.pyc .tok-operator, .pyc .tok-punctuation { color: var(--py-op); }
 .pyc-tag { display: inline-block; margin-right: 6px; padding: 0 4px; border-radius: var(--radius-sm); font-weight: 400;
   background: var(--warn); color: var(--bg-panel); font-size: 0.7rem; }
 .pyc-detail { margin: 2px 0 4px 14px; color: var(--text-muted); }
@@ -12537,14 +12553,12 @@ button.uo-col { cursor: pointer; }
    per kind, the name, what it is; a call's signature with its docstring */
 .pyc-matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(16em, 1fr)); gap: 0 12px; margin: 0 0 4px 0; }
 .pyc-m { display: flex; gap: 6px; align-items: baseline; min-width: 0; white-space: nowrap; }
-.pyc-mark { flex: 0 0 1.1em; text-align: center; color: var(--text-faint); }
-.pyc-mk-module .pyc-mark, .pyc-mk-class .pyc-mark { color: var(--accent); }
-.pyc-mk-function .pyc-mark, .pyc-mk-method .pyc-mark { color: var(--brand); }
-.pyc-mk-property .pyc-mark, .pyc-mk-param .pyc-mark { color: var(--ok); }
-.pyc-mname { color: var(--text); }
-.pyc-mdetail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-faint); font-size: 0.72rem; }
-.pyc-line.pyc-k-sig { color: var(--accent); }
-.pyc-line.pyc-k-sig .pyc-detail { color: var(--text-muted); font-style: italic; }
+/* MICRO-SEG09 · the whole list green (--ok-ink), the mark tells the kind */
+.pyc-mark { flex: 0 0 1.1em; text-align: center; color: var(--ok-ink); }
+.pyc-mname { color: var(--ok-ink); }
+.pyc-mdetail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ok-ink); font-size: 0.72rem; }
+.pyc-line.pyc-k-sig { color: var(--ok-ink); }
+.pyc-line.pyc-k-sig .pyc-detail { color: var(--ok-ink); font-style: italic; }
 /* the Script Editor's list (CodeMirror autocomplete) in the chrome's colours */
 .cm-tooltip.cm-tooltip-autocomplete { background: var(--bg-panel); border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 0.78rem; }
 .cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent); color: var(--bg-panel); }
@@ -12560,9 +12574,11 @@ button.uo-col { cursor: pointer; }
    its line numbers and Python's colours in both themes (classHighlighter's
    tok-* classes, coloured here from the chrome's variables) */
 .tile-scriptbody { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
-.sce { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; font-size: 0.82rem;
-  --py-kw: #8a3ffc; --py-str: #1a7f37; --py-com: var(--text-faint); --py-num: #b35900; --py-fn: var(--brand); --py-op: var(--text-muted); }
-[data-theme="dark"] .sce { --py-kw: #c792ea; --py-str: #8fd18f; --py-num: #f2a25a; --py-fn: #82aaff; }
+.sce { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; font-size: 0.82rem; }
+/* Python's colours, the Script Editor's and the console's (MICRO-SEG09: the
+   number was #b35900, 4.46:1 on the light well → #a65300, 5.02:1) */
+.sce, .pyc { --py-kw: #8a3ffc; --py-str: #1a7f37; --py-com: var(--text-faint); --py-num: #a65300; --py-fn: var(--brand); --py-op: var(--text-muted); }
+[data-theme="dark"] .sce, [data-theme="dark"] .pyc { --py-kw: #c792ea; --py-str: #8fd18f; --py-num: #f2a25a; --py-fn: #82aaff; }
 .sce-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 8px; border-bottom: 1px solid var(--border); }
 .sce-head button { font-size: 0.78rem; padding: 1px 8px; }
 .sce-title { font-family: var(--font-mono); font-weight: 600; color: var(--text); white-space: nowrap; }
