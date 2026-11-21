@@ -12828,3 +12828,22 @@ td.plg-col { color: var(--muted, #888); }
 .nv-lane-chip:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
 .nv-lane-chip:disabled { cursor: default; }
 .nv-heading-wrap > .nv-lanes { margin-top: -2px; }
+
+/* MICRO-SEG24 · the figures an epoch or an activity carries with it */
+.nv-fig-add { font-size: 11px; padding: 0 7px; border-radius: 8px; }
+.nv-figcap { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.35; }
+.nv-figcap b { color: var(--text); font-weight: 600; }
+.nv-figcap-auto { font-style: italic; }
+.nv-matrix-fig { margin-top: 6px; background: var(--bg-paper, #fff); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px; overflow: auto; max-height: 520px; }
+.nv-matrix-fig svg { display: block; width: 100%; height: auto; }
+.nv-subepochs-axis { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+.nv-subepochs-row { box-sizing: border-box; }
+.nv-fig-menu .nv-fig-of { font-weight: 600; text-transform: none; letter-spacing: 0; }
+.nv-mention.nv-figref { font-style: normal; font-variant-numeric: tabular-nums; }
+.nidx-coh-head { margin-top: 12px; }
+.nidx-coh { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; font-size: 12px; }
+.nidx-coh-ok { color: var(--ok-ink, #2e6b32); }
+.nidx-coh-row { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; color: var(--text-muted); }
+.nidx-coh-text { font: inherit; text-align: left; background: none; border: none; padding: 0; color: inherit; cursor: pointer; flex: 1 1 160px; }
+.nidx-coh-text:hover { color: var(--text); text-decoration: underline; }
+.nidx-coh-fix { font-size: 11px; }

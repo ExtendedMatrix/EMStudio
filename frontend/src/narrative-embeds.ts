@@ -1244,7 +1244,7 @@ export function rmDocEmbed(node: EmNode, doc: EmDocument | null,
  * tests); the interactive stage is the editor's (`SceneFactory`, main.ts).
  */
 export interface SceneContent {
-  kind: "graph" | "epoch" | "group" | "document" | "model";
+  kind: "graph" | "epoch" | "group" | "document" | "model" | "activity";
   /** representation models (RM, RMSF, RMDoc) in the scene */
   models: string[];
   /** the containers they are in, and containers named directly */
@@ -1295,6 +1295,19 @@ export function sceneContent(node: EmNode, doc: EmDocument | null): SceneContent
       for (const id of incoming(doc, lane, ["has_first_epoch", "survive_in_epoch"])) if (isRm(id)) addRm(id);
     }
     for (const u of scopeOf(node, doc).units) if (hasProxy(doc, u.id, index)) out.proxies.push(u.id);
+  } else if (type === "ActivityNodeGroup") {
+    // MICRO-SEG24 · what belongs to the activity: the proxies of its units and
+    // the models tied to it or to them — not the whole epoch's site
+    out.kind = "activity";
+    const units = scopeOf(node, doc).units;
+    for (const id of [node.id, ...units.map((u) => u.id)]) {
+      for (const m of outgoing(doc, id, ["has_representation_model"])) {
+        if (isRm(m)) addRm(m);
+        else if (isGroup(m)) { addGroup(m); members(m).forEach(addRm); }
+      }
+      for (const m of incoming(doc, id, ["has_first_epoch", "survive_in_epoch", "is_in_activity"])) if (isRm(m)) addRm(m);
+    }
+    for (const u of units) if (hasProxy(doc, u.id, index)) out.proxies.push(u.id);
   } else if (type === RM_GROUP) {
     out.kind = "group";
     addGroup(node.id);

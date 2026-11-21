@@ -300,8 +300,10 @@ import { refsForViewType, scene3dRefKind, unvalidatedForExport, viewTypesFor, ty
 import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
 import { laneTree, missingActivityHeadings, type HorizonLike, type LaneItem, type LaneMode } from "./narrative-lanes";
 import type { LanePickerHooks } from "./narrative-lane-picker";
-import { citedContext, setDocumentContent, setSceneFactory, setSitePicker, type NarrativeSelection, type Reading, type SceneFactory } from "./narrative";
-import { documentEmbed as documentEmbedRaw, epochStart, sceneContent, sceneContentLine, tableRows, type TableContext } from "./narrative-embeds";
+import { citedContext, setDocumentContent, setMatrixFigureFactory, setSceneFactory, setSitePicker, type NarrativeSelection, type Reading, type SceneFactory } from "./narrative";
+import { autoCaption, datesOf, FIGURE_REF_PREFIX, FIGURE_VIEW, figureChoices, figureEntries, figureKey, figureNumbers, figureOf, subEpochsSvg } from "./narrative-figures";
+import { coherenceIssues } from "./narrative-coherence";
+import { documentEmbed as documentEmbedRaw, epochStart, sceneContent, sceneContentLine, scopeOf, tableRows, type TableContext } from "./narrative-embeds";
 import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
 import { carriedPropertyEdges, compactableUnits, compactPlan, compactProperties, dissolveGroups, drawnEdgeKey,
@@ -3222,6 +3224,10 @@ window.__EM_SCENE__ = () => {
   copyReaderLink: () => copyReaderLink(),
   /** …the figures this process renders for it, by key */
   narrativeFigureKeys: async (id: string) => Object.keys(await narrativeFigures(id)),
+  // MICRO-SEG24 · the figures as the export gets them (key → SVG length), and
+  // an `em.app` request as a script sends it (space.render, matrix.render)
+  narrativeFigureSizes: async (id: string) => Object.fromEntries(Object.entries(await narrativeFigures(id)).map(([k, v]) => [k, v.length])),
+  appOp: (op: string, args: Record<string, unknown>) => scriptAppOp(op, args),
   /** MICRO-NARRATIVE-MODULI · what a story's 3D scene of this node draws */
   narrativeSceneItems: (id: string) => { const n = store?.node(id); return n ? narrativeSceneItems(n).map((i) => ({ kind: i.kind, id: i.id, state: i.state, url: i.url ?? null })) : null; },
   setBands: (bands: Bands, winId?: string) => { const w = winById(winId ?? activeWin().id); if (w) setBandsOf(w, bands); },
@@ -18682,7 +18688,7 @@ async function narrativeFigures(
 
   // what is asked for, once, before anything is drawn: the placement below is a
   // bridge round-trip and it is worth making only if a map is actually embedded
-  const wanted: Array<{ view: string; ref: string; options: Record<string, unknown>; ctx: TableContext }> = [];
+  const wanted: Array<{ view: string; ref: string; options: Record<string, unknown>; ctx: TableContext; variant: string }> = [];
   const seen = new Set<string>();
   for (const chapter of narrative.chapters as Array<{
     blocks?: Array<{ block_type?: string; ref?: string; view_type?: string; options?: Record<string, unknown> }>;
@@ -18692,14 +18698,17 @@ async function narrativeFigures(
       const view = String(block.view_type ?? "");
       const ref = String(block.ref ?? "");
       if (!ref || !FIGURABLE.has(view)) return;
+      // MICRO-SEG24 · a figure of an epoch or an activity is filed under its
+      // kind too (`scene3d:E2#plan`): a plan and a 3/4 view are two plates
+      const variant = figureOf(block as never)?.kind ?? "";
       // MICRO-NARRATIVE-MODULI p.12 · p.19 · a scene, a document's models: the
       // still of the framing saved in the block (none saved: the placeholder
-      // and the link, as before)
-      if (view === "scene3d" && typeof block.options?.still !== "string") return;
-      const key = `${view}:${ref}`;
+      // and the link, as before) — a 3D FIGURE is drawn off screen instead
+      if (view === "scene3d" && typeof block.options?.still !== "string" && !variant) return;
+      const key = figureKey(view, ref, variant);
       if (seen.has(key)) return;            // one plate per (view, subject)
       seen.add(key);
-      wanted.push({ view, ref, options: block.options ?? {}, ctx: citedContext((chapter.blocks ?? []) as never, bi) });
+      wanted.push({ view, ref, options: block.options ?? {}, ctx: citedContext((chapter.blocks ?? []) as never, bi), variant });
     });
   }
   if (!wanted.length) return out;
@@ -18719,12 +18728,22 @@ async function narrativeFigures(
     else placed = answer;
   }
 
-  for (const { view, ref, options, ctx } of wanted) {
-    const key = `${view}:${ref}`;
+  for (const { view, ref, options, ctx, variant } of wanted) {
+    const key = figureKey(view, ref, variant);
     const node = store.node(ref) ?? null;
     try {
       let svg: string | null = null;
-      if (view === "matrix") {
+      if (variant && node && view === FIGURE_VIEW.matrix) {
+        // MICRO-SEG24 · an epoch's band, or an activity's units and their
+        // neighbours, in the canvas's layout
+        svg = matrixFigureSvg(node);
+      } else if (variant === "sub_epochs" && node) {
+        svg = subEpochsSvg(node, doc);
+      } else if (variant && node && view === "scene3d" && typeof options.still !== "string") {
+        // MICRO-SEG24 D · no still of its own: drawn off screen, now
+        const got = await renderFigureStill(node, variant);
+        svg = got ? `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${got.width}" height="${got.height}"><image width="${got.width}" height="${got.height}" xlink:href="${got.image}"/></svg>` : null;
+      } else if (view === "matrix") {
         const matrix = scenes.matrix;          // nothing laid out: nothing to
         if (!matrix) continue;                 // photograph
         const slice = epochSliceOf(matrix, ref);
@@ -18886,7 +18905,7 @@ async function exportNarrative(format: string, opts: { force?: boolean } = {}): 
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doc: withBakedQueries(JSON.parse(store.toJSON()), chosen),
+        body: JSON.stringify({ doc: withFigureCaptions(withBakedQueries(JSON.parse(store.toJSON()), chosen), chosen),
                                narrative_id: chosen,
                                figures,
                                // COLLEGARE · only when the dialog's «Esporta
@@ -27171,6 +27190,10 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
     onSetDescription: (text) => nedit.setNarrativeDescription(st, narrativeId, text),
     onSetQuery: (patch) => block != null && nedit.setBlockOptions(st, narrativeId, chapter, block, patch),
     lanePicker: lanePickerFor(narrativeId, chapters, chapter, block),
+    // MICRO-SEG24 · the selected figure's number, the file of its caption
+    figureNumber: block != null ? figureNumbers(chapters as never, narrativesIn(st.doc).find((n) => n.id === narrativeId)?.numbered ?? true,
+      (id) => !!st.node(id)).get(`${chapter}:${block}`) ?? null : null,
+    figureFile: storyFileName(),
     onSignMe: () => signChapterAsMe(narrativeId, chapter),
     onToggleCanonical: () => nedit.toggleCanonical(st, narrativeId, chapter),
     canGenerate: () => !!ch?.anchor,
@@ -27755,30 +27778,11 @@ function openNarrativeSceneInSpace(node: EmNode, camera: unknown): void {
   setTimeout(tryIt, 300);
 }
 
-const narrativeSceneFactory: SceneFactory = (stage, spec) => {
-  const kept = narrativeScenes.get(spec.key);
-  const bar = document.createElement("div");
-  bar.className = "nv-scene-bar";
-  const btn = (label: string, probe: string, title: string, run: () => void): HTMLButtonElement => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "nv-mini";
-    b.textContent = label;
-    b.title = title;
-    b.dataset.nvScene = probe;
-    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
-    bar.appendChild(b);
-    return b;
-  };
-  const mount = (host: HTMLElement): SpaceSceneHandle => {
-    // a story's scene draws only while it is on screen: a chapter with three
-    // scenes scrolled away costs nothing
-    let seen = true;
-    const io = typeof IntersectionObserver === "function"
-      ? new IntersectionObserver((es) => { seen = es.some((e) => e.isIntersecting); }) : null;
-    io?.observe(host);
-    const handle = mountSpaceScene(host, {
-      paused: () => !seen || !host.isConnected,
+/** The options every scene of the story mounts with (the page's and the
+ *  offscreen one of MICRO-SEG24). */
+function narrativeSceneOptions(paused: () => boolean): Omit<Parameters<typeof mountSpaceScene>[1], "onMeasured"> {
+  return {
+      paused,
       texts: {
         loading: t("space.loading"), noEngine: t("em3d.noEngine"),
         referenceOnly: (name, rid) => refOnlyWords(name, rid),
@@ -27808,12 +27812,46 @@ const narrativeSceneFactory: SceneFactory = (stage, spec) => {
       sketchVisible: () => false,
       onLoadOutcome: (key, label, url, error) => noteModelLoad(key, label, url, error),
       onTileError: (key, label, _url, e) => noteTileError(key, label, e),
+  };
+}
+
+const narrativeSceneFactory: SceneFactory = (stage, spec) => {
+  const kept = narrativeScenes.get(spec.key);
+  // MICRO-SEG24 · a figure's plan or three-quarter view frames itself so
+  // (a plan always; the others unless a framing was saved)
+  const figKind = figureOf({ block_type: "embed", options: spec.options } as never)?.kind;
+  const framePreset = (h: SpaceSceneHandle): void => {
+    const cam = spec.options.camera;
+    if (figKind === "plan" || (!cam && figKind === "three_quarter")) { applyFigureView(h, figKind); return; }
+    if (cam) h.setCamera(cam as never); else h.frame();
+  };
+  const bar = document.createElement("div");
+  bar.className = "nv-scene-bar";
+  const btn = (label: string, probe: string, title: string, run: () => void): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "nv-mini";
+    b.textContent = label;
+    b.title = title;
+    b.dataset.nvScene = probe;
+    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    bar.appendChild(b);
+    return b;
+  };
+  const mount = (host: HTMLElement): SpaceSceneHandle => {
+    // a story's scene draws only while it is on screen: a chapter with three
+    // scenes scrolled away costs nothing
+    let seen = true;
+    const io = typeof IntersectionObserver === "function"
+      ? new IntersectionObserver((es) => { seen = es.some((e) => e.isIntersecting); }) : null;
+    io?.observe(host);
+    const handle = mountSpaceScene(host, {
+      ...narrativeSceneOptions(() => !seen || !host.isConnected),
       onMeasured: () => {
         const k = narrativeScenes.get(spec.key);
         if (!k || k.sig === "framed") return;
         k.sig = "framed";
-        const cam = spec.options.camera;
-        if (cam) handle.setCamera(cam as never); else handle.frame();
+        framePreset(handle);
       },
     });
     return handle;
@@ -27851,7 +27889,7 @@ const narrativeSceneFactory: SceneFactory = (stage, spec) => {
   btn(`⤢ ${t("nv.sc.frame")}`, "frame", t("nv.sc.frameTitle"), () => {
     const h = narrativeScenes.get(spec.key)?.handle;
     if (!h) return;
-    if (spec.options.camera) h.setCamera(spec.options.camera as never); else h.frame();
+    framePreset(h);
   });
   if (spec.onSave)
     btn(t("nv.sc.saveFraming"), "save", t("nv.sc.saveFramingTitle"), () => {
@@ -27889,6 +27927,272 @@ const narrativeSceneFactory: SceneFactory = (stage, spec) => {
   sweepNarrativeScenes();
 };
 setSceneFactory(narrativeSceneFactory);
+
+// ── MICRO-SEG24 · the figures an epoch or an activity carries with it ───────
+
+/** The file the story is in, for the automatic captions («Extended Matrix ·
+ *  <file>»); null when the graph was never saved to one. */
+function storyFileName(): string | null {
+  const f = emtree.fileOf(emtree.active());
+  return f?.name ?? (currentFilePath ? baseName(currentFilePath) : null);
+}
+
+/** A plan: from above, orthographic, framed. A three-quarter view: from the
+ *  front-right and above (azimuth 45°, elevation 30°), in perspective, framed.
+ *  Shared by the page's scenes and the offscreen render (`em.app.space.render`). */
+function applyFigureView(h: SpaceSceneHandle, kind: string | undefined): void {
+  if (kind === "plan") {
+    h.setView("top");
+    if (!h.view().ortho) h.toggleOrtho();
+    h.frame();
+    return;
+  }
+  if (h.view().ortho) h.toggleOrtho();
+  h.frame();
+  if (kind !== "three_quarter") return;
+  const cam = h.camera();
+  if (!cam) return;
+  const d = Math.hypot(cam.pos[0] - cam.target[0], cam.pos[1] - cam.target[1], cam.pos[2] - cam.target[2]) || 1;
+  const el = Math.PI / 6, az = Math.PI / 4;
+  // three's axes (Y up): +X and +Z are Blender's +X and −Y — the front-right
+  const dir: [number, number, number] = [Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)];
+  h.setCamera({ target: cam.target, pos: [cam.target[0] + dir[0] * d, cam.target[1] + dir[1] * d, cam.target[2] + dir[2] * d] });
+}
+
+/**
+ * MICRO-SEG24 D · a 3D view of an epoch or an activity drawn OFF SCREEN: the
+ * Space's scene with only what is pertinent (`narrativeSceneItems`: the
+ * models and proxies of that epoch, the epoch set), framed as the kind asks
+ * (`model` free, `plan`, `three_quarter`), read back as a PNG. What the
+ * exports use for a 3D figure with no still of its own, and what
+ * `em.app.space.render` gives a script. Null when nothing could be drawn (no
+ * 3D engine, nothing in the scene, the files not reachable): the caller keeps
+ * its placeholder.
+ */
+async function renderFigureStill(node: EmNode, kind: string, w = 1280, h = 800,
+                                 waitMs = 20000): Promise<{ image: string; width: number; height: number } | null> {
+  const items = narrativeSceneItems(node);
+  if (!items.length) return null;
+  if (!bridgeBaseNow && currentFilePath) { try { bridgeBaseNow = await bridgeUrl(); } catch { /* offline */ } }
+  const host = document.createElement("div");
+  host.className = "nv-scene-host scn-host nv-offscreen";
+  // in the viewport but unseen: the scene starts its engine only when its host
+  // is visible (`onFirstVisible`), and a host far off screen never is
+  host.style.cssText = `position:fixed;left:0;top:0;width:${w}px;height:${h}px;opacity:0;pointer-events:none;z-index:-1;`;
+  document.body.appendChild(host);
+  let measured = false;
+  let handle: SpaceSceneHandle | null = null;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  try {
+    handle = mountSpaceScene(host, { ...narrativeSceneOptions(() => false), onMeasured: () => { measured = true; } });
+    handle.update(items);
+    // a model says when it has come (`onMeasured`); proxies alone are drawn
+    // from the graph, with no file to wait for
+    const files = items.some((i) => i.kind === "rm");
+    const t0 = Date.now();
+    while (!measured && Date.now() - t0 < (files ? waitMs : 3000)) await sleep(200);
+    await sleep(files ? 1500 : 300);       // the rest of the files, a moment
+    applyFigureView(handle, kind);
+    await sleep(450);                       // an aligned view's passage
+    const canvas = host.querySelector<HTMLCanvasElement>("canvas.scn-canvas") ?? host.querySelector("canvas");
+    if (!canvas) return null;
+    return await new Promise((resolve) => requestAnimationFrame(() => {
+      try {
+        const c2 = document.createElement("canvas");
+        c2.width = canvas.width; c2.height = canvas.height;
+        const g = c2.getContext("2d")!;
+        g.fillStyle = "#ffffff";
+        g.fillRect(0, 0, c2.width, c2.height);
+        g.drawImage(canvas, 0, 0);
+        const px = g.getImageData(0, 0, c2.width, c2.height).data;
+        let ink = 0;
+        for (let i = 0; i < px.length; i += 4 * 97) if (px[i] < 250 || px[i + 1] < 250 || px[i + 2] < 250) ink++;
+        resolve(ink > 20 ? { image: c2.toDataURL("image/png"), width: c2.width, height: c2.height } : null);
+      } catch { resolve(null); }
+    }));
+  } catch {
+    return null;
+  } finally {
+    try { handle?.dispose(); } catch { /* already gone */ }
+    host.remove();
+  }
+}
+
+/** The Matrix of an epoch (its band, as the canvas lanes it) or of an activity
+ *  (its units and what is directly related to them), in EMStudio's layout. */
+function matrixSliceFor(scene: Scene, node: EmNode): Scene | null {
+  if (node.node_type === "EpochNode" || node.node_type === "epoch") return epochSliceOf(scene, node.id);
+  const own = new Set(scopeOf(node, store?.doc ?? null).units.map((u) => u.id));
+  if (!own.size) return null;
+  const keep = new Set(own);
+  for (const e of scene.edges) {
+    if (own.has(e.source)) keep.add(e.target);
+    if (own.has(e.target)) keep.add(e.source);
+  }
+  const nodes = scene.nodes.filter((n) => keep.has(n.id));
+  if (!nodes.length) return null;
+  const top = Math.min(...nodes.map((n) => n.y)), bottom = Math.max(...nodes.map((n) => n.y + n.h));
+  return { ...scene, nodes, byId: new Map(nodes.map((n) => [n.id, n])),
+    edges: scene.edges.filter((e) => keep.has(e.source) && keep.has(e.target)),
+    lanes: scene.lanes.filter((l) => l.y < bottom && l.y + l.height > top) };
+}
+
+/** The Matrix figure as an SVG string, null when the canvas has not laid out. */
+function matrixFigureSvg(node: EmNode): string | null {
+  const matrix = scenes.matrix;
+  if (!matrix) return null;
+  const slice = matrixSliceFor(matrix, node);
+  return slice ? sceneToSvg(slice, edgeVisible, String(node.name ?? node.id)) : null;
+}
+
+setMatrixFigureFactory((host, node) => {
+  const svg = matrixFigureSvg(node);
+  if (!svg) return false;
+  host.innerHTML = svg;
+  const s = host.querySelector("svg");
+  if (s) { s.removeAttribute("width"); s.removeAttribute("height"); s.setAttribute("preserveAspectRatio", "xMidYMid meet"); }
+  return true;
+});
+
+/** «＋ Figure»: for each epoch and activity the part narrates, the figures it
+ *  carries — a refused one greyed with why. A pick inserts it at the end of
+ *  the part's own words (one undo step) and selects it. */
+function openFigureMenu(narrativeId: string, c: number, b: number | null, anchorEl: HTMLElement): void {
+  hideContextMenu();
+  if (!store) return;
+  const st = store;
+  const chapters = chaptersOfNarrative(narrativeId);
+  const ids = nedit.partAnchors(chapters, c, b).filter((id) => {
+    const tp = st.node(id)?.node_type;
+    return tp === "EpochNode" || tp === "epoch" || tp === "ActivityNodeGroup";
+  });
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu nv-ctx nv-fig-menu";
+  const r = anchorEl.getBoundingClientRect();
+  menu.style.left = Math.min(r.left, innerWidth - 260) + "px";
+  menu.style.top = r.bottom + 4 + "px";
+  const head = document.createElement("div");
+  head.className = "ctx-header";
+  head.textContent = t("nv.fig.menuTitle");
+  menu.appendChild(head);
+  if (!ids.length) {
+    const none = document.createElement("div");
+    none.className = "ctx-note";
+    none.textContent = t("nv.fig.nothing");
+    menu.appendChild(none);
+  }
+  for (const id of ids) {
+    const node = st.node(id)!;
+    const sub = document.createElement("div");
+    sub.className = "ctx-header nv-fig-of";
+    const dates = datesOf(node, st.doc);
+    sub.textContent = `${String(node.name ?? id)}${dates ? ` · ${dates}` : ""}`;
+    menu.appendChild(sub);
+    for (const ch of figureChoices(node, st.doc)) {
+      const btn = document.createElement("button");
+      btn.textContent = t(`nv.fig.kind.${ch.kind}`);
+      btn.dataset.nvFig = `${id}|${ch.kind}`;
+      btn.disabled = !!ch.why;
+      btn.title = ch.why ?? t(`nv.fig.what.${ch.kind}`);
+      btn.onclick = () => {
+        hideContextMenu();
+        const at = nedit.insertFigure(st, narrativeId, c, b, id, ch.kind);
+        if (!at) return;
+        setNarrativeSelection(narrativeId, { chapter: at.chapter, block: at.block });
+        refreshNarrativeView();
+        logInfo(t("nv.fig.inserted", { what: t(`nv.fig.cap.${ch.kind}`, { name: String(node.name ?? id) }), ref: `[[${FIGURE_REF_PREFIX}${at.label}]]` }), [narrativeId]);
+      };
+      menu.appendChild(btn);
+    }
+  }
+  document.body.appendChild(menu);
+  ctxMenuEl = ctxFloating(keepOnScreen(menu));
+}
+
+/** The figures of a story, for the `[[` menu: «Fig. 8.1 — Plan of II A.D.». */
+function figureMentionEntries(narrativeId: string | null | undefined, pick: (id: string) => void): AddMenuEntry[] {
+  if (!store || !narrativeId) return [];
+  const st = store;
+  const nr = narrativesIn(st.doc).find((n) => n.id === narrativeId);
+  if (!nr) return [];
+  return figureEntries(nr.chapters as never, nr.numbered, (id) => !!st.node(id)).map((f) => {
+    const node = st.node(f.ref);
+    const what = node ? t(`nv.fig.cap.${f.kind}`, { name: String(node.name ?? f.ref) }) : f.ref;
+    return { key: `f|${f.label}`, label: `${t("nv.fig.short")} ${f.number} — ${what}`, detail: t("nv.fig.refDetail"),
+      description: what, alias: `${f.number} ${what}`, run: () => pick(`${FIGURE_REF_PREFIX}${f.label}`) };
+  });
+}
+
+/** The export's copy: a figure of an epoch or an activity with no caption of
+ *  its own gets the one written for it (the story keeps none: the next export
+ *  writes it again, with the names of that day). */
+function withFigureCaptions(docJson: EmDocument, narrativeId: string): EmDocument {
+  const nar = docJson.graph.nodes.find((n) => n.id === narrativeId);
+  const data = (nar?.data ?? {}) as Record<string, unknown>;
+  if (!nar || !Array.isArray(data.chapters)) return docJson;
+  const file = storyFileName();
+  const byId = new Map(docJson.graph.nodes.map((n) => [n.id, n]));
+  const chapters = (data.chapters as nedit.EditableChapter[]).map((c) => ({ ...c, blocks: (c.blocks ?? []).map((b) => {
+    const f = figureOf(b as never);
+    const node = b.ref ? byId.get(b.ref) : undefined;
+    if (!f || !node || String((b.options ?? {})["caption"] ?? "").trim()) return b;
+    return { ...b, options: { ...(b.options ?? {}), caption: autoCaption(f.kind, node, docJson, file) } };
+  }) }));
+  nar.data = { ...data, chapters };
+  return docJson;
+}
+
+/** MICRO-SEG24 C · «Coherence with the Matrix», under the Coverage of the
+ *  Index: quiet notices, each with its «Put it right» (never applied alone). */
+function renderCoherenceInto(host: HTMLElement, narrativeId: string): void {
+  if (!store) return;
+  const st = store;
+  const data = (st.node(narrativeId)?.data ?? {}) as Record<string, unknown>;
+  const issues = coherenceIssues(st.doc, data);
+  const box = document.createElement("div");
+  box.className = "nidx-coh";
+  box.dataset.coherence = String(issues.length);
+  if (!issues.length) {
+    const ok = document.createElement("div");
+    ok.className = "nidx-coh-ok";
+    ok.textContent = `✓ ${t("nv.coh.none")}`;
+    box.appendChild(ok);
+  }
+  for (const is of issues) {
+    const row = document.createElement("div");
+    row.className = `nidx-coh-row nidx-coh-${is.kind}`;
+    row.dataset.coh = is.key;
+    const txt = document.createElement("button");
+    txt.type = "button";
+    txt.className = "nidx-coh-text";
+    txt.textContent = is.text;
+    txt.title = t("nv.coh.goTo");
+    txt.addEventListener("click", () => {
+      if (is.kind === "unrecorded") return;
+      setNarrativeSelection(narrativeId, { chapter: is.chapter, block: is.block });
+      const sel = is.block === null ? `.nv-chapter[data-chapter="${is.chapter}"]` : `.nv-block-row[data-block="${is.chapter}:${is.block}"]`;
+      activeNarrativeHost()?.querySelector<HTMLElement>(sel)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    row.appendChild(txt);
+    if (is.fix) {
+      const fix = document.createElement("button");
+      fix.type = "button";
+      fix.className = "nv-mini nidx-coh-fix";
+      fix.dataset.cohFix = is.fix.kind;
+      fix.textContent = is.fix.label;
+      fix.title = t("nv.coh.fixTitle");
+      fix.addEventListener("click", () => {
+        if (nedit.applyCoherence(st, narrativeId, is)) {
+          logInfo(t("nv.coh.fixed", { what: is.fix!.label }), [narrativeId]);
+          refreshNarrativeView();
+        }
+      });
+      row.appendChild(fix);
+    }
+    box.appendChild(row);
+  }
+  host.appendChild(box);
+}
 
 setDocumentContent((host, spec) => {
   const st = store;
@@ -28061,7 +28365,7 @@ function citeSectionFor(host: HTMLElement): void {
 }
 
 /** «[[» in a paragraph: the link menu over the graph's nodes; the pick is a mention. */
-function openMentionMenu(anchor: HTMLElement, pick: (id: string) => void, dismiss: () => void): void {
+function openMentionMenu(anchor: HTMLElement, pick: (id: string) => void, dismiss: () => void, narrativeId?: string | null): void {
   if (!store) return;
   const r = anchor.getBoundingClientRect();
   const nodes = store.liveNodes().filter((n) => LINK_GROUP_ORDER.includes(linkGroupOf(n.node_type) as never));
@@ -28071,16 +28375,18 @@ function openMentionMenu(anchor: HTMLElement, pick: (id: string) => void, dismis
     icon: () => typeIconElement(n.node_type), run: () => pick(n.id),
   });
   const flat = nodes.map(entryOf);
+  // MICRO-SEG24 · the story's figures first: `[[fig:<label>]]`, «Fig. 8.1»
+  const figs = figureMentionEntries(narrativeId, pick);
   showAddMenu({
     title: t("nv.mention"), context: t("nv.mentionCtx"), placeholder: t("link.q"),
     linked: [], recent: [], categories: [],
     existing: {
       header: t("nv.mentionHeader"),
-      groups: LINK_GROUP_ORDER.map((g) => ({ label: t(`link.g.${g}`),
-        entries: flat.filter((_, i) => linkGroupOf(nodes[i].node_type) === g) })),
+      groups: [...(figs.length ? [{ label: t("nv.fig.group"), entries: figs }] : []), ...LINK_GROUP_ORDER.map((g) => ({ label: t(`link.g.${g}`),
+        entries: flat.filter((_, i) => linkGroupOf(nodes[i].node_type) === g) }))],
       perGroup: EXISTING_PER_GROUP, more: (n) => t("link.more", { n }), none: t("link.none"),
     },
-    extra: [], searchable: flat, matches: (e, q) => existingMatches(e, q), onDismiss: dismiss,
+    extra: [], searchable: [...figs, ...flat], matches: (e, q) => existingMatches(e, q), onDismiss: dismiss,
     count: t("link.count", { n: flat.length }), noResults: t("add.noResults"), keysHint: t("add.keys"),
   }, r.left, r.bottom + 4);
 }
@@ -28139,7 +28445,7 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
       selection: nvSel && nvFocus && current && nvSel.narrativeId === current.id
         ? { chapter: nvSel.chapter, block: nvSel.block } : null,
       onSelectPart: (sel) => { if (current) setNarrativeSelection(current.id, sel); },
-      onMention: (anchor, pick, cancel) => openMentionMenu(anchor, pick, cancel),
+      onMention: (anchor, pick, cancel) => openMentionMenu(anchor, pick, cancel, current?.id),
       onVerify: (c, b) => { if (current) verifyBlock(current.id, c, b); },
       onInsert: (c, at, anchor, replace) => { if (current) openBlocksMenu(current.id, c, at, anchor, !!replace); },
       onFileDrop: (c, f, x, y) => { if (current) dropFileOnChapter(current.id, c, f, x, y); },
@@ -28156,6 +28462,9 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
       // MICRO-SEG23 · the chips of what a part narrates
       laneName: (id) => laneNameOf(id),
       onFrameLane: (id) => frameLane(id),
+      // MICRO-SEG24 · the figures an epoch or an activity carries
+      onFigureMenu: (c, b, anchor) => { if (current) openFigureMenu(current.id, c, b, anchor); },
+      figureFile: storyFileName(),
       onScaffold: () => {
         if (!store) return;
         const nid = scaffoldNarrativeFromGraph(store);   // one batch: one undo step
@@ -28229,6 +28538,17 @@ function openNarrativeContextMenu(narrativeId: string, c: number, b: number | nu
     item(t("nv.ctx.mention"), "mention", () => mentionAt(narrativeId, c, b + 1, anchor()));
     sep();
     item(t("nv.ctx.chapterHere"), "chapter-here", () => newChapterHere(narrativeId, c, b), b === 0 ? t("nv.ctx.chapterHereFirst") : undefined);
+  }
+  // MICRO-SEG24 · a part that narrates an epoch or an activity: its figures
+  {
+    const narrated = nedit.partAnchors(chaptersOfNarrative(narrativeId), c, b).some((id) => {
+      const tp = st.node(id)?.node_type;
+      return tp === "EpochNode" || tp === "epoch" || tp === "ActivityNodeGroup";
+    });
+    if (narrated) {
+      sep();
+      item(`${t("nv.fig.insert")}…`, "figure", () => openFigureMenu(narrativeId, c, b, anchor()));
+    }
   }
   // MICRO-SEG22 · «Transform into…»: the four kinds, the shortcut beside each;
   // a refused one says why. Not on an embed (it has no words to be a title).
@@ -39127,6 +39447,7 @@ function renderInspectorChronology(host: HTMLElement): void {
 
 /** p.9 · the Index's coverage section, open or closed (closed by default) */
 let nidxCoverageOpen = false;
+let nidxCoherenceOpen = false;
 
 // ── MICRO-SEG23 · «Narrates»: a tree in order of time, with ticks ────────────
 
@@ -39331,6 +39652,13 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
     laneLabel: (id) => (s ? narrativeLanes(s.doc).find((l) => l.id === id)?.long : undefined) ?? id,
     coverageOpen: nidxCoverageOpen,
     onCoverageToggle: (open) => { nidxCoverageOpen = open; },
+    // MICRO-SEG24 C · coherence with the Matrix
+    ...(s && narrId ? {
+      coherenceCount: () => coherenceIssues(s.doc, (s.node(narrId)?.data ?? {}) as Record<string, unknown>).length,
+      coherence: (h: HTMLElement) => renderCoherenceInto(h, narrId),
+      coherenceOpen: nidxCoherenceOpen,
+      onCoherenceToggle: (open: boolean) => { nidxCoherenceOpen = open; },
+    } : {}),
   });
   scroller.scrollTop = keptTop;
   body.scrollTop = keptOwn;
@@ -68157,6 +68485,26 @@ async function scriptAppOp(op: string, args: Record<string, unknown>): Promise<u
       if (e.off) throw new Error(e.off);
       if (!setSpaceTool(w, id)) throw new Error(t("py.noTool", { tool: ref, known: entries.map((x) => x.id).join(", ") }));
       return id;
+    }
+    // MICRO-SEG24 D · a view of an epoch or an activity rendered OFF SCREEN,
+    // filtered to what is pertinent: the Space's 3D (model, plan, three-quarter)
+    // and the Matrix's slice — what the Narrative's figures use, for scripts too
+    case "space.render": {
+      const id = scriptNode(args.scope, "scope");
+      const view = String(args.view ?? "model");
+      if (!["model", "plan", "three_quarter"].includes(view))
+        throw new Error(t("py.paramChoice", { id: "space.render", name: "view", type: "enum", choices: "model, plan, three_quarter" }));
+      const w = Math.max(64, Math.min(4096, Number(args.width ?? 1280) || 1280));
+      const h = Math.max(64, Math.min(4096, Number(args.height ?? 800) || 800));
+      const got = await renderFigureStill(store!.node(id)!, view, w, h, Number(args.timeout_ms ?? 20000) || 20000);
+      if (!got) throw new Error(t("py.renderNothing", { ref: String(store?.node(id)?.name ?? id) }));
+      return got;
+    }
+    case "matrix.render": {
+      const id = scriptNode(args.scope, "scope");
+      const svg = matrixFigureSvg(store!.node(id)!);
+      if (!svg) throw new Error(t("py.matrixNothing", { ref: String(store?.node(id)?.name ?? id) }));
+      return { svg };
     }
     case "workspaces.list":
       return WORKSPACES.map((w) => ({ id: w.id, label: workspaceLabel(w, t), builtin: !!w.builtin, active: w.id === activeWorkspace() }));

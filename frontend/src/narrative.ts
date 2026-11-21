@@ -27,6 +27,7 @@ import { blockStatus, bylineOf, narrativeAuthors } from "./narrative-authorship"
 import type { AuthorRef, BlockStatus } from "./narrative-authorship";
 import { canonicalViewType } from "./narrative-edit";
 import { anchorsOf } from "./narrative-lanes";
+import { autoCaption, FIGURE_REF_PREFIX, figureLabels, figureNumbers, figureOf, isFigureRef, subEpochsEmbed } from "./narrative-figures";
 import { kindOfDigit, numberingOn, outlineNumbers, type HeadingHint, type PartKind } from "./narrative-outline";
 import { chainCard, isChainNode } from "./hdto-card";
 import { mentionsIn, notebookCells, printItems, scene3dRefKind, type ProjChapter, type SceneRefKind } from "./narrative-projection";
@@ -251,6 +252,33 @@ let documentContent: DocumentContentFactory | null = null;
 let sceneFactory: SceneFactory | null = null;
 export function setDocumentContent(fn: DocumentContentFactory | null): void { documentContent = fn; }
 export function setSceneFactory(fn: SceneFactory | null): void { sceneFactory = fn; }
+/** MICRO-SEG24 · the Matrix of an epoch or an activity in EMStudio's own
+ *  layout (the canvas's slice, as an SVG): the editor's; absent → the chips */
+export type MatrixFigureFactory = (host: HTMLElement, node: EmNode) => boolean;
+let matrixFigure: MatrixFigureFactory | null = null;
+export function setMatrixFigureFactory(fn: MatrixFigureFactory | null): void { matrixFigure = fn; }
+
+/** MICRO-SEG24 · the figures of the story being drawn: their numbers (by
+ *  block), the labels `[[fig:…]]` refers to, the file for automatic captions. */
+let docOfPrint: EmDocument | null = null;
+const figureCtx = { numbers: new Map<string, string>(), labels: new Map<string, string>(), file: null as string | null };
+function setFigureCtx(chapters: NarrativeChapter[], numbered: boolean, index: Map<string, EmNode>, file: string | null): void {
+  const resolves = (id: string) => index.has(id);
+  figureCtx.numbers = figureNumbers(chapters as never, numbered, resolves);
+  figureCtx.labels = figureLabels(chapters as never, numbered, resolves);
+  figureCtx.file = file;
+}
+
+/** MICRO-SEG24 · a figure's caption: the author's, else (a figure of an epoch
+ *  or an activity) the one written for them, else none. */
+export function figureCaption(block: { ref?: string; options?: Record<string, unknown> }, node: EmNode | undefined,
+                              doc: EmDocument | null, file: string | null): { text: string; auto: boolean } {
+  const own = String((block.options ?? {})["caption"] ?? "").trim();
+  if (own) return { text: own, auto: false };
+  const f = figureOf(block as never);
+  if (f && node) return { text: autoCaption(f.kind, node, doc, file), auto: true };
+  return { text: "", auto: false };
+}
 
 /** p.19 · DOCUMENT shows the thing, whatever it is on: an image (IIIF or the
  *  file), a PDF (the page chosen, turned in Leggi), a text, a 3D model (the
@@ -643,7 +671,7 @@ export function citedContext(blocks: NarrativeBlock[], at: number): TableContext
  *  container, a document that publishes models. */
 function isSceneScope(node: EmNode): boolean {
   const k = scene3dRefKind(node);
-  return k === "graph" || k === "epoch" || k === "group" || k === "document";
+  return k === "graph" || k === "epoch" || k === "group" || k === "document" || k === "activity";
 }
 
 /** p.12 · the 3D scene of a scope: what it shows (from the graph, now), the
@@ -713,7 +741,19 @@ function renderEmbed(
   } else if (viewType === "us") {
     box = usCard(node, doc);
   } else if (viewType === "matrix") {
+    // MICRO-SEG24 · a figure's Matrix is the canvas's own slice, when the
+    // editor can draw it; else (and in the reader) the chips
     box = matrixEmbed(node, doc);
+    if (figureOf(block as never) && matrixFigure) {
+      const stage = el("div", "nv-matrix-fig");
+      if (matrixFigure(stage, node)) {
+        box.querySelectorAll(".nv-matrix-lanes").forEach((x) => x.remove());
+        box.classList.add("nv-matrix-layout");
+        box.appendChild(stage);
+      }
+    }
+  } else if (viewType === "timeline" && figureOf(block as never)?.kind === "sub_epochs") {
+    box = subEpochsEmbed(node, doc);
   } else if (viewType === "timeline") {
     box = timelineEmbed(node, doc);
   } else if (viewType === "table") {
@@ -1044,6 +1084,11 @@ export interface PageHooks {
   /** MICRO-SEG23 · a chip of what a part narrates clicked: the Matrix frames
    *  that epoch, horizon or activity */
   onFrameLane?(id: string): void;
+  /** MICRO-SEG24 · «＋ Figure» beside the chips: the figures the part's
+   *  epochs and activities carry (`block` null: the chapter) */
+  onFigureMenu?(chapter: number, block: number | null, anchor: HTMLElement): void;
+  /** MICRO-SEG24 · the file the story is in, for the automatic captions */
+  figureFile?: string | null;
 }
 
 /**
@@ -1053,7 +1098,8 @@ export interface PageHooks {
  * more than before.
  */
 function laneChips(ids: string[], index: Map<string, EmNode>, page: PageHooks,
-                   onReveal: ((id: string) => void) | undefined): HTMLElement {
+                   onReveal: ((id: string) => void) | undefined,
+                   where?: { chapter: number; block: number | null }): HTMLElement {
   const row = el("div", "nv-lanes");
   for (const id of ids) {
     const node = index.get(id);
@@ -1067,6 +1113,18 @@ function laneChips(ids: string[], index: Map<string, EmNode>, page: PageHooks,
     chip.disabled = !name || !go;
     chip.addEventListener("click", (e) => { e.stopPropagation(); if (name) go?.(id); });
     row.appendChild(chip);
+  }
+  // MICRO-SEG24 · what the part's epochs and activities carry: a figure
+  if (where && page.onFigureMenu && ids.some((id) => {
+    const tp = index.get(id)?.node_type;
+    return tp === "EpochNode" || tp === "epoch" || tp === "ActivityNodeGroup";
+  })) {
+    const add = el("button", "nv-mini nv-fig-add", `＋ ${t("nv.fig.insert")}`) as HTMLButtonElement;
+    add.type = "button";
+    add.dataset.nvFigure = where.block === null ? `${where.chapter}` : `${where.chapter}:${where.block}`;
+    add.title = t("nv.fig.insertTitle");
+    add.addEventListener("click", (e) => { e.stopPropagation(); page.onFigureMenu!(where.chapter, where.block, add); });
+    row.appendChild(add);
   }
   return row;
 }
@@ -1161,6 +1219,16 @@ function queryEmbed(result: QueryResult, here: string,
 /** A mention in the page: the node's NAME, clickable, never editable as text. */
 function mentionChip(ref: string, index: Map<string, EmNode>, editable: boolean,
                      onReveal?: (id: string) => void): HTMLElement {
+  if (isFigureRef(ref)) {
+    // MICRO-SEG24 · a reference to a figure of the story: its number, now
+    const number = figureCtx.labels.get(ref.slice(FIGURE_REF_PREFIX.length).trim());
+    const chip = el("span", "nv-mention nv-figref" + (number ? "" : " nv-mention-miss"),
+      number ? `${t("nv.fig.short")} ${number}` : `${t("nv.fig.short")} ?`);
+    chip.dataset.ref = ref;
+    chip.title = number ? t("nv.fig.refTitle", { n: number }) : t("nv.fig.refMissing");
+    if (editable) chip.setAttribute("contenteditable", "false");
+    return chip;
+  }
   const node = index.get(ref);
   const chip = el("span", "nv-mention" + (node ? "" : " nv-mention-miss"),
     node ? String(node.name || node.id) : `${ref} ?`);
@@ -1293,6 +1361,7 @@ export function renderNarrativeView(
     container.appendChild(bar);
   }
   const index = new Map((doc?.graph?.nodes ?? []).map((n) => [n.id, n]));
+  setFigureCtx(current.chapters, current.numbered, index, page.figureFile ?? null);
 
   // ── STAMPA · NOTEBOOK — the page as the exporters will write it ──────────
   // NARRATIVA-BLOCCHI p.2 · a query block is printed as the text of its
@@ -1301,6 +1370,7 @@ export function renderNarrativeView(
     ? { ...current, chapters: bakeQueries(current.chapters, queryInputFor(doc, current.chapters), new Date()) }
     : current;
   if (reading === "print") {
+    docOfPrint = doc;
     renderPrintPreview(container, baked(), index, page);
     return;
   }
@@ -1602,7 +1672,7 @@ export function renderNarrativeView(
     }
     section.appendChild(h);
     if (writing && anchorsOf(chapter as never).length)
-      section.appendChild(laneChips(anchorsOf(chapter as never), index, page, onReveal));
+      section.appendChild(laneChips(anchorsOf(chapter as never), index, page, onReveal, { chapter: ci, block: null }));
     // RIFINITURE · in Leggi a click on the chapter (not on a link, a button, an
     // embed that goes to its node) opens the chapter's Inspector, as the head does
     if (!writing && page.onSelectPart)
@@ -1626,7 +1696,7 @@ export function renderNarrativeView(
         const lanes = writing ? anchorsOf(block as never) : [];
         if (lanes.length) {
           const wrap = el("div", "nv-heading-wrap");
-          wrap.append(body, laneChips(lanes, index, page, onReveal));
+          wrap.append(body, laneChips(lanes, index, page, onReveal, { chapter: ci, block: bi }));
           body = wrap;
         }
       } else if (block.block_type === "prose") {
@@ -1647,6 +1717,17 @@ export function renderNarrativeView(
           writing && editor!.setBlockOptions
             ? (patch) => editor!.setBlockOptions!(ci, bi, patch) : undefined,
           citedContext(blocks, bi));
+        // MICRO-SEG24 · a figure says its number, and its caption
+        const number = figureCtx.numbers.get(`${ci}:${bi}`);
+        if (number) {
+          const cap = figureCaption(block, index.get(block.ref ?? ""), doc, figureCtx.file);
+          const fc = el("div", "nv-figcap" + (cap.auto ? " nv-figcap-auto" : ""));
+          fc.dataset.figure = number;
+          fc.appendChild(el("b", undefined, `${t("nv.fig.short")} ${number}`));
+          if (cap.text) fc.appendChild(document.createTextNode(` — ${cap.text}`));
+          if (cap.auto) fc.title = t("nv.fig.capAuto");
+          body.appendChild(fc);
+        }
       }
       // (AUDIT C · the VIEW-TYPE drop on an embed went: nothing has dragged a
       // view type since the palette was removed; «mostrato come» is the
@@ -1933,7 +2014,7 @@ function renderPrintPreview(container: HTMLElement, nr: Narrative, index: Map<st
   sheet.title = t("nv.previewComputed");
   sheet.appendChild(el("h1", "nv-title", nr.name));
   if (nr.description) sheet.appendChild(el("p", "nv-lede", nr.description));
-  const { items, bibliography } = printItems(nr.chapters as ProjChapter[], index);
+  const { items, bibliography } = printItems(nr.chapters as ProjChapter[], index, { numbered: nr.numbered });
   // MICRO-SEG22 · chapter, section, subsection at their levels, numbered as
   // the exporters number them (or not, `numbering: false`)
   const lead = (num: string): string => (nr.numbered && num ? `${num} ` : "");
@@ -1972,7 +2053,15 @@ function renderPrintPreview(container: HTMLElement, nr: Narrative, index: Map<st
       f.appendChild(el("div", "nv-print-ph", it.baked ? t("nv.bakedAtExport") : it.viewType));
       const cap = el("figcaption");
       cap.appendChild(el("b", undefined, `${t("nv.figure")} ${it.number}`));
-      cap.appendChild(document.createTextNode(` — ${it.name}${it.caption ? ` — ${it.caption}` : ""}`));
+      // MICRO-SEG24 · a figure of an epoch or an activity: its caption whole
+      // (the author's, else the one written for them)
+      const blk = nr.chapters[it.chapter]?.blocks?.[it.block];
+      if (blk && figureOf(blk as never)) {
+        const fcap = figureCaption(blk, index.get(it.ref), docOfPrint, figureCtx.file);
+        cap.appendChild(document.createTextNode(` — ${fcap.text}`));
+        f.dataset.figure = it.number;
+      } else
+        cap.appendChild(document.createTextNode(` — ${it.name}${it.caption ? ` — ${it.caption}` : ""}`));
       f.appendChild(cap);
       sheet.appendChild(f);
     } else {

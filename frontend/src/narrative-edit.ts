@@ -18,6 +18,8 @@ import { narrativeViewTypes } from "./rules";
 import type { EmNode } from "./types";
 import { t } from "./i18n";
 import { anchorsOf, setAnchorsOn } from "./narrative-lanes";
+import { applyCoherenceFix, recordSeen, type CoherenceIssue } from "./narrative-coherence";
+import { FIGURE_VIEW, figureBlock, figureInsertAt, figureOf, figureSig, newFigureLabel, type FigureKind } from "./narrative-figures";
 import { headingSpan } from "./narrative-outline";
 
 export interface EditableBlock {
@@ -110,14 +112,56 @@ export function editChapters(
   store: DocumentStore,
   narrativeId: string,
   mutate: (chapters: EditableChapter[]) => void,
+  /** MICRO-SEG24 · and the narrative's other data (what it saw of the graph),
+   *  in the same edit: still one undo step */
+  mutateData?: (data: Record<string, unknown>, chapters: EditableChapter[]) => void,
 ): void {
   const node = store.node(narrativeId);
   if (!node) return;
   const chapters = chaptersOf(node);
   mutate(chapters);
   const data = { ...((node.data ?? {}) as Record<string, unknown>) };
+  mutateData?.(data, chapters);
   data.chapters = chapters;
   store.updateNode(narrativeId, { data });
+}
+
+/** MICRO-SEG24 · what the story saw of these ids today (`data.narrated_seen`),
+ *  for the notices of «Coherence with the Matrix». */
+const seeing = (store: DocumentStore, ids: () => string[]) =>
+  (data: Record<string, unknown>) => recordSeen(data, store.doc, ids());
+
+/**
+ * MICRO-SEG24 · a figure of an epoch or an activity, inserted from a part that
+ * narrates it (`block` null: the chapter) at the end of the part's own words
+ * (`figureInsertAt`). Its label is new in the story, its signature what it
+ * shows now. One undo step. Returns where it went.
+ */
+export function insertFigure(store: DocumentStore, narrativeId: string,
+                             chapter: number, block: number | null, ref: string,
+                             kind: FigureKind): { chapter: number; block: number; label: string } | null {
+  const node = store.node(ref);
+  if (!node) return null;
+  let at = -1, label = "";
+  editChapters(store, narrativeId, (cs) => {
+    const c = cs[chapter];
+    if (!c) return;
+    const blocks = (c.blocks ??= []);
+    at = figureInsertAt(blocks, block);
+    label = newFigureLabel(cs);
+    blocks.splice(at, 0, figureBlock(ref, kind, label, figureSig(node, store.doc, kind)) as EditableBlock);
+  }, seeing(store, () => [ref]));
+  return at < 0 ? null : { chapter, block: at, label };
+}
+
+/** MICRO-SEG24 C · a notice's «Put it right», in one edit. */
+export function applyCoherence(store: DocumentStore, narrativeId: string, issue: CoherenceIssue): boolean {
+  let done = false;
+  let chs: EditableChapter[] = [];
+  editChapters(store, narrativeId, (cs) => { chs = cs; }, (data) => {
+    done = applyCoherenceFix(chs, data, store.doc, issue);
+  });
+  return done;
 }
 
 // ── the story itself ─────────────────────────────────────────────────────────
@@ -175,16 +219,21 @@ export function setChapterAnchor(store: DocumentStore, narrativeId: string,
  */
 export function setPartAnchors(store: DocumentStore, narrativeId: string,
                                chapter: number, block: number | null, ids: string[]): void {
+  // only what starts being narrated is recorded: a notice about one already
+  // there (renamed, moved) stays until it is put right
+  let fresh: string[] = [];
   editChapters(store, narrativeId, (cs) => {
     const c = cs[chapter];
     if (!c) return;
+    const before = partAnchors(cs, chapter, block);
+    fresh = ids.filter((x) => !before.includes(x));
     if (block == null) { setAnchorsOn(c as unknown as Record<string, unknown>, ids); return; }
     const b = c.blocks?.[block];
     if (!b || b.block_type !== "heading") return;
     const opts = { ...(b.options ?? {}) };
     setAnchorsOn(opts, ids);
     if (Object.keys(opts).length) b.options = opts; else delete b.options;
-  });
+  }, seeing(store, () => fresh));
 }
 
 /** The ids a part narrates (a chapter, or a heading of it). */
@@ -228,7 +277,7 @@ export function narrateWithActivities(store: DocumentStore, narrativeId: string,
     blocks.splice(at, 0, ...activities.map((a): EditableBlock =>
       ({ block_type: "heading", text: a.name, level, options: { anchor: a.id } })));
     done = true;
-  });
+  }, seeing(store, () => [epochId, ...activities.map((a) => a.id)]));
   return done;
 }
 
@@ -423,7 +472,17 @@ export function setEmbedViewType(store: DocumentStore, narrativeId: string,
                                  viewType: string): void {
   editChapters(store, narrativeId, (cs) => {
     const b = cs[chapterIndex]?.blocks?.[blockIndex];
-    if (b && b.block_type === "embed") b.view_type = viewType;
+    if (b && b.block_type === "embed") {
+      b.view_type = viewType;
+      // MICRO-SEG24 · a figure shown another way is no longer that figure (a
+      // plan made a Matrix): it becomes an ordinary embed of the same subject
+      const f = figureOf(b);
+      if (f && FIGURE_VIEW[f.kind] !== viewType && b.options) {
+        const { figure: _gone, ...rest } = b.options;
+        void _gone;
+        if (Object.keys(rest).length) b.options = rest; else delete b.options;
+      }
+    }
   });
 }
 

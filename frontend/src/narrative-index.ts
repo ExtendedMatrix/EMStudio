@@ -54,6 +54,13 @@ export interface IndexHooks {
   onMoveSpan?(chapter: number, block: number, toChapter: number, toAt: number): void;
   /** p.9 · the coverage section open (remembered by the caller) */
   coverageOpen?: boolean;
+  /** MICRO-SEG24 C · «Coherence with the Matrix»: how many notices (the
+   *  summary says it), the section drawn by the caller into its host, open or
+   *  not (remembered by the caller) */
+  coherenceCount?(): number;
+  coherence?(host: HTMLElement): void;
+  coherenceOpen?: boolean;
+  onCoherenceToggle?(open: boolean): void;
   onCoverageToggle?(open: boolean): void;
 }
 
@@ -339,6 +346,27 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
     det.addEventListener("toggle", () => {
       hooks.onCoverageToggle?.(det.open);
       if (det.open && !body.childElementCount) hooks.coverage!(body);
+    });
+    root.appendChild(det);
+  }
+  // MICRO-SEG24 C · the story against the Matrix as it is now: a section of
+  // its own, closed, its summary saying quietly how many notices there are
+  if (hooks.coherence) {
+    const n = hooks.coherenceCount?.() ?? 0;
+    const det = document.createElement("details");
+    det.className = "nidx-cov nidx-coh-sect";
+    det.open = !!hooks.coherenceOpen;
+    const sum = el("summary", "nidx-cov-sum", n ? `${t("nv.coh.title")} · ${n}` : `${t("nv.coh.title")} ✓`);
+    sum.dataset.nidxact = "coherence";
+    sum.dataset.coherenceCount = String(n);
+    sum.title = t("nv.coh.titleTip");
+    det.appendChild(sum);
+    const body = el("div", "nidx-cov-body");
+    det.appendChild(body);
+    if (det.open) hooks.coherence(body);
+    det.addEventListener("toggle", () => {
+      hooks.onCoherenceToggle?.(det.open);
+      if (det.open && !body.childElementCount) hooks.coherence!(body);
     });
     root.appendChild(det);
   }

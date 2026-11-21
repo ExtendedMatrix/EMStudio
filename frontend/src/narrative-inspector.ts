@@ -30,6 +30,7 @@ import type { EmDocument, EmNode } from "./types";
 import { KIND_DIGIT, PART_KINDS, kindOfPart, outlineNumbers, type PartKind } from "./narrative-outline";
 import type { EditableChapter } from "./narrative-edit";
 import { renderLanePicker, type LanePickerHooks } from "./narrative-lane-picker";
+import { autoCaption, figureOf } from "./narrative-figures";
 
 export interface NarrInspectorHooks {
   doc: EmDocument;
@@ -85,6 +86,10 @@ export interface NarrInspectorHooks {
   onSetNumbering?(on: boolean): void;
   /** the modifier as drawn on this platform («⌘⌥» on a Mac, «Ctrl+Alt+» elsewhere) */
   modKeys?: string;
+  /** MICRO-SEG24 · the selected figure's number («8.1»), and the file named in
+   *  its automatic caption */
+  figureNumber?: string | null;
+  figureFile?: string | null;
 }
 
 /** MICRO-SEG22 · «Transform into…»: the four kinds side by side, the current
@@ -456,6 +461,15 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
       if (node.description) ref.append(el("span", "ninsp-dim", ` ${node.description}`));
     } else ref.append(el("span", "ninsp-tag warn", `${block.ref} · ${t("ninsp.unresolved")}`));
     field(s, "ref", ref);
+    // MICRO-SEG24 · a figure of an epoch or an activity: which, and its number
+    const fig = figureOf(block as never);
+    if (fig) {
+      const words = [h.figureNumber ? `${t("nv.fig.short")} ${h.figureNumber}` : "", t(`nv.fig.kind.${fig.kind}`)];
+      const fl = el("span", "ninsp-figure", words.filter(Boolean).join(" · "));
+      fl.dataset.nvset = "figure";
+      fl.title = t("nv.fig.liveTitle");
+      field(s, t("nv.fig.field"), fl);
+    }
     // MICRO-NARRATIVE-MODULI p.13 · «Shown as» says, beside each choice, what
     // it changes — a list of choices with a line each, not a bare select
     const vl = el("div", "ninsp-l ninsp-vt", t("ninsp.shownAs"));
@@ -484,7 +498,8 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
     ci.className = "insp-name-input";
     ci.dataset.nvset = "cap";
     ci.value = String((block.options ?? {})["caption"] ?? "");
-    ci.placeholder = node ? nameOf(node.id) : "";
+    ci.placeholder = node ? (fig ? autoCaption(fig.kind, node, h.doc, h.figureFile ?? null) : nameOf(node.id)) : "";
+    if (fig) ci.title = t("nv.fig.capAuto");
     ci.addEventListener("change", () => h.onSetCaption(ci.value));
     cl.appendChild(ci);
     s.appendChild(cl);

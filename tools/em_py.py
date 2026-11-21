@@ -734,6 +734,24 @@ class EMStudioSpace:
     def epoch(self, ref: Any) -> None:
         _ask_app(self._run, "space.set_epoch", epoch=str(getattr(ref, "id", None) or (ref.get("id") if isinstance(ref, dict) else ref)))
 
+    def render(self, scope: Any, view: str = "model", width: int = 1280,
+               height: int = 800, path: Optional[str] = None,
+               timeout_ms: int = 20000) -> bytes:
+        """MICRO-SEG24 · a picture of an epoch or an activity, drawn OFF SCREEN
+        with only what is pertinent to it (its models and proxies, the epoch
+        set): ``view`` ``"model"`` (free), ``"plan"`` (from above, orthographic)
+        or ``"three_quarter"``. Returns the PNG's bytes, and writes them to
+        ``path`` when given — the same picture the Narrative's figures print."""
+        import base64
+        ref = str(getattr(scope, "id", None) or (scope.get("id") if isinstance(scope, dict) else scope))
+        got = _ask_app(self._run, "space.render", scope=ref, view=str(view), width=int(width),
+                       height=int(height), timeout_ms=int(timeout_ms)) or {}
+        data = base64.b64decode(str(got.get("image", "")).split(",", 1)[-1])
+        if path:
+            with open(path, "wb") as fh:
+                fh.write(data)
+        return data
+
     @_asks
     def profile(self) -> Dict[str, Any]:
         """The hardware profile the Space loads for: ``{profile, chosen, read, why}``;
@@ -746,6 +764,27 @@ class EMStudioSpace:
 
     def __repr__(self) -> str:
         return "<em.app.space of emstudio>"
+
+
+class EMStudioMatrix:
+    """``em.app.matrix`` (MICRO-SEG24): the Matrix as EMStudio lays it out."""
+
+    def __init__(self, run: "Run"):
+        self._run = run
+
+    def render(self, scope: Any, path: Optional[str] = None) -> str:
+        """The Matrix of an epoch (its band) or of an activity (its units and
+        what is directly related to them), in EMStudio's layout, as an SVG
+        string; written to ``path`` when given."""
+        ref = str(getattr(scope, "id", None) or (scope.get("id") if isinstance(scope, dict) else scope))
+        svg = str((_ask_app(self._run, "matrix.render", scope=ref) or {}).get("svg", ""))
+        if path:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(svg)
+        return svg
+
+    def __repr__(self) -> str:
+        return "<em.app.matrix of emstudio>"
 
 
 class EMStudioWorkspaces:
@@ -819,6 +858,8 @@ class EMStudioApp:
         self._run = run
         #: MICRO-SEG02 p.3 · the Space, the workspaces, the windows as objects
         self.space = EMStudioSpace(run)
+        #: MICRO-SEG24 · the Matrix's slice of an epoch or an activity
+        self.matrix = EMStudioMatrix(run)
         self.workspaces = EMStudioWorkspaces(run)
         self.windows = EMStudioWindows(run)
 

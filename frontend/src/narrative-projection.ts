@@ -15,6 +15,7 @@
  */
 import { canonicalViewType, VIEW_TYPES } from "./narrative-edit";
 import { outlineNumbers } from "./narrative-outline";
+import { figureNumbers } from "./narrative-figures";
 import type { EmDocument, EmNode } from "./types";
 
 /** `latex_exporter.CITED_VIEW_TYPES`: a printed page CITES these. */
@@ -212,12 +213,14 @@ export function refsForViewType(viewType: string, doc: EmDocument | null,
 /** p.12 · what a 3D scene is PROPOSED on, in this order: the whole graph, the
  *  epochs, the containers, the documents that publish models. A single model
  *  is not proposed (`scene3dRefKind` = "model"): searching still finds it. */
-export type SceneRefKind = "graph" | "epoch" | "group" | "document" | "model";
+export type SceneRefKind = "graph" | "epoch" | "group" | "document" | "model" | "activity";
 export function scene3dRefKind(node: EmNode | undefined): SceneRefKind | null {
   const t = String(node?.node_type ?? "");
   if (t === "graph" || t === "GraphNode") return "graph";
   if (EPOCH_TYPES.includes(t)) return "epoch";
   if (t === RM_GROUP_TYPE) return "group";
+  // MICRO-SEG24 · an activity's scene: the proxies of its units, its models
+  if (t === "ActivityNodeGroup") return "activity";
   if (t === "document") return "document";
   if (t.startsWith("representation_model")) return "model";
   return null;
@@ -247,7 +250,8 @@ export type PrintItem =
   | { kind: "withheld"; chapter: number; block: number }
   | { kind: "citation"; chapter: number; block: number; ref: string; name: string; key: number }
   | { kind: "figure"; chapter: number; block: number; ref: string; name: string; caption: string;
-      number: number; baked: boolean; viewType: string }
+      /** MICRO-SEG24 · «8.1» (by chapter) or a running «3» when not numbered */
+      number: string; baked: boolean; viewType: string }
   | { kind: "unresolved"; chapter: number; block: number; ref: string };
 
 /**
@@ -257,7 +261,7 @@ export type PrintItem =
  * it the paragraph is `withheld` — the preview shows the hole, not the text.
  */
 export function printItems(chapters: ProjChapter[], index: Map<string, EmNode>,
-                           opts: { force?: boolean } = {}): { items: PrintItem[]; bibliography: { key: number; ref: string; name: string; description: string }[] } {
+                           opts: { force?: boolean; numbered?: boolean } = {}): { items: PrintItem[]; bibliography: { key: number; ref: string; name: string; description: string }[] } {
   const items: PrintItem[] = [];
   const bib: { key: number; ref: string; name: string; description: string }[] = [];
   const nameOf = (id: string): string | null => {
@@ -266,6 +270,8 @@ export function printItems(chapters: ProjChapter[], index: Map<string, EmNode>,
   };
   let fig = 0;
   const numbers = outlineNumbers(chapters);
+  // MICRO-SEG24 · the figures numbered as the exporters number them
+  const figNumbers = figureNumbers(chapters as never, opts.numbered !== false, (id) => index.has(id));
   chapters.forEach((c, ci) => {
     items.push({ kind: "chapter", chapter: ci, title: String(c.title ?? ""), number: numbers.get(String(ci)) ?? "" });
     (c.blocks ?? []).forEach((b, bi) => {
@@ -307,7 +313,7 @@ export function printItems(chapters: ProjChapter[], index: Map<string, EmNode>,
       }
       fig++;
       items.push({ kind: "figure", chapter: ci, block: bi, ref, name,
-                   caption: String(b.options?.caption ?? ""), number: fig, baked: kind === "figure-baked",
+                   caption: String(b.options?.caption ?? ""), number: figNumbers.get(`${ci}:${bi}`) ?? String(fig), baked: kind === "figure-baked",
                    viewType: canonicalViewType(b.view_type) });
     });
   });
