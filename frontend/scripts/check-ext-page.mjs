@@ -266,4 +266,79 @@ ok(/id="settings-sect-extensions"/.test(html) && /id="set-extensions"/.test(html
 const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
 ok(/\.ext-scroll > \* \{ flex-shrink: 0; \}/.test(css), "the rows of the scroll keep their height (the Development folder is not squashed)");
 
+// ── MICRO-SEG20 · «Show me» that goes there; the colour ramps; signed but not reviewed ──
+{
+  // where each row of «Where you will find it» leads (the page runs the plan: probe on the true case)
+  const plan = (kind, here = { inspectorHere: true }, place) => X.showPlan({ kind, place }, here);
+  eq(plan("door"), { workspace: null, target: "file-menu" }, "File ▸ Bring in…: the File menu, in the workspace in front");
+  eq([plan("import").target, plan("export").target], ["file-menu", "file-menu"], "File ▸ Import / Export: the File menu too");
+  eq(plan("panel", undefined, "sidebar"), { workspace: "space", target: "sidebar-panel" }, "Right panel: the Space, its sidebar on the extension's tab");
+  eq(plan("panel", undefined, "window"), { workspace: null, target: "panel-window" }, "a panel of its own: its window");
+  eq(plan("layer"), { workspace: "space", target: "layer" }, "Space ▸ Layers: the Space (the panel and the layer's row lit)");
+  eq(plan("tool"), { workspace: "space", target: "toolbar" }, "Space ▸ toolbar: the Space, the toolbar shown, the tools lit");
+  eq(plan("section"), { workspace: null, target: "inspector-section" }, "Inspector: where an Inspector is in front");
+  eq(plan("section", { inspectorHere: false }), { workspace: "canvas", target: "inspector-section" }, "…else Stratigraphy, which has one");
+  eq(plan("vocab", { inspectorHere: false }), { workspace: "canvas", target: "vocab-picker" }, "Vocabularies: the Inspector's picker that uses them");
+  eq(plan("python"), { workspace: "scripting", target: "console" }, "Python: the Scripting workspace's console (written, not run)");
+  eq(plan("menu").target, "said", "a place with nothing to open is said in words");
+  eq(X.SHOWME_MS, 1500, "the ring stays ~1.5 s");
+  // the node an Inspector section is shown on
+  const nodes = [{ id: "U1", node_type: "US" }, { id: "D1", node_type: "document" }, { id: "D2", node_type: "document", data: { by: "geofisica" } }];
+  const reads = (n) => n.node_type === "document";
+  const made = (n) => JSON.stringify(n).includes('"geofisica');
+  eq(X.nodeForSection(nodes, reads, "D1", made)?.id, "D1", "the node selected, when the section reads it");
+  eq(X.nodeForSection(nodes, reads, "U1", made)?.id, "D2", "else one the extension made");
+  eq(X.nodeForSection(nodes.slice(0, 2), reads, null, made)?.id, "D1", "else the first it reads");
+  eq(X.nodeForSection([nodes[0]], reads, null, made), null, "none: the page says why (ext.w.sectionNone)");
+  // the colour schemes of the Geofisica profile are RAMPS (positions 0–1): never «not a colour scheme ()»
+  const S = await load("extensions-state.ts");
+  const ramp = (stops) => ({ name: "Viridis", kind: "ramp", interpolation: "linear", domain: "normalized",
+    color_mapping: Object.fromEntries(stops.map((p, i) => [p, ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"][i]])), nodata: "transparent" });
+  eq(S.rampStops(ramp(["0.000", "0.250", "0.500", "0.750", "1.000"])), 5, "a ramp: its stops");
+  eq(S.rampStops({ color_mapping: { "0": "#000000", "1": "#ffffff" } }), 2, "keys 0–1 with no property: a ramp too");
+  eq(S.rampStops({ metadata: { property_name: "material" }, color_mapping: { calcare: [1, 1, 1, 1] } }), null, "a scheme of a property is not a ramp");
+  const IRI = "https://w3id.org/extendedmatrix/profile/geofisica";
+  const ov = { color_schemes: {
+    "geof:viridis": { id: "geof:viridis", profile: IRI, label: { en: "Viridis", it: "Viridis" }, doc: ramp(["0.000", "0.250", "0.500", "0.750", "1.000"]) },
+    "geof:hot": { id: "geof:hot", profile: IRI, label: { en: "Hot (amplitude)", it: "Caldo (ampiezza)" }, doc: { ...ramp(["0.0", "0.5", "1.0"]), name: "Hot" } },
+    "x:mat": { id: "x:mat", profile: IRI, label: "Materials", doc: { metadata: { property_name: "material" }, color_mapping: { calcare: [0.5, 0.5, 0.5, 1] } } },
+  } };
+  const sch = S.schemesOf(ov, "en");
+  eq(sch.map((x) => [x.name, x.ramp, !!x.emc, x.property]), [["Viridis", 5, false, ""], ["Hot (amplitude)", 3, false, ""], ["Materials", null, true, "material"]],
+     "the reader: two ramps with their stops, a scheme of «material» importable");
+  // the page, code installed from the official repository: signed, not reviewed; the profile's schemes
+  const geoSigned = { ...geoFull, signed: { key_id: "269B910A23431722", repos: ["extendedmatrix"] },
+    code: { ...geoFull.code, verified: false } };
+  W.setRowOpen("geofisica", true);
+  const b2 = W.extensionsContent(document, { ...host, fileName: () => "x.em.json", importScheme: () => {} },
+    { ...st, rows: [geoSigned], overlay: ov }, () => {});
+  const g2 = b2.querySelector('.ext-list [data-ext-id="geofisica"]');
+  const code = g2.querySelector('[data-ext-part="code"]').textContent;
+  ok(code.includes("ext.signedUnreviewed(r=extendedmatrix)") && !code.includes("ext.unverifiedFrom"),
+     "signed by the official repository: «signed ✓ · one step missing: a review», never «not verified» beside «signed by the key»");
+  ok(g2.querySelector("[data-ext-unreviewed]")?.title === "ext.signedUnreviewedHint(r=extendedmatrix)", "…its hint says what is verified and what is missing");
+  ok(g2.querySelector("[data-ext-signed='269B910A23431722']"), "the key line stays");
+  const lines = [...g2.querySelectorAll("[data-ext-scheme]")].map((l) => l.textContent.trim());
+  eq(lines.slice(0, 2), ["ext.schemeRamp.other(n=5,s=Viridis)", "ext.schemeRamp.other(n=3,s=Caldo (ampiezza))"], "the ramps: their name and stops, no «()»");
+  ok(lines[2].startsWith("ext.scheme(s=Materials,p=material)") && g2.querySelector('[data-ext-scheme="x:mat"] [data-ext="scheme-import"]'), "a scheme of a property: its property, «Into the file»");
+  ok(!g2.textContent.includes("ext.schemeBad") && !/\(\)/.test(lines.join(" ")), "no «not a colour scheme», no empty parentheses");
+  // an unsigned repository's code keeps «from R, not verified»
+  W.setRowOpen("geofisica", true);
+  const b3 = W.extensionsContent(document, host, { ...st, rows: [{ ...geoFull, signed: undefined }] }, () => {});
+  ok(b3.querySelector('[data-ext-part="code"]').textContent.includes("ext.unverifiedFrom(r=extendedmatrix)"), "unsigned: «from R, not verified», as before");
+  // the strings, EN and IT
+  for (const lang of ["en", "it"]) {
+    I.setLocale(lang);
+    for (const k of ["ext.schemeRamp.one", "ext.schemeRamp.other", "ext.schemeNoProp", "ext.signedUnreviewed", "ext.signedUnreviewedRepo",
+                     "ext.signedUnreviewedHint", "ext.w.sectionNone", "ext.w.vocabNone"]) ok(I.t(k) !== k, `${lang}: ${k}`);
+  }
+  I.setLocale("en");
+  eq(I.t("ext.schemeRamp.other", { s: "Viridis", n: "5" }), "Colour ramp «Viridis» (5 stops) — the colours of the slices, chosen in the extension's panel", "EN: a ramp");
+  I.setLocale("it");
+  ok(I.t("ext.signedUnreviewed", { r: "extendedmatrix" }).includes("manca un passo: la revisione"), "IT: the missing step named");
+  // the ring: em-accent, ~1.5 s, still under prefers-reduced-motion
+  ok(/\.em-showme \{ outline: 2px solid var\(--accent\)[^}]*animation: em-showme 0\.75s ease-out 2; \}/.test(css)
+     && /@media \(prefers-reduced-motion: reduce\) \{ \.em-showme \{ animation: none;/.test(css), "the ring: accent, 2 × 0.75 s, no motion when reduced");
+}
+
 console.log(`check-ext-page: ${checks} checks passed`);

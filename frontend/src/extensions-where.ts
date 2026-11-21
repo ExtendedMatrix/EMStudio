@@ -138,3 +138,35 @@ export function repoHost(url: string): string {
   const parts = u.replace(/^file:\/\//i, "").replace(/[\\/]index\.json$/i, "").split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? u;
 }
+
+/** MICRO-SEG20 · how long the em-accent ring of «Show me» stays on what it found */
+export const SHOWME_MS = 1500;
+
+/** MICRO-SEG20 · «Show me»: where a place of «Where you will find it» is reached —
+ *  the workspace to go to (null: the one in front), and what is opened and lit there.
+ *  The Preferences close first (a modal over the place it shows: see the report). */
+export type ShowTarget = "file-menu" | "sidebar-panel" | "panel-window" | "layer" | "toolbar"
+  | "inspector-section" | "vocab-picker" | "console" | "said";
+export interface ShowPlan { workspace: string | null; target: ShowTarget }
+export function showPlan(p: Pick<WherePlace, "kind" | "place">, here: { inspectorHere: boolean }): ShowPlan {
+  const insp = here.inspectorHere ? null : "canvas";
+  switch (p.kind) {
+    case "door": case "import": case "export": return { workspace: null, target: "file-menu" };
+    case "panel": return p.place === "window" ? { workspace: null, target: "panel-window" } : { workspace: "space", target: "sidebar-panel" };
+    case "layer": return { workspace: "space", target: "layer" };
+    case "tool": return { workspace: "space", target: "toolbar" };
+    case "section": return { workspace: insp, target: "inspector-section" };
+    case "vocab": return { workspace: insp, target: "vocab-picker" };
+    case "python": return { workspace: "scripting", target: "console" };
+    default: return { workspace: null, target: "said" };
+  }
+}
+
+/** MICRO-SEG20 · the node «Show me» selects for an Inspector section: the selected one
+ *  when the section reads it, else one the extension made (its id in the node), else the
+ *  first the section reads; null: none in the document (the page says why). */
+export function nodeForSection<N extends { id: string }>(nodes: N[], reads: (n: N) => boolean,
+                                                          selected: string | null, madeBy: (n: N) => boolean): N | null {
+  const ok = nodes.filter(reads);
+  return ok.find((n) => n.id === selected) ?? ok.find(madeBy) ?? ok[0] ?? null;
+}

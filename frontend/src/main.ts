@@ -192,7 +192,7 @@ import { declareVocabularies, isControlled, termOf, termPatch } from "./vocab-te
 import { VocabState, linkDialog, valueTermEl, vocabContent, type VocabHost } from "./vocab-ui";
 import { ExtensionsState, declareProfiles, declaredOf, formsOf, formVocabulariesOf, labelIn as extLabelIn, nameOfIri, qualiaOf, redeclareProfiles, stringsOf, typeLabel as packageTypeLabel, type ExtNewer, type OverlayDoc } from "./extensions-state";
 import { archiveOfFile, extensionsContent, extensionsFilter, extensionsSig, newerFlow, type ExtDevHost, type ExtWindowHost } from "./extensions-window";
-import type { WherePlace } from "./extensions-where";
+import { SHOWME_MS, nodeForSection, showPlan, type WherePlace } from "./extensions-where";
 import { NodePluginsState, nodePluginsSection } from "./node-plugins";
 import { VocabMarkCache, vocabMarkOf, type VocabMarkCtx } from "./vocab-marks";
 import {
@@ -2940,6 +2940,8 @@ window.__EM_SCENE__ = () => {
   backDepth: () => viewHistory.length,
   goBack: () => goBack(),
   jumpTo: (id: string) => jumpTo(id),
+  /** MICRO-SEG20 · what the last «Show me» reached (target, how many things lit, the sentence said) */
+  showMeLast: () => ({ ...showMeLast }),
   // MICRO-BADGE-PD · the groups' chips as drawn (canvas-relative), the context
   pdChips: () => drawnPdChips(),
   /** MICRO-TIL001 · the «!» of the warnings as drawn (canvas px) */
@@ -36568,33 +36570,55 @@ const extWindow = {
 function openExtensionsWindow(): void {
   openSettings("settings-sect-extensions");
 }
-/** MICRO-SEG08 · «Mostrami»: the place of «Dove la trovi», reached. The
- *  Preferences close (a modal), then: File ▸ Porta dentro… opened and lit; the
- *  Space with its Layers or its tool lit; the Inspector lit (with what it needs
- *  to show the section); a panel opened; the Vocabularies; the console with the
- *  command written in it (not run). */
+/** MICRO-SEG08 → MICRO-SEG20 · «Show me»: the place of «Where you will find it»,
+ *  reached (E.D. 21 Nov: «premendo Show me non succede nulla»). The Preferences
+ *  close (a modal over the very place it shows), the right workspace comes to
+ *  the front (`showPlan`), then:
+ *  - File ▸ Bring in… / Import / Export: the File menu opened, the entry lit;
+ *  - a panel, a layer: the Space's sidebar on the extension's tab, the panel lit
+ *    (a layer: its row in the Space's Outliner too, when the document has one);
+ *  - a tool: the Space's toolbar shown (T), the extension's tools lit;
+ *  - an Inspector section: a node it reads selected (the one selected, else one
+ *    the extension made, else the first) and the Inspector scrolled to the
+ *    section; none in the document: one line says why;
+ *  - the vocabularies: the Inspector's picker that uses them (a property of their
+ *    kind selected, its «Link to vocabulary…» opened), else the Vocabularies;
+ *  - Python: the Scripting workspace's console with the line written, not run.
+ *  What is found gets the em-accent ring for SHOWME_MS (a still ring under
+ *  prefers-reduced-motion, `.em-showme` in style.css). */
 function showExtPlace(p: WherePlace, extId: string): void {
   const plugin = pluginState?.plugins.find((x) => (x.id === extId || x.package === extId) && x.state === "loaded") ?? null;
+  const pid = plugin?.id ?? extId;
   const cmdOf = (id: string | undefined) => plugin?.commands.find((c) => c.id === id) ?? null;
   const light = (elm: Element | null | undefined): boolean => {
-    if (!elm) return false;
-    (elm as HTMLElement).scrollIntoView?.({ block: "nearest" });
+    if (!elm || !(elm as HTMLElement).isConnected) return false;
+    (elm as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" });
     elm.classList.remove("em-showme");
     void (elm as HTMLElement).offsetWidth;
     elm.classList.add("em-showme");
-    setTimeout(() => elm.classList.remove("em-showme"), 4000);
+    setTimeout(() => elm.classList.remove("em-showme"), SHOWME_MS);
     return true;
   };
+  const lightAll = (els: Iterable<Element>): number => { let n = 0; for (const e of els) if (light(e)) n++; return n; };
   const say = (k: string, v: Record<string, string> = {}) => { const m = t(k, v); toast(m); logInfo(m); };
+  showMeLast = { kind: p.kind, target: "", lit: 0, said: null };
+  const sayAs = (k: string, v: Record<string, string> = {}) => { showMeLast.said = k; say(k, v); };
   closeSettings();
-  const inSpace = (then: () => void) => {
-    if (activeWorkspace() !== "space") setWorkspace("space");
-    // the Space draws after the workspace: look for its bar a moment later
-    setTimeout(then, 350);
+  const plan = showPlan(p, { inspectorHere: windowsOf().some((w) => w.type === "inspector") });
+  showMeLast.target = plan.target;
+  const switched = !!plan.workspace && activeWorkspace() !== plan.workspace;
+  if (switched) setWorkspace(plan.workspace as WorkspaceId);
+  // a workspace drawn anew (the Space's scene, the sidebar) needs a moment before it can be lit
+  const then = (fn: () => void) => setTimeout(fn, switched ? 350 : 30);
+  const sidebarTabOfExt = (): string | null => {
+    const tabs = sidebarTabsNow();
+    const panelNames = (plugin?.panels ?? []).map((x) => x.name);
+    return tabs.find((x) => x.kind === "extension" && x.panels.some((n) => panelNames.includes(n)))?.id
+      ?? tabs.find((x) => x.kind === "extension" && x.extensions?.includes(pid))?.id ?? null;
   };
-  switch (p.kind) {
-    case "door": case "import": case "export": {
-      // after the click that pressed «Mostrami» has reached the document (which closes every menu)
+  switch (plan.target) {
+    case "file-menu": {
+      // after the click that pressed «Show me» has reached the document (which closes every menu)
       setTimeout(() => {
         const toggle = document.querySelector<HTMLButtonElement>("#dd-file .dd-toggle");
         const menu = document.querySelector<HTMLElement>("#dd-file .dd-menu");
@@ -36603,65 +36627,127 @@ function showExtPlace(p: WherePlace, extId: string): void {
       setTimeout(() => {
         const item = p.kind === "door" ? document.getElementById("btn-bring-in")
           : document.querySelector<HTMLElement>(`#dd-file .dd-sub[data-sub="${p.kind}"] .dd-sub-toggle`);
-        if (!light(item)) say("ext.w.shownMenu", { where: t(`ext.w.${p.kind}`) });
+        if (light(item)) showMeLast.lit = 1; else sayAs("ext.w.shownMenu", { where: t(`ext.w.${p.kind}`) });
       }, 60);
       return;
     }
-    case "layer":
-      // the Space asks the plugins for its layers once it is open: wait for them (a few seconds at most)
-      inSpace(() => void until(() => pluginLayersNow().length > 0, 4000).then((there) => {
-        const sw = windowsOf().find((w) => w.type === "scene");
-        const open = sw ? visOpeners.get(sw.id) : undefined;
-        if (open) open();
-        setTimeout(() => {
-          const menu = document.querySelector<HTMLElement>(".vis-menu");
-          if (!light(menu?.querySelector(".plg-panel") ?? menu)) say("ext.w.shownSpace");
-          if (!there) say("ext.w.layerEmpty", { n: p.names.join(", ") });
-        }, 120);
-      }));
+    case "panel-window": {
+      const panel = plugin ? (plugin.panels ?? []).find((x) => p.names.includes(labelOfPlugin(x.label, x.id))) ?? (plugin.panels ?? [])[0] : null;
+      if (panel) openPluginPanel(panel); else sayAs("ext.w.notLoaded");
       return;
-    case "tool":
-      inSpace(() => {
-        const c = cmdOf(p.commands[0]);
-        // the Space's layers bar (MICRO-GEO13, `data-plg-tool`), else a Viewer's bar (`data-tool`)
-        const id = c ? CSS.escape(toolId(c)) : "";
-        const sel = c ? `[data-plg-tool="${id}"], [data-tool="${id}"]` : "[data-plg-tool^='plugin:'], [data-tool^='plugin:']";
-        void until(() => !!document.querySelector(sel), 4000).then((there) => {
-          if (!there || !light(document.querySelector(sel))) say("ext.w.toolWhere", { n: p.names.join(", ") });
+    }
+    case "sidebar-panel": case "layer": {
+      then(() => {
+        const tab = sidebarTabOfExt();
+        if (tab) setSidebarTab(tab);
+        const wait = p.kind === "layer" ? () => pluginLayersNow().length > 0 : () => true;
+        void until(wait, p.kind === "layer" ? 4000 : 0).then((there) => {
+          setTimeout(() => {
+            const panels = [...document.querySelectorAll(`.scn-npanel [data-np-panel^="${CSS.escape(pid)}/"]`)];
+            let n = lightAll(panels.length ? panels : [...document.querySelectorAll(".scn-npanel [data-np-panel]")].slice(0, 1));
+            if (p.kind === "layer") {
+              // the layer's row in the Space's Outliner (a stack the extension drew)
+              const keys = pluginLayersNow().filter((l) => l.plugin === pid).map((l) => `/plyr/${layerKey(l)}`);
+              const rows = [...document.querySelectorAll<HTMLElement>(".uo-row[data-key]")].filter((r) =>
+                keys.some((k) => (r.dataset.key ?? "").endsWith(k)));
+              n += lightAll(rows);
+              if (!there) sayAs("ext.w.layerEmpty", { n: p.names.join(", ") });
+            }
+            showMeLast.lit = n;
+            if (!n && !tab) sayAs("ext.w.notLoaded");
+          }, 160);
         });
       });
       return;
-    case "section": {
-      const insp = windowsOf().find((w) => w.type === "inspector");
-      if (insp) { selectWindow(insp.id); light(winAreas.get(insp.id)); }
-      const c = cmdOf(p.commands[0]);
-      say("ext.w.sectionWhen", { n: p.names.join(", "), when: c?.when ? c.when.replace(/^selection:/, "") : "—" });
-      return;
     }
-    case "panel": {
-      const panel = plugin ? (plugin.panels ?? []).find((x) => p.names.includes(labelOfPlugin(x.label, x.id))) ?? (plugin.panels ?? [])[0] : null;
-      if (panel) openPluginPanel(panel);
-      else say("ext.w.notLoaded");
+    case "toolbar":
+      then(() => {
+        const pr = space3dPrefs();
+        if (pr.tShown === false) setSpace3dPrefs({ ...pr, tShown: true });
+        const c = cmdOf(p.commands[0]);
+        const sel = `.scn-toolbar [data-plg-tool^="plugin:${CSS.escape(pid)}/"]` + (c ? `, .scn-toolbar [data-plg-tool="${CSS.escape(toolId(c))}"]` : "");
+        void until(() => !!document.querySelector(sel), 4000).then(() => {
+          const n = lightAll(document.querySelectorAll(sel));
+          showMeLast.lit = n;
+          if (!n) sayAs("ext.w.toolWhere", { n: p.names.join(", ") });
+        });
+      });
       return;
-    }
-    case "vocab":
-      openVocabWindow();
+    case "inspector-section":
+      then(() => {
+        const st = store;
+        const c = cmdOf(p.commands[0]);
+        const reads = (n: { node_type?: unknown }) => !!c && whenHolds(c.when, { document: true, types: [String(n.node_type ?? "")] });
+        const node = st && c ? nodeForSection(st.liveNodes() as Array<{ id: string; node_type?: unknown }>, reads, selectedId,
+          (n: { id: string }) => JSON.stringify(n).includes(`"${pid}`)) : null;
+        const insp = windowsOf().find((w) => w.type === "inspector");
+        if (insp) selectWindow(insp.id);
+        if (!node) {
+          sayAs("ext.w.sectionNone", { n: p.names.join(", "), when: c?.when ? c.when.replace(/^selection:/, "").split("|").join(", ") : "—" });
+          if (insp) light(winAreas.get(insp.id));
+          return;
+        }
+        if (selectedId !== node.id) select(node.id);
+        const sel = `[data-plg-section="${CSS.escape(`${pid}/${c!.id}`)}"]`;
+        void until(() => !!document.querySelector(`h3${sel}, ${sel}`), 3000).then(() => {
+          const h = document.querySelector(`h3${sel}`) ?? document.querySelector(sel);
+          showMeLast.lit = light(h) ? 1 : 0;
+          if (!showMeLast.lit) sayAs("ext.w.sectionWhen", { n: p.names.join(", "), when: c?.when ? c.when.replace(/^selection:/, "") : "—" });
+        });
+      });
       return;
-    case "python": {
-      const w = openConsoleWindow();
-      setTimeout(() => {
-        const area = w ? winAreas.get(w.id) : null;
-        const input = area?.querySelector<HTMLTextAreaElement>(".pyc-input");
-        if (input && p.code) { input.value = p.code; input.focus(); input.setSelectionRange(p.code.length, p.code.length); light(input); }
-      }, 60);
+    case "vocab-picker":
+      then(() => {
+        // the properties whose values these vocabularies give (the profile's qualia_vocabularies)
+        const row = extState.rows?.find((r) => r.id === extId);
+        const schemes = new Set((row?.data?.carried_vocabularies ?? []).map((v) => v.scheme));
+        const qv = (extState.overlay?.qualia_vocabularies ?? []) as Array<{ property_type?: string; label?: Record<string, string> | string; scheme?: string }>;
+        const kinds = qv.filter((q) => q.scheme && schemes.has(q.scheme));
+        const names = new Set(kinds.flatMap((q) => [q.property_type ?? "", ...Object.values(typeof q.label === "object" && q.label ? q.label : { x: String(q.label ?? "") })]).filter(Boolean).map((x) => x.toLowerCase()));
+        const typeOf = (n: { name?: unknown; data?: unknown }) => [String(n.name ?? ""), String((n.data as { property_type?: unknown } | null)?.property_type ?? "")];
+        const props = (store?.liveNodes() ?? []).filter((n) => n.node_type === "property" && typeOf(n).some((x) => names.has(x.toLowerCase())));
+        const pick = props.find((n) => n.id === selectedId) ?? props.find((n) => !isControlled(n as never) || !termOf(n as never)) ?? props[0] ?? null;
+        if (!pick) {
+          openVocabWindow();
+          sayAs("ext.w.vocabNone", { k: kinds.map((q) => labelOfPlugin(q.label as never, q.property_type ?? "")).join(", ") || p.names.join(", ") });
+          return;
+        }
+        const insp = windowsOf().find((w) => w.type === "inspector");
+        if (insp) selectWindow(insp.id);
+        if (selectedId !== pick.id) select(pick.id);
+        setTimeout(() => {
+          const vt = document.querySelector(`[data-value-term="${CSS.escape(pick.id)}"]`);
+          showMeLast.lit = light(vt) ? 1 : 0;
+          // the picker: «Link to vocabulary…», the candidates of the installed vocabularies
+          if (!termOf(pick as never)) void openVocabLink(pick.id);
+        }, 200);
+      });
       return;
-    }
-    default: {
+    case "console":
+      then(() => {
+        const w = consoleWin() ?? openConsoleWindow();
+        if (w) { setActiveWin(w.id); renderTiles(); }
+        setTimeout(() => {
+          const area = w ? winAreas.get(w.id) : null;
+          const input = area?.querySelector<HTMLTextAreaElement>(".pyc-input") ?? document.querySelector<HTMLTextAreaElement>(".pyc-input");
+          if (input && p.code) {
+            input.value = p.code;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.focus();
+            input.setSelectionRange(p.code.length, p.code.length);
+            showMeLast.lit = light(input) ? 1 : 0;
+          }
+        }, 80);
+      });
+      return;
+    default:
       // the menus, the context menu, the checks, a column, the status bar: said where, in words
-      say("ext.w.shownMenu", { where: t(`ext.w.${p.kind}`) });
-    }
+      sayAs("ext.w.shownMenu", { where: t(`ext.w.${p.kind}`) });
   }
 }
+/** MICRO-SEG20 · what the last «Show me» did (page tests: `__EM_DRAG__.showMeLast()`) */
+// eslint-disable-next-line no-var
+var showMeLast: { kind: string; target: string; lit: number; said: string | null } = { kind: "", target: "", lit: 0, said: null };
 /** true as soon as `ok()` holds, false after `ms` (polled every 100 ms) */
 function until(ok: () => boolean, ms: number): Promise<boolean> {
   return new Promise((res) => {

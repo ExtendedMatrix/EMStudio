@@ -12541,8 +12541,10 @@ button.uo-col { cursor: pointer; }
   font-size: 11.5px; background: var(--bg-panel); color: var(--text); }
 .ext-repo-add-acts { display: flex; gap: 8px; align-items: center; padding-top: 4px; }
 /* «Mostrami»: the place reached, lit for a moment (ochre ring) */
-.em-showme { outline: 2px solid var(--accent) !important; outline-offset: 2px; animation: em-showme 1.2s ease-out 2; }
+/* MICRO-SEG20 · «Show me»: an em-accent ring for ~1.5 s (SHOWME_MS) on what it found; still under reduced motion */
+.em-showme { outline: 2px solid var(--accent) !important; outline-offset: 2px; animation: em-showme 0.75s ease-out 2; }
 @keyframes em-showme { 0% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 45%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .em-showme { animation: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); } }
 
 /* ── MICRO-SEG08 · Preferences ▸ Third-party tools (board 3): one table,
    Tool · Used for · On this computer · action ── */

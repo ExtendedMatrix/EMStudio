@@ -357,23 +357,39 @@ export function typeLabel(ov: OverlayDoc | null, typeId: string, lang: string): 
  *  (SPEC-pacchetto §9: keyed by the term's CODE, so it holds in every language),
  *  turned into the .emc's linear colours; an .emc already in EM Tools' form is
  *  taken as it is. `emc` null: the file is not a scheme (said). */
-export interface PackageScheme { id: string; name: string; property: string; profile: string; emc: Emc | null }
+/** a package's colour scheme as the window reads it. MICRO-SEG20: two shapes travel under a
+ *  profile's `color_schemes` — a scheme of a property (a .emc: a colour per value, «Into the
+ *  file») and a continuous RAMP (`kind: "ramp"`, positions 0–1 → colours, the colours of a
+ *  plugin's slices, as Geofisica's grey/viridis/hot/jet): `ramp` is then its number of stops,
+ *  and it is neither «not a colour scheme» nor imported as one */
+export interface PackageScheme { id: string; name: string; property: string; profile: string; emc: Emc | null; ramp: number | null }
+/** the stops of a continuous ramp (`kind: "ramp"`, or every key a position 0–1), else null */
+export function rampStops(doc: Record<string, unknown> | undefined | null): number | null {
+  const m = doc?.color_mapping;
+  if (!m || typeof m !== "object" || Array.isArray(m)) return null;
+  const keys = Object.keys(m as Record<string, unknown>);
+  if (!keys.length) return null;
+  const positions = keys.every((k) => /^\s*[01](\.\d+)?\s*$/.test(k) && Number(k) >= 0 && Number(k) <= 1);
+  return doc!.kind === "ramp" || (positions && !doc!.metadata && !doc!.property) ? keys.length : null;
+}
 export function schemesOf(ov: OverlayDoc | null, lang: string): PackageScheme[] {
   if (!ov) return [];
   const out: PackageScheme[] = [];
   for (const [id, c] of Object.entries(ov.color_schemes ?? {})) {
     const doc = c.doc as Record<string, unknown> | undefined;
     let emc: Emc | null = null;
+    const ramp = rampStops(doc);
     const meta = doc?.metadata as Record<string, unknown> | undefined;
-    if (doc && meta && typeof meta.property_name === "string" && doc.color_mapping && typeof doc.color_mapping === "object") emc = doc as unknown as Emc;
+    if (ramp != null) emc = null;
+    else if (doc && meta && typeof meta.property_name === "string" && doc.color_mapping && typeof doc.color_mapping === "object") emc = doc as unknown as Emc;
     else if (doc && doc.color_mapping && typeof doc.color_mapping === "object") {
       const hex = Object.fromEntries(Object.entries(doc.color_mapping as Record<string, unknown>)
         .filter(([, v]) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v)) as Array<[string, string]>);
       const prop = String(doc.property ?? c.property ?? "");
       if (prop && Object.keys(hex).length) emc = emcDocument(prop, hex, "", { source: c.origin ?? id });
     }
-    out.push({ id, name: labelIn(c.label, lang) || String(doc?.name ?? id), property: String(c.property ?? doc?.property ?? ""),
-               profile: c.profile ?? "", emc });
+    const prop = String(c.property ?? doc?.property ?? (meta && typeof meta.property_name === "string" ? meta.property_name : ""));
+    out.push({ id, name: labelIn(c.label, lang) || String(doc?.name ?? id), property: prop, profile: c.profile ?? "", emc, ramp });
   }
   return out;
 }

@@ -504,6 +504,14 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
     return { data: licenceText(ff?.dataLicense ?? (two ? all[0] : all)), code: licenceText(ff?.codeLicense ?? (two ? all[1] : all)) };
   }
 
+  /** MICRO-SEG20 · code signed by its repository and not reviewed: one sentence with the step that is missing */
+  function unreviewedSigned(repo: string): HTMLElement {
+    const m = el("span", "ext-unverified ext-unreviewed", t("ext.signedUnreviewed", { r: repo }));
+    m.dataset.extUnreviewed = repo;
+    m.title = t("ext.signedUnreviewedHint", { r: repo });
+    return m;
+  }
+
   /** «Cosa contiene»: the data, the code, what it asks */
   function containsCol(e: Entry, f: ExtFacts | "asking" | "none" | null): HTMLElement {
     const r = e.row, a = e.avail;
@@ -537,8 +545,11 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
         for (const sc of schemes) {
           const ln = el("div", "cw-hint ext-scheme");
           ln.dataset.extScheme = sc.id;
-          ln.append(t("ext.scheme", { s: sc.name, p: sc.property }), " ");
-          if (sc.emc && host.importScheme && host.fileName())
+          // MICRO-SEG20 · a ramp says its stops; a scheme says its property, or no parentheses at all
+          ln.append(sc.ramp != null ? tn("ext.schemeRamp", sc.ramp, { s: sc.name })
+            : sc.property ? t("ext.scheme", { s: sc.name, p: sc.property }) : t("ext.schemeNoProp", { s: sc.name }), " ");
+          if (sc.ramp != null) ln.dataset.extSchemeRamp = String(sc.ramp);
+          else if (sc.emc && host.importScheme && host.fileName())
             ln.append(btn(t("ext.schemeImport"), "scheme-import", () => host.importScheme!(sc.name, sc.emc), t("ext.schemeImportHint"), "cw-mini"));
           else if (!sc.emc) ln.append(el("span", "cw-warn", t("ext.schemeBad")));
           inner.appendChild(ln);
@@ -581,6 +592,9 @@ export function extensionsContent(doc: Document, host: ExtWindowHost, state: Ext
         const s = el("div", "");
         s.append(`${t("ext.versions", { v: (code.versions ?? [code.version]).filter(Boolean).join(" · ") })} · `,
           code.verified ? reviewedMark(doc, t, code.reviewed)
+            // MICRO-SEG20 · signed and not reviewed: the step that is missing is said, not «not verified»
+            // beside «signed by the key …» (the signature says who published the bytes, a review who read them)
+            : r!.signed?.key_id ? unreviewedSigned(r!.signed.repos?.length ? r!.signed.repos.join(", ") : (r!.source ?? ""))
             : el("span", "ext-unverified", isRepoSource(r!.source) ? t("ext.unverifiedFrom", { r: r!.source! }) : t("ext.unverified")),
           ` · ${t(code.active ? "ext.active" : "ext.inactive")}`);
         inner.appendChild(s);
@@ -1263,7 +1277,10 @@ export function confirmBody(doc: Document, host: Pick<ExtWindowHost, "t" | "lang
     const box = el("div", "ext-panel ext-panel-code");
     box.dataset.extPanel = "code";
     const h = el("div", "ext-panel-h", t("ext.panelCode", { m: c.module ?? "", v: c.version ?? "" }));
+    const sg = pv.signature?.status === "signed" && pv.signature.key_id ? pv.signature : null;
     h.append(" ", c.verified ? reviewedMark(doc, t, c.reviewed)
+      // MICRO-SEG20 · signed: «not reviewed», the missing step — never «NOT VERIFIED» under «signed by the key …»
+      : sg ? el("span", "ext-unverified ext-unreviewed", t("ext.signedUnreviewedRepo", { r: sg.repos?.length ? sg.repos.join(", ") : (pv.source ?? "") }))
       : el("span", "ext-unverified", isRepoSource(pv.source) ? t("ext.unverifiedRepo", { r: pv.source! }) : t("ext.unverifiedDisk")));
     box.appendChild(h);
     // MICRO-PL18 (W15a) · asked only when it must be: the first time, or when
