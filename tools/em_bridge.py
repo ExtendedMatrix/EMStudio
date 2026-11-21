@@ -2044,7 +2044,7 @@ def _gltfpack_tool():
     version}`` or None."""
     import shutil as _sh
     import subprocess
-    # MICRO-OTTIMIZZA-1 · the add-on downloaded on request (Settings › Add-ons)
+    # MICRO-OTTIMIZZA-1 · the add-on downloaded on request (Settings › Third-party tools)
     # comes right after the explicit EM_GLTFPACK
     import em_optimize
     try:
@@ -4601,7 +4601,7 @@ def make_handler(api):
                             "command": " ".join(O.gltfpack_command("gltfpack", "‹in›", "‹out›", params)[1:])})
                 return
             if not tool:
-                self._fail(501, "gltfpack is not here: install it from Settings › Add-ons, set EM_GLTFPACK to its path, or put it on the PATH")
+                self._fail(501, "gltfpack is not here: install it from Settings › Third-party tools, set EM_GLTFPACK to its path, or put it on the PATH")
                 return
             done = [_variant_write(item, params, tool) for item in planned]
             self._json({"ok": True, "tool": tool, "outputs": done, "parameters": _variant_parameters(params)})
@@ -4732,7 +4732,7 @@ def make_handler(api):
             if kind == "tileset":
                 plan = self._tileset_plan(body)
                 if not plan.get("tool"):
-                    self._fail(501, "Obj2Tiles is not here: install it from Settings › Add-ons")
+                    self._fail(501, "Obj2Tiles is not here: install it from Settings › Third-party tools")
                     return
                 todo = plan["items"]
                 if not any(not it.get("error") and not it.get("exists") for it in todo):
@@ -4770,7 +4770,7 @@ def make_handler(api):
                 params = self._optimize_params(body)
                 tool = _gltfpack_tool()
                 if not tool:
-                    self._fail(501, "gltfpack is not here: install it from Settings › Add-ons")
+                    self._fail(501, "gltfpack is not here: install it from Settings › Third-party tools")
                     return
                 planned = self._optimize_plan(body, params)
 
@@ -4968,7 +4968,7 @@ def make_handler(api):
                 return {"ok": False, "error": f"unknown Blender operation {op!r}"}
             blender = str(body.get("blender") or "") or BL.current()
             if not blender or not os.path.isfile(blender):
-                return {"ok": False, "error": "Blender is not here: choose it in Settings › Add-ons"}
+                return {"ok": False, "error": "Blender is not here: choose it in Settings › Third-party tools"}
             if op == "probe":
                 return {"ok": True, "op": op, "blender": blender, "outputs": [], "estimate_mb": 400, "heavy": False}
             blend = ""
@@ -5028,7 +5028,7 @@ def make_handler(api):
             import em_optimize as O
             blender = str(body.get("blender") or "") or BL.current()
             if not blender or not os.path.isfile(blender):
-                return {"ok": False, "error": "Blender is not here: choose it in Settings › Add-ons"}
+                return {"ok": False, "error": "Blender is not here: choose it in Settings › Third-party tools"}
             blend, err = self._fs_resolve(os.path.abspath(os.path.expanduser(str(body.get("blend") or ""))), want="file")
             if err or not blend.lower().endswith(".blend"):
                 return {"ok": False, "error": (err[1] if err else "a .blend is wanted")}
@@ -5126,7 +5126,7 @@ def make_handler(api):
             op = str(body.get("op"))
             blender = str(body.get("blender") or "") or BL.current()
             if not blender or not os.path.isfile(blender):
-                self._fail(400, "Blender is not here: choose it in Settings › Add-ons")
+                self._fail(400, "Blender is not here: choose it in Settings › Third-party tools")
                 return
             blend, err = self._blend_of(body)
             if err:
@@ -5894,7 +5894,7 @@ def make_handler(api):
             import em_optimize as O
             blender = str(body.get("blender") or "") or BL.current()
             if not blender or not os.path.isfile(blender):
-                self._fail(400, "Blender is not here: choose it in Settings › Add-ons")
+                self._fail(400, "Blender is not here: choose it in Settings › Third-party tools")
                 return
             plan = body.get("plan") if isinstance(body.get("plan"), dict) else None
             if not plan or not plan.get("ok") or not isinstance(plan.get("items"), list) or not plan["items"]:
@@ -5954,7 +5954,7 @@ def make_handler(api):
             from s3dgraphy.resources import blend_folder as BF
             blender = str(body.get("blender") or "") or BL.current()
             if not blender or not os.path.isfile(blender):
-                return 400, {"ok": False, "error": "Blender is not here: choose it in Settings › Add-ons"}
+                return 400, {"ok": False, "error": "Blender is not here: choose it in Settings › Third-party tools"}
             blend, err = self._blend_of(body)
             if err:
                 return 400, {"ok": False, "error": err}

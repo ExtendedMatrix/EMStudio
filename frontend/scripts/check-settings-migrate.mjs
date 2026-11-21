@@ -58,7 +58,10 @@ eq(fresh.getSettings().sync.nodes, [], "a new profile: no node");
 // the markup
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const tabs = [...html.matchAll(/data-settings-tab="([a-z]+)"/g)].map((m) => m[1]).filter((v, i, a) => a.indexOf(v) === i);
-eq(tabs, ["general", "identity", "connections", "viewers", "advanced", "addons"], "the tabs, by topic (Add-ons since MICRO-PREPARA-RITOCCHI)");
+eq(tabs, ["general", "identity", "viewers", "connections", "extensions", "addons", "advanced"],
+   "the tabs, by topic (MICRO-SEG08: Extensions and Third-party tools a group of their own, before Advanced)");
+ok(/data-settings-tab="extensions" data-settings-group="ext"/.test(html) && /data-settings-tab="addons" data-settings-group="ext"/.test(html),
+   "Extensions and Third-party tools: one group, between thin lines");
 ok(!/data-settings-tab="sync"/.test(html), "«Sync» is gone");
 ok(!/id="set-hub-room"/.test(html), "no Room field in Settings");
 ok(!/id="set-node-signin"/.test(html), "no Sign in in Settings");

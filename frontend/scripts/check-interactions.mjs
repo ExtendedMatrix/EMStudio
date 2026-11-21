@@ -7313,7 +7313,7 @@ test("DC4.who", "DOVE-CHI-MENU p.4 · «Chi sei» a destra della barra: dichiara
     detail: { seen } };
 });
 
-test("DC5.settings", "DOVE-CHI-MENU p.5 · Impostazioni per argomento: Generale · Identità · Connessioni · Visualizzatori · Avanzate; le impostazioni della dev.50 (nodo, stanza, Blender, client ORCID) arrivano al posto nuovo; Connessioni elenca il nodo (Prova, Rimuovi) senza Accedi né Stanza; il client ORCID in «Avanzate» chiuso; Salva non perde niente", async () => {
+test("DC5.settings", "DOVE-CHI-MENU p.5 · Impostazioni per argomento: Generale · Identità · Visualizzatori · Connessioni — Estensioni · Strumenti di terze parti — Avanzate (MICRO-SEG08); le impostazioni della dev.50 (nodo, stanza, Blender, client ORCID) arrivano al posto nuovo; Connessioni elenca il nodo (Prova, Rimuovi) senza Accedi né Stanza; il client ORCID in «Avanzate» chiuso; Salva non perde niente", async () => {
   const old = { identity: { orcidClientId: "APP-SANDBOX0001", orcidBase: "https://sandbox.orcid.org" },
     sync: { protocol: "ws", host: "192.168.1.5", port: 8790, tool: "blender", direction: "receive",
             hubUrl: "https://em.localhost:8443/em", hubRoom: "sarmitest-16102026" } };
@@ -7337,8 +7337,9 @@ test("DC5.settings", "DOVE-CHI-MENU p.5 · Impostazioni per argomento: Generale 
   await p.waitForTimeout(300);
   const saved = await p.evaluate(() => JSON.parse(localStorage.getItem("emstudio.settings")));
   await ctx.close();
-  // «Componenti aggiuntivi» joined the tabs with MICRO-PREPARA-RITOCCHI
-  return { pass: JSON.stringify(tabs) === JSON.stringify(["Generale", "Identità", "Connessioni", "Visualizzatori", "Avanzate", "Componenti aggiuntivi"])
+  // «Componenti aggiuntivi» joined the tabs with MICRO-PREPARA-RITOCCHI; MICRO-SEG08: «Estensioni» and
+  // «Strumenti di terze parti» (it was «Componenti aggiuntivi») a group of their own, before «Avanzate»
+  return { pass: JSON.stringify(tabs) === JSON.stringify(["Generale", "Identità", "Visualizzatori", "Connessioni", "Estensioni", "Strumenti di terze parti", "Avanzate"])
       && ident.advOpen === false && ident.client === "APP-SANDBOX0001" && ident.base === "https://sandbox.orcid.org"
       && JSON.stringify(conn.nodes) === JSON.stringify(["https://em.localhost:8443/em"]) && conn.acts.join("|") === "Rendi predefinito|Modifica|Prova|Rimuovi"
       && !conn.room && !conn.signin && conn.host === "192.168.1.5" && conn.port === "8790"
@@ -12627,7 +12628,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     kv: tip(".files-tab-optimize .files-kv-tip"),
     variant: [...document.querySelectorAll(".files-tab-optimize .files-prev td")].map((x) => x.textContent),
     command: tip(".files-tab-optimize .files-cmd"),
-    // p.2 · the add-on missing: ONE line, to Settings › Add-ons; no card here
+    // p.2 · the add-on missing: ONE line, to Settings › Third-party tools; no card here
     link: !!document.querySelector('.files-tab-optimize [data-addon="gltfpack"] [data-action="open-addons"]'),
     cardHere: !!document.querySelector('.files-tab-optimize .files-addon'),
     go: document.querySelector('[data-action="files-optimize"]')?.disabled ?? null,
@@ -12673,7 +12674,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     engine: web.engine === "gltfpack" && /un secondo/.test(web.why) && /KTX2/.test(web.kv) && /meshopt/.test(web.kv),
     named: web.variant.includes("OB_CUBO_LOD1@lod4-web.glb") && /-si 0\.1 -cc -tc -tl 1024/.test(web.command),
     addon: web.link && !web.cardHere && web.go === true,
-    // p.2 · Settings › Add-ons, a tab of its own: this machine, the card with its licence, sha256, state and install
+    // p.2 · Settings › Third-party tools, a tab of its own: this machine, the card with its licence, sha256, state and install
     settings: settings.tab === "addons" && settings.shown && /Questa macchina: macOS/.test(settings.machine)
       && /licenza MIT/.test(settings.card) && /sha256/.test(settings.card) && settings.fit === "ok" && settings.install,
     // p.1 · no paragraph of explanation left in the panel: they are in the ⓘ
@@ -12688,7 +12689,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
   return { pass: Object.values(conds).every(Boolean), detail: { conds, web, settings, exp, changed, errors } };
 });
 
-test("PR1.ritocchi", "MICRO-PREPARA-RITOCCHI · «Prepara per un uso» con i nomi di E.D. (sette profili, la riga di che cosa serve; webXR con «ATON / Heriverse»): la griglia per gruppi, ciascuno con la sua spunta e il suo razionale, i sicuri già spuntati; aperto un gruppo, le righe con i parametri modificabili (lato, formato); Impostazioni › Componenti aggiuntivi: in cima «per ciò che fai bastano», ogni scheda dice a che cosa serve e se è consigliata o facoltativa, il testo lungo nel suo ⓘ; il validatore si installa «con Node.js» quando Node manca; Obj2Tiles ufficiale 1.9.0, il fork come storia (MICRO-RIFINITURE)", async () => {
+test("PR1.ritocchi", "MICRO-PREPARA-RITOCCHI · «Prepara per un uso» con i nomi di E.D. (sette profili, la riga di che cosa serve; webXR con «ATON / Heriverse»): la griglia per gruppi, ciascuno con la sua spunta e il suo razionale, i sicuri già spuntati; aperto un gruppo, le righe con i parametri modificabili (lato, formato); Impostazioni › Strumenti di terze parti: in cima «per ciò che fai bastano», ogni scheda dice a che cosa serve e se è consigliata o facoltativa, il testo lungo nel suo ⓘ; il validatore si installa «con Node.js» quando Node manca; Obj2Tiles ufficiale 1.9.0, il fork come storia (MICRO-RIFINITURE)", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "pr1");
   mkdirSync(`${pr}/SB/versions`, { recursive: true });
@@ -12750,7 +12751,7 @@ T.write_glb(sys.argv[1]); T.write_glb(sys.argv[2], copies=5)`, `${pr}/SB/version
   if (sideIn) { await sideIn.fill("2048"); await sideIn.dispatchEvent("change"); }
   await p.waitForTimeout(1500);
   const after2 = await p.evaluate(() => [...document.querySelectorAll(".files-use-diag .files-lead")].map((x) => x.textContent).find((x) => /→/.test(x)) ?? "");
-  // Settings › Add-ons
+  // Settings › Third-party tools
   await p.evaluate(() => document.getElementById("btn-settings")?.click());
   await p.waitForTimeout(400);
   await p.click('#settings-tabs [data-tab-target="addons"]').catch(() => {});

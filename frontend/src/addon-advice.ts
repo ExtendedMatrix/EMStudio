@@ -1,5 +1,5 @@
 /**
- * MICRO-PREPARA-RITOCCHI p.4 (E.D., 30 Oct 2026) · Settings › Add-ons says
+ * MICRO-PREPARA-RITOCCHI p.4 (E.D., 30 Oct 2026) · Settings › Third-party tools says
  * first, in plain words, what each add-on is FOR YOU — which action of
  * Ottimizza uses it — and WHEN to install it: «recommended» when it serves
  * what you do, «optional» otherwise, so that it is clear they are not all

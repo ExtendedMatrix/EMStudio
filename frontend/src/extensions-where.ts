@@ -1,0 +1,128 @@
+/**
+ * MICRO-SEG08 (E.D. 21 Nov 2026: «non trovo dove è visibile quella sulla
+ * geofisica») · WHERE AN EXTENSION SHOWS IN THE INTERFACE, and what it
+ * contains, read from what its manifest declares — never from a list written
+ * here. A command's slots (`in = ["door.reader@2"]`…) and the declarative
+ * panels (`[[code.panels]]`) say the places; the data say the vocabularies.
+ *
+ * Each place says whether it is there NOW (the plugin loaded with that
+ * command) or only once the code is installed: «● attivo ora», «○ arriva con
+ * il codice». Pure: no DOM (`scripts/check-ext-page.mjs`).
+ */
+
+/** a command as the preview, the register or the loaded plugin describe it */
+export interface WhereCommand {
+  id: string;
+  label?: Record<string, string> | string;
+  in?: string[];
+  slots?: Array<{ name: string; kind?: string; required?: boolean }>;
+  folders?: boolean;
+  when?: string;
+}
+/** a declarative panel (`[[code.panels]]`) */
+export interface WherePanel { id: string; label?: Record<string, string> | string; place?: string }
+
+/** the kinds of place, in the order the page lists them (the order of the approved draft) */
+export const WHERE_ORDER = ["door", "import", "export", "panel", "layer", "tool", "section", "column", "statusbar",
+  "menu", "context", "check", "narrative", "vocab", "python"] as const;
+export type WhereKind = typeof WHERE_ORDER[number];
+
+/** the slot → the kind of place (`door.reader@2` → door) */
+const SLOT_KIND: Record<string, WhereKind> = {
+  "door.reader": "door", "menu.file.import": "import", "menu.file.export": "export",
+  "space.layer": "layer", "space.tool": "tool", "inspector.section": "section",
+  "tabular.column": "column", "statusbar": "statusbar", "menu.tools": "menu",
+  "context.node": "context", "check": "check", "export.narrative": "narrative",
+};
+export function slotKind(slot: string): WhereKind | null {
+  return SLOT_KIND[slot.replace(/@\d+$/, "")] ?? null;
+}
+
+/** one place of the interface where the extension shows */
+export interface WherePlace {
+  kind: WhereKind;
+  /** the labels of what is there (the commands, the panels, the vocabularies) */
+  names: string[];
+  /** a reader that reads folders */
+  folders?: boolean;
+  /** the command ids behind it (for «Mostrami»: the first) */
+  commands: string[];
+  /** panels: where it opens (right, left, below, window) */
+  place?: string;
+  /** the Python line (kind python) */
+  code?: string;
+  /** more commands only reachable from Python */
+  more?: number;
+  /** there now: the plugin is loaded with it (the data: installed) */
+  active: boolean;
+}
+
+export function labelOf(v: Record<string, string> | string | undefined | null, lang: string, fallback = ""): string {
+  if (v == null) return fallback;
+  if (typeof v === "string") return v;
+  const base = lang.split("-")[0];
+  return v[lang] ?? v[base] ?? v.en ?? Object.values(v)[0] ?? fallback;
+}
+
+/** the Python line of a command, as the console runs it today:
+ *  `em.plugins.invoke("geofisica", "geofisica.ingest", {"folder": …})`.
+ *  (The draft wrote `em.app.commands.run("geofisica.ingest", …)`: measured on
+ *  21 Nov, EMStudio's `commands.run` does not reach a plugin's command — neither
+ *  that id nor the documented `"<plugin>/<command>"` —, `em.plugins.invoke` does.) */
+export function pythonLine(c: WhereCommand, pluginId: string): string {
+  const req = (c.slots ?? []).filter((s) => s.required !== false).map((s) => `${JSON.stringify(s.name)}: …`);
+  return `em.plugins.invoke(${JSON.stringify(pluginId)}, ${JSON.stringify(c.id)}${req.length ? `, {${req.join(", ")}}` : ""})`;
+}
+
+/** the places of an extension, in the page's order: what its code declares
+ *  (`codeActive`: the plugin is loaded now) and its vocabularies (`dataActive`: installed) */
+export function whereOf(o: {
+  commands: WhereCommand[]; panels: WherePanel[]; vocabularies: string[];
+  codeActive: boolean; dataActive: boolean; lang: string; pluginId?: string;
+}): WherePlace[] {
+  const by = new Map<WhereKind, WherePlace>();
+  const add = (kind: WhereKind, name: string, cmd: string | null, extra: Partial<WherePlace> = {}, active = o.codeActive) => {
+    let p = by.get(kind);
+    if (!p) { p = { kind, names: [], commands: [], active }; by.set(kind, p); }
+    if (name && !p.names.includes(name)) p.names.push(name);
+    if (cmd) p.commands.push(cmd);
+    Object.assign(p, extra);
+  };
+  for (const c of o.commands) {
+    const name = labelOf(c.label, o.lang, c.id);
+    for (const slot of c.in ?? []) {
+      const k = slotKind(slot);
+      if (k) add(k, name, c.id, k === "door" && c.folders ? { folders: true } : {});
+    }
+  }
+  for (const p of o.panels) add("panel", labelOf(p.label, o.lang, p.id), null, { place: p.place || "right" });
+  if (o.vocabularies.length) add("vocab", "", null, { names: [...o.vocabularies] }, o.dataActive);
+  // Python: every command can be run from a script; the line shown is the first
+  // one no menu carries (else the first), the others counted
+  if (o.commands.length) {
+    const first = o.commands.find((c) => !(c.in ?? []).length) ?? o.commands[0];
+    add("python", labelOf(first.label, o.lang, first.id), first.id, { code: pythonLine(first, o.pluginId ?? first.id.split(".")[0]), more: o.commands.length - 1 });
+  }
+  return WHERE_ORDER.filter((k) => by.has(k)).map((k) => by.get(k)!);
+}
+
+/** what the code contains, counted by kind of place: "8 commands, 1 reader, 1 Space layer…" */
+export function codeCounts(commands: WhereCommand[], panels: WherePanel[]): Array<{ kind: WhereKind | "commands"; n: number }> {
+  const n = new Map<WhereKind, number>();
+  for (const c of commands) for (const s of new Set((c.in ?? []).map(slotKind).filter(Boolean) as WhereKind[])) n.set(s, (n.get(s) ?? 0) + 1);
+  if (panels.length) n.set("panel", panels.length);
+  const out: Array<{ kind: WhereKind | "commands"; n: number }> = [];
+  if (commands.length) out.push({ kind: "commands", n: commands.length });
+  for (const k of WHERE_ORDER) if (n.get(k)) out.push({ kind: k, n: n.get(k)! });
+  return out;
+}
+
+/** the host of a repository's address, as the selector shows it */
+export function repoHost(url: string): string {
+  const u = url.trim();
+  const m = /^[a-z]+:\/\/([^/]+)/i.exec(u);
+  if (m && !/^file:/i.test(u)) return m[1];
+  // a folder or a file:// URL: the folder's name (the index.json dropped)
+  const parts = u.replace(/^file:\/\//i, "").replace(/[\\/]index\.json$/i, "").split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? u;
+}

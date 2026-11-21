@@ -96,7 +96,7 @@
           <!-- MICRO-U · the vocabularies of this computer and of the file -->
           <button id="btn-tool-vocabularies" data-i18n="tools.vocabularies" data-i18n-title="tools.vocabulariesTitle" title="The vocabularies installed on this computer, those this file uses, and the copy of their terms in the file">Vocabularies…</button>
           <!-- MICRO-PL09 (W6) · the extensions of this computer: community packages, plugins -->
-          <button id="btn-tool-extensions" data-i18n="tools.extensions" data-i18n-title="tools.extensionsTitle" title="The extensions of this computer — community packages and plugins: install from disk, enable, remove">Extensions…</button>
+          <button id="btn-tool-extensions" data-i18n="tools.extensions" data-i18n-title="tools.extensionsTitle" title="Settings ▸ Extensions">Extensions…</button>
           <button id="btn-tool-chronology" data-i18n="chr.checkEllipsis" data-i18n-title="chr.checkTitle" title="Check the chronology: the epochs on a time axis, the overlaps with their delta and their remedies">Check the chronology…</button>
           <!-- MICRO-COR06 · it was «Resources»: a DosCo folder now comes in through «Porta dentro…» -->
           <button id="btn-door-dosco-tools" data-i18n-title="door.doscoMenuHint" title="Bring in a DosCo folder: each file with an EM id becomes the document of that id — its date, its licence, its role asked in one block" data-i18n="door.doscoMenu">Read as DosCo…</button>
@@ -483,138 +483,6 @@
               <select id="set-text-lang"></select>
             </label>
           </section>
-          <!-- IDENTITY · who is working. The ORCID iD is the identity itself;
-               everything else here is for humans to read. Note the contrast with
-               the AI key below: an iD is a PUBLIC identifier (it is printed on
-               papers) and lives in localStorage in clear text, while the tokens
-               that verify it are secrets and never touch this window. -->
-          <section data-settings-tab="identity" class="settings-sect" id="settings-sect-identity">
-            <!-- DEV30 U16 · in the interface's language (data-i18n), like the
-                 rest of Settings: the section was written in Italian -->
-            <h4 data-i18n="idw.setTitle">Identity (ORCID)</h4>
-            <p class="settings-hint" data-i18n="idw.setHint">
-              The ORCID iD is the identity: what you create and change carries the
-              signature of the current author. You can declare it offline and work at
-              once; verifying it is what unlocks publishing as that person.
-            </p>
-            <label
-              >ORCID iD
-              <input
-                id="set-orcid"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="0000-0000-0000-0000"
-              />
-            </label>
-            <label
-              ><span data-i18n="idw.setName">Name (optional)</span>
-              <input id="set-orcid-name" type="text" autocomplete="off" />
-            </label>
-            <label
-              ><span data-i18n="idw.setSurname">Surname (optional)</span>
-              <input id="set-orcid-surname" type="text" autocomplete="off" />
-            </label>
-            <p class="settings-url">
-              <button id="set-orcid-declare" type="button" data-i18n="idw.setDeclare">Declare</button>
-              <button id="set-orcid-verify" type="button" data-i18n="idw.setVerify">Verify with ORCID</button>
-              <button id="set-orcid-signout" type="button" data-i18n="idw.signOut" hidden>Sign out · forget this identity</button>
-            </p>
-            <p class="settings-hint" id="set-orcid-state"></p>
-            <div id="set-orcid-known"></div>
-            <!-- MICRO-DOVE-CHI-MENU p.5 · the ORCID client and orcid.org / sandbox
-                 are for whoever deploys EMStudio: in «Advanced», closed -->
-            <details class="settings-adv" id="set-orcid-adv">
-              <summary data-i18n="settings.advancedBox">Advanced</summary>
-              <p class="settings-hint" data-i18n="idp.clientHint">
-                ORCID's own sign-in needs a client registered at ORCID, with this page as its redirect.
-              </p>
-              <label
-                ><span data-i18n="idp.clientId">ORCID client id (public)</span>
-                <input id="set-orcid-client" type="text" autocomplete="off" spellcheck="false" placeholder="APP-DBYSPGP676HKN8OE" />
-              </label>
-              <label
-                ><span data-i18n="idp.clientBase">ORCID</span>
-                <select id="set-orcid-base">
-                  <option value="https://orcid.org">orcid.org</option>
-                  <option value="https://sandbox.orcid.org">sandbox.orcid.org</option>
-                </select>
-              </label>
-            </details>
-          </section>
-          <!-- MICRO-DOVE-CHI-MENU p.5 · CONNECTIONS: the saved nodes and, below, the
-               synchronised apps. MICRO-CHIP-UNICO p.4 · only what lasts: each saved
-               node made the default, edited, tested, removed; «Add a node…» unfolds
-               THE node selector (the chip's). Signing in and rooms are the chip's. -->
-          <section data-settings-tab="connections" class="settings-sect" id="settings-sect-node">
-            <h4 data-i18n="settings.nodesTitle">StratiGraph nodes</h4>
-            <p class="settings-hint" data-i18n="settings.nodesHint">
-              The nodes this computer knows. You choose one, sign in and pick its rooms from the chip at
-              the top right.
-            </p>
-            <ul id="set-nodes" class="set-nodes"></ul>
-            <div class="settings-node-actions">
-              <button type="button" id="set-node-add-btn" aria-expanded="false" data-i18n="settings.nodeAddMore">Add a node…</button>
-            </div>
-            <div id="set-node-chooser" class="set-node-chooser" hidden></div>
-          </section>
-          <!-- MICRO-SPAZIO-3D-2 p.6 · the node's orphan assets, for its operator -->
-          <section data-settings-tab="connections" class="settings-sect orph-off" id="settings-sect-orphans">
-            <h4 data-i18n="settings.orphans">Orphan assets</h4>
-            <p class="settings-hint" data-i18n="settings.orphansHint">
-              Files of the node's store that no room cites any more (their room was deleted). They stay
-              in the store: the same file uploaded again is not stored twice and joins its new room.
-              They are deleted one at a time, here.
-            </p>
-            <div class="orph-filter">
-              <select id="set-orph-type">
-                <option value="" data-i18n="settings.orphAllTypes">Every type</option>
-                <option value="model">model/*</option>
-                <option value="image">image/*</option>
-                <option value="application">application/*</option>
-                <option value="text">text/*</option>
-              </select>
-              <label><span data-i18n="settings.orphSince">since</span> <input id="set-orph-since" type="date" /></label>
-              <button type="button" id="set-orph-refresh" data-i18n="settings.orphRefresh">Refresh</button>
-            </div>
-            <div id="set-orph-list" class="orph-list"></div>
-          </section>
-          <section data-settings-tab="connections" class="settings-sect" id="settings-sect-sync">
-            <h4 data-i18n="settings.appsTitle">Synchronised apps</h4>
-            <p class="settings-hint" data-i18n="settings.blenderHint">
-              Live sync with a tool on this machine or your network (ADR-002):
-              the chosen tool is the host and runs the WebSocket server;
-              EMStudio is the client.
-            </p>
-            <label
-              ><span data-i18n="settings.syncWith">Sync with</span>
-              <select id="set-sync-tool"></select>
-            </label>
-            <label
-              ><span data-i18n="settings.syncProtocol">Protocol</span>
-              <select id="set-sync-protocol">
-                <option value="ws">ws:// (local)</option>
-                <option value="wss">wss:// (secure)</option>
-              </select>
-            </label>
-            <label
-              ><span data-i18n="settings.syncHost">Host / IP</span>
-              <input id="set-sync-host" type="text" placeholder="localhost" />
-            </label>
-            <label
-              ><span data-i18n="settings.syncPort">Port</span>
-              <input
-                id="set-sync-port"
-                type="number"
-                min="1"
-                max="65535"
-                placeholder="8788"
-              />
-            </label>
-            <p class="settings-url">
-              <span data-i18n="settings.endpoint">Address:</span> <code id="set-sync-url"></code>
-            </p>
-          </section>
           <!-- DARK1: the theme, first after the language — both change every
                other label in this dialog, so they belong together at the top. -->
           <section data-settings-tab="general" class="settings-sect">
@@ -688,6 +556,65 @@
             </label>
             <button id="set-onedrive-find" type="button" data-i18n="settings.onedriveFind">Find it</button>
             <p class="settings-hint" id="set-onedrive-found"></p>
+          </section>
+          <!-- IDENTITY · who is working. The ORCID iD is the identity itself;
+               everything else here is for humans to read. Note the contrast with
+               the AI key below: an iD is a PUBLIC identifier (it is printed on
+               papers) and lives in localStorage in clear text, while the tokens
+               that verify it are secrets and never touch this window. -->
+          <section data-settings-tab="identity" class="settings-sect" id="settings-sect-identity">
+            <!-- DEV30 U16 · in the interface's language (data-i18n), like the
+                 rest of Settings: the section was written in Italian -->
+            <h4 data-i18n="idw.setTitle">Identity (ORCID)</h4>
+            <p class="settings-hint" data-i18n="idw.setHint">
+              The ORCID iD is the identity: what you create and change carries the
+              signature of the current author. You can declare it offline and work at
+              once; verifying it is what unlocks publishing as that person.
+            </p>
+            <label
+              >ORCID iD
+              <input
+                id="set-orcid"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="0000-0000-0000-0000"
+              />
+            </label>
+            <label
+              ><span data-i18n="idw.setName">Name (optional)</span>
+              <input id="set-orcid-name" type="text" autocomplete="off" />
+            </label>
+            <label
+              ><span data-i18n="idw.setSurname">Surname (optional)</span>
+              <input id="set-orcid-surname" type="text" autocomplete="off" />
+            </label>
+            <p class="settings-url">
+              <button id="set-orcid-declare" type="button" data-i18n="idw.setDeclare">Declare</button>
+              <button id="set-orcid-verify" type="button" data-i18n="idw.setVerify">Verify with ORCID</button>
+              <button id="set-orcid-signout" type="button" data-i18n="idw.signOut" hidden>Sign out · forget this identity</button>
+            </p>
+            <p class="settings-hint" id="set-orcid-state"></p>
+            <div id="set-orcid-known"></div>
+            <!-- MICRO-DOVE-CHI-MENU p.5 · the ORCID client and orcid.org / sandbox
+                 are for whoever deploys EMStudio: in «Advanced», closed -->
+            <details class="settings-adv" id="set-orcid-adv">
+              <summary data-i18n="settings.advancedBox">Advanced</summary>
+              <p class="settings-hint" data-i18n="idp.clientHint">
+                ORCID's own sign-in needs a client registered at ORCID, with this page as its redirect.
+              </p>
+              <label
+                ><span data-i18n="idp.clientId">ORCID client id (public)</span>
+                <input id="set-orcid-client" type="text" autocomplete="off" spellcheck="false" placeholder="APP-DBYSPGP676HKN8OE" />
+              </label>
+              <label
+                ><span data-i18n="idp.clientBase">ORCID</span>
+                <select id="set-orcid-base">
+                  <option value="https://orcid.org">orcid.org</option>
+                  <option value="https://sandbox.orcid.org">sandbox.orcid.org</option>
+                </select>
+              </label>
+            </details>
           </section>
           <section data-settings-tab="viewers" class="settings-sect">
             <h4 data-i18n="settings.viewer">3D viewer</h4>
@@ -824,6 +751,99 @@
               />
             </label>
           </section>
+          <!-- MICRO-DOVE-CHI-MENU p.5 · CONNECTIONS: the saved nodes and, below, the
+               synchronised apps. MICRO-CHIP-UNICO p.4 · only what lasts: each saved
+               node made the default, edited, tested, removed; «Add a node…» unfolds
+               THE node selector (the chip's). Signing in and rooms are the chip's. -->
+          <section data-settings-tab="connections" class="settings-sect" id="settings-sect-node">
+            <h4 data-i18n="settings.nodesTitle">StratiGraph nodes</h4>
+            <p class="settings-hint" data-i18n="settings.nodesHint">
+              The nodes this computer knows. You choose one, sign in and pick its rooms from the chip at
+              the top right.
+            </p>
+            <ul id="set-nodes" class="set-nodes"></ul>
+            <div class="settings-node-actions">
+              <button type="button" id="set-node-add-btn" aria-expanded="false" data-i18n="settings.nodeAddMore">Add a node…</button>
+            </div>
+            <div id="set-node-chooser" class="set-node-chooser" hidden></div>
+          </section>
+          <!-- MICRO-SPAZIO-3D-2 p.6 · the node's orphan assets, for its operator -->
+          <section data-settings-tab="connections" class="settings-sect orph-off" id="settings-sect-orphans">
+            <h4 data-i18n="settings.orphans">Orphan assets</h4>
+            <p class="settings-hint" data-i18n="settings.orphansHint">
+              Files of the node's store that no room cites any more (their room was deleted). They stay
+              in the store: the same file uploaded again is not stored twice and joins its new room.
+              They are deleted one at a time, here.
+            </p>
+            <div class="orph-filter">
+              <select id="set-orph-type">
+                <option value="" data-i18n="settings.orphAllTypes">Every type</option>
+                <option value="model">model/*</option>
+                <option value="image">image/*</option>
+                <option value="application">application/*</option>
+                <option value="text">text/*</option>
+              </select>
+              <label><span data-i18n="settings.orphSince">since</span> <input id="set-orph-since" type="date" /></label>
+              <button type="button" id="set-orph-refresh" data-i18n="settings.orphRefresh">Refresh</button>
+            </div>
+            <div id="set-orph-list" class="orph-list"></div>
+          </section>
+          <section data-settings-tab="connections" class="settings-sect" id="settings-sect-sync">
+            <h4 data-i18n="settings.appsTitle">Synchronised apps</h4>
+            <p class="settings-hint" data-i18n="settings.blenderHint">
+              Live sync with a tool on this machine or your network (ADR-002):
+              the chosen tool is the host and runs the WebSocket server;
+              EMStudio is the client.
+            </p>
+            <label
+              ><span data-i18n="settings.syncWith">Sync with</span>
+              <select id="set-sync-tool"></select>
+            </label>
+            <label
+              ><span data-i18n="settings.syncProtocol">Protocol</span>
+              <select id="set-sync-protocol">
+                <option value="ws">ws:// (local)</option>
+                <option value="wss">wss:// (secure)</option>
+              </select>
+            </label>
+            <label
+              ><span data-i18n="settings.syncHost">Host / IP</span>
+              <input id="set-sync-host" type="text" placeholder="localhost" />
+            </label>
+            <label
+              ><span data-i18n="settings.syncPort">Port</span>
+              <input
+                id="set-sync-port"
+                type="number"
+                min="1"
+                max="65535"
+                placeholder="8788"
+              />
+            </label>
+            <p class="settings-url">
+              <span data-i18n="settings.endpoint">Address:</span> <code id="set-sync-url"></code>
+            </p>
+          </section>
+          <!-- MICRO-SEG08 · Preferences ▸ Extensions (it was the window Tools ▸ Extensions…):
+               the page is drawn by extensions-window.ts into #set-extensions while the tab
+               is shown; with «Third-party tools» it makes a group of its own in the strip -->
+          <section data-settings-tab="extensions" data-settings-group="ext" class="settings-sect settings-sect-page" id="settings-sect-extensions">
+            <div id="set-extensions"></div>
+          </section>
+          <!-- MICRO-OTTIMIZZA-1 · the external tools EMStudio calls and does not
+               ship: downloaded on request (pinned version, sha256 checked),
+               updated and removed here; their licences and sources are the
+               credits of what they do -->
+          <!-- MICRO-OTTIMIZZA-3 p.2 · a tab of their own, the list filtered for
+               this machine (system, processor, graphics, memory) -->
+          <section data-settings-tab="addons" data-settings-group="ext" class="settings-sect settings-sect-page" id="settings-sect-addons">
+            <!-- MICRO-SEG08 · it was «Add-ons»: programs made by others, not the EM language (board 3) -->
+            <h3 class="settings-page-title" data-i18n="settings.addons">Third-party tools</h3>
+            <p class="settings-hint" data-i18n="settings.addonsHint">Programs made by others that EMStudio calls on this computer to prepare 3D models. They add no EM vocabulary or command: that is what Extensions do.</p>
+            <p class="settings-hint" data-i18n="settings.addonsCredits">Downloaded on request from their official releases, at a pinned version whose sha256 is checked.</p>
+            <p class="settings-hint" id="set-addons-machine"></p>
+            <div id="set-addons"></div>
+          </section>
           <!-- WIN7 · the narrative window's ⌁ button opens Settings straight
                here: "who writes the draft, and with which key" is the data the
                AI needs, and hunting for it in a long dialog was the reason
@@ -864,18 +884,6 @@
               <button id="set-ai-key-clear" type="button" data-i18n="settings.aiKeyClear">Remove</button>
             </p>
             <p class="settings-hint" id="set-ai-key-hint"></p>
-          </section>
-          <!-- MICRO-OTTIMIZZA-1 · the external tools EMStudio calls and does not
-               ship: downloaded on request (pinned version, sha256 checked),
-               updated and removed here; their licences and sources are the
-               credits of what they do -->
-          <!-- MICRO-OTTIMIZZA-3 p.2 · a tab of their own, the list filtered for
-               this machine (system, processor, graphics, memory) -->
-          <section data-settings-tab="addons" class="settings-sect" id="settings-sect-addons">
-            <h4 data-i18n="settings.addons">Add-ons</h4>
-            <p class="settings-hint" data-i18n="settings.addonsHint">Tools EMStudio calls and does not ship.</p>
-            <p class="settings-hint" id="set-addons-machine"></p>
-            <div id="set-addons"></div>
           </section>
           <section data-settings-tab="advanced" class="settings-sect">
             <h4 data-i18n="settings.developer">Developer</h4>

@@ -110,9 +110,9 @@ ok(old.querySelector("[data-ext='version-use']") && old.querySelector("[data-ext
    "an older code: «Usa questa», «Rimuovi questa versione», where it came from");
 ok(vers.querySelector('[data-ext-version="data/0.1.0"] [data-ext="version-remove-data"]'), "a data version: removable one at a time");
 ok(vers.querySelector("[data-ext='prune']"), "«Rimuovi le versioni vecchie del codice»");
-const repos = box.querySelector("[data-ext-repos]");
-ok(repos.querySelector("[data-ext='update-all']")?.textContent === "ext.updateAllN(n=2)", "«Aggiorna tutto (2)»");
-ok(repos.querySelector('[data-ext-other-platform="nas/rti-viewer"]')?.textContent.includes("non per questa macchina"),
+// MICRO-SEG08 · «Aggiorna tutto (2)» on the page's status line; what is only for other machines under the list
+ok(box.querySelector(".ext-status [data-ext='update-all']")?.textContent === "ext.updateAllN(n=2)", "«Aggiorna tutto (2)»");
+ok(box.querySelector('.ext-list [data-ext-other-platform="nas/rti-viewer"]')?.textContent.includes("non per questa macchina"),
    "what a repository has only for other machines: said, not offered");
 const nw = box.querySelector("[data-ext-newer]");
 ok(nw && nw.querySelector(`[data-ext-newer-iri="${IRI}"]`)?.dataset.extNewerChange === "major", "«questo file usa … c'è la 0.2.0» in the window");

@@ -3,7 +3,7 @@
 // by hand; this one gives the bridge NOTHING but the add-ons folder — no
 // `EM_GLTFPACK`, a PATH of /usr/bin:/bin — so the tool it runs is the add-on
 // `./em.sh gltfpack` installs (meshoptimizer's official release, pinned version
-// and sha256, into `<state>/addons/gltfpack/<version>/`, as Settings › Add-ons).
+// and sha256, into `<state>/addons/gltfpack/<version>/`, as Settings › Third-party tools).
 // A glb of testdata/ is COPIED into a folder of /tmp, and the variant is asked
 // as the page asks it: `POST /jobs {kind: variants}`, polled to its end.
 //

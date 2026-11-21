@@ -189,7 +189,8 @@ import { ColoursWindow, screenArea, type SystemWindow } from "./colours-window";
 import { declareVocabularies, isControlled, termOf, termPatch } from "./vocab-terms";
 import { VocabState, linkDialog, valueTermEl, vocabContent, type VocabHost } from "./vocab-ui";
 import { ExtensionsState, declareProfiles, declaredOf, formsOf, formVocabulariesOf, labelIn as extLabelIn, nameOfIri, qualiaOf, redeclareProfiles, stringsOf, typeLabel as packageTypeLabel, type ExtNewer, type OverlayDoc } from "./extensions-state";
-import { archiveOfFile, extensionsContent, extensionsFilter, newerFlow, type ExtDevHost, type ExtWindowHost } from "./extensions-window";
+import { archiveOfFile, extensionsContent, extensionsFilter, extensionsSig, newerFlow, type ExtDevHost, type ExtWindowHost } from "./extensions-window";
+import type { WherePlace } from "./extensions-where";
 import { NodePluginsState, nodePluginsSection } from "./node-plugins";
 import { VocabMarkCache, vocabMarkOf, type VocabMarkCtx } from "./vocab-marks";
 import {
@@ -21482,6 +21483,9 @@ function showSettingsTab(wanted: string | null): void {
   // The scroll belongs to the tab, not to the dialog: arriving on a tab
   // half-way down the previous one's scroll is disorienting.
   settingsModal.querySelector(".modal-body")?.scrollTo({ top: 0 });
+  // MICRO-SEG08 · the extensions are a page that reads this machine: asked when shown
+  settingsModal.classList.toggle("settings-wide", active === "extensions" || active === "addons");
+  if (active === "extensions") onExtensionsTab();
   try {
     localStorage.setItem(SETTINGS_TAB_KEY, active);
   } catch {
@@ -21493,7 +21497,20 @@ const settingsTabBar = document.getElementById("settings-tabs")!;
 
 function buildSettingsTabs(): void {
   settingsTabBar.textContent = "";
+  // MICRO-SEG08 · a thin line where the sections' group changes (`data-settings-group`
+  // on the sections: Extensions and Third-party tools together, as in Blender)
+  const groupOf = (tab: string): string =>
+    settingsSections().find((x) => x.dataset.settingsTab === tab)?.dataset.settingsGroup ?? "";
+  let lastGroup: string | null = null;
   for (const tab of settingsTabIds()) {
+    const g = groupOf(tab);
+    if (lastGroup !== null && g !== lastGroup) {
+      const sep = document.createElement("div");
+      sep.className = "settings-tab-sep";
+      sep.setAttribute("role", "separator");
+      settingsTabBar.appendChild(sep);
+    }
+    lastGroup = g;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "settings-tab";
@@ -21508,7 +21525,8 @@ function buildSettingsTabs(): void {
   }
   settingsTabBar.addEventListener("keydown", (event) => {
     const key = (event as KeyboardEvent).key;
-    const step = key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : 0;
+    // MICRO-SEG08 · the strip is a column on the left now: ↑ ↓ (← → kept)
+    const step = key === "ArrowRight" || key === "ArrowDown" ? 1 : key === "ArrowLeft" || key === "ArrowUp" ? -1 : 0;
     if (!step) return;
     event.preventDefault();
     const tabs = settingsTabIds();
@@ -36217,6 +36235,19 @@ const extWindowHost: ExtWindowHost = {
     t: (k, v) => t(k, v), lang: () => getLocale(), role: () => hostInfo.role ?? null,
     canWrite: () => !hubReadOnly(), selection: () => [...selectedIds], log: (m) => logInfo(m),
   }, nodePlugState, () => extWindow.repaint(true)),
+  // MICRO-SEG08 · «Dove la trovi»: the plugin as loaded now, «Mostrami», the guide
+  loadedFacts: (id) => {
+    const p = pluginState?.plugins.find((x) => (x.id === id || x.package === id) && x.state === "loaded" && !x.dev);
+    if (!p) return null;
+    return { commands: p.commands.map((c) => ({ id: c.id, label: c.label, in: c.in, slots: c.slots, folders: c.folders, when: c.when })),
+      panels: (p.panels ?? []).map((x) => ({ id: x.id, label: x.label, place: x.place })) };
+  },
+  showWhere: (p, id) => showExtPlace(p, id),
+  openGuide: () => {
+    const url = `https://docs.extendedmatrix.org/projects/emstudio-doc/${getLocale().startsWith("it") ? "it" : "en"}/1.6/extending/index.html`;
+    if (isTauri()) void openInSystemBrowser(url);
+    else window.open(url, "_blank", "noopener");
+  },
 };
 /** MICRO-PL27 (X7) · what the node says of its plugins for the room this page is in
  *  (s3dgraphy extensions.node behind the node's routes; signed with the session's token) */
@@ -36298,23 +36329,157 @@ function devHost(): ExtDevHost {
     reload: (id) => post("/py/plugins/reload", { plugin: id }),
   };
 }
-const extWindow = new ColoursWindow(coloursWindowHostForVocab(), document, {
-  prefKey: "emstudio.extensions.window.v1", titleKey: "ext.title", helpKey: "ext.help", popupName: "emstudio-extensions", data: "extWindow",
-  content: (d) => extensionsContent(d, extWindowHost, extState, () => extWindow.repaint(true)),
-  sig: () => JSON.stringify([extState.rev, extState.rows?.length ?? -1, extState.unavailable, extState.missing,
-    (extState.overlay?.profiles ?? []).map((p) => `${p.name}@${p.version}${p.declared ? "*" : ""}`),
-    emtree.activeFile()?.id ?? "", extensionsFilter(), getLocale(),
-    // MICRO-PL18 · the development folder and its plugins
-    pluginState ? [pluginState.dev, pluginState.why, pluginState.plugins.filter((p) => p.dev).map((p) => [p.id, p.version, p.state])] : null,
-    // MICRO-PL22 · the repositories
-    extReposOld, extState.repos?.length ?? -1, extState.online?.on ?? null,
-    // MICRO-PL23 · the file's newer packages, the updates' level
-    extState.newer.map((n) => `${n.iri}@${n.newest}`), extUpdatesOld,
-    // MICRO-PL27 · the plugins of the node
-    nodePlugState.rev, hostInfo.role ?? null, hubReadOnly()]),
-});
+/** MICRO-SEG08 · «Estensioni» is a page of the Preferences (it was a window of
+ *  Tools): drawn into `#set-extensions` while that tab is shown, again on every
+ *  change the state reports; the search keeps its caret, the list its scroll. */
+let extPaintSig = "";
+const extWindow = {
+  repaint(force = false): void {
+    const mount = document.getElementById("set-extensions");
+    const sect = document.getElementById("settings-sect-extensions");
+    if (!mount || !sect || settingsModal.classList.contains("hidden") || sect.classList.contains("hidden")) { extPaintSig = ""; return; }
+    const sig = JSON.stringify([extState.rev, extState.rows?.length ?? -1, extState.unavailable, extState.missing,
+      (extState.overlay?.profiles ?? []).map((p) => `${p.name}@${p.version}${p.declared ? "*" : ""}`),
+      emtree.activeFile()?.id ?? "", extensionsFilter(), extensionsSig(), getLocale(),
+      // MICRO-PL18 · the development folder and its plugins; MICRO-SEG08 · the plugins loaded («Dove la trovi»)
+      pluginState ? [pluginState.dev, pluginState.why, pluginState.plugins.map((p) => [p.id, p.version, p.state])] : null,
+      // MICRO-PL22 · the repositories
+      extReposOld, extState.repos?.length ?? -1, extState.online?.on ?? null,
+      // MICRO-PL23 · the file's newer packages, the updates' level
+      extState.newer.map((n) => `${n.iri}@${n.newest}`), extUpdatesOld,
+      // MICRO-PL27 · the plugins of the node
+      nodePlugState.rev, hostInfo.role ?? null, hubReadOnly()]);
+    if (!force && sig === extPaintSig) return;
+    extPaintSig = sig;
+    const active = document.activeElement as HTMLInputElement | null;
+    const typing = active?.matches?.("[data-ext-search]") ? active.selectionStart ?? active.value.length : null;
+    const scrollTop = mount.querySelector(".ext-scroll")?.scrollTop ?? 0;
+    mount.replaceChildren(extensionsContent(document, extWindowHost, extState, () => extWindow.repaint(true)));
+    const sc = mount.querySelector(".ext-scroll");
+    if (sc) sc.scrollTop = scrollTop;
+    if (typing != null) {
+      const si = mount.querySelector<HTMLInputElement>("[data-ext-search]");
+      if (si) { si.focus(); si.setSelectionRange(typing, typing); }
+    }
+  },
+  open(): void { openExtensionsWindow(); },
+};
+/** Tools ▸ Extensions… stays: a shortcut to Preferences ▸ Extensions (MICRO-SEG08) */
 function openExtensionsWindow(): void {
-  extWindow.open();
+  openSettings("settings-sect-extensions");
+}
+/** MICRO-SEG08 · «Mostrami»: the place of «Dove la trovi», reached. The
+ *  Preferences close (a modal), then: File ▸ Porta dentro… opened and lit; the
+ *  Space with its Layers or its tool lit; the Inspector lit (with what it needs
+ *  to show the section); a panel opened; the Vocabularies; the console with the
+ *  command written in it (not run). */
+function showExtPlace(p: WherePlace, extId: string): void {
+  const plugin = pluginState?.plugins.find((x) => (x.id === extId || x.package === extId) && x.state === "loaded") ?? null;
+  const cmdOf = (id: string | undefined) => plugin?.commands.find((c) => c.id === id) ?? null;
+  const light = (elm: Element | null | undefined): boolean => {
+    if (!elm) return false;
+    (elm as HTMLElement).scrollIntoView?.({ block: "nearest" });
+    elm.classList.remove("em-showme");
+    void (elm as HTMLElement).offsetWidth;
+    elm.classList.add("em-showme");
+    setTimeout(() => elm.classList.remove("em-showme"), 4000);
+    return true;
+  };
+  const say = (k: string, v: Record<string, string> = {}) => { const m = t(k, v); toast(m); logInfo(m); };
+  closeSettings();
+  const inSpace = (then: () => void) => {
+    if (activeWorkspace() !== "space") setWorkspace("space");
+    // the Space draws after the workspace: look for its bar a moment later
+    setTimeout(then, 350);
+  };
+  switch (p.kind) {
+    case "door": case "import": case "export": {
+      // after the click that pressed «Mostrami» has reached the document (which closes every menu)
+      setTimeout(() => {
+        const toggle = document.querySelector<HTMLButtonElement>("#dd-file .dd-toggle");
+        const menu = document.querySelector<HTMLElement>("#dd-file .dd-menu");
+        if (toggle && menu?.classList.contains("hidden")) toggle.click();
+      }, 0);
+      setTimeout(() => {
+        const item = p.kind === "door" ? document.getElementById("btn-bring-in")
+          : document.querySelector<HTMLElement>(`#dd-file .dd-sub[data-sub="${p.kind}"] .dd-sub-toggle`);
+        if (!light(item)) say("ext.w.shownMenu", { where: t(`ext.w.${p.kind}`) });
+      }, 60);
+      return;
+    }
+    case "layer":
+      // the Space asks the plugins for its layers once it is open: wait for them (a few seconds at most)
+      inSpace(() => void until(() => pluginLayersNow().length > 0, 4000).then((there) => {
+        const sw = windowsOf().find((w) => w.type === "scene");
+        const open = sw ? visOpeners.get(sw.id) : undefined;
+        if (open) open();
+        setTimeout(() => {
+          const menu = document.querySelector<HTMLElement>(".vis-menu");
+          if (!light(menu?.querySelector(".plg-panel") ?? menu)) say("ext.w.shownSpace");
+          if (!there) say("ext.w.layerEmpty", { n: p.names.join(", ") });
+        }, 120);
+      }));
+      return;
+    case "tool":
+      inSpace(() => {
+        const c = cmdOf(p.commands[0]);
+        // the Space's layers bar (MICRO-GEO13, `data-plg-tool`), else a Viewer's bar (`data-tool`)
+        const id = c ? CSS.escape(toolId(c)) : "";
+        const sel = c ? `[data-plg-tool="${id}"], [data-tool="${id}"]` : "[data-plg-tool^='plugin:'], [data-tool^='plugin:']";
+        void until(() => !!document.querySelector(sel), 4000).then((there) => {
+          if (!there || !light(document.querySelector(sel))) say("ext.w.toolWhere", { n: p.names.join(", ") });
+        });
+      });
+      return;
+    case "section": {
+      const insp = windowsOf().find((w) => w.type === "inspector");
+      if (insp) { selectWindow(insp.id); light(winAreas.get(insp.id)); }
+      const c = cmdOf(p.commands[0]);
+      say("ext.w.sectionWhen", { n: p.names.join(", "), when: c?.when ? c.when.replace(/^selection:/, "") : "—" });
+      return;
+    }
+    case "panel": {
+      const panel = plugin ? (plugin.panels ?? []).find((x) => p.names.includes(labelOfPlugin(x.label, x.id))) ?? (plugin.panels ?? [])[0] : null;
+      if (panel) openPluginPanel(panel);
+      else say("ext.w.notLoaded");
+      return;
+    }
+    case "vocab":
+      openVocabWindow();
+      return;
+    case "python": {
+      const w = openConsoleWindow();
+      setTimeout(() => {
+        const area = w ? winAreas.get(w.id) : null;
+        const input = area?.querySelector<HTMLTextAreaElement>(".pyc-input");
+        if (input && p.code) { input.value = p.code; input.focus(); input.setSelectionRange(p.code.length, p.code.length); light(input); }
+      }, 60);
+      return;
+    }
+    default: {
+      // the menus, the context menu, the checks, a column, the status bar: said where, in words
+      say("ext.w.shownMenu", { where: t(`ext.w.${p.kind}`) });
+    }
+  }
+}
+/** true as soon as `ok()` holds, false after `ms` (polled every 100 ms) */
+function until(ok: () => boolean, ms: number): Promise<boolean> {
+  return new Promise((res) => {
+    const t0 = Date.now();
+    const tick = () => { if (ok()) res(true); else if (Date.now() - t0 > ms) res(false); else setTimeout(tick, 100); };
+    tick();
+  });
+}
+function labelOfPlugin(v: Record<string, string> | string | undefined, id: string): string {
+  if (!v) return id;
+  if (typeof v === "string") return v;
+  const l = getLocale();
+  return v[l] ?? v[l.split("-")[0]] ?? v.en ?? Object.values(v)[0] ?? id;
+}
+/** the tab «Estensioni» shown: what this machine has asked again */
+function onExtensionsTab(): void {
+  extWindow.repaint(true);
+  void refreshPlugins();
   void extState.refresh().then(() => {
     // MICRO-PL27 · the web (the node answered, or nothing did): the node's plugins for this room
     if (extState.from === "node" || extState.unavailable) void nodePlugState.refresh();
@@ -44744,11 +44909,26 @@ function addonCard(a: AddonState, compact: boolean, advice?: Advice): HTMLElemen
   if (row.childElementCount) box.appendChild(row);
   const rows = jobRows(["addon"]);
   if (rows && busy) box.appendChild(rows);
+  // MICRO-SEG08 · Preferences ▸ Third-party tools: the card is a line of one
+  // table — Tool · Used for · On this computer · action (board 3)
+  if (!compact) {
+    const cells = ["addons-c1", "addons-c2", "addons-c3", "addons-c4"].map((c) => { const d = document.createElement("div"); d.className = c; return d; });
+    for (const k of [...box.children]) {
+      const he = k as HTMLElement;
+      if (k === head) cells[0].appendChild(k);
+      else if (he.classList.contains("files-addon-for") || he.classList.contains("files-addon-when") || he.dataset.emulated != null) cells[1].appendChild(k);
+      else if (he.classList.contains("files-addon-gestures") || he.classList.contains("files-jobs")) cells[3].appendChild(k);
+      else cells[2].appendChild(k);
+    }
+    cells[2].classList.add(a.installed ? "ok" : "none");
+    box.className = "files-addon addons-row";
+    box.replaceChildren(...cells);
+  }
   return box;
 }
 
 /** An add-on installed (or updated) as a job of the bridge; the plans that
- *  waited for it asked again (Settings › Add-ons, and in line where it is
+ *  waited for it asked again (Settings › Third-party tools, and in line where it is
  *  missing — MICRO-ARCHIVE-ASSET-2). */
 async function installAddon(a: AddonState): Promise<void> {
   const job = await startJob({ kind: "addon", id: a.id }, `${a.name} ${a.version ?? ""}`.trim());
@@ -44769,7 +44949,7 @@ async function installAddon(a: AddonState): Promise<void> {
 }
 
 /** MICRO-OTTIMIZZA-3 p.2 · an add-on a tab needs and does not find: ONE line,
- *  with the way to Settings › Add-ons, where it is installed (its card says
+ *  with the way to Settings › Third-party tools, where it is installed (its card says
  *  what it does, version, licence, source, and whether it suits this machine). */
 let addonFocus: string | null = null;
 function addonLink(id: string, why: string, inline = true): HTMLElement {
@@ -44808,7 +44988,7 @@ function machineLine(m: AddonMachine): string {
   return t("settings.machine", { system: sys, cpu: m.cpu ? `${m.cpu} (${chip})` : chip, gpu, memory: formatMb(m.memory_mb, getLocale()) });
 }
 
-/** Settings › Add-ons (a tab of its own since MICRO-OTTIMIZZA-3): this machine,
+/** Settings › Third-party tools (a tab of its own since MICRO-OTTIMIZZA-3): this machine,
  *  the add-ons that suit it — each with what it does, its pinned version,
  *  licence and source, its state and install · update · remove — then the
  *  ones that do not, each with why; Blender last. */
@@ -44827,10 +45007,41 @@ function paintAddonsSettings(): void {
     const adv = new Map(advice.map((x) => [x.id, x]));
     const enough = enoughFor(list, advice);
     const sum = tabLead(enough.length ? t("settings.addonsEnough", { list: enough.join(", ") }) : t("settings.addonsNoneNeeded"),
-                        "files-lead files-addons-enough");
+                        "files-lead files-addons-enough addons-lead");
     sum.dataset.enough = enough.join(",");
     sum.append(" ", tabTip(t("settings.addonsEnoughTip")));
     host.appendChild(sum);
+    // MICRO-SEG08 · one table: Tool · Used for · On this computer · action
+    const table = document.createElement("div");
+    table.className = "addons-table";
+    table.dataset.addonsTable = "1";
+    const th = document.createElement("div");
+    th.className = "addons-row addons-head ext-eyebrow";
+    for (const k of ["settings.addonsColTool", "settings.addonsColFor", "settings.addonsColHere", ""]) {
+      const c = document.createElement("span");
+      c.textContent = k ? t(k) : "";
+      th.appendChild(c);
+    }
+    table.appendChild(th);
+    host.appendChild(table);
+    const fits = list.filter((a) => a.fit?.ok !== false), not = list.filter((a) => a.fit?.ok === false);
+    // the recommended first, then the optional, then what is not needed
+    const rank = (a: AddonState): number => ({ recommended: 0, optional: 1, not_needed: 2, not_here: 3 })[adv.get(a.id)?.code ?? "optional"];
+    for (const a of [...fits].sort((x, y) => rank(x) - rank(y))) table.appendChild(addonCard(a, false, adv.get(a.id)));
+    // Blender: a line of the table; its card (which one, where) opens under it
+    table.appendChild(blenderSettingsRow());
+    host.appendChild(blenderSettingsCard());
+    if (not.length) {
+      const h = document.createElement("h5");
+      h.className = "settings-sub";
+      h.textContent = t("settings.addonsNotHere");
+      host.appendChild(h);
+      const nt = document.createElement("div");
+      nt.className = "addons-table";
+      for (const a of not) nt.appendChild(addonCard(a, false, adv.get(a.id)));
+      host.appendChild(nt);
+    }
+    host.appendChild(tabLead(t("files.addonsWhere", { folder: list[0]?.folder.replace(/[/\\][^/\\]+$/, "") ?? "" }), "settings-hint"));
     // MICRO-CODA-MULTICORE · how much of the machine the queue uses
     const qh = document.createElement("h5");
     qh.className = "settings-sub";
@@ -44841,19 +45052,6 @@ function paintAddonsSettings(): void {
     sl.dataset.alSched = "";
     host.appendChild(sl);
     void pushQueueShare().then(loadScheduler).then(paintSchedLine);
-    const fits = list.filter((a) => a.fit?.ok !== false), not = list.filter((a) => a.fit?.ok === false);
-    // the recommended first, then the optional, then what is not needed
-    const rank = (a: AddonState): number => ({ recommended: 0, optional: 1, not_needed: 2, not_here: 3 })[adv.get(a.id)?.code ?? "optional"];
-    for (const a of [...fits].sort((x, y) => rank(x) - rank(y))) host.appendChild(addonCard(a, false, adv.get(a.id)));
-    if (not.length) {
-      const h = document.createElement("h5");
-      h.className = "settings-sub";
-      h.textContent = t("settings.addonsNotHere");
-      host.appendChild(h);
-      for (const a of not) host.appendChild(addonCard(a, false, adv.get(a.id)));
-    }
-    host.appendChild(blenderSettingsCard());
-    host.appendChild(tabLead(t("files.addonsWhere", { folder: list[0]?.folder.replace(/[/\\][^/\\]+$/, "") ?? "" }), "settings-hint"));
     const focus = addonFocus ? host.querySelector<HTMLElement>(`[data-addon="${addonFocus}"]`) : null;
     addonFocus = null;
     if (focus) { focus.classList.add("flash"); focus.scrollIntoView({ block: "nearest" }); }
@@ -45592,7 +45790,7 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
     const paint = (pl: OptPlan): void => {
       slot.textContent = "";
       if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
-      // p.2 · the add-on missing: one line, to Settings › Add-ons
+      // p.2 · the add-on missing: one line, to Settings › Third-party tools
       // (its «Installa» is beside the engine above — MICRO-ARCHIVE-ASSET-2)
       if (!pl.tool) slot.appendChild(addonLink("gltfpack", t("files.optNoTool"), !(engine === "gltfpack" && gltfpackMissing)));
       const table = document.createElement("table");
@@ -45841,7 +46039,7 @@ function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTML
       }
       slot.appendChild(box);
     }
-    // Obj2Tiles: here (said in an ⓘ), or one line to Settings › Add-ons
+    // Obj2Tiles: here (said in an ⓘ), or one line to Settings › Third-party tools
     const toolTip = pl.tool ? tabTip(t("files.tilesTool", { version: pl.tool.version || "Obj2Tiles", path: pl.tool.path })
         + (pl.tool.emulated ? " " + t("files.tilesRosetta") : "")
         + " " + t(pl.tool.progress ? "files.tilesProgressExact" : "files.tilesProgressPhases") + " " + t("files.tilesAgpl")) : null;
@@ -46749,14 +46947,51 @@ async function runBlender(win: Win, body: Record<string, unknown>, source: strin
   renderStorage();
 }
 
-/** Settings ▸ Add-ons: Blender — the ones found, the one used (chosen or the
+/** Settings ▸ Third-party tools: Blender — the ones found, the one used (chosen or the
  *  newest), what it has; another one chosen by its path. */
 function blenderSettingsCard(): HTMLElement {
   const card = document.createElement("div");
   card.className = "addon-card";
   card.id = "set-blender";
+  // MICRO-SEG08 · under the table, opened by «Trova…» on Blender's line (or when one is asked for)
+  card.hidden = !blenderCardOpen && addonFocus !== "blender";
   paintBlenderCard(card);
   return card;
+}
+let blenderCardOpen = false;
+/** MICRO-SEG08 · Blender as a line of «Strumenti di terze parti»: not downloaded, found on this computer */
+function blenderSettingsRow(): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "addons-row files-addon";
+  row.dataset.addon = "blender";
+  const st = blenderState?.s;
+  const c1 = document.createElement("div"); c1.className = "addons-c1";
+  const b = document.createElement("b"); b.textContent = "Blender";
+  const sm = document.createElement("small"); sm.textContent = t(blenderOn() ? "settings.addonAdvice.recommended" : "settings.addonAdvice.optional");
+  c1.append(b, sm);
+  const c2 = document.createElement("div"); c2.className = "addons-c2"; c2.textContent = t("settings.addonFor.blender");
+  const c3 = document.createElement("div");
+  const ver = st?.probe?.blender ?? null;
+  c3.className = `addons-c3 ${st?.current ? "ok" : "none"}`;
+  c3.textContent = st == null ? t("files.blAsking") : st.current ? `✓ ${ver ? ver.replace(/^Blender\s*/i, "") : paths.leafName(st.current)}` : t("settings.addonsNotFound");
+  if (st?.current) c3.title = st.current;
+  const c4 = document.createElement("div"); c4.className = "addons-c4";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "ghost";
+  go.dataset.action = "blender-locate";
+  go.textContent = t("settings.blenderLocate");
+  go.setAttribute("aria-expanded", String(blenderCardOpen));
+  go.onclick = () => {
+    blenderCardOpen = !blenderCardOpen;
+    go.setAttribute("aria-expanded", String(blenderCardOpen));
+    const card = document.getElementById("set-blender");
+    if (card) { card.hidden = !blenderCardOpen; if (blenderCardOpen) card.scrollIntoView({ block: "nearest" }); }
+  };
+  c4.appendChild(go);
+  row.append(c1, c2, c3, c4);
+  if (!blenderState) void loadBlender().then(() => { if (row.isConnected) row.replaceWith(blenderSettingsRow()); });
+  return row;
 }
 
 function paintAddonsSettingsBlender(): void {
@@ -54602,7 +54837,7 @@ async function stampFromQueue(path: string): Promise<void> {
   renderStorage();
 }
 
-/** An add-on installed by its id (the same gesture as Settings › Add-ons). */
+/** An add-on installed by its id (the same gesture as Settings › Third-party tools). */
 async function installAddonById(id: string): Promise<void> {
   const list = await loadAddons();
   const a = list?.find((x) => x.id === id);

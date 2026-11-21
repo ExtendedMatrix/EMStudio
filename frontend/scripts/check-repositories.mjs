@@ -93,13 +93,18 @@ eq(lab.querySelector("[data-ext-repo-problem]")?.textContent, "https://repo.exam
    "the last read's problem, in the page's language");
 ok(lab.querySelector("[data-ext='repo-sync']") && lab.querySelector("[data-ext='repo-token']") && lab.querySelector("[data-ext='repo-remove']"),
    "«Aggiorna l'elenco», the token, «Rimuovi il repository»");
-eq([...sec.querySelectorAll("[data-ext-avail]")].map((r) => r.dataset.extAvail), ["nas/facemesh_fit", "nas/alfa", "nas/zeta"], "what is offered, updates first");
-const fm = sec.querySelector('[data-ext-avail="nas/facemesh_fit"]');
-ok(fm.querySelector("[data-ext='repo-update']") && fm.querySelector('[data-ext-avail-state="update"]').textContent === "ext.availUpdate(old=0.2.0,v=0.2.1)",
-   "an update: «Aggiorna», 0.2.0 → 0.2.1");
-ok(sec.querySelector('[data-ext-avail="nas/zeta"] [data-ext="repo-install"]'), "a new one: «Installa»");
+// MICRO-SEG08 · what is offered is in the ONE list, beside what is installed (grouped by repository):
+// an id installed here is its installed line (with its update), an id not here a line with «Installa»
+eq([...box.querySelectorAll(".ext-list [data-ext-avail]")].map((r) => r.dataset.extAvail), ["nas/alfa", "nas/zeta"], "what is offered and not here, by id");
+eq([...box.querySelectorAll(".ext-list [data-ext-group]")].map((h) => h.dataset.extGroup), ["nas"], "…under its repository");
+ok(!sec.querySelector("[data-ext-avail]"), "the repositories' panel holds the repositories, not the list");
+const fmRow = box.querySelector('.ext-list [data-ext-id="facemesh_fit"]');
+ok(fmRow.querySelector(".ext-row-state [data-ext='repo-update']")?.classList.contains("primary")
+   && fmRow.querySelector("[data-ext-state]").textContent === "ext.st.update(old=0.2.0,v=0.2.1)",
+   "an update: its line says «Aggiornamento 0.2.0 → 0.2.1», ONE action «Aggiorna» (ochre)");
+ok(box.querySelector('[data-ext-avail="nas/zeta"] .ext-row-state [data-ext="repo-install"]'), "a new one: «Installa»");
 const instRow = box.querySelector('.ext-list [data-ext-id="facemesh_fit"]');
-ok(instRow.querySelector("[data-ext-update]")?.textContent === "ext.repoUpdate(old=0.2.0,v=0.2.1,r=nas)", "the installed row says the update");
+ok(instRow.querySelector("[data-ext-update]")?.title === "ext.repoUpdate(old=0.2.0,v=0.2.1,r=nas)", "the installed row says the update (and from where, in its tooltip)");
 ok(instRow.textContent.includes("ext.source.repo(r=nas)") && instRow.textContent.includes("ext.unverifiedFrom(r=nas)"), "…and where it came from, not verified");
 ok(box.querySelector('.ext-list [data-ext-id="esempio-statuaria"] [data-ext-blocked="nas"]')?.textContent.includes("lo ha ritirato"),
    "an installed id the index withdrew: said beside it");
@@ -107,6 +112,9 @@ ok(box.querySelector('.ext-list [data-ext-id="esempio-statuaria"] [data-ext-bloc
 W.setExtensionsFilter("packages");
 box = W.extensionsContent(document, host, st, () => {});
 eq([...box.querySelectorAll("[data-ext-avail]")].map((r) => r.dataset.extAvail), ["nas/alfa", "nas/zeta"], "the filter, on the offered list too");
+W.setExtensionsFilter("plugins");
+box = W.extensionsContent(document, host, st, () => {});
+eq([...box.querySelectorAll("[data-ext-avail]")].map((r) => r.dataset.extAvail), ["nas/alfa"], "«Codice»: the offered mixed one only");
 W.setExtensionsFilter("all");
 // the environment decides the switch
 box = W.extensionsContent(document, host, { ...st, online: { on: true, setting: false, env: "1" } }, () => {});
@@ -240,7 +248,7 @@ print(json.dumps(out))`;
     S3DGRAPHY_PLUGINS_DIR: path.join(dir, "plugins"), EM_VOCABULARIES_DIR: path.join(dir, "vocab") };
   delete env.S3DGRAPHY_ONLINE_ACCESS;
   const out = JSON.parse(execFileSync(py, ["-c", code, dir, path.join(ROOT, "tools"), path.join(PROFILES, "examples")], { env }).toString());
-  eq(out.empty, [200, [], false, "https://extendedmatrix.github.io/em-extensions/index.json"], "none at first; the switch off; the official address offered, not added");
+  eq(out.empty, [200, [], false, "https://extensions.extendedmatrix.org/index.json"], "none at first; the switch off; the official address offered, not added");
   eq(out.add, [200, "estensioni", true, true], "a folder (the NAS) added as a file:// repository, named after it");
   eq(out.add_web, [200, true, false], "an https one with a token: «token impostato», the token never given back");
   eq(out.sync, [200, [["estensioni", true, 2, []], ["lab", false, null, ["repo_offline"]]]], "read: the folder with the switch off; the https one refused while off");

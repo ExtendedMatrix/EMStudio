@@ -123,7 +123,11 @@ eq(box.querySelector("[data-ext-missing]")?.dataset.extMissing, "1", "the file's
 eq(box.querySelector("[data-ext-missing-iri]")?.textContent.trim(), "ritratti-romani 0.2.0", "…by its name and version");
 const mixed = box.querySelector("[data-ext-id='esempio-statuaria']");
 eq(mixed.querySelector("[data-ext-state]").dataset.extState, "codeOut", "the mixed row: code not installed");
-ok(mixed.querySelector("[data-ext-state]").textContent.includes("scelta dell'utente"), "…with its reason");
+// MICRO-SEG08 · the line says the true state in words («Dati installati · codice non installato»),
+// the library's reason in its tooltip and in the opened row
+eq(mixed.querySelector("[data-ext-state]").textContent, "ext.st.dataOnly", "…in words: data installed, code not");
+ok(mixed.querySelector("[data-ext-state]").title.includes("scelta dell'utente") && mixed.querySelector("[data-ext-why]")?.textContent.includes("scelta dell'utente"),
+   "…with its reason");
 ok(mixed.querySelector("[data-ext-used]"), "«usato da questo file» (declared by the open document)");
 ok(mixed.querySelector("[data-ext='install-code']"), "«Installa il codice…» for the code left out");
 ok(!mixed.querySelector("[data-ext='remove-code']"), "no «Rimuovi il codice» when the code is not installed");

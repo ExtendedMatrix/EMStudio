@@ -75,7 +75,7 @@ ok(U.profileWords(P, "it").purpose === "il browser" && U.profileWords(P, "en").p
    && U.profileWords({ ...P, label_it: "anteprima/catalogo", label: "Preview / catalogue" }, "it").label === "anteprima/catalogo",
    "E.D.'s names in Italian, the table's English in any other language");
 
-// p.4 · Settings › Add-ons: what each is for you, recommended or optional
+// p.4 · Settings › Third-party tools: what each is for you, recommended or optional
 const adv = await esbuild.build({ entryPoints: [`${SRC}addon-advice.ts`], bundle: true, format: "esm", write: false });
 const A = await import("data:text/javascript;base64," + Buffer.from(adv.outputFiles[0].text).toString("base64"));
 const L = [{ id: "gltfpack", name: "gltfpack", available: true, installed: null, serves: { actions: ["variants"], profiles: [] } },

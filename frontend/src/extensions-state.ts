@@ -206,12 +206,12 @@ export function sizeText(n: number | undefined | null): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 /** what the window shows of a repository's list: the updates first, then by name */
-export function availableRows(av: ExtAvailable[], only: "all" | "packages" | "plugins"): ExtAvailable[] {
+export function availableRows(av: ExtAvailable[], only: ExtFilter): ExtAvailable[] {
   const kindOf = (a: ExtAvailable) => {
     const s = Object.keys(a.sections ?? {});
     return s.includes("code") && s.includes("data") ? "mixed" : s.includes("code") ? "plugin" : "community-package";
   };
-  return av.filter((a) => only === "all" || (only === "plugins" ? kindOf(a) !== "community-package" : kindOf(a) !== "plugin"))
+  return av.filter((a) => only === "all" || (only === "mixed" ? kindOf(a) === "mixed" : only === "plugins" ? kindOf(a) !== "community-package" : kindOf(a) !== "plugin"))
     .sort((a, b) => Number(b.update) - Number(a.update) || a.id.localeCompare(b.id) || a.repo.localeCompare(b.repo));
 }
 
@@ -269,8 +269,9 @@ export function problemText(p: ExtProblem | null | undefined, lang: string): str
   return lang.startsWith("it") ? p.it || p.en : p.en || p.it;
 }
 
-/** what kind a row is, for the filter «Tutte · Pacchetti di comunità · Plugin» */
-export type ExtFilter = "all" | "packages" | "plugins";
+/** what kind a row is, for the filter: «Dati» (packages: it carries data), «Codice»
+ *  (plugins: it carries code), «Dati + codice» (mixed: both) — MICRO-SEG08 */
+export type ExtFilter = "all" | "packages" | "plugins" | "mixed";
 export function rowKind(r: ExtRow): "community-package" | "plugin" | "mixed" {
   if (r.kind === "plugin" || r.kind === "mixed" || r.kind === "community-package") return r.kind;
   return r.code && r.code.status !== "absent" && r.data?.status !== "installed" ? "plugin" : "community-package";
@@ -278,6 +279,7 @@ export function rowKind(r: ExtRow): "community-package" | "plugin" | "mixed" {
 export function passesFilter(r: ExtRow, f: ExtFilter): boolean {
   const k = rowKind(r);
   if (f === "all") return true;
+  if (f === "mixed") return k === "mixed";
   if (f === "packages") return k === "community-package" || k === "mixed";
   return k === "plugin" || k === "mixed";
 }

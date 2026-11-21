@@ -277,7 +277,7 @@ NODE_MIN_MAJOR = 18
 
 # MICRO-PREPARA-RITOCCHI p.4 · what each add-on is FOR YOU: the actions of
 # Ottimizza that use it, and the profiles of use those actions serve.
-# Settings › Add-ons says it first, in plain words, and whether it is
+# Settings › Third-party tools says it first, in plain words, and whether it is
 # recommended for what you do or optional (EMStudio decides from the switches
 # and choices you made: ``addon-advice.ts``).
 ADDONS["gltfpack"]["serves"] = {"actions": ["variants"], "profiles": ["preview", "mobile_webxr"]}
@@ -450,7 +450,7 @@ def addon_state(addon_id: str) -> dict:
 
 def addon_fit(spec: dict, state: dict, memory_mb: int) -> dict:
     """Whether the add-on suits THIS machine, and why not (MICRO-OTTIMIZZA-3,
-    E.D. 28 Oct: Settings › Add-ons lists them filtered for the hardware and
+    E.D. 28 Oct: Settings › Third-party tools lists them filtered for the hardware and
     the system): ``code`` is ``ok``, ``emulated`` (it runs, translated),
     ``memory`` (it runs, but the machine has less than it wants), or — not
     suitable — ``no_build`` (nothing published for this platform),

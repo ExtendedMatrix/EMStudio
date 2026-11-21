@@ -137,7 +137,7 @@ do_build() {
 
 # ── gltfpack, the bridge's add-on ────────────────────────────────────────────
 #
-# The SAME install as Settings › Add-ons (`em_optimize.install`): the build
+# The SAME install as Settings › Third-party tools (`em_optimize.install`): the build
 # pinned in `tools/em_optimize.py` ADDONS — its URL on github.com/zeux/
 # meshoptimizer/releases and the sha256 of its zip, a wrong digest installs
 # nothing — into `<state>/addons/gltfpack/<version>/` (`EM_BRIDGE_STATE_DIR`,
