@@ -123,6 +123,22 @@ else
   FAILED=1
 fi
 
+# MICRO-MF06 · the LAB sidecar (`EM_LAB=1`) carries the s3dgraphy the functions
+# under embargo need: POST /functional-matrix (em_py_lab) must answer, and with
+# the overlay's plan (functional_matrix.overlay_plan, MF02) — a lab whose
+# s3dgraphy predates it draws the overlay with no braces
+if [[ "${EM_LAB:-0}" == "1" ]]; then
+  out="$(curl -s -m 90 -X POST -H "$O" -H 'Content-Type: application/json' --data "{\"doc\":$POSE_DOC}" "$B/functional-matrix" -w '\n%{http_code}')" || true
+  code="${out##*$'\n'}"
+  out="${out%$'\n'*}"
+  if [[ "$code" == 200 && "$out" == *'"ok": true'* && "$out" == *'"overlay":'* ]]; then
+    echo "  ✓ /functional-matrix · the lab's Functional Matrix with the overlay's plan (em_py_lab, s3dgraphy.functional_matrix)"
+  else
+    echo "  ✗ /functional-matrix · the lab's sidecar must answer it with the overlay's plan — HTTP $code ${out:0:300}"
+    FAILED=1
+  fi
+fi
+
 if [[ "$FAILED" != 0 ]]; then
   echo "✗ the frozen bridge cannot do what the app asks of it (see above): an app that places no tileset, or prints no sheet, is not released"
   exit 1

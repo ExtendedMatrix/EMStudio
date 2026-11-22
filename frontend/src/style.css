@@ -13038,6 +13038,15 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .win-header .win-act.win-fo { width: auto; padding: 0 8px; white-space: nowrap; flex: 0 0 auto; }
 .win-act.win-fo[aria-pressed="true"] { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
 .win-fo-note { font-size: 11px; color: var(--text-muted); white-space: nowrap; padding: 0 6px; flex: 0 0 auto; }
+/* MICRO-MF06 · EMBARGO · the overlay on a graph with no functional unit: a row
+   at the top of the area, the sentence and its three ways in */
+.fo-empty-row { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 3;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px);
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated);
+  font-size: 12px; color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+.fo-empty-row.hidden { display: none; }
+.fo-empty-row .fo-empty-say { font-weight: 600; margin-right: 4px; }
+.fo-empty-row .insp-btn { white-space: nowrap; width: auto; flex: 0 0 auto; margin: 0; }
 /* the chronology's ▲ in the status pill: its own click */
 .warn-pill .sv-chr { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 /* MICRO-SEG29 · Preferences ▸ Extensions: the plugins' commands (Tools ▸ Plugins before) */

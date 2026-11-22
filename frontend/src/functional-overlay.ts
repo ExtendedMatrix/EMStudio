@@ -243,6 +243,32 @@ export function overlayScene(base: Scene, answer: FoAnswer | null, opt: FoOption
   };
 }
 
+/**
+ * MICRO-MF06 · the view by activity is off AS SOON AS the overlay is on — the
+ * page decides it, not the plan (E.D., 22 Nov 2026: with the overlay on and no
+ * plan yet, or a bridge that cannot compute it, or a graph with no functional
+ * unit, the activities' boxes stayed drawn while the header said they were
+ * off). A COPY of `base` without the activities: their boxes, their nodes,
+ * the instances drawn inside them and the edges `keepEdge` refuses (the
+ * memberships in an activity); every other node stays where the Matrix put it.
+ */
+export function withoutActivities(base: Scene, isActivity: (n: SceneNode) => boolean,
+                                  keepEdge: (e: SceneEdge) => boolean): Scene {
+  const gone = new Set(base.nodes.filter(isActivity).map((n) => n.id));
+  const nodes = base.nodes.filter((n) => !gone.has(n.id) && !(n.instanceBadge && gone.has(n.instanceBadge.group)));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const edges = base.edges.filter((e) => byId.has(e.source) && byId.has(e.target) && keepEdge(e));
+  const groups = (base.groups ?? []).filter((g) => !gone.has(g.id));
+  const keepMap = (m?: Map<string, string>): Map<string, string> =>
+    new Map([...(m ?? new Map<string, string>())].filter(([k, v]) => byId.has(k) && !gone.has(v)));
+  return {
+    ...base, nodes, byId, edges, groups,
+    groupsById: new Map(groups.map((g) => [g.id, g])),
+    memberOf: keepMap(base.memberOf), outlineOf: keepMap(base.outlineOf),
+    arrangedIn: base.arrangedIn ? keepMap(base.arrangedIn) : undefined,
+  };
+}
+
 const ord = (it: Item): number => (it.node ? 0 : 1);
 
 function median(xs: number[]): number {

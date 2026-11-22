@@ -514,7 +514,7 @@ import { evidenceColour, fmAsk, fmInspectorInto, fmIssues, fmLitOf, fmMatrixLit,
 const FM_ON = LAB && featureOn("functional-matrix");
 // MICRO-MF02 · EMBARGO · the functional overlay on the Matrix (the braces on the
 // Matrix itself, a spatial layout, the view by activity off): behind FO_ON
-import { hitBrace, overlayScene, type FoAnswer } from "./functional-overlay";
+import { hitBrace, overlayScene, withoutActivities, type FoAnswer } from "./functional-overlay";
 const FO_ON = LAB && featureOn("functional-overlay");
 // MICRO-MF03 · EMBARGO · the Landscape Matrix (an area) and the semantic zoom of
 // the Functional Matrix, from the room to the city: behind LM_ON
@@ -7575,20 +7575,40 @@ function sceneOfWin(winId: string | null | undefined, mode: ViewKind): Scene | n
   // MICRO-MF02 · EMBARGO · a Matrix window with the functional overlay on: a
   // copy of its scene, laid out by the plan (the base scene is not touched)
   // (a Matrix reading by horizons has no switch: its bands are laid out by themselves)
-  if (FO_ON && mode === "matrix" && sc && foOn(winId) && !hzWin(winId)) return foSceneOf(sc) ?? sc;
+  // MICRO-MF06 · with no plan to apply (waiting, no bridge, no plan, no
+  // functional unit) the Matrix as it is WITHOUT its activities: the page
+  // decides that the view by activity is off, not the plan
+  if (FO_ON && mode === "matrix" && sc && foOn(winId) && !hzWin(winId)) return foSceneOf(sc) ?? foNoActivities(sc);
+  return sc;
+}
+
+/** MICRO-MF06 · EMBARGO · the Matrix scene without its activities (boxes,
+ *  nodes, `is_in_activity`), built once per base scene */
+const foBare = new WeakMap<Scene, Scene>();
+function foNoActivities(base: Scene): Scene {
+  if (!FO_ON) return base;
+  let sc = foBare.get(base);
+  if (!sc) {
+    sc = withoutActivities(base, (n) => n.node.node_type === "ActivityNodeGroup",
+                           (e) => e.edge.edge_type !== "is_in_activity");
+    foBare.set(base, sc);
+  }
   return sc;
 }
 
 /** MICRO-MF05 (C, MF02's open point) · why a Matrix with the overlay on shows
  *  it or not: «applied», or waiting for the bridge, no bridge that computes it,
  *  a bridge whose s3Dgraphy has no plan, lanes that are not this Matrix's */
-function foWhy(winId: string): "applied" | "waiting" | "bridge" | "plan" | "lanes" {
+function foWhy(winId: string): "applied" | "waiting" | "bridge" | "plan" | "lanes" | "empty" {
   if (!FO_ON) return "bridge";
   const base = sceneOfWinBase(winId, "matrix");
   const st = fmState();
   if (st.status === "missing" || st.status === "off" || st.status === "error") return "bridge";
   const answer = st.answer as FoAnswer | null;
   if (!answer) return "waiting";
+  // MICRO-MF06 · a graph with no functional unit: nothing to overlay (the
+  // plan is empty, not of other lanes) — the area says it and offers the way in
+  if (!(answer.units ?? []).length) return "empty";
   if (!answer.overlay) return "plan";
   if (!base) return "waiting";
   // the same test as `foSceneOf`, without building (or memoising) the copy
@@ -30213,6 +30233,10 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
       hint.classList.toggle("hidden", !empty);
       mini.classList.toggle("hidden", empty);
       if (empty) fillGraphEmpty(hint, win, mode);
+      // MICRO-MF06 · EMBARGO · the overlay on a graph with no functional unit:
+      // a row in the area says so, with the three ways in
+      if (FO_ON) foEmptyRow(cv, winId, mode === "matrix" && !here && !empty && foOn(winId) && !hzWin(winId)
+                                          && foWhy(winId) === "empty");
       paintGraphWindow({
         winId, cv, mode,
         highlightEdgeType: legendHighlight.get(winId) ?? null,
@@ -30302,6 +30326,98 @@ function fillGraphEmpty(hint: HTMLElement, win: Win, mode: ViewKind): void {
   hint.append(b, p, acts);
 }
 
+/**
+ * MICRO-MF06 · EMBARGO (functional-overlay) · «No functional unit in this
+ * graph»: the overlay is on and the graph has none — instead of an empty
+ * Matrix with no word, a row in the area with the three ways in: «Read as…»
+ * on the selection (the jar, MF05), the workspace «Functional», and the proof
+ * file beside this em.json (`<name>_fu-prova.em.json`) when it is there.
+ * Rebuilt only when what it says changes (the paint runs per frame).
+ */
+const foProof = new Map<string, boolean | null>();   // path → there? (null: asking)
+function foProofPath(): string | null {
+  const here = emtree.activeFile()?.path ?? currentFilePath;
+  if (!here) return null;
+  const name = paths.basename(here);
+  const m = /^(.*?)(\.em\.json|\.emj|\.json)$/i.exec(name);
+  if (!m || /_fu-prova$/i.test(m[1])) return null;
+  const dir = paths.dirname(here);
+  return `${dir ? `${dir}/` : ""}${m[1]}_fu-prova.em.json`;
+}
+function foProofThere(path: string): boolean {
+  const known = foProof.get(path);
+  if (known !== undefined) return known === true;
+  foProof.set(path, null);
+  void (async () => {
+    let ok = false;
+    try {
+      const r = await fetch(`${await bridgeUrl()}/fs/probe`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: [path] }) });
+      const st = r.ok ? String((await r.json()).files?.[0]?.state ?? "") : "";
+      ok = st === "ok" || st === "cloud-only";
+    } catch { ok = false; }
+    foProof.set(path, ok);
+    if (ok) draw();
+  })();
+  return false;
+}
+async function foOpenProof(path: string): Promise<void> {
+  if (isTauri()) { await openPathFromDesktop(path); return; }
+  try {
+    const text = await (await fsBridgeFetch(`/fs/file?path=${encodeURIComponent(path)}`)).text();
+    if (!(await confirmOpenOverUnsaved(baseName(path)))) return;
+    if (!(await confirmLeaveSidecar("Opening a file"))) return;
+    loadContainerDocument(JSON.parse(text), baseName(path), path);
+  } catch (e) {
+    toast(t("fo.empty.proofFailed", { name: baseName(path), why: e instanceof Error ? e.message : String(e) }));
+  }
+}
+function foEmptyRow(cv: HTMLCanvasElement, winId: string, show: boolean): void {
+  if (!FO_ON) return;
+  const host = cv.parentElement;
+  let row = host?.querySelector<HTMLElement>(":scope > .fo-empty-row") ?? null;
+  if (!show) { row?.classList.add("hidden"); return; }
+  if (!host) return;
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "fo-empty-row";
+    row.dataset.foEmpty = winId;
+    row.addEventListener("pointerdown", (e) => e.stopPropagation());
+    host.appendChild(row);
+  }
+  row.classList.remove("hidden");
+  // under the window's header: at the top of the canvas, not over the switch
+  const top = `${cv.offsetTop + 10}px`;
+  if (row.style.top !== top) row.style.top = top;
+  const proof = foProofPath();
+  const proofThere = !!proof && foProofThere(proof);
+  const wsThere = WORKSPACES.some((w) => w.id === "functional");
+  const k = `${getLocale()}:${FM_ON ? 1 : 0}:${wsThere ? 1 : 0}:${proofThere ? proof : "-"}`;
+  if (row.dataset.k === k) return;
+  row.dataset.k = k;
+  row.textContent = "";
+  const say = document.createElement("span");
+  say.className = "fo-empty-say";
+  say.textContent = t("fo.empty.say");
+  say.title = t("fo.empty.sayTitle");
+  row.appendChild(say);
+  const act = (id: string, label: string, title: string, run: () => void): void => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "insp-btn";
+    b.dataset.foEmptyAct = id;
+    b.textContent = label;
+    b.title = title;
+    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    row!.appendChild(b);
+  };
+  // «Read as…» writes a membership: the jar is of the Functional Matrix (MF05)
+  if (FM_ON) act("read-as", t("fo.empty.readAs"), t("fo.empty.readAsTitle"), () => { void jarReadAs(); });
+  if (wsThere) act("workspace", t("fo.empty.workspace"), t("fo.empty.workspaceTitle"), () => setWorkspace("functional" as WorkspaceId));
+  if (proofThere && proof) act("proof", t("fo.empty.proof"), t("fo.empty.proofTitle", { name: paths.basename(proof) }),
+                               () => { void foOpenProof(proof); });
+}
+
 /** MICRO-CONTENTS-1 F9 · where the Storage is, seen from this window: an
  *  arrow, or null when no Storage is on screen in the same document. */
 function arrowTowardsStorage(win: Win): "←" | "→" | "↑" | "↓" | null {
@@ -30324,6 +30440,7 @@ function graphModeOf(winId: string): ViewKind {
 
 function unmountGraphCanvas(winId: string): void {
   graphWindows.get(winId)?.hint?.remove();
+  graphWindows.get(winId)?.cv.parentElement?.querySelector(".fo-empty-row")?.remove();
   graphWindows.get(winId)?.cv.parentElement?.querySelector(".graph-legend-host")?.remove();
   legendHighlight.delete(winId);
   graphWindows.delete(winId);
@@ -64690,6 +64807,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
           const note = document.createElement("span");
           note.className = "win-fo-note";
           note.dataset.foNote = why === "applied" ? "activities-off" : why;
+          // MICRO-MF06 · whatever the plan, the activities are not drawn
+          note.dataset.foActivities = "off";
           // a head too tight keeps it, shorter: the interface always says it
           const long = why === "applied" ? t("fo.activitiesOff") : t(`fo.why.${why}`);
           const short = why === "applied" ? t("fo.activitiesOffShort") : t(`fo.why.${why}Short`);

@@ -194,8 +194,21 @@ do_build_lab() {
   fi
   log "lab · frontend (EM_PROFILE=lab → frontend/dist-lab)"
   (cd "$FE" && npm run build:lab)
-  if [[ "${EM_LAB_REUSE_BRIDGE:-0}" == "1" && -n "$(ls "$ROOT/apps/desktop/src-tauri/binaries/" 2>/dev/null)" ]]; then
-    warn "lab · reusing the sidecar in src-tauri/binaries (EM_LAB_REUSE_BRIDGE=1): em.app has no lab APIs unless it was built with EM_LAB=1"
+  # MICRO-MF06 · a reused sidecar is ASKED first (check-bridge.sh with EM_LAB=1:
+  # /functional-matrix and the overlay's plan); one that does not answer — a
+  # community sidecar, an s3dgraphy older than the functions under embargo — is
+  # rebuilt instead of shipped in the lab
+  local reuse=0 bin
+  bin="$(ls "$ROOT/apps/desktop/src-tauri/binaries/"em-bridge-* 2>/dev/null | head -1)"
+  if [[ "${EM_LAB_REUSE_BRIDGE:-0}" == "1" && -n "$bin" ]]; then
+    if EM_LAB=1 PYTHON="${PYTHON:-$ROOT/../s3Dgraphy/.venv/bin/python}" "$ROOT/apps/desktop/check-bridge.sh" "$bin"; then
+      reuse=1
+    else
+      warn "lab · the sidecar in src-tauri/binaries is not a lab one with the s3dgraphy the embargo needs: rebuilt (EM_LAB=1)"
+    fi
+  fi
+  if [[ "$reuse" == 1 ]]; then
+    warn "lab · reusing the sidecar in src-tauri/binaries (EM_LAB_REUSE_BRIDGE=1), checked: it answers the Functional Matrix with the overlay's plan"
   else
     log "lab · sidecar (EM_LAB=1: with em_py_lab)"
     (cd "$ROOT/apps/desktop" && EM_LAB=1 ./build-bridge.sh)

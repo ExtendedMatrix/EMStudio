@@ -24,6 +24,11 @@
 //   5 · the REAL case (FU_PROVA): Templu Mare, SU003/USV102 on the border
 //       between portico and courtyard, the foundations as instances between
 //       epochs in the ruin, the measure of §C.
+//   6 · MICRO-MF06: the view by activity off AT ONCE (the page decides it,
+//       not the plan): no activity box while the bridge thinks, with a bridge
+//       that cannot compute it, with a graph with no functional unit; such a
+//       graph says «Nessuna unità funzionale in questo grafo» in the area with
+//       its three ways in (Read as…, the workspace, the proof file beside).
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -131,6 +136,13 @@ const centreIn = (n, l) => n.y + n.h / 2 >= l.y && n.y + n.h / 2 <= l.y + l.heig
   eq(sc.functional.borders.length, 1, "one border drawn");
   eq(FO.hitBrace(sc, br.B.x + br.B.w / 2 + 20, br.B.y + 5)?.unit, "B", "a click on a brace's label row finds its unit");
   eq(FO.overlayScene(base, { ...answer, overlay: undefined }, {}), null, "no plan (an older bridge): no overlay");
+  // MICRO-MF06 · with no plan the page still turns the activities off
+  const bare = FO.withoutActivities(base, (n) => n.node.node_type === "ActivityNodeGroup", (e) => e.edge.edge_type !== "is_in_activity");
+  ok(!bare.byId.has("ACT") && bare.groups.length === 0 && !bare.groupsById.has("ACT"), "MF06 · no plan: the activity's box and node not drawn");
+  eq(bare.edges.map((e) => e.edge.edge_type), ["is_after"], "MF06 · …its membership edge gone, the stratigraphic one kept");
+  ok(["a1", "a2", "s1", "DOC"].every((id) => bare.byId.get(id)?.x === base.byId.get(id).x && bare.byId.get(id)?.y === base.byId.get(id).y),
+     "MF06 · …every other node where the Matrix put it (the document too)");
+  ok(base.byId.has("ACT") && base.groups.length === 1, "MF06 · …and the base scene is not changed (a copy)");
 }
 
 // ── 3 · 4 · 5 · the bridge and the page ─────────────────────────────────────
@@ -200,9 +212,10 @@ async function ask(file) {
 // ── 4 · the page ─────────────────────────────────────────────────────────────
 const browser = await pw.chromium.launch({ executablePath: fs.existsSync(CHR) ? CHR : undefined,
   args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
-async function open(file, { embargo = true, lang = "it" } = {}) {
+async function open(file, { embargo = true, lang = "it", before = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1700, height: 1000 } });
   const page = await ctx.newPage();
+  if (before) await before(page);
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
   await page.addInitScript(([on, l]) => {
@@ -338,7 +351,93 @@ if (REAL) {
   eq(r.errors, [], "no page error (Templu Mare)");
   await r.ctx.close();
 }
+// ── 6 · MICRO-MF06 · the activities off at once; a graph with no functional unit
+let mf06 = 0;
+if (REAL) {
+  const c0 = checks;
+  // the bridge THINKS (its answer held) and then a bridge that cannot compute it
+  for (const how of ["waiting", "bridge"]) {
+    // the route set before the page loads: no answer of the real bridge slips in
+    const r = await open(REAL, { before: (page) => page.route("**/functional-matrix", (route) => (how === "bridge"
+      ? route.fulfill({ status: 404, contentType: "application/json", body: '{"ok": false, "error": "unknown endpoint"}' })
+      : undefined)) });   // never answered: the bridge is thinking
+    const before = await fo(r.page);
+    ok(before.activityBoxes > 0, `MF06 · ${how}: the Matrix by activity has its boxes (${before.activityBoxes})`);
+    await r.page.locator(SW).first().click();
+    if (how === "bridge") await r.page.waitForFunction(() => window.__EM_DRAG__.functionalOverlay().status === "missing", null, { timeout: 60000 });
+    else await r.page.waitForTimeout(300);
+    await r.page.waitForTimeout(200);
+    const on = await fo(r.page);
+    eq(on.activityBoxes, 0, `MF06 · ${how}: with the overlay on and no plan, no activity box`);
+    ok(on.nodes.every((n) => n.type !== "ActivityNodeGroup") && !on.drawing, `MF06 · ${how}: …no activity node, no braces`);
+    const note = r.page.locator('[data-fo-activities="off"]').first();
+    eq(await note.getAttribute("data-fo-note"), how, `MF06 · ${how}: the header says why there are no braces`);
+    ok(!(await note.getAttribute("title")).includes("resta com'è"), `MF06 · ${how}: …and no longer that the Matrix stays as it is`);
+    await r.page.locator(SW).first().click();
+    ok((await fo(r.page)).activityBoxes > 0, `MF06 · ${how}: off again, the boxes come back`);
+    eq(r.errors, [], `MF06 · ${how}: no page error`);
+    await r.ctx.close();
+  }
+  // a graph with NO functional unit (the real v11), its proof file beside it
+  const V11 = process.env.V11 ?? path.join(path.dirname(FU_PROVA), "TempluMare_v11.em.json");
+  if (fs.existsSync(V11)) {
+    const doc = path.join(dir, "TempluMare_v11.em.json");
+    fs.copyFileSync(V11, doc);
+    const r = await open(doc);
+    const before = await fo(r.page);
+    ok(before.activityBoxes > 0, `MF06 · v11 (no FU): the Matrix by activity has its boxes (${before.activityBoxes})`);
+    await r.page.locator(SW).first().click();
+    const row = r.page.locator(".fo-empty-row:not(.hidden)").first();
+    await row.waitFor({ state: "visible", timeout: 120000 });
+    const on = await fo(r.page);
+    eq(on.activityBoxes, 0, "MF06 · v11: no activity box with the overlay on");
+    eq(await r.page.locator('[data-fo-activities="off"]').first().getAttribute("data-fo-note"), "empty", "MF06 · v11: the header says «no functional unit»");
+    eq((await row.locator(".fo-empty-say").textContent()).trim(), "Nessuna unità funzionale in questo grafo", "MF06 · v11: the row says it, in the area");
+    await r.page.locator('.fo-empty-row [data-fo-empty-act="proof"]').waitFor({ state: "visible", timeout: 20000 });
+    const acts = await row.locator("[data-fo-empty-act]").evaluateAll((bs) => bs.map((b) => [b.dataset.foEmptyAct, b.textContent.trim()]));
+    if (SHOTS) await r.page.screenshot({ path: path.join(SHOTS, "fo-3-v11-senza-unita.png") });
+    eq(acts, [["read-as", "Leggi come…"], ["workspace", "Apri lo spazio di lavoro Funzionale"], ["proof", "Apri il file di prova"]],
+       "MF06 · v11: its three ways in");
+    // «Read as…» on the selection: the jar's dialog, for the selected unit
+    const us = on.nodes.find((n) => n.type === "US" && !n.of);
+    await H(r.page, (id) => window.__EM_DRAG__.select(id), us.id);
+    await row.locator('[data-fo-empty-act="read-as"]').click();
+    await r.page.locator('[data-app-dialog="jar-read-as"]').waitFor({ state: "visible", timeout: 20000 });
+    ok(true, "MF06 · «Leggi come…» opens the jar's dialog on the selection");
+    await r.page.keyboard.press("Escape");
+    await r.page.locator('[data-app-dialog="jar-read-as"]').waitFor({ state: "detached", timeout: 20000 });
+    // the workspace «Functional»
+    await row.locator('[data-fo-empty-act="workspace"]').click();
+    await r.page.waitForFunction(() => document.querySelector('button[data-ws="functional"]')?.classList.contains("active"), null, { timeout: 20000 });
+    ok(true, "MF06 · «Apri lo spazio di lavoro Funzionale» opens it");
+    await r.ctx.close();
+    // the proof file: opened from the row, and the braces come
+    const r2 = await open(doc);
+    await r2.page.locator(SW).first().click();
+    await r2.page.locator('.fo-empty-row:not(.hidden) [data-fo-empty-act="proof"]').waitFor({ state: "visible", timeout: 120000 });
+    await r2.page.locator('.fo-empty-row [data-fo-empty-act="proof"]').click();
+    await r2.page.waitForFunction(() => (window.__EM_DRAG__.functionalOverlay().drawing?.braces.length ?? 0) > 0, null, { timeout: 120000 });
+    const p = await fo(r2.page);
+    ok(p.drawing.braces.some((b) => b.name === "tempio"), "MF06 · «Apri il file di prova» opens TempluMare_v11_fu-prova: the braces drawn");
+    eq(await r2.page.locator(".fo-empty-row:not(.hidden)").count(), 0, "MF06 · …and the row is gone");
+    eq([...r.errors, ...r2.errors], [], "MF06 · v11: no page error");
+    await r2.ctx.close();
+    // a file with no proof beside it: two ways in, not three
+    const lone = path.join(dir, "lone");
+    fs.mkdirSync(lone, { recursive: true });
+    fs.copyFileSync(V11, path.join(lone, "TempluMare_v11.em.json"));
+    const r3 = await open(path.join(lone, "TempluMare_v11.em.json"));
+    await r3.page.locator(SW).first().click();
+    await r3.page.locator(".fo-empty-row:not(.hidden)").waitFor({ state: "visible", timeout: 120000 });
+    await r3.page.waitForTimeout(1500);
+    eq(await r3.page.locator(".fo-empty-row [data-fo-empty-act]").evaluateAll((bs) => bs.map((b) => b.dataset.foEmptyAct)), ["read-as", "workspace"],
+       "MF06 · no proof file beside: no «Apri il file di prova»");
+    await r3.ctx.close();
+  } else console.log(`check-functional-overlay: MF06 · no ${V11}: the graph with no functional unit skipped`);
+  mf06 = checks - c0;
+}
 await browser.close();
 stop();
+if (mf06) console.log(`check-functional-overlay: MF06 · ${mf06} checks`);
 console.log(`check-functional-overlay: ${checks} checks passed${measure ? ` · §C Templu Mare fu-prova: ${JSON.stringify(measure)}` : " (no FU_PROVA: the real case skipped)"}`);
 process.exit(0);

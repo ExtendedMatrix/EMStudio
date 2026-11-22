@@ -460,6 +460,13 @@ as an orphan), its own keychain service, the bridge's state in
 registers no `stratigraph://` scheme: a sign-in from the lab is completed by
 pasting the address the browser was sent to.
 
+The lab's sidecar is frozen from the s3Dgraphy beside EMStudio, and
+`check-bridge.sh` with `EM_LAB=1` (what `build --lab` runs) also asks it the
+lab's own routes and refuses an answer from an s3dgraphy that predates the
+functions under embargo: such a lab is not built. `EM_LAB_REUSE_BRIDGE=1`
+reuses the sidecar in `src-tauri/binaries/` only if it passes that check;
+otherwise it is rebuilt.
+
 **The guard.** `frontend/scripts/embargo-guard.mjs` looks, in a build, for the
 markers of every embargo entry of the register — a sentinel per function
 (`em-embargo:<id>`), the i18n key of its title — and for the embargo's own
