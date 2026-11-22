@@ -59,6 +59,19 @@ const THREE_EXTERNAL = /^three($|\/)/;
 // RIFINITURE · the web build of the editor leaves three.js out of the single
 // file and fetches `engine3d.js` when a model opens (`npm run build:web`)
 const lazy3d = process.env.EM_LAZY_3D === "1";
+// MICRO-SEG30 · THE TWO PROFILES OF THE BUILD (features.ts). `community` is
+// what is released (GitHub, the site, `./em.sh devrel` / `ghrelease`): the
+// functions under embargo are folded out of it — `__EM_LAB__` is the literal
+// `false`, so their register, texts and code are not emitted. `lab` is
+// `./em.sh build --lab` (EMStudio_lab.app): they are there, behind
+// Preferences ▸ Advanced. A BUILD is the community unless `EM_PROFILE=lab`
+// says otherwise; the DEV SERVER is the lab unless `EM_PROFILE=community`
+// (the dev stack is where the embargoed functions are written). The lab's
+// editor goes to `dist-lab/`, never over the community's `dist/`.
+const profileOf = (command: string): "lab" | "community" =>
+  process.env.EM_PROFILE === "lab" ? "lab"
+  : process.env.EM_PROFILE === "community" ? "community"
+  : command === "serve" ? "lab" : "community";
 
 // ── WHERE THE DEV SERVER LIVES, and why it is not `/` ───────────────────────
 //
@@ -138,6 +151,7 @@ function dracoBeside(): Plugin {
 }
 
 export default defineConfig(({ command }) => {
+  const lab = profileOf(command) === "lab";
   return ({
   // The dev server is reached through Caddy, which forwards the ORIGINAL Host —
   // so Vite's host check has to know the names it will see. Without this it
@@ -172,7 +186,8 @@ export default defineConfig(({ command }) => {
   // every module request resolve against whatever directory the page was asked
   // for. Two situations, two answers, one line each.
   base: command === "serve" ? devBase : "./",
-  define: { __EMSTUDIO_VERSION__: JSON.stringify(pkg.version), __EM_LAZY_3D__: JSON.stringify(lazy3d) },
+  define: { __EMSTUDIO_VERSION__: JSON.stringify(pkg.version), __EM_LAZY_3D__: JSON.stringify(lazy3d),
+            __EM_LAB__: JSON.stringify(lab) },
   // The EDITOR is one file you can double-click, and that is a product
   // property: it opens from a USB stick, in a trench, with no server. The
   // READER is SERVED (StratiGraph Catalog, the field node), so it does not need to be —
@@ -191,7 +206,7 @@ export default defineConfig(({ command }) => {
     : entry === "reader" ? [] : entry === "engine3d" ? [minifyWholeChunk()]
     : entry === "tiles3d" ? [minifyWholeChunk(), dracoBeside()] : [viteSingleFile()])],
   build: {
-    outDir: "dist",
+    outDir: lab && command === "build" ? "dist-lab" : "dist",
     // RIFINITURE · the engine is a library build: ONE self-contained ES module
     ...(entry === "engine3d" ? { lib: { entry: new URL("./src/engine3d-entry.ts", import.meta.url).pathname,
                                         formats: ["es" as const], fileName: () => "engine3d.js" } } : {}),

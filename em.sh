@@ -21,7 +21,16 @@
 #                                node/edge models, qualia vocab, 2D icons) from a
 #                                s3Dgraphy checkout OR the installed s3dgraphy.
 #                                No arg = auto-detect.
-#   ./em.sh build                Build the single-file frontend (dist/).
+#   ./em.sh build                Build the single-file frontend (dist/): the
+#                                COMMUNITY profile, the one that is released.
+#   ./em.sh build --lab          EMStudio LAB (macOS): the functions under
+#                                embargo in (frontend/src/features.ts) —
+#                                dist-lab/, a lab sidecar, and
+#                                EMStudio_lab.app (own identifier, data, icon),
+#                                beside the community app. Never released.
+#   ./em.sh embargo-guard [path…] Refuse a build that holds a function under
+#                                embargo (default: a fresh community build);
+#                                devrel, ghrelease and release.yml run it.
 #   ./em.sh wasm                 Rebuild em-core → WASM (needs Rust/cargo).
 #   ./em.sh all    [s3Dgraphy]   sync → wasm → build (sync/wasm best-effort).
 #   ./em.sh dev    [args…]       Start the dev stack (bridge + Vite → ./dev.sh).
@@ -127,12 +136,89 @@ usage() {
 do_sync() { log "sync datamodels"; "$FE/scripts/sync-datamodels.sh" "$@"; }
 do_wasm() { log "build WASM (em-core)"; "$FE/scripts/build-wasm.sh"; }
 do_build() {
+  case "${1:-}" in
+    --lab) do_build_lab; return ;;
+    "") ;;
+    *) die "unknown option for build: $1 (expected nothing, or --lab)" ;;
+  esac
   log "build frontend (dist)"
   if [ ! -d "$FE/node_modules" ]; then
     log "installing frontend deps (first run)"
     (cd "$FE" && npm install)
   fi
   (cd "$FE" && npm run build)
+}
+
+# ── EMStudio LAB: the build with the functions under embargo (MICRO-SEG30) ──
+#
+# The embargo is of the BUILD, not of the code (E.D., 22 Nov 2026): the
+# community build — everything released — neither contains nor shows a function
+# whose state is `embargo` in frontend/src/features.ts; the lab has them, behind
+# Preferences ▸ Advanced ▸ «Functions under embargo». Three pieces, each with the
+# profile: the page (`npm run build:lab` → dist-lab/, EM_PROFILE=lab), the
+# sidecar (`EM_LAB=1 build-bridge.sh`: em_py_lab, the lab's em.app APIs) and the
+# shell (`--features lab`: bridge port 8785, its own keychain service and state
+# folder, no updates). tauri.lab.conf.json gives it its own identifier, name,
+# title and icon, so EMStudio_lab.app lives beside EMStudio.app.
+#
+# tauri.lab.conf.json (merged over tauri.conf.json; Tauri refuses comments in
+# it, so they are here): identifier org.extendedmatrix.emstudio.lab, product
+# EMStudio_lab, window «EMStudio lab», frontendDist ../../../frontend/dist-lab,
+# icons-lab/, the bundle an .app only, no updater artifacts, and as deep-link
+# scheme only its own (the ecosystem's `stratigraph://` and the sign-in answers
+# stay with the community app: a sign-in from the lab is completed by pasting
+# the address the browser was sent to).
+#
+# macOS only (E.D.: «solo Mac va bene»). The sidecar binary is the one file the
+# two builds share on disk (src-tauri/binaries/): the lab's is left there, and
+# the next `./em.sh pack` builds the community's again — the guard refuses a
+# community app that carries the lab's (it looks for em_py_lab in the binary).
+do_build_lab() {
+  [[ "$(uname -s)" == "Darwin" ]] || die "./em.sh build --lab is macOS only (EMStudio_lab.app)"
+  export PATH="$HOME/.cargo/bin:$PATH"
+  command -v cargo >/dev/null || die "cargo not found (rustup): the lab is a desktop build"
+  if [ ! -d "$FE/node_modules" ]; then
+    log "installing frontend deps (first run)"
+    (cd "$FE" && npm install)
+  fi
+  log "lab · frontend (EM_PROFILE=lab → frontend/dist-lab)"
+  (cd "$FE" && npm run build:lab)
+  if [[ "${EM_LAB_REUSE_BRIDGE:-0}" == "1" && -n "$(ls "$ROOT/apps/desktop/src-tauri/binaries/" 2>/dev/null)" ]]; then
+    warn "lab · reusing the sidecar in src-tauri/binaries (EM_LAB_REUSE_BRIDGE=1): em.app has no lab APIs unless it was built with EM_LAB=1"
+  else
+    log "lab · sidecar (EM_LAB=1: with em_py_lab)"
+    (cd "$ROOT/apps/desktop" && EM_LAB=1 ./build-bridge.sh)
+  fi
+  log "lab · desktop (cargo tauri build --features lab --config tauri.lab.conf.json)"
+  (cd "$ROOT/apps/desktop/src-tauri" && cargo tauri build --features lab --config tauri.lab.conf.json)
+  local app="$ROOT/apps/desktop/src-tauri/target/release/bundle/macos/EMStudio_lab.app"
+  [[ -d "$app" ]] || die "the lab build ended without $app"
+  #: the lab must HAVE what the community must not: the same markers, expected
+  node "$FE/scripts/embargo-guard.mjs" --expect --bundle "$FE/dist-lab"
+  log "EMStudio lab: $app"
+}
+
+#: `embargo-guard [path…]`: the community build holds no function under
+#: embargo. No path = a fresh community build of the page in a temporary folder
+#: (the one `devrel` / `ghrelease` tag), checked and thrown away. Exit 1 names
+#: the marker and the file; 2 = nothing to check.
+do_embargo_guard() {
+  if [[ $# -gt 0 ]]; then
+    node "$FE/scripts/embargo-guard.mjs" "$@" || fail $? "the embargo guard refused — nothing is released"
+    return 0
+  fi
+  log "gate: the community build holds no function under embargo (frontend/scripts/embargo-guard.mjs)"
+  if [ ! -d "$FE/node_modules" ]; then
+    (cd "$FE" && npm install)
+  fi
+  local out
+  out="$(mktemp -d)"
+  (cd "$FE" && EM_PROFILE=community node node_modules/vite/bin/vite.js build --outDir "$out" --logLevel warn) \
+    || { rm -rf "$out"; die "the community build failed, so it could not be checked"; }
+  local rc=0
+  node "$FE/scripts/embargo-guard.mjs" "$out/index.html" || rc=$?
+  rm -rf "$out"
+  [[ "$rc" -eq 0 ]] || fail "$rc" "the community build holds a function under embargo — nothing is tagged. See above."
 }
 
 # ── gltfpack, the bridge's add-on ────────────────────────────────────────────
@@ -825,6 +911,7 @@ do_devrel() {
   echo "  tag           $tag"
   echo "  s3dgraphy pin $(pinned_s3dgraphy)"
   echo "  gates         the pin is on PyPI · the app opens in a browser"
+  echo "                no function under embargo in the build"
   echo "  files touched frontend/package.json"
   echo "                apps/desktop/src-tauri/Cargo.toml"
   echo "                apps/desktop/src-tauri/tauri.conf.json (numeric core)"
@@ -855,6 +942,7 @@ do_devrel() {
   # The app is opened on the tree as it is — the bump only touches the version.
   s3d_gate
   do_apertura
+  do_embargo_guard
 
   if [[ "$dry" -eq 1 ]]; then
     log "dry run: nothing was written, nothing was tagged, nothing was pushed"
@@ -895,6 +983,7 @@ x.y.z — a dev build is what ./em.sh devrel is for"
   require_clean_tree
   s3d_gate
   do_apertura
+  do_embargo_guard
   log "set the app version to $version"
   node "$ROOT/scripts/set-version.mjs" "$version"
   local branch
@@ -919,7 +1008,7 @@ shift || true
 case "$cmd" in
   sync) do_sync "$@" ;;
   wasm) do_wasm ;;
-  build) do_build ;;
+  build) do_build "$@" ;;
   dev) "$ROOT/dev.sh" "$@" ;;
   gltfpack) do_gltfpack "$@" ;;
   all)
@@ -942,6 +1031,7 @@ case "$cmd" in
   pack) do_pack ;;
   bridge-check) PYTHON="${PYTHON:-$ROOT/../s3Dgraphy/.venv/bin/python}" "$ROOT/apps/desktop/check-bridge.sh" "$@" ;;
   apertura) do_apertura ;;
+  embargo-guard) do_embargo_guard "$@" ;;
   devrel) do_devrel "$@" ;;
   ghrelease) do_ghrelease "$@" ;;
   release-branch) do_release_branch "$@" ;;

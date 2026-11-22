@@ -12,6 +12,7 @@
  * Pure: no DOM, no Tauri. `menu-ui.ts` draws the rows; `check-menu-table.mjs`
  * compares what the two surfaces get, per platform.
  */
+import { featureOn } from "./features";
 
 /** Where the app runs. The web is one platform whatever the OS under it: the
  *  browser owns its own menu bar. */
@@ -50,6 +51,11 @@ export interface CommandRow {
    *  (the Matrix's header, the Preferences, a window's choice): what the
    *  command search shows beside it. A row drawn by a menu has its path. */
   home?: string;
+  /** MICRO-SEG30 · the function of the register (features.ts) the command
+   *  belongs to: drawn, searched and run only while `featureOn(feature)`.
+   *  A command of an EMBARGO function is written only under `LAB` (its row
+   *  folds out of the community build with the register). */
+  feature?: string;
 }
 export interface PredefinedRow { kind: "os"; id: string; os: Predefined; label?: string }
 /** MICRO-PL17 (W14) · an INVOCATION, not a button: a plugin's command
@@ -328,6 +334,8 @@ function rowOnSurface(menu: MenuDef, row: Row, surface: Surface): boolean {
 }
 
 function rowOnPlatform(row: Row, platform: Platform): boolean {
+  const gate = (row as { feature?: string }).feature;
+  if (gate && !featureOn(gate)) return false;          // MICRO-SEG30 · off, or not in this build
   const only = (row as { only?: Platform[] }).only;
   return !only || only.includes(platform);
 }

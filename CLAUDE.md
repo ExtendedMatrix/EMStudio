@@ -129,6 +129,15 @@ ReferenceError thrown while `main.ts` was evaluating): `./em.sh apertura`
 real browser and fails on any `pageerror` / unlisted `console.error`, with the
 `src/` file:line. `devrel`, `ghrelease`, `release.yml` and s3Dgraphy's
 `release.py` step 12 all refuse on it.
+**Two builds (MICRO-SEG30).** The community build (`./em.sh build`, what is
+released) and the lab (`./em.sh build --lab`, EMStudio_lab.app, macOS). A
+function whose state is `embargo` in `frontend/src/features.ts` exists only in
+the lab: its register entry, its texts (i18n.ts `LAB_TEXTS` blocks) and its
+code are folded out of the community by the `__EM_LAB__` define; reach it only
+through `LAB` / `featureOn(id)`. `frontend/scripts/embargo-guard.mjs` refuses a
+community build that carries one (devrel, ghrelease, release.yml);
+`check-embargo.mjs` proves it. Publishing = changing the state in the register
+(docs/DEVELOPMENT.md, «Two builds»).
 Visual check: load `frontend/dist/index.html` and **drop an .em.json onto
 it**. The app deliberately starts from an EMPTY canvas — it does NOT
 auto-load a fixture (`main.ts`, `// ---------- boot ----------`): starting

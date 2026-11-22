@@ -22,7 +22,15 @@ use tauri_plugin_shell::ShellExt;
 
 /// Port the local sidecar listens on (matches the frontend browser-dev
 /// default, so `?bridge=`/`EM_BRIDGE` overrides still line up).
+///
+/// MICRO-SEG30 · EMStudio lab (`--features lab`) has a port of its own, 8785:
+/// it lives beside the community EMStudio.app, and `decide_launch` closes an
+/// em-bridge it finds on ITS port as an orphan — on 8765 that would be the
+/// bridge of the community app in use. 8785…8795 never meets 8765…8775.
+#[cfg(not(feature = "lab"))]
 const BRIDGE_PORT_DEFAULT: u16 = 8765;
+#[cfg(feature = "lab")]
+const BRIDGE_PORT_DEFAULT: u16 = 8785;
 /// B3 (s3Dgraphy#25, Enzo Cocca) · how many ports after the default are tried
 /// when the default belongs to ANOTHER program (not an em-bridge).
 const BRIDGE_PORT_TRIES: u16 = 10;
@@ -55,7 +63,11 @@ struct BridgeChild(Mutex<Option<CommandChild>>);
 // it, so the frontend says so and the user exports the env var before ./dev.sh.
 // Degrading to "store it in plain text" would be worse than not offering it.
 
+#[cfg(not(feature = "lab"))]
 const KEYRING_SERVICE: &str = "org.extendedmatrix.emstudio";
+/// MICRO-SEG30 · the lab keeps its own key (its own data, beside the community app)
+#[cfg(feature = "lab")]
+const KEYRING_SERVICE: &str = "org.extendedmatrix.emstudio.lab";
 const KEYRING_USER: &str = "anthropic-api-key";
 
 /// What to say when there is no credential store to write to. Names the one
@@ -216,6 +228,14 @@ const RELEASES_REPO: &str = "ExtendedMatrix/EMStudio";
 #[tauri::command]
 async fn update_install(app: tauri::AppHandle, tag: String) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
+    // MICRO-SEG30 · the lab never takes a release: a release is the COMMUNITY
+    // build, and installing it over EMStudio_lab.app would turn the lab into it
+    #[cfg(feature = "lab")]
+    {
+        let _ = (&app, &tag);
+        return Err("EMStudio lab does not update itself from the releases (they are the community build): build it again with ./em.sh build --lab".to_string());
+    }
+    #[allow(unreachable_code)]
     if !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
         return Err(format!("not a release tag: {tag}"));
     }
@@ -495,6 +515,15 @@ fn spawn_bridge(app: &tauri::AppHandle) {
     env.insert("EM_BRIDGE_PARENT_PID".to_string(), std::process::id().to_string());
     // MICRO-PL15 · the secret of the Python routes (see `bridge_token_value`)
     env.insert("EM_BRIDGE_TOKEN".to_string(), bridge_token_value().to_string());
+    // MICRO-SEG30 · the lab's bridge keeps its state (add-ons, history, the
+    // plugins' data) in a folder of its own, beside the community's
+    #[cfg(feature = "lab")]
+    if std::env::var_os("EM_BRIDGE_STATE_DIR").is_none() {
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            let dir = std::path::PathBuf::from(home).join(".config").join("emstudio-lab");
+            env.insert("EM_BRIDGE_STATE_DIR".to_string(), dir.to_string_lossy().into_owned());
+        }
+    }
     match cmd
         .args(["--port", &bridge_port().to_string(), "--exit-with-parent"])
         .envs(env)
@@ -960,6 +989,24 @@ fn bridge_port_default() -> u16 {
 fn selftest_js() -> Option<String> {
     std::env::var("EMSTUDIO_SELFTEST_JS").ok().and_then(|p| std::fs::read_to_string(p).ok())
 }
+
+/// MICRO-SEG30 · which build this is: `community` (what is released) or `lab`
+/// (`./em.sh build --lab`, EMStudio_lab.app). The lab answers with its
+/// sentinel, which the release guard (frontend/scripts/embargo-guard.mjs)
+/// looks for in the community binary: the `cfg` keeps it out of it.
+#[tauri::command]
+fn build_profile() -> serde_json::Value {
+    #[cfg(feature = "lab")]
+    {
+        serde_json::json!({ "profile": "lab", "sentinel": EMBARGO_SENTINEL })
+    }
+    #[cfg(not(feature = "lab"))]
+    {
+        serde_json::json!({ "profile": "community" })
+    }
+}
+#[cfg(feature = "lab")]
+const EMBARGO_SENTINEL: &str = "em-embargo:desktop";
 
 /// MICRO-OVERLAY-PER-FINESTRA p.0 · close a detached window («×», «⇤ Back»,
 /// the main page going): the page's `window.close()` reaches nobody on macOS
@@ -1432,6 +1479,7 @@ fn main() {
         .manage(Pending(Mutex::new(DesktopQueue::default())))
         .invoke_handler(tauri::generate_handler![
             transformer_url,
+            build_profile,
             bridge_token,
             take_desktop_queue,
             llm_key_status,

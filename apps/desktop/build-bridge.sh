@@ -233,6 +233,16 @@ fi
 # MICRO-TIL03 (T2) · em_graphwork: /geometry-summary in a worker process; the
 # frozen binary runs itself again for it (multiprocessing.freeze_support in
 # em_bridge's __main__).
+# MICRO-SEG30 · EMBARGO: `em_py_lab` (the em.app APIs of the functions under
+# embargo) goes into the LAB sidecar only (`EM_LAB=1`, `./em.sh build --lab`).
+# The analysis follows the import inside em_py's function, so the community
+# sidecar must EXCLUDE it explicitly; the release guard
+# (frontend/scripts/embargo-guard.mjs) looks for its name in the binary.
+if [[ "${EM_LAB:-0}" == "1" ]]; then
+  LAB_ARGS=(--hidden-import em_py_lab)
+else
+  LAB_ARGS=(--exclude-module em_py_lab)
+fi
 "$PY" -m PyInstaller --onefile --name em-bridge \
   --paths "$S3/src" --collect-submodules s3dgraphy \
   --add-data "$SRC/JSON_config${SEP}s3dgraphy/JSON_config" \
@@ -248,6 +258,7 @@ fi
   ${DOCX_ARGS[@]+"${DOCX_ARGS[@]}"} \
   ${FIGURE_ARGS[@]+"${FIGURE_ARGS[@]}"} \
   "${SHEET_ARGS[@]}" \
+  "${LAB_ARGS[@]}" \
   --exclude-module pandas --exclude-module numpy --exclude-module openpyxl \
   --exclude-module fitz --exclude-module pymupdf --exclude-module pymupdf.mupdf \
   --distpath "$WORK/dist" --workpath "$WORK/build" --specpath "$WORK" \

@@ -1,0 +1,47 @@
+{
+  "identifier": "org.extendedmatrix.emstudio.lab",
+  "productName": "EMStudio_lab",
+  "build": {
+    "frontendDist": "../../../frontend/dist-lab",
+    "beforeBuildCommand": {
+      "script": "npm run build:lab",
+      "cwd": "../../../frontend"
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "EMStudio lab",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 800,
+        "minHeight": 500,
+        "dragDropEnabled": true
+      }
+    ]
+  },
+  "bundle": {
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons-lab/32x32.png",
+      "icons-lab/128x128.png",
+      "icons-lab/128x128@2x.png",
+      "icons-lab/icon.icns",
+      "icons-lab/icon.ico"
+    ],
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "org.extendedmatrix.emstudio.lab"
+        ]
+      }
+    }
+  }
+}

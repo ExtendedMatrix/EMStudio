@@ -161,6 +161,9 @@ export interface PyPage {
   /** MICRO-SEG02 · the commands and actions a script reaches, with their
    *  params (`script-commands.ts` `scriptCatalog`): the console completes from it */
   commands?(): unknown;
+  /** MICRO-SEG30 · the register of the functions as this build has it
+   *  (`features.ts featuresWire`): `em.app.features()`, and the lab's APIs */
+  features?(): unknown;
   /** apply ONE step in ONE batch (one undo); the revision after it */
   applyStep(step: PyStep): number;
   host: PyAppHost;
@@ -218,7 +221,8 @@ export class PySession {
     const { status, answer } = await this.post("/py/session", {
       doc: this.page.doc(), revision: this.page.revision(), author: this.page.author(),
       lang: this.page.lang(), declared: this.page.declared(), selection: this.page.selection(),
-      ...(this.page.commands ? { commands: this.page.commands() } : {}) });
+      ...(this.page.commands ? { commands: this.page.commands() } : {}),
+      ...(this.page.features ? { features: this.page.features() } : {}) });
     if (status !== 200 || !answer.ok) throw new PyError(wordsOf(answer, this.page.lang()) || `HTTP ${status}`, status, answer);
     this.id = (answer as { session?: string }).session ?? null;
     this.listeners = answer.listeners ?? {};

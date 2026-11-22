@@ -331,6 +331,19 @@ jobs:
         run: node scripts/check-apertura.mjs
         working-directory: frontend
 
+      # MICRO-SEG30 · the EMBARGO is of the build: the community build (this
+      # one) must not contain a function whose state is `embargo` in
+      # frontend/src/features.ts. The page, built as the desktop builds it,
+      # looked at for every marker (embargo-guard.mjs); the desktop job looks
+      # again at the app it built, binary and sidecar included.
+      - name: No function under embargo in the community build (the page)
+        env:
+          EM_PROFILE: community
+        run: |
+          node node_modules/vite/bin/vite.js build --outDir "$RUNNER_TEMP/embargo" --logLevel warn
+          node scripts/embargo-guard.mjs "$RUNNER_TEMP/embargo/index.html"
+        working-directory: frontend
+
   # ── 4 · the three builds ──────────────────────────────────────────────────
   desktop:
     needs: [gate, draft, apertura]
@@ -546,6 +559,14 @@ jobs:
           # build's bundle version is x.y.z, see scripts/set-version.mjs)
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      # MICRO-SEG30 · the app just built — the page it embeds (frontend/dist),
+      # the sidecar, the bundle (.app / .dmg / .msi / .deb …) — holds no marker
+      # of a function under embargo. A refusal fails this job: the release
+      # stays a draft (`publish` needs every build).
+      - name: No function under embargo in the built app
+        shell: bash
+        run: node frontend/scripts/embargo-guard.mjs frontend/dist/index.html apps/desktop/src-tauri/binaries apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
 
       # MICRO-INSTALLER-PULSANTE p.1 · the NSIS installer closes em-bridge.exe
       # before it copies (windows/installer-hooks.nsh). Without it an update

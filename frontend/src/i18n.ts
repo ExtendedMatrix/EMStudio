@@ -55,6 +55,13 @@ export const LOCALES: LocaleInfo[] = [
 
 type Dict = Record<string, string>;
 
+/** MICRO-SEG30 · the texts of the functions under embargo are in this file
+ *  like every text, but inside `...(LAB_TEXTS ? { … } : {})`: in the community
+ *  build `__EM_LAB__` is `false`, the object is folded away and not one of its
+ *  words is in the bundle (features.ts, scripts/check-embargo.mjs). Written
+ *  here and not imported from features.ts: this module imports nothing. */
+const LAB_TEXTS: boolean = typeof __EM_LAB__ !== "undefined" && __EM_LAB__ === true;
+
 // ── English: the reference dictionary, and the fallback for every other ───────
 //
 // Keys are namespaced by where they appear (`toolbar.`, `tab.`, `settings.`,
@@ -4628,7 +4635,28 @@ const EN: Dict = {
   "settings.showIds": "Show node UUIDs (inspector) — off by default",
   "settings.experimental": "Experimental functions",
   "settings.experimentalOn": "Turn on the experimental functions on this machine — off by default",
-  "settings.experimentalHint": "Today they hold only the site and its footprint (the Landscape Graph, under embargo until its preprint). Read when EMStudio starts: a change takes effect after a reload.",
+  "settings.experimentalHint": "Read when EMStudio starts: a change takes effect after a reload.",
+  // MICRO-SEG30 · the register of the functions (features.ts)
+  "settings.experimentalHas": "Today they hold: {list}.",
+  "feat.site.title": "The site and its footprint",
+  "feat.site.desc": "A site as a node: the GIS layer hangs from it, its footprint drawn from the proxies of its units.",
+  ...(LAB_TEXTS ? {
+    // EMBARGO · lab build only (features.ts EMBARGO): folded out of the community
+    "settings.embargo": "Functions under embargo",
+    "settings.embargoOn": "Turn on the functions under embargo on this machine — off by default",
+    "settings.embargoHint": "Only in EMStudio lab: the community build does not contain them. Read when EMStudio starts: a change takes effect after a reload.",
+    "settings.embargoReload": "The functions under embargo change when EMStudio reloads. Reload now?",
+    "settings.w.embargo": "functions under embargo",
+    "settings.labBadge": "lab",
+    "feat.functionalMatrix.title": "Functional Matrix",
+    "feat.functionalMatrix.desc": "The Matrix of the functional units: what each part of a building did, in time.",
+    "feat.functionalOverlay.title": "Functional overlay",
+    "feat.functionalOverlay.desc": "The functional units drawn over the stratigraphic Matrix and the Space.",
+    "feat.landscapeMatrix.title": "Landscape Matrix",
+    "feat.landscapeMatrix.desc": "The Matrix at the scale of the landscape: sites and their relations in time.",
+    "feat.landscapeCube.title": "Landscape cube",
+    "feat.landscapeCube.desc": "The landscape in space and time as one volume.",
+  } : {}),
   // MICRO-COR11 · out of «Funzioni sperimentali», each with its own switch, off by default
   "settings.ownSwitches": "Functions with a switch of their own",
   "settings.ownTiles": "A tileset (3D Tiles) from a textured mesh · beta — off by default",
@@ -14149,7 +14177,27 @@ const IT: Dict = {
   "settings.showIds": "Mostra gli UUID dei nodi (ispettore) — spento di default",
   "settings.experimental": "Funzioni sperimentali",
   "settings.experimentalOn": "Accendi le funzioni sperimentali su questa macchina — spente di default",
-  "settings.experimentalHint": "Oggi contengono solo il sito e la sua impronta (il Landscape Graph, sotto embargo fino al suo preprint). Lette all'avvio di EMStudio: un cambio vale dopo il ricaricamento.",
+  "settings.experimentalHint": "Lette all'avvio di EMStudio: un cambio vale dopo il ricaricamento.",
+  "settings.experimentalHas": "Oggi contengono: {list}.",
+  "feat.site.title": "Il sito e la sua impronta",
+  "feat.site.desc": "Il sito come nodo: lo strato GIS vi è appeso, la sua impronta tratta dai proxy delle sue unità.",
+  ...(LAB_TEXTS ? {
+    // EMBARGO · solo il compilato lab (features.ts EMBARGO)
+    "settings.embargo": "Funzioni in embargo",
+    "settings.embargoOn": "Accendi le funzioni in embargo su questa macchina — spente di default",
+    "settings.embargoHint": "Solo in EMStudio lab: il compilato comunitario non le contiene. Lette all'avvio di EMStudio: un cambio vale dopo il ricaricamento.",
+    "settings.embargoReload": "Le funzioni in embargo cambiano quando EMStudio si ricarica. Ricaricare ora?",
+    "settings.w.embargo": "funzioni in embargo",
+    "settings.labBadge": "lab",
+    "feat.functionalMatrix.title": "Matrix funzionale",
+    "feat.functionalMatrix.desc": "La Matrix delle unità funzionali: che cosa ha fatto ogni parte di un edificio, nel tempo.",
+    "feat.functionalOverlay.title": "Sovrapposizione funzionale",
+    "feat.functionalOverlay.desc": "Le unità funzionali disegnate sopra la Matrix stratigrafica e lo Spazio.",
+    "feat.landscapeMatrix.title": "Landscape Matrix",
+    "feat.landscapeMatrix.desc": "La Matrix alla scala del paesaggio: i siti e le loro relazioni nel tempo.",
+    "feat.landscapeCube.title": "Cubo del paesaggio",
+    "feat.landscapeCube.desc": "Il paesaggio nello spazio e nel tempo come un solo volume.",
+  } : {}),
   "settings.ownSwitches": "Funzioni con un interruttore proprio",
   "settings.ownTiles": "Un tileset (3D Tiles) da una mesh texturizzata · beta — spento di default",
   "settings.ownTilesHint": "In Archivio ▸ File ▸ Ottimizza, «Tileset (3D Tiles)» si aggiunge alle destinazioni: un OBJ texturizzato tagliato in tile da Obj2Tiles, validato, impacchettato in .3tz, timbrato e registrato come versione del modello — lo Spazio carica poi un modello grande un pezzo alla volta.",

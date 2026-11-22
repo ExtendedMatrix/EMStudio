@@ -10,6 +10,12 @@ authors = ["Emanuel Demetrescu <emanuel.demetrescu@cnr.it>"]
 # root cargo workspace (em-core/em-cli stay lean for CI).
 [workspace]
 
+# MICRO-SEG30 · `lab`: EMStudio lab (`./em.sh build --lab`, with
+# tauri.lab.conf.json): its own bridge port, keychain service and state folder,
+# and the sentinel the release guard looks for. The community build never has it.
+[features]
+lab = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

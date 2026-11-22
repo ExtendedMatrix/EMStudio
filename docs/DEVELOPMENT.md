@@ -406,6 +406,82 @@ smallest touch that still verifies it. Locally:
 ./em.sh ghrelease 1.6.0           # exact version, same gate, tag v1.6.0
 ```
 
+## Two builds: community and lab (the embargo is of the build)
+
+Some functions are written in this public repository before they may be
+shown: a function waiting for its paper is **under embargo**. The rule (E.D.,
+22 Nov 2026): the code may be seen; the **community build** — everything
+released: GitHub's installers, the site, what `devrel` / `ghrelease` tag —
+neither contains nor shows it. The **lab build** has it.
+
+**The register** — `frontend/src/features.ts`, one entry per function: `id`,
+`state`, the i18n keys of its title and description. Three states:
+
+| state | community build | lab build |
+|---|---|---|
+| `public` | there | there |
+| `experimental` | behind Preferences ▸ Advanced ▸ *Experimental functions* (off by default) | the same |
+| `embargo` | **not in the build** | behind Preferences ▸ Advanced ▸ *Functions under embargo* (off by default) |
+
+**How a function leaves the community build.** Vite defines `__EM_LAB__`
+(`EM_PROFILE=lab` → `true`, otherwise `false` for a build; the dev server is
+the lab unless `EM_PROFILE=community`). `features.ts` turns it into `LAB`, and
+the embargo entries sit in a block that is `LAB ? [ … ] : []`; their texts sit
+in i18n.ts inside `...(LAB_TEXTS ? { … } : {})` (EN + IT, like every text).
+In the community build those are literal `false`, Rollup folds the branch, and
+not one id, word or line of code of the function is emitted. A function's code
+is reached only through `featureOn(id)` / `LAB`; a command of it carries
+`feature: "<id>"` in `menu-table.ts` (not drawn, not searched by F3, not run
+while the function is off — and absent from the community). Its `em.app` API is
+registered in `tools/em_py_lab.py` (`@lab_api(id, name)`), a module the
+community sidecar does not contain (`build-bridge.sh --exclude-module`), and it
+attaches only when the page's build lists the function as `embargo` and on.
+Two places are NOT folded, because they are data, not code: `index.html` and
+the JSON assets (`script-commands.json` and the like) are in every build as
+they are — an embargo function draws its markup from code and declares its
+commands' parameters in code under `LAB`, never there.
+
+**The two profiles.**
+
+```bash
+./em.sh build          # community: frontend/dist (what is released)
+./em.sh build --lab    # lab, macOS: frontend/dist-lab, a sidecar with em_py_lab,
+                       # cargo tauri build --features lab --config tauri.lab.conf.json
+                       # → target/release/bundle/macos/EMStudio_lab.app
+```
+
+EMStudio_lab.app lives beside EMStudio.app: its own identifier
+(`org.extendedmatrix.emstudio.lab`, so its own data folder and webview
+storage), name, window title and icon with «lab» (`icons-lab/`, from
+`apps/desktop/make-lab-icon.py`); the Rust feature `lab` gives it the bridge
+port 8785 (the community's is 8765: a bridge found on one's own port is closed
+as an orphan), its own keychain service, the bridge's state in
+`~/.config/emstudio-lab`, and no updates (a release is the community build). It
+registers no `stratigraph://` scheme: a sign-in from the lab is completed by
+pasting the address the browser was sent to.
+
+**The guard.** `frontend/scripts/embargo-guard.mjs` looks, in a build, for the
+markers of every embargo entry of the register — a sentinel per function
+(`em-embargo:<id>`), the i18n key of its title — and for the embargo's own
+words (its switch's key, its section, the desktop's sentinel, `em_py_lab` in
+the sidecar). `devrel` and `ghrelease` run it on a fresh community build among
+their gates (`./em.sh embargo-guard`); release.yml runs it on the page before
+the builds and on every built app, sidecar and installer after them. A marker
+found stops the release and says which and where. `scripts/check-embargo.mjs`
+proves it: the community passes, the lab is refused naming every sentinel, one
+sentinel slipped into a community copy is refused.
+
+**Publishing a function** is a change of state in the register, then a release:
+
+1. in `features.ts`, move its entry out of the `EMBARGO` block into `OPEN`,
+   with `state: "experimental"` (or `"public"`) and without its `sentinel`;
+2. in `i18n.ts`, move its texts out of the two `LAB_TEXTS` blocks into the open
+   dictionaries;
+3. move its `em.app` API from `tools/em_py_lab.py` into `tools/em_py.py`;
+4. `node frontend/scripts/check-embargo.mjs` (update the list of ids it
+   expects), then release as usual. The guard reads the register, so it stops
+   looking for that function by itself.
+
 ## Live sync with Blender (ADR-002, phase 1 — WIP)
 
 The WebSocket transport lives in `EM-blender-tools/sync_bridge/ws_server.py`

@@ -18,6 +18,7 @@
 import {
   type CommandRow, type MenuDef, type Platform, type Row, type RunRow, MENUS, keysFor, menuRows, slotRuns,
 } from "./menu-table";
+import { featureOn } from "./features";
 
 export interface CommandEntry {
   /** the command's id (`runCommand(id)`), or a plugin's `plugin:<id>/<command>` */
@@ -128,6 +129,9 @@ export function commandEntries(o: CatalogOptions): CommandEntry[] {
   // drawn first, so that a button shared by two rows keeps the drawn one
   places.sort((a, b) => Number(!a.path) - Number(!b.path));
   for (const { row, path } of places) {
+    // MICRO-SEG30 · a command of a function that is off (or not in this build: an
+    // embargo one in the community) is not offered
+    if (row.feature && !featureOn(row.feature)) continue;
     const exists = !row.only || row.only.includes(platform) || (row.only.length === 0 && !!row.home);
     if (!exists || seenButton.has(row.button)) continue;
     if (!path && !row.home) continue;

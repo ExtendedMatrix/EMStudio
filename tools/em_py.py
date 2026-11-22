@@ -511,6 +511,10 @@ class Session:
         #: MICRO-SEG02 · the commands and actions a script reaches, with their
         #: params (the page's ``script-commands.json``): completion reads it
         self.commands: List[Dict[str, Any]] = [c for c in body.get("commands") or [] if isinstance(c, dict)]
+        #: MICRO-SEG30 · the register of the functions AS THE PAGE'S BUILD HAS IT
+        #: (features.ts ``featuresWire``: id, state, on). The community build
+        #: sends no ``embargo`` entry, so no embargo API can attach.
+        self.features: List[Dict[str, Any]] = [f for f in body.get("features") or [] if isinstance(f, dict)]
         self.listeners: Dict[str, List[Callable]] = {name: [] for name in em.EVENTS}
         self.ns: Dict[str, Any] = {"__name__": "__console__", "__builtins__": builtins, "em": em}
         self.runs: Dict[str, "Run"] = {}
@@ -534,6 +538,8 @@ class Session:
             self._overlay = None
         if isinstance(body.get("commands"), list):
             self.commands = [c for c in body["commands"] if isinstance(c, dict)]
+        if isinstance(body.get("features"), list):
+            self.features = [f for f in body["features"] if isinstance(f, dict)]
 
     def overlay(self) -> Any:
         if self._overlay is None:
@@ -912,6 +918,28 @@ class EMStudioApp:
         (``em.app.commands.list()``)."""
         return [dict(c) for c in self._run.session.commands]
 
+    def features(self) -> List[Dict[str, Any]]:
+        """MICRO-SEG30 · the functions of EMStudio's register as this build has
+        them: ``[{id, state, on}]`` (``state``: public · experimental, and in
+        EMStudio lab embargo)."""
+        return [dict(f) for f in getattr(self._run.session, "features", [])]
+
+    def feature_on(self, feature_id: str) -> bool:
+        """Is the function ``feature_id`` of the register on in this page?"""
+        return any(f.get("id") == feature_id and f.get("on") for f in self.features())
+
+    def __getattr__(self, name: str) -> Any:
+        # EMBARGO (MICRO-SEG30) · the em.app APIs of the functions under embargo
+        # live in `em_py_lab`, which the community sidecar does not contain
+        # (build-bridge.sh `--exclude-module em_py_lab`): one attaches only when
+        # the page's build lists its function as `embargo` and on.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        api = _lab_api(self, name)
+        if api is not None:
+            return api
+        raise AttributeError(name)
+
     def selection(self) -> List[str]:
         return list(self._run.session.selection)
 
@@ -949,6 +977,17 @@ class EMStudioApp:
 
     def __repr__(self) -> str:
         return "<em.app of emstudio>"
+
+
+def _lab_api(app: "EMStudioApp", name: str) -> Any:
+    """EMBARGO (MICRO-SEG30) · ``em.app.<name>`` of a function under embargo, or
+    None: no `em_py_lab` in this build (the community sidecar), no such API, or
+    its function not listed by the page as ``embargo`` and on."""
+    try:
+        import em_py_lab  # noqa: PLC0415 — absent from the community sidecar
+    except ImportError:
+        return None
+    return em_py_lab.attach(app, name)
 
 
 class EMStudioHost:
@@ -1608,7 +1647,7 @@ class _AppView:
     def names(self) -> List[str]:
         base = {n for n in dir(type(self._app)) if not n.startswith("_")}
         base |= {"selection", "select", "view", "notify", "space", "commands", "available", "on",
-                 "workspaces", "windows", "narrative"}
+                 "workspaces", "windows", "narrative", "features", "feature_on"}   # MICRO-SEG30
         return sorted(base)
 
     def get(self, name: str) -> Any:

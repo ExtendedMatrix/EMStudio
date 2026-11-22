@@ -501,6 +501,11 @@ import { mountScriptEditor, newScriptBuffer, pyNames, scriptTitle, type ScriptBu
 // EXPERIMENTAL · «Funzioni sperimentali» (off for everyone): since MICRO-COR11
 // only the site and its footprint (experimental.ts)
 import { EXPERIMENTAL, experimentalStored, setExperimental } from "./experimental";
+// MICRO-SEG30 · the register of the functions (public · experimental · embargo):
+// the site passes through it; the embargo exists only in the lab build
+import { APP_NAME, EMBARGO_ON, LAB, embargoStored, featureOn, featuresOf, featuresWire, setEmbargo } from "./features";
+/** EXPERIMENTAL · the site and its footprint, through the register (features.ts) */
+const SITE_ON = featureOn("site");
 import { betaMark } from "./beta";
 import { BUCKET_MIME, bucketView, bucketViewState } from "./bucket-view";
 import { initSiteDoor, onSiteMark, siteChip, siteDoorState, siteMarks, spaceButtons } from "./site-door";
@@ -1415,7 +1420,9 @@ verBtn.textContent = EM_VERSION;
   const brandEl = document.getElementById("brand");
   if (brandEl) brandEl.title = `EMStudio ${__EMSTUDIO_VERSION__} · Extended Matrix ${EM_VERSION}`;
   const footVer = document.getElementById("footer-app-version");
-  if (footVer) footVer.textContent = `· EMStudio ${__EMSTUDIO_VERSION__}`;
+  if (footVer) footVer.textContent = `· ${APP_NAME} ${__EMSTUDIO_VERSION__}`;
+  // MICRO-SEG30 · the lab build says so: the window's title, before any file
+  if (LAB) document.title = APP_NAME;
 }
 
 // Footer word for the current authoring mode (ADR-002): Standalone = editing a
@@ -6658,7 +6665,7 @@ function updateToolbar(): void {
 // (e.g. "TempluMare.em.json ● — EMStudio"). No-op in a browser.
 function updateWindowTitle(): void {
   if (!isTauri()) return;
-  let title = "EMStudio";
+  let title = APP_NAME;
   if (store) {
     const g = store.doc.graph;
     const slot = emtree.active();
@@ -6666,7 +6673,7 @@ function updateWindowTitle(): void {
     // MICRO-CONTENTS-1 A3 · «file › grafo»
     const file = emtree.fileOf(slot);
     const name = file ? `${file.name} › ${graph}` : currentFilePath ? `${baseName(currentFilePath)} › ${graph}` : graph;
-    title = `${withCode(name, shownCode(store.doc))}${store.dirty ? " ●" : ""} — EMStudio`;
+    title = `${withCode(name, shownCode(store.doc))}${store.dirty ? " ●" : ""} — ${APP_NAME}`;
   }
   void setWindowTitle(title);
 }
@@ -21415,6 +21422,51 @@ async function paintTileCacheHint(): Promise<void> {
   }
 }
 
+/** EMBARGO (MICRO-SEG30) · Preferences ▸ Advanced ▸ «Functions under embargo»,
+ *  the LAB build only: drawn by code (index.html is the same in both builds),
+ *  called only under `if (LAB)`, so the community build has neither the
+ *  section, nor its switch, nor the key it writes. The switch is read when the
+ *  page starts (features.ts EMBARGO_ON); the functions it guards are listed
+ *  from the register with their state. */
+function mountEmbargoSettings(): void {
+  let sect = document.getElementById("settings-sect-embargo");
+  if (!sect) {
+    sect = document.createElement("section");
+    sect.id = "settings-sect-embargo";
+    sect.className = "settings-sect";
+    sect.dataset.settingsTab = "advanced";
+    const anchor = document.getElementById("settings-sect-experimental");
+    if (anchor) anchor.after(sect); else settingsModal.querySelector(".settings-body, .modal-body")?.append(sect);
+  }
+  sect.textContent = "";
+  const h = document.createElement("h4");
+  h.textContent = t("settings.embargo");
+  const label = document.createElement("label");
+  label.className = "settings-check";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.id = "set-embargo";
+  box.checked = embargoStored();
+  const span = document.createElement("span");
+  span.textContent = t("settings.embargoOn");
+  label.append(box, span);
+  const list = document.createElement("ul");
+  list.className = "settings-hint set-embargo-list";
+  for (const f of featuresOf("embargo")) {
+    const li = document.createElement("li");
+    li.dataset.feature = f.id;
+    li.dataset.sentinel = f.sentinel ?? "";
+    const b = document.createElement("b");
+    b.textContent = t(f.title);
+    li.append(b, ` — ${t(f.desc)}`);
+    list.append(li);
+  }
+  const hint = document.createElement("p");
+  hint.className = "settings-hint";
+  hint.textContent = t("settings.embargoHint");
+  sect.append(h, label, list, hint);
+}
+
 function openSettings(section?: string): void {
   const s = getSettings();
   void paintOrphans();
@@ -21431,6 +21483,11 @@ function openSettings(section?: string): void {
   setDevUuid.checked = s.developer.showNodeIds;
   // EXPERIMENTAL · the switch, as stored on this machine (experimental.ts)
   { const el = document.getElementById("set-experimental") as HTMLInputElement | null; if (el) el.checked = experimentalStored(); }
+  // MICRO-SEG30 · what «Experimental functions» holds, from the register
+  { const el = document.getElementById("set-experimental-has");
+    if (el) el.textContent = t("settings.experimentalHas", { list: featuresOf("experimental").map((f) => t(f.title)).join(" · ") }); }
+  // EMBARGO · lab build only: «Functions under embargo» (folded out of the community)
+  if (LAB) mountEmbargoSettings();
   // MICRO-COR11 · the two functions with a switch of their own (this machine)
   { const el = document.getElementById("set-own-tiles") as HTMLInputElement | null; if (el) el.checked = tilesOn(); }
   { const el = document.getElementById("set-own-blender") as HTMLInputElement | null; if (el) el.checked = blenderOn(); }
@@ -21953,6 +22010,16 @@ settingsModal.addEventListener("click", (e) => {
     changed.push(t("settings.w.experimental"));
     if (expEl.checked !== EXPERIMENTAL)
       void askConfirm(t("settings.experimentalReload")).then((yes) => { if (yes) location.reload(); });
+  }
+  // EMBARGO · lab build only: the embargo's switch, read when the page starts
+  if (LAB) {
+    const embEl = document.getElementById("set-embargo") as HTMLInputElement | null;
+    if (embEl && embEl.checked !== embargoStored()) {
+      setEmbargo(embEl.checked);
+      changed.push(t("settings.w.embargo"));
+      if (embEl.checked !== EMBARGO_ON)
+        void askConfirm(t("settings.embargoReload")).then((yes) => { if (yes) location.reload(); });
+    }
   }
   const syncChanged = JSON.stringify(before.sync) !== JSON.stringify(next.sync);
   toast(changed.length
@@ -38479,9 +38546,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
-    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(EXPERIMENTAL ? siteMarks(win.id) : [])],   // EXPERIMENTAL: the site's footprint
+    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : [])],   // EXPERIMENTAL: the site's footprint
     onMark: (id) => {
-      if (EXPERIMENTAL && onSiteMark(id)) return;
+      if (SITE_ON && onSiteMark(id)) return;
       if (id.startsWith("inst:")) goToInstance(id.slice(5));
       // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · an extractor's mark: the chain source → extractor → property
       else if (id.startsWith("x3d:")) { select(id.slice(4)); refreshInspector(); }
@@ -39488,7 +39555,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // Epochs ⇄ Horizons (beta, MICRO-COR11); EXPERIMENTAL · the site's marks («Funzioni sperimentali» on)
     // MICRO-SEG15 · Globe / Plan / Site went to the column under the gizmo
     // (`placeGeoCol`), the hardware profile to the information line (`hwInfo`)
-    bar.append(back, bands, lab, seg, ...(EXPERIMENTAL ? spaceButtons(win.id) : []));
+    bar.append(back, bands, lab, seg, ...(SITE_ON ? spaceButtons(win.id) : []));
     // MICRO-E p.6 · «Colori ▾»: the mode said when it is not EM's
     const csNow = spaceColoursOf(win.id);
     const colb = document.createElement("button");
@@ -42576,7 +42643,7 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   siteName.type = "text"; siteName.dataset.doorSiteName = "1"; siteName.placeholder = t("labsite.siteName");
   if (siteNow) { sr.dataset.doorSite = siteNow.id; sr.append(t("door.siteThere", { site: String(siteNow.name ?? siteNow.id) })); }
   else sr.append(`${t("door.siteMake")} `, siteName);
-  if (!(EXPERIMENTAL && gisHere)) sr.classList.add("hidden");
+  if (!(SITE_ON && gisHere)) sr.classList.add("hidden");
   body.append(list, dr, er, ar, lr, svr, sr);
   const dateOf = (id: string) => String(((st.node(id)?.data ?? {}) as Record<string, unknown>).absolute_time_start ?? "");
   const dlg = openDialog({ kind: "door", title: t("door.title"), body, ok: t("door.go"),
@@ -42630,7 +42697,7 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
     date: a.value.trim(), epoch: models ? esel.value || null : null, license: lsel.value || null,
     ...(Object.keys(crsB).length ? { crs: crsB, shift: shB } : {}),
     ...(gisHere && survey.value.trim() ? { acquisition: { dtc_kind: "topographic", name: survey.value.trim() } } : {}),
-    ...(EXPERIMENTAL && gisHere ? (siteNow ? { attach_to: siteNow.id } : siteName.value.trim() ? { site_name: siteName.value.trim() } : {}) : {}) });
+    ...(SITE_ON && gisHere ? (siteNow ? { attach_to: siteNow.id } : siteName.value.trim() ? { site_name: siteName.value.trim() } : {}) : {}) });
   if (!j.ok) { toast(t("door.failed", { why: String(j.error ?? j.status) })); return; }
   // MICRO-K §B1 · the acquisition written on the models IN the same delta (one undo)
   if (acqV != null || untilV != null) doorStampAcquired(st, j.delta, j.items.map((x) => x.model_id).filter((x): x is string => !!x), acqV, untilV);
@@ -42641,7 +42708,7 @@ async function portaDentro(files: DoorFile[], opts: { epoch?: string | null } = 
   for (const sh of j.gis?.sheets ?? []) if (sh.said) logInfo(`${sh.name ?? ""} · ${sh.said}`);
   if (j.site_name) logInfo(t("door.siteMade", { site: j.site_name }));
   // EXPERIMENTAL · the site's chip in the bars of the Matrix and the Graph says the new layer (and a site just made)
-  if (EXPERIMENTAL && gisHere) renderAreaHeaders();
+  if (SITE_ON && gisHere) renderAreaHeaders();
   for (const w of j.warnings ?? []) logWarn(w);
   // MICRO-F p.2 · the dropped tilesets are models now: their previews go
   {
@@ -63556,7 +63623,7 @@ function buildAreaHeader(win: Win): DocumentFragment {
   if (type === "graph" && (winMode(win) === "matrix" || winMode(win) === "graph") && store)
     frag.appendChild(bandsControl(win));
   // ── EXPERIMENTAL · the site as a node: its glyph, in the bar ─────────────
-  if (EXPERIMENTAL && type === "graph" && (winMode(win) === "matrix" || winMode(win) === "graph") && store) {
+  if (SITE_ON && type === "graph" && (winMode(win) === "matrix" || winMode(win) === "graph") && store) {
     const chip = siteChip();
     if (chip) frag.appendChild(chip);
   }
@@ -68750,7 +68817,7 @@ setInterval(() => { void askServiceSeen(); }, 30000);
 // EXPERIMENTAL · the site and its footprint: their seams (site-door.ts); the
 // switch off, nothing of it is wired. (The lab's door went with MICRO-COR11:
 // «Porta dentro…» is the one door.)
-if (EXPERIMENTAL) initSiteDoor({
+if (SITE_ON) initSiteDoor({
   t: (k, v) => t(k, v), toast,
   doc: () => (store?.doc ?? null) as EmDocument | null,
   footprint: (siteId, units) => siteFootprint(siteId, units),
@@ -68758,7 +68825,7 @@ if (EXPERIMENTAL) initSiteDoor({
   redraw: () => { renderAreaHeaders(); draw(); refreshSurfaces("scene"); },
   readOnly: () => !!sync.room && hubReadOnly(),
 });
-if (EXPERIMENTAL) Object.assign(window as unknown as Record<string, unknown>, { __siteDoor: siteDoorState });
+if (SITE_ON) Object.assign(window as unknown as Record<string, unknown>, { __siteDoor: siteDoorState });
 // PELLE · the canvas face (Sora) arrives after the first frame; one redraw when
 // it is in, so the drawing does not stay in the fallback until the next click.
 whenCanvasFontsReady(() => draw());
@@ -69443,6 +69510,7 @@ function pySessionFor(st: DocumentStore): PySession {
     selection: () => [...selectedIds],
     // MICRO-SEG02 · what `em.app.commands` reaches, with the params (the console completes from it)
     commands: () => scriptCatalog((id) => { const r = findRow(id); return r ? t(r.label) : null; }),
+    features: () => featuresWire(),                    // MICRO-SEG30 · em.app.features()
     applyStep: (step: PyStep) => { applyDelta(st, step.delta, { renameCopies: true }); return st.rev; },
     log: (level, message, ids) => (level === "error" ? logError : level === "warn" ? logWarn : logInfo)(message, ids),
     t: (key, vars) => t(key, vars),

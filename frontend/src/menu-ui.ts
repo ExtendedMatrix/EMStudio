@@ -15,6 +15,7 @@
  * menu's accelerator), and the second within 400 ms is the same press.
  */
 import { applyStaticTranslations, onLocaleChange, t } from "./i18n";
+import { featureOn } from "./features";
 import {
   type CommandRow, type OptRow, type Platform, type Row, type RunRow, MENUS, findRun, keysFor, menuRows, menusFor,
   optionOn, setOption, slotRuns,
@@ -227,6 +228,7 @@ export function runCommand(id: string, opts: { script?: boolean } = {}): boolean
   }
   const row = findRow(id);
   if (!row) return false;
+  if (row.feature && !featureOn(row.feature)) return false;   // MICRO-SEG30 · its function is off
   const now = performance.now();
   if (!opts.script) {
     if (lastRun.button === row.button && now - lastRun.at < 400) return true;
