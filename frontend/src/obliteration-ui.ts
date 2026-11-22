@@ -68,10 +68,16 @@ export interface OblConflict {
   other?: string; inherited_from?: OblOrigin; other_inherited_from?: OblOrigin;
 }
 export interface OblNotReached { container: OblOrigin; property_ids: string[]; state: string; start: number | null; member_start: number | null }
-export interface OblHint { kind: string; unit: string; start: number | null; end: number | null; by: string[]; container?: OblOrigin }
+export interface OblHint { kind: string; unit: string; start: number | null; end: number | null; by: string[]; container?: OblOrigin;
+                          covers?: string[]; edges?: string[] }
+/** the kinds of hint the section says (MICRO-LG8: «not_reached» is gone —
+ *  an older s3Dgraphy may still send it, and it is not said) */
+const HINT_KINDS = new Set(["declared_uncovered", "covered_undeclared", "obliterating_member"]);
 export interface OblDiary {
   unit: string; name: string | null; life: [number | null, number | null];
-  windows: OblWindow[]; conflicts: OblConflict[]; not_reached: OblNotReached[]; warnings: string[];
+  windows: OblWindow[]; conflicts: OblConflict[]; warnings: string[];
+  /** MICRO-LG8: always empty (the exclusion by date of MICRO-LG6 is gone); read by nobody */
+  not_reached?: OblNotReached[];
   containers: Array<OblOrigin & { declares: boolean }>;
 }
 export type OblStatus = "idle" | "loading" | "ok" | "off" | "error";
@@ -147,7 +153,7 @@ class Asker {
         next = { status: "error", diary: null, hints: [], error: msg, stale: false };
       } else {
         const j = (await res.json()) as { diary?: OblDiary; hints?: OblHint[] };
-        next = { status: "ok", diary: j.diary ?? null, hints: j.hints ?? [], stale: false };
+        next = { status: "ok", diary: j.diary ?? null, hints: ((j.hints ?? []) as OblHint[]).filter((h) => HINT_KINDS.has(h.kind)), stale: false };
       }
     } catch {
       next = { status: "off", diary: null, hints: [], stale: false };
@@ -414,7 +420,8 @@ function paradataLine(doc: EmDocument, w: { paradata: OblParadata[] }, onJump: (
 
 function hintWords(doc: EmDocument, h: OblHint): string {
   const vars = { from: fmtYear(h.start), to: fmtYear(h.end), by: h.by.map((b) => nameOf(doc, b)).join(", "),
-                 node: h.container ? (h.container.name ?? nameOf(doc, h.container.node)) : "" };
+                 node: h.container ? (h.container.name ?? nameOf(doc, h.container.node)) : "",
+                 covers: (h.covers ?? []).map((c) => nameOf(doc, c)).join(", ") };
   return t(`oblit.hint.${h.kind}`, vars);
 }
 
@@ -423,7 +430,7 @@ function paintUnit(host: HTMLElement, store: DocumentStore, id: string, onJump: 
   const st = obliterationFor(store, id);
   const d = st.diary;
   const own = declaredOn(doc, id).length > 0;
-  const something = own || !!(d && (d.windows.length || d.not_reached.length || d.conflicts.length));
+  const something = own || !!(d && (d.windows.length || d.conflicts.length));
   if (!something) {
     emptyLine(host, store, id, "unit", st.hints);
     const line = host.querySelector<HTMLElement>("[data-obl-empty]");
@@ -441,13 +448,6 @@ function paintUnit(host: HTMLElement, store: DocumentStore, id: string, onJump: 
     for (const w of d.windows) list.appendChild(windowRow(store, id, w, onJump));
     box.appendChild(list);
     if (d.windows.length) box.appendChild(el("p", "insp-hint insp-obl-between", t("oblit.between")));
-    for (const nr of d.not_reached) {
-      const p = el("p", "insp-hint insp-obl-notreached");
-      p.dataset.oblNotReached = nr.container.node;
-      p.append(t("oblit.notReached.pre"), " ", link(nr.container.node, nr.container.name ?? nameOf(doc, nr.container.node), onJump),
-               " ", t("oblit.notReached.post", { from: fmtYear(nr.start) }));
-      box.appendChild(p);
-    }
     if (d.conflicts.length) {
       const c = el("div", "insp-obl-conflicts");
       c.appendChild(el("div", "insp-hint", t("oblit.conflicts")));

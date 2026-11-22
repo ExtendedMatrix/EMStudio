@@ -20,7 +20,11 @@
 //       1979 with scissor 1978–1979, a new document, who states it and the
 //       doubts) — one property obliteration, one extractor, one document; the
 //       member SU003 INHERITS it with the container's paradata in view (the
-//       doubts quoted); SU019, born when it begins, is NOT REACHED (said);
+//       doubts quoted); SU019 (FILL), member of the ruin born when the
+//       obliteration begins, is REACHED (MICRO-LG8: no exclusion by date) and,
+//       since it overlies SU001 of the same ruin, gets the HINT «the layer that
+//       obliterates is inside the unit it obliterates: remove it?» — nothing
+//       corrected, the membership stays;
 //       «Sovrascrivi qui…» (partly obliterated 1500–1600) wins on SU003 only;
 //       «Togli» removes it; «Togli» on the container gives the empty line
 //       back; the words in English; no page error.
@@ -47,7 +51,9 @@ for (const s of ["obliterated", "partially_obliterated"]) used.add(`oblit.state.
 for (const s of ["absolute", "epoch", "undated"]) used.add(`oblit.src.${s}`);
 for (const s of ["functional_unit", "activity", "timebranch", "epoch"]) used.add(`oblit.kind.${s}`);
 for (const s of ["outside_life", "declared_overlap", "inherited_overlap"]) used.add(`oblit.conflict.${s}`);
-for (const s of ["declared_uncovered", "covered_undeclared", "not_reached"]) used.add(`oblit.hint.${s}`);
+for (const s of ["declared_uncovered", "covered_undeclared", "obliterating_member"]) used.add(`oblit.hint.${s}`);
+eq([...i18n.matchAll(/"oblit\.(notReached\.\w+|hint\.not_reached)":/g)].length, 0, "MICRO-LG8: no «not reached» text left (EN, IT)");
+ok(!/\.not_reached\b|oblit\.notReached/.test(mod), "MICRO-LG8: the module no longer reads not_reached");
 for (const s of ["year", "epoch", "open"]) used.add(`oblit.form.mode.${s}`);
 for (const s of ["own", "inherited"]) used.add(`oblit.level.${s}`);
 const en = i18n.slice(i18n.indexOf("const EN: Dict = {"), i18n.indexOf("const IT: Dict = {"));
@@ -238,8 +244,18 @@ await waitRows(page, "F3", [["obliterated", 200, 1979, "inherited", "RUIN"]], "S
   ok(await page.locator('h3[data-sect="obliteration"]').count() === 1, "…now the section has its head");
 }
 await selectUnit(page, "FILL");
-ok((await page.locator('[data-obl-sect="FILL"] [data-obl-not-reached="RUIN"]').count()) === 1, "SU019, born when the obliteration begins: NOT REACHED, and said");
-eq(await page.locator('[data-obl-sect="FILL"] [data-obl-window]').count(), 0, "…no window on it");
+await waitRows(page, "FILL", [["obliterated", 200, 1979, "inherited", "RUIN"]],
+  "MICRO-LG8: SU019, born when the obliteration begins, is REACHED (no exclusion by date)");
+eq(await page.locator('[data-obl-sect="FILL"] [data-obl-not-reached]').count(), 0, "…no «non raggiunta» line any more");
+{
+  const h = page.locator('[data-obl-sect="FILL"] [data-obl-hint="obliterating_member"]');
+  eq(await h.count(), 1, "…the HINT: it covers a member of its own ruin while the ruin is obliterated");
+  const w = await h.textContent();
+  ok(w.includes("copre SU001") && w.includes("lo strato che oblitera è dentro l'unità che oblitera: toglierlo da rudere?"),
+     "…«copre SU001, anch'essi membri di rudere… toglierlo da rudere?»");
+  eq((await docOf(page)).edges.filter((e) => e.edge_type === "is_in_functional_unit" && e.source === "FILL").length, 1,
+     "…a question, never a correction: SU019 is still a member of the ruin");
+}
 
 // OVERRIDE on SU003
 await selectUnit(page, "F3");
