@@ -787,6 +787,48 @@ class EMStudioMatrix:
         return "<em.app.matrix of emstudio>"
 
 
+class EMStudioNarrative:
+    """``em.app.narrative`` (MICRO-SEG26): the 3D that follows the text, and the
+    block of the story the person is on (the caret while writing, the reading
+    line while reading). Its changes are the event ``narrative-block-changed``
+    (``em.app.on("narrative-block-changed", fn)``, payload ``{narrative,
+    chapter, block, narrates, cites, reading}``)."""
+
+    def __init__(self, run: "Run"):
+        self._run = run
+
+    @_asks
+    def follow(self) -> bool:
+        """Whether the Narrative's 3D follows the active block; set it to
+        ``True`` / ``False`` (the area's «Follow the text»)."""
+        return bool(_ask_app(self._run, "narrative.follow"))
+
+    @follow.setter
+    def follow(self, on: bool) -> None:
+        _ask_app(self._run, "narrative.set_follow", on=bool(on))
+
+    @_asks
+    def active(self) -> Optional[Dict[str, Any]]:
+        """The active block: ``{narrative, chapter, block, narrates, cites,
+        reading, epoch, following}`` (``block`` None: a chapter's head), or None."""
+        return _ask_app(self._run, "narrative.active")
+
+    def go(self, chapter: int, block: Optional[int] = None, narrative: Optional[str] = None) -> Dict[str, Any]:
+        """Make a block the active one (the 3D follows it at once): ``chapter``
+        and ``block`` from 0, ``block`` None for the chapter's head."""
+        return _ask_app(self._run, "narrative.set_active", chapter=int(chapter),
+                        block=None if block is None else int(block),
+                        narrative=None if narrative is None else str(getattr(narrative, "id", narrative)))
+
+    def on_block(self, fn: Callable[[Dict[str, Any]], Any]) -> Any:
+        """Subscribe to the active block's changes — the same as
+        ``em.app.on("narrative-block-changed", fn)``."""
+        return _em().events.on("narrative-block-changed", fn)
+
+    def __repr__(self) -> str:
+        return "<em.app.narrative of emstudio>"
+
+
 class EMStudioWorkspaces:
     """``em.app.workspaces`` (MICRO-SEG02 p.3): the tabs of the bar."""
 
@@ -860,6 +902,8 @@ class EMStudioApp:
         self.space = EMStudioSpace(run)
         #: MICRO-SEG24 · the Matrix's slice of an epoch or an activity
         self.matrix = EMStudioMatrix(run)
+        #: MICRO-SEG26 · the 3D that follows the text, the active block
+        self.narrative = EMStudioNarrative(run)
         self.workspaces = EMStudioWorkspaces(run)
         self.windows = EMStudioWindows(run)
 
@@ -1564,16 +1608,16 @@ class _AppView:
     def names(self) -> List[str]:
         base = {n for n in dir(type(self._app)) if not n.startswith("_")}
         base |= {"selection", "select", "view", "notify", "space", "commands", "available", "on",
-                 "workspaces", "windows"}
+                 "workspaces", "windows", "narrative"}
         return sorted(base)
 
     def get(self, name: str) -> Any:
-        if name in ("space", "workspaces", "windows"):
+        if name in ("space", "workspaces", "windows", "narrative"):
             return getattr(self._own, name)
         return getattr(self._app, name)
 
     def static(self, name: str) -> Any:
-        if name in ("space", "workspaces", "windows"):
+        if name in ("space", "workspaces", "windows", "narrative"):
             return property(lambda _self: None, doc=getattr(type(getattr(self._own, name)), "__doc__", None))
         try:
             import inspect

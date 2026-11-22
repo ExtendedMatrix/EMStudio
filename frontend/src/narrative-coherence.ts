@@ -258,7 +258,8 @@ export function coherenceIssues(doc: EmDocument | null, data: Record<string, unk
           : { kind: "remove_figure", label: t("nv.coh.fix.removeFigure") } });
       return;
     }
-    if (f.sig && f.sig !== figureSig(n, doc, f.kind))
+    // MICRO-SEG26 · a frozen view is frozen by design: it never «changed»
+    if (f.kind !== "still" && f.sig && f.sig !== figureSig(n, doc, f.kind))
       out.push({ key: `figure:${ci}:${bi}`, kind: "figure_changed", chapter: ci, block: bi, ref: b.ref,
         text: t("nv.coh.figureChanged", { what: t(`nv.fig.cap.${f.kind}`, { name: nameOf(n) }) }),
         fix: { kind: "regenerate", label: t("nv.coh.fix.regenerate") } });

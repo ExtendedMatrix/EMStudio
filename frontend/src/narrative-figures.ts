@@ -27,8 +27,12 @@ import { epochEnd, epochStart, sceneContent, scopeOf } from "./narrative-embeds"
 import { intervalLabel } from "./narrative-lanes";
 import type { EmDocument, EmNode } from "./types";
 
-export const FIGURE_KINDS = ["matrix", "model", "plan", "three_quarter", "sub_epochs"] as const;
+export const FIGURE_KINDS = ["matrix", "model", "plan", "three_quarter", "sub_epochs", "view", "still"] as const;
 export type FigureKind = typeof FIGURE_KINDS[number];
+/** MICRO-SEG26 · a view brought from the Space: `view` live (its camera and
+ *  parameters in `options`), `still` a frozen picture (`options.still`). Each
+ *  is ONE camera among many of its epoch: its own plate (`figureVariant`). */
+export const VIEW_FIGURE_KINDS: readonly FigureKind[] = ["view", "still"];
 
 export interface FigureSpec {
   kind: FigureKind;
@@ -41,6 +45,7 @@ export interface FigureSpec {
 /** The datamodel's view type each kind is drawn as. */
 export const FIGURE_VIEW: Record<FigureKind, string> = {
   matrix: "matrix", model: "scene3d", plan: "scene3d", three_quarter: "scene3d", sub_epochs: "timeline",
+  view: "scene3d", still: "scene3d",
 };
 
 /** The prefix of a figure's reference in the text (s3Dgraphy `FIGURE_REF_PREFIX`). */
@@ -108,6 +113,15 @@ export function figureLabels(chapters: readonly Chapterish[], numbered: boolean,
   const m = new Map<string, string>();
   for (const e of figureEntries(chapters, numbered, resolves)) if (!m.has(e.label)) m.set(e.label, e.number);
   return m;
+}
+
+/** What tells two figures of the same (view, subject) apart (s3Dgraphy
+ *  `figure_variant`): the kind — and, for a view brought from the Space, its
+ *  label too («view-f3»). "" for an ordinary embed. */
+export function figureVariant(block: Blockish): string {
+  const f = figureOf(block);
+  if (!f) return "";
+  return VIEW_FIGURE_KINDS.includes(f.kind) && f.label ? `${f.kind}-${f.label}` : f.kind;
 }
 
 /** The key a client-rendered picture is filed under (s3Dgraphy `figure_key`). */

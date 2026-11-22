@@ -190,7 +190,9 @@ export type SpaceKeyAction =
   /** MICRO-SEG19 · T, the toolbar on the left (freed by MICRO-SEG14) */
   | "toolbar"
   /** MICRO-SPAZIO-3D-3 · A, Alt+A; H, Alt+H, Shift+H; B (box select) */
-  | "select-all" | "select-none" | "hide" | "reveal" | "hide-unselected" | "box-select";
+  | "select-all" | "select-none" | "hide" | "reveal" | "hide-unselected" | "box-select"
+  /** MICRO-SEG26 · Shift+N, «Bring into the Narrative…»: the view as it is now into the active block */
+  | "to-narrative";
 
 export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
                                mac: boolean): SpaceKeyAction | null {
@@ -211,6 +213,7 @@ export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boo
     if (k === "H" || k === "h") return "hide-unselected";
     if (k === "C" || k === "c") return "cursor-reset";
     if (k === "A" || k === "a") return "add-menu";
+    if (k === "N" || k === "n") return "to-narrative";
     return null;
   }
   switch (k) {

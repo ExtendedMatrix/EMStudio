@@ -359,16 +359,26 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
         { name: "story", type: "narrative", state: { "current.reading": "write" } },
         { name: "index", type: "narrative-index" },
         { name: "outliner", type: "outliner" },
+        // MICRO-SEG26 · the 3D that accompanies the text: a Space window (the
+        // same engine and the same scene as the Space's) that follows the
+        // active block (`follow: "narrative"`)
+        { name: "scene", type: "scene", state: { follow: "narrative" } },
         { name: "canvas", type: "graph", state: { mode: "matrix" } },
         { name: "inspector", type: "inspector" },
       ],
       active: "story",
       // MICRO-OUTLINER-UNICO · the left column is the story's Index above the
-      // Outliner; the Matrix and the Properties side by side, down to the bottom
+      // Outliner; the Matrix and the Properties side by side, down to the bottom.
+      // MICRO-SEG26 (E.D., 22 Nov 2026: «in Narrative non c'è un modello 3D che
+      // accompagni il testo») · the Matrix's area is split top / bottom: the 3D
+      // above, the Matrix under it — both follow the block, both in sight (a tab
+      // would hide one of the two); the area changes type or closes as any other
       layout: { dir: "row", ratio: 0.18,
                 a: { dir: "col", ratio: 0.45, a: { win: "index" }, b: { win: "outliner" } },
                 b: { dir: "row", ratio: 0.52, a: { win: "story" },
-                     b: { dir: "row", ratio: 0.55, a: { win: "canvas" }, b: { win: "inspector" } } } },
+                     b: { dir: "row", ratio: 0.55,
+                          a: { dir: "col", ratio: 0.55, a: { win: "scene" }, b: { win: "canvas" } },
+                          b: { win: "inspector" } } } },
     },
   },
   // SPAZIO · «Dove sta, e che forma ha in ogni epoca?» (scrivania v11b, 30 set
@@ -930,11 +940,13 @@ export const LEGACY_SIGNATURES: Record<string, string[]> = {
            "row(emtree,row(col(storage,shelf),graph:dtc))"],
   narrative: ["row(narrative,viewer)",
               // rev 6 · no Outliner, the Matrix above the Properties
-              "row(narrative-index,row(narrative,col(graph:matrix,inspector)))"],
+              "row(narrative-index,row(narrative,col(graph:matrix,inspector)))",
+              // rev 7 (MICRO-SEG26) · the seed with no 3D beside the text
+              "row(col(narrative-index,outliner),row(narrative,row(graph:matrix,inspector)))"],
   // rev 6 · no Outliner, the scene's own in the 3D view
   space: ["row(col(scene,table),row(graph:matrix,inspector))"],
 };
-export const WORKSPACES_REV = 6;
+export const WORKSPACES_REV = 7;
 const REV_KEY = "emstudio.workspaces.rev";
 
 export function migrateSavedArrangements(

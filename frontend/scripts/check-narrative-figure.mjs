@@ -131,7 +131,8 @@ console.log("\nA · what an epoch and an activity offer");
   eq(kinds("A01"), ["matrix", "model", "plan", "three_quarter"], "an activity: no sub-epochs");
   eq(kinds("E1"), ["matrix✗", "model✗", "plan✗", "three_quarter✗", "sub_epochs✗"], "an empty epoch: everything refused, with why");
   ok(F.figureChoices(st.node("E1"), st.doc).every((c) => c.why && c.why.length > 8), "…each refusal says why");
-  eq(F.FIGURE_VIEW, { matrix: "matrix", model: "scene3d", plan: "scene3d", three_quarter: "scene3d", sub_epochs: "timeline" },
+  // (MICRO-SEG26 added the views brought from the Space, `view` and `still`, also scene3d)
+  eq(F.FIGURE_VIEW, { matrix: "matrix", model: "scene3d", plan: "scene3d", three_quarter: "scene3d", sub_epochs: "timeline", view: "scene3d", still: "scene3d" },
      "drawn with the datamodel's view types: no new one");
   eq(F.subEpochRows(st.doc, "E2").map((r) => `${r.name}:${r.start}-${r.end}`), ["Early II:101-150", "Late II:151-200"],
      "the sub-epochs, oldest first, with dates");

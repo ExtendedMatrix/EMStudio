@@ -298,10 +298,11 @@ import { linkGroupOf, throughExtractor } from "./add-menu";
 import { bindParams, declOf, registerScriptAction, registerScriptForm, runsWithoutWindow, scriptActionOf, scriptCatalog, scriptFormOf } from "./script-commands";
 import { refsForViewType, scene3dRefKind, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
 import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
-import { laneTree, missingActivityHeadings, type HorizonLike, type LaneItem, type LaneMode } from "./narrative-lanes";
+import { anchorsOf, laneTree, missingActivityHeadings, type HorizonLike, type LaneItem, type LaneMode } from "./narrative-lanes";
 import type { LanePickerHooks } from "./narrative-lane-picker";
 import { citedContext, setDocumentContent, setMatrixFigureFactory, setSceneFactory, setSitePicker, type NarrativeSelection, type Reading, type SceneFactory } from "./narrative";
-import { autoCaption, datesOf, FIGURE_REF_PREFIX, FIGURE_VIEW, figureChoices, figureEntries, figureKey, figureNumbers, figureOf, subEpochsSvg } from "./narrative-figures";
+import { autoCaption, datesOf, epochOfActivity, FIGURE_REF_PREFIX, FIGURE_VIEW, figureBlock, figureChoices, figureEntries, figureInsertAt, figureKey, figureNumbers, figureOf, figureSig, figureVariant, newFigureLabel, subEpochsSvg } from "./narrative-figures";
+import * as nfw from "./narrative-follow";
 import { coherenceIssues } from "./narrative-coherence";
 import { documentEmbed as documentEmbedRaw, epochStart, sceneContent, sceneContentLine, scopeOf, tableRows, type TableContext } from "./narrative-embeds";
 import { openSitePicker } from "./site-picker";
@@ -3229,6 +3230,19 @@ window.__EM_SCENE__ = () => {
   // an `em.app` request as a script sends it (space.render, matrix.render)
   narrativeFigureSizes: async (id: string) => Object.fromEntries(Object.entries(await narrativeFigures(id)).map(([k, v]) => [k, v.length])),
   appOp: (op: string, args: Record<string, unknown>) => scriptAppOp(op, args),
+  // MICRO-SEG26 · the 3D that follows the text: what it follows, the parts about a unit, a view brought in
+  followState: () => ({ on: nvFollowGlobal, active: nvActive, reading: nvActiveReading, pending: nvSettle.pending(),
+    epoch: spaceEpochId, focus: nvFocus3d ? { epoch: nvFocus3d.epoch, keys: nvFocus3d.keys ? [...nvFocus3d.keys] : null,
+      lit: nvFocus3d.lit ? [...nvFocus3d.lit] : null, lanes: nvFocus3d.lanes, cites: nvFocus3d.cites, from: nvFocus3d.from, idle: nvFocus3d.idle } : null,
+    wins: followWins().map((w) => ({ id: w.id, items: (sceneItemsNow.get(w.id) ?? []).map((i) => ({ kind: i.kind, id: i.id,
+      dim: i.kind === "proxy" && !!nvFocus3d?.lit && !nvFocus3d.lit.has(i.id) })) })) }),
+  setActiveBlock: (narrativeId: string, chapter: number, block: number | null, why: "click" | "caret" | "read" | "api" = "api") =>
+    noteActiveBlock({ narrativeId, chapter, block }, why),
+  aboutState: () => (nvAbout ? { unit: nvAbout.unit, list: nvAbout.list, i: nvAbout.i } : null),
+  aboutUnit: (id: string) => showNarrativeAbout(id),
+  bringView: (winId: string, mode: "view" | "still" | null, from: "companion" | "space" = "space") => {
+    const w = winById(winId); return w ? bringViewIntoNarrative(w, mode, from) : Promise.resolve(false);
+  },
   /** MICRO-NARRATIVE-MODULI · what a story's 3D scene of this node draws */
   narrativeSceneItems: (id: string) => { const n = store?.node(id); return n ? narrativeSceneItems(n).map((i) => ({ kind: i.kind, id: i.id, state: i.state, url: i.url ?? null })) : null; },
   setBands: (bands: Bands, winId?: string) => { const w = winById(winId ?? activeWin().id); if (w) setBandsOf(w, bands); },
@@ -4057,6 +4071,8 @@ function showSelection(nodeId: string, from: PickFrom | null): void {
     }
   }
   draw();
+  // MICRO-SEG26 C · a unit picked in a 3D: the parts of the story about it
+  if (from?.part === "scene" && narrativeOpen() && store?.node(nodeId)) showNarrativeAbout(nodeId);
   const scenes = windowsOf().filter((w) => w.type === "scene" && winAreas.has(w.id));
   if (scenes.length) showInSpace(nodeId, scenes.map((w) => ({
     id: w.id, frame: !(from?.win === w.id && from.part === "scene"), reveal: !(from?.win === w.id && from.part === "outliner") })));
@@ -18705,7 +18721,8 @@ async function narrativeFigures(
       if (!ref || !FIGURABLE.has(view)) return;
       // MICRO-SEG24 · a figure of an epoch or an activity is filed under its
       // kind too (`scene3d:E2#plan`): a plan and a 3/4 view are two plates
-      const variant = figureOf(block as never)?.kind ?? "";
+      // MICRO-SEG26 · …and a view brought from the Space under its label too (`#view-f3`)
+      const variant = figureVariant(block as never);
       // MICRO-NARRATIVE-MODULI p.12 · p.19 · a scene, a document's models: the
       // still of the framing saved in the block (none saved: the placeholder
       // and the link, as before) — a 3D FIGURE is drawn off screen instead
@@ -18746,7 +18763,8 @@ async function narrativeFigures(
         svg = subEpochsSvg(node, doc);
       } else if (variant && node && view === "scene3d" && typeof options.still !== "string") {
         // MICRO-SEG24 D · no still of its own: drawn off screen, now
-        const got = await renderFigureStill(node, variant);
+        const fk = figureOf({ block_type: "embed", options } as never)?.kind ?? variant;
+        const got = await renderFigureStill(node, fk, 1280, 800, 20000, fk === "view" ? options.camera as CamState | undefined : undefined, options.view as Record<string, unknown> | undefined);
         svg = got ? `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${got.width}" height="${got.height}"><image width="${got.width}" height="${got.height}" xlink:href="${got.image}"/></svg>` : null;
       } else if (view === "matrix") {
         const matrix = scenes.matrix;          // nothing laid out: nothing to
@@ -26509,6 +26527,542 @@ function setNarrativeSelection(narrativeId: string, sel: NarrativeSelection): vo
   markNarrativeSelection();
   refreshSurfaces("inspector");
   syncGraphToChapter();
+  // MICRO-SEG26 · the part picked is the active block: the 3D follows it
+  noteActiveBlock({ narrativeId, chapter: sel.chapter, block: sel.block }, "click");
+}
+
+// ── MICRO-SEG26 · the 3D that accompanies the text ──────────────────────────
+//
+// The Narrative workspace has a Space window that FOLLOWS the active block
+// (`follow: "narrative"` in its state, `isFollowWin`). The ACTIVE BLOCK is the
+// one the caret is in while writing (a click, the arrows), the one under the
+// reading line while reading (a scroll that stops): `noteActiveBlock`. The 3D
+// follows after the caret has rested ~1 s while writing (never while typing),
+// at once after a click while reading: the epoch narrated is set, only the
+// pertinent proxies and models are drawn, the cited units lit and the others
+// faded, and the camera FLIES to them (the double click's flight; «Reduce
+// motion»: a fade). A block with no ties leaves everything as it was. One
+// switch, «Follow the text» (on by default, remembered on this machine), in
+// the area and in `em.app.narrative.follow`; «Frame this block» does it now.
+
+const NV_FOLLOW_KEY = "emstudio.narrative.follow";
+let nvFollowGlobal = ((): boolean => { try { return localStorage.getItem(NV_FOLLOW_KEY) !== "0"; } catch { return true; } })();
+/** the block of the story the person is on (caret or reading line) */
+let nvActive: nfw.BlockRef | null = null;
+let nvActiveReading: "write" | "read" = "write";
+/** what the companion 3D shows for it (null: nothing followed yet) */
+let nvFocus3d: { ref: nfw.BlockRef; epoch: string | null; keys: Set<string> | null; lit: Set<string> | null;
+                 lanes: string[]; cites: string[]; from: nfw.NarratesFrom; idle: boolean; sig: string } | null = null;
+let nvFollowGen = 0;
+const nvSettle = nfw.settle();
+/** the items each Space window drew last (the still of «Bring into the Narrative») */
+const sceneItemsNow = new Map<string, SceneItem[]>();
+
+function isFollowWin(w: Win | undefined | null): boolean { return !!w && w.type === "scene" && w.state?.follow === "narrative"; }
+function followWins(): Win[] { return windowsOf().filter((w) => isFollowWin(w) && winAreas.has(w.id)); }
+/** the filter and the lights of the active block, for a Space window: only the
+ *  companion ones, only while following */
+function followLookOf(win: Win): typeof nvFocus3d {
+  return nvFollowGlobal && isFollowWin(win) && nvFocus3d ? nvFocus3d : null;
+}
+function setNarrativeFollow(on: boolean): void {
+  nvFollowGlobal = on;
+  try { localStorage.setItem(NV_FOLLOW_KEY, on ? "1" : "0"); } catch { /* a viewer without storage */ }
+  if (on) { if (nvFocus3d) nvFocus3d.sig = ""; applyFollow(true); }
+  else { nvSettle.cancel(); nvFollowGen++; }
+  refreshSurfaces("scene");
+}
+
+/** The narrative a story window shows (its own choice, else the app's). */
+function narrativeIdOfWin(w: Win): string | null {
+  return (winCurrent(w, "narrative") as string | null) ?? selectedNarrativeId ?? narrativesIn(store?.doc ?? null)[0]?.id ?? null;
+}
+
+/** The part of the page an element is in: a block row, a chapter's head, the
+ *  story's head. */
+function partOfElement(el: Element | null): { chapter: number; block: number | null } | null {
+  if (!el) return null;
+  const row = el.closest<HTMLElement>(".nv-block-row[data-block]");
+  if (row) { const [c, b] = (row.dataset.block ?? "").split(":").map(Number); return Number.isFinite(c) && Number.isFinite(b) ? { chapter: c, block: b } : null; }
+  const ch = el.closest<HTMLElement>(".nv-chapter[data-chapter]");
+  if (ch && el.closest(".nv-chapter-head")) return { chapter: Number(ch.dataset.chapter), block: null };
+  if (el.closest(".nv-head")) return { chapter: -1, block: null };
+  return null;
+}
+
+/** The active block changed (or was said again): the event for scripts, and
+ *  the 3D follows — after the caret rests (writing), at once (reading, a click). */
+function noteActiveBlock(ref: nfw.BlockRef, why: "click" | "caret" | "read" | "api"): void {
+  const story = windowsOf().find((w) => w.type === "narrative");
+  nvActiveReading = story && readingOf(story) !== "write" ? "read" : "write";
+  const same = nfw.sameBlock(ref, nvActive);
+  nvActive = { ...ref };
+  if (!same) {
+    const narr = store ? narrativesIn(store.doc).find((n) => n.id === ref.narrativeId) : null;
+    const f = narr ? nfw.blockFocus(store!.doc, narr.chapters as never, ref.chapter, ref.block) : null;
+    pyNudge("narrative-block-changed", { narrative: ref.narrativeId, chapter: ref.chapter, block: ref.block,
+      narrates: f?.narrates ?? [], cites: f?.cites ?? [], reading: nvActiveReading });
+    paintFollowStrips();
+  }
+  if (!nvFollowGlobal || !followWins().length) return;
+  if (same && why !== "api") return;
+  const ms = why === "read" ? nfw.READ_SETTLE_MS : nvActiveReading === "write" && why !== "api" ? nfw.WRITE_SETTLE_MS : 0;
+  nvSettle.push(ms, () => applyFollow(false));
+}
+
+/** An epoch where one of these units or models is drawn: the one shown if it
+ *  draws one, else the first that does. */
+function epochShowingAny(ids: string[]): string | null {
+  const sp = currentSpace();
+  if (!sp || !ids.length) return null;
+  const shows = (ep: string) => ids.some((id) => sp.summary(ep)?.withProxy.includes(id) || !!sp.rms.find((r) => r.id === id)?.epochs.includes(ep));
+  const cur = spaceEpochOf(sp);
+  if (cur && shows(cur)) return cur;
+  return sp.epochs.find((e) => shows(e.id))?.id ?? null;
+}
+
+/** The 3D takes the active block: epoch, filter, lights, flight. `force`: fly
+ *  even when the block asks what is already shown («Frame this block»). */
+function applyFollow(force: boolean): void {
+  if (!store || !nvActive || !nvFollowGlobal) return;
+  const narr = narrativesIn(store.doc).find((n) => n.id === nvActive!.narrativeId);
+  if (!narr) return;
+  const ref = { ...nvActive };
+  const f = nfw.blockFocus(store.doc, narr.chapters as never, ref.chapter, ref.block);
+  const sp = currentSpace();
+  const drawable = f.cites.filter((id) => !!sp && (sp.proxies.has(id) || sp.rms.some((r) => r.id === id)));
+  if (!f.narrates.length && !drawable.length) {
+    // MICRO-SEG26 B · a block with no ties: the 3D stays on its last framing
+    if (nvFocus3d) nvFocus3d = { ...nvFocus3d, ref, idle: true };
+    paintFollowStrips();
+    if (force) toast(t("nvf.noTies"));
+    return;
+  }
+  const scope = nfw.laneScope(store.doc, f.narrates);
+  const epoch = scope.epoch ?? epochShowingAny(drawable);
+  const lit = drawable.length ? new Set(drawable) : null;
+  const sig = JSON.stringify([epoch, scope.keys ? [...scope.keys].sort() : null, lit ? [...lit].sort() : null]);
+  const changed = !nvFocus3d || nvFocus3d.sig !== sig || nvFocus3d.idle;
+  nvFocus3d = { ref, epoch, keys: scope.keys, lit, lanes: f.narrates, cites: f.cites, from: f.from, idle: false, sig };
+  if (!changed && !force) { paintFollowStrips(); return; }
+  if (epoch && epoch !== spaceEpochId) spaceEpochId = epoch;
+  refreshSurfaces("scene");
+  paintFollowStrips();
+  flyFollow();
+}
+
+/** The keys the flight frames: the lit units, else the pertinent, else what
+ *  the window draws. */
+function followFrameKeys(win: Win): string[] {
+  const fx = nvFocus3d;
+  if (fx?.lit) return [...fx.lit].flatMap((id) => [`proxy:${id}`, `rm:${id}`]);
+  if (fx?.keys) return [...fx.keys];
+  return (sceneItemsNow.get(win.id) ?? []).map((i) => `${i.kind}:${i.id}`);
+}
+function flyFollow(): void {
+  const gen = ++nvFollowGen;
+  const t0 = Date.now();
+  for (const w of followWins()) {
+    const tryFly = (): void => {
+      if (gen !== nvFollowGen) return;           // another block came
+      const h = sceneHandles.get(w.id);
+      const keys = followFrameKeys(w);
+      if (h && keys.length && h.frameKeys(keys, true)) return;
+      if (Date.now() - t0 < 15000) setTimeout(tryFly, 300);
+    };
+    setTimeout(tryFly, 80);                      // after the scene's own refresh
+  }
+}
+
+/** The caret, while writing. */
+document.addEventListener("selectionchange", () => {
+  if (!store) return;
+  const sel = document.getSelection();
+  const node = sel?.anchorNode ?? null;
+  const el = node ? (node.nodeType === 1 ? node as Element : node.parentElement) : null;
+  if (!el || !el.closest(".nv-view")) return;
+  const story = windowsOf().find((w) => w.type === "narrative" && narrativeHostOf(w)?.contains(el));
+  if (!story || readingOf(story) !== "write") return;
+  const part = partOfElement(el);
+  const narrId = narrativeIdOfWin(story);
+  if (part && narrId) noteActiveBlock({ narrativeId: narrId, ...part }, "caret");
+});
+/** …and typing pushes the flight back: the 3D never moves under the fingers.
+ *  A mention typed is taken when the caret rests. */
+for (const ev of ["keydown", "input"] as const)
+  document.addEventListener(ev, (e) => {
+    const el = e.target as Element | null;
+    if (!el?.closest?.(".nv-view") || !nvActive || !nvFollowGlobal || !followWins().length) return;
+    if (ev === "keydown" && !nvSettle.pending()) return;
+    nvSettle.push(nfw.WRITE_SETTLE_MS, () => applyFollow(false));
+  }, true);
+/** The reading line, while reading: the block under the upper third of the
+ *  page, when the scroll stops. */
+let nvReadTimer = 0;
+document.addEventListener("scroll", (e) => {
+  const target = e.target as Element | Document | null;
+  if (!store || !target || target === document) return;
+  for (const w of windowsOf()) {
+    if (w.type !== "narrative" || readingOf(w) === "write") continue;
+    const host = narrativeHostOf(w);
+    if (!host || !((target as Element).contains?.(host) || host.contains(target as Element))) continue;
+    window.clearTimeout(nvReadTimer);
+    nvReadTimer = window.setTimeout(() => {
+      const scroller = (target as Element);
+      const r = scroller.getBoundingClientRect();
+      const line = r.top + r.height * 0.3;
+      let at: Element | null = null;
+      for (const c of host.querySelectorAll(".nv-chapter[data-chapter] > .nv-chapter-head, .nv-block-row[data-block]")) {
+        if (c.getBoundingClientRect().top <= line) at = c; else break;
+      }
+      const part = partOfElement(at);
+      const narrId = narrativeIdOfWin(w);
+      if (part && narrId) noteActiveBlock({ narrativeId: narrId, ...part }, "read");
+    }, 120);
+    return;
+  }
+}, true);
+
+/** The strip of a companion 3D: «Follow the text», «Frame this block»,
+ *  «Insert this view as a figure», and what it follows now. */
+const followStrips = new Map<string, HTMLElement>();
+function paintFollowStrips(): void {
+  for (const [winId, strip] of followStrips) {
+    if (!strip.isConnected) { followStrips.delete(winId); continue; }
+    const tg = strip.querySelector<HTMLButtonElement>("[data-nvf=toggle]");
+    if (tg) { tg.setAttribute("aria-pressed", String(nvFollowGlobal)); tg.classList.toggle("on", nvFollowGlobal); }
+    const what = strip.querySelector<HTMLElement>("[data-nvf=what]");
+    if (!what) continue;
+    const fx = nvFocus3d;
+    const name = (id: string) => String(store?.node(id)?.name ?? id);
+    let words: string;
+    if (!nvFollowGlobal) words = t("nvf.off");
+    else if (!nvActive) words = t("nvf.none");
+    else if (!fx) words = t("nvf.waiting");
+    else {
+      const bits: string[] = [];
+      if (fx.lanes.length) bits.push(fx.lanes.map(name).join(", "));
+      if (fx.lit?.size) bits.push(tn("nvf.cites", fx.lit.size));
+      words = bits.join(" · ") + (fx.idle ? ` — ${t("nvf.idle")}` : "");
+    }
+    what.textContent = words;
+    what.title = words;
+    strip.dataset.nvfEpoch = fx?.epoch ?? "";
+    strip.dataset.nvfIdle = String(!!fx?.idle);
+  }
+}
+function followStripFor(win: Win, host: HTMLElement): HTMLElement {
+  const strip = document.createElement("div");
+  strip.className = "scn-follow";
+  strip.dataset.nvfStrip = win.id;
+  for (const ev of ["pointerdown", "dblclick", "wheel"]) strip.addEventListener(ev, (e) => e.stopPropagation());
+  const btn = (probe: string, label: string, title: string, run: () => void): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "scn-follow-btn";
+    b.dataset.nvf = probe;
+    // the glyph alone when the area is narrow (`.narrow`), the words otherwise
+    const [glyph, ...rest] = label.split(" ");
+    const g = document.createElement("span");
+    g.className = "scn-follow-glyph";
+    g.textContent = glyph;
+    const w = document.createElement("span");
+    w.className = "scn-follow-words";
+    w.textContent = ` ${rest.join(" ")}`;
+    b.append(g, w);
+    b.title = title;
+    b.setAttribute("aria-label", title);
+    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    strip.appendChild(b);
+    return b;
+  };
+  btn("toggle", `⟲ ${t("nvf.follow")}`, t("nvf.followTitle"), () => setNarrativeFollow(!nvFollowGlobal));
+  btn("frame", `⤢ ${t("nvf.frame")}`, t("nvf.frameTitle"), () => {
+    nvSettle.cancel();
+    if (!nvActive) { toast(t("nvf.none")); return; }
+    if (!nvFollowGlobal) setNarrativeFollow(true);
+    applyFollow(true);
+  });
+  btn("figure", `＋ ${t("nvf.figure")}`, t("nvf.figureTitle"), () => { void bringViewIntoNarrative(win, "view", "companion"); });
+  const what = document.createElement("span");
+  what.className = "scn-follow-what";
+  what.dataset.nvf = "what";
+  strip.appendChild(what);
+  host.appendChild(strip);
+  followStrips.set(win.id, strip);
+  // under the information line (its height varies), in one row: narrow, the glyphs
+  const place = (): void => {
+    const line = host.querySelector<HTMLElement>(".scn-topline");
+    strip.style.top = `${Math.max(28, (line?.offsetTop ?? 5) + (line?.offsetHeight ?? 20) + 4)}px`;
+    strip.classList.toggle("narrow", host.clientWidth < 560);
+  };
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(place);
+    ro.observe(host);
+    const line = host.querySelector(".scn-topline");
+    if (line) ro.observe(line);
+  }
+  queueMicrotask(() => { place(); paintFollowStrips(); });
+  return strip;
+}
+
+// ── MICRO-SEG26 C · from the 3D to the text ─────────────────────────────────
+//
+// A proxy picked in a Space → the parts of the story that cite or narrate that
+// unit are lit in the page and in the Index, with «‹ Previous · Next ›».
+
+let nvAbout: { unit: string; narrativeId: string; list: nfw.BlockAbout[]; i: number } | null = null;
+function showNarrativeAbout(unitId: string): void {
+  if (!store) return;
+  const story = windowsOf().find((w) => w.type === "narrative");
+  const narrId = story ? narrativeIdOfWin(story) : null;
+  const narr = narrId ? narrativesIn(store.doc).find((n) => n.id === narrId) : null;
+  if (!narr) return;
+  nvAbout = { unit: unitId, narrativeId: narr.id, list: nfw.blocksAbout(store.doc, narr.chapters as never, unitId), i: -1 };
+  markNarrativeAbout();
+  refreshSurfaces("narrative-index");
+}
+function clearNarrativeAbout(): void {
+  nvAbout = null;
+  markNarrativeAbout();
+  refreshSurfaces("narrative-index");
+}
+function aboutSelector(a: nfw.BlockAbout): string {
+  return a.block === null ? `.nv-chapter[data-chapter="${a.chapter}"] > .nv-chapter-head` : `.nv-block-row[data-block="${a.chapter}:${a.block}"]`;
+}
+function goNarrativeAbout(step: number): void {
+  if (!nvAbout || !nvAbout.list.length) return;
+  const n = nvAbout.list.length;
+  nvAbout.i = ((nvAbout.i < 0 ? (step > 0 ? -1 : 0) : nvAbout.i) + step + n) % n;
+  const a = nvAbout.list[nvAbout.i];
+  setNarrativeSelection(nvAbout.narrativeId, { chapter: a.chapter, block: a.block });
+  markNarrativeAbout();
+  for (const w of windowsOf()) {
+    if (w.type !== "narrative") continue;
+    narrativeHostOf(w)?.querySelector<HTMLElement>(aboutSelector(a))?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+function markNarrativeAbout(): void {
+  for (const w of windowsOf()) {
+    if (w.type !== "narrative") continue;
+    const host = narrativeHostOf(w);
+    if (!host) continue;
+    host.querySelectorAll(".nv-about").forEach((x) => x.classList.remove("nv-about", "nv-about-now"));
+    host.querySelector(".nv-about-bar")?.remove();
+    if (!nvAbout || narrativeIdOfWin(w) !== nvAbout.narrativeId) continue;
+    nvAbout.list.forEach((a, i) => {
+      const el = host.querySelector<HTMLElement>(aboutSelector(a));
+      if (!el) return;
+      el.classList.add("nv-about");
+      el.dataset.nvAbout = a.why;
+      if (i === nvAbout!.i) el.classList.add("nv-about-now");
+    });
+    const bar = document.createElement("div");
+    bar.className = "nv-about-bar";
+    bar.dataset.nvAboutBar = nvAbout.unit;
+    bar.setAttribute("role", "status");
+    const name = String(store?.node(nvAbout.unit)?.name ?? nvAbout.unit);
+    const n = nvAbout.list.length;
+    const words = document.createElement("span");
+    words.dataset.nvAboutWords = String(n);
+    words.textContent = n ? t("nvf.about", { name, n: String(n) }) + (nvAbout.i >= 0 ? ` · ${nvAbout.i + 1}/${n}` : "")
+      : t("nvf.aboutNone", { name });
+    bar.appendChild(words);
+    const mk = (probe: string, label: string, title: string, run: () => void, off = false): void => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "nv-mini";
+      b.dataset.nvAboutGo = probe;
+      b.textContent = label;
+      b.title = title;
+      b.disabled = off;
+      b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+      bar.appendChild(b);
+    };
+    mk("prev", t("nvf.prev"), t("nvf.prevTitle"), () => goNarrativeAbout(-1), !n);
+    mk("next", t("nvf.next"), t("nvf.nextTitle"), () => goNarrativeAbout(1), !n);
+    mk("close", "×", t("nvf.aboutClose"), clearNarrativeAbout);
+    host.prepend(bar);
+  }
+}
+/** …and the Index: the chapters and sections with a part about the unit. */
+function markIndexAbout(body: HTMLElement): void {
+  body.querySelectorAll(".nidx-about").forEach((x) => { x.classList.remove("nidx-about"); x.querySelector(".nidx-about-n")?.remove(); });
+  if (!nvAbout) return;
+  const per = new Map<number, number>();
+  for (const a of nvAbout.list) per.set(a.chapter, (per.get(a.chapter) ?? 0) + 1);
+  for (const [c, n] of per) {
+    const row = body.querySelector<HTMLElement>(`.nidx-row[data-chapter="${c}"]:not(.nidx-h)`);
+    if (!row) continue;
+    row.classList.add("nidx-about");
+    const badge = document.createElement("span");
+    badge.className = "nidx-about-n";
+    badge.textContent = String(n);
+    badge.title = t("nvf.aboutIndex", { n: String(n) });
+    row.appendChild(badge);
+  }
+  for (const a of nvAbout.list)
+    if (a.block !== null) body.querySelector(`.nidx-row.nidx-h[data-chapter="${a.chapter}"][data-block="${a.block}"]`)?.classList.add("nidx-about");
+}
+
+// ── MICRO-SEG26 D · G · a view of the Space into the story ──────────────────
+//
+// From the companion 3D, «Insert this view as a figure»: the live figure of
+// SEG24 (kind `view`) with the camera as it is. From the Space, «Bring into the
+// Narrative…» (the viewport's ⋯, Shift+N): the view as it is now — camera,
+// epoch, layers shown, selection, LOD — into the active block, DYNAMIC (the
+// live figure: drawn again from the graph, reopened in the Space from Read) or
+// STATIC (a frozen picture at high resolution, the date and the view's
+// parameters in its caption). With no active block, the parts of the story
+// that narrate the view's epoch are proposed. One undo step.
+
+/** The parts of a story that narrate an epoch (or an activity of it), in
+ *  reading order: chapters and headings. */
+function partsNarratingEpoch(chapters: unknown[], epochId: string): Array<{ chapter: number; block: number | null; label: string }> {
+  const out: Array<{ chapter: number; block: number | null; label: string }> = [];
+  const doc = store?.doc ?? null;
+  const hits = (lanes: string[]) => lanes.some((id) => id === epochId || epochOfActivity(id, doc) === epochId);
+  (chapters as Array<{ title?: string; anchor?: string; anchors?: string[]; blocks?: Array<{ block_type?: string; text?: string; options?: Record<string, unknown> }> }>).forEach((c, ci) => {
+    if (hits(anchorsOf(c as never))) out.push({ chapter: ci, block: null, label: `${ci + 1} · ${String(c.title ?? "")}` });
+    (c.blocks ?? []).forEach((b, bi) => {
+      if (b.block_type === "heading" && hits(anchorsOf(b as never))) out.push({ chapter: ci, block: bi, label: `${ci + 1} · ${String(b.text ?? "").replace(/\[\[[^\]]*\]\]/g, "").trim()}` });
+    });
+  });
+  return out;
+}
+
+/** What a view of the Space is, as the figure keeps it. */
+function spaceViewParams(win: Win, h: SpaceSceneHandle): Record<string, unknown> {
+  const layers = VISIBILITY_KEYS.filter((k) => space3dShown(k, win.id));
+  return {
+    epoch: spaceEpochId, layers, hidden: [...eyesOf(win.id).hidden], selection: [...selectedIds],
+    lod: { profile: hardwareProfile(), drawn: h.drawnAs().map((d) => ({ id: d.id, as: d.as })) },
+    ...(followLookOf(win)?.keys ? { only: [...followLookOf(win)!.keys!] } : {}),
+  };
+}
+
+/** A still of what a window draws now, at `scale` × its size (≤ 3200 px wide):
+ *  the window's own items and camera, drawn off screen. */
+async function windowStill(win: Win, scale: number, jpeg: boolean): Promise<{ image: string; width: number; height: number } | null> {
+  const h = sceneHandles.get(win.id);
+  const cam = h?.camera();
+  const items = sceneItemsNow.get(win.id) ?? [];
+  const canvas = document.querySelector<HTMLCanvasElement>(`.scn-host[data-scn="${CSS.escape(win.id)}"] canvas.scn-canvas`);
+  if (!h || !cam || !items.length) return null;
+  const cw = canvas?.clientWidth || 960, ch = canvas?.clientHeight || 600;
+  // a frozen view (scale > 1) is at least 1600 px on its long side: a plate to print
+  const long = Math.max(cw, ch);
+  const k = scale > 1 ? Math.min(3200, Math.max(1600, long * scale)) / long : scale;
+  const w = Math.round(cw * k), hh = Math.round(ch * k);
+  return renderStill(() => items, w, hh, 20000, (x) => x.setCamera(cam), jpeg);
+}
+
+async function bringViewIntoNarrative(win: Win, mode: "view" | "still" | null, from: "companion" | "space"): Promise<boolean> {
+  const st = store;
+  if (!st) return false;
+  const h = sceneHandles.get(win.id);
+  const cam = h?.camera();
+  if (!h || !cam) { toast(t("nvf.loadFirst")); return false; }
+  // the epoch the Space shows (the newest one when none was chosen)
+  const spNow = currentSpace();
+  const epochNow = spNow ? spaceEpochOf(spNow) : spaceEpochId;
+  const narrs = narrativesIn(st.doc);
+  const story = windowsOf().find((w) => w.type === "narrative");
+  const narrId = (story ? narrativeIdOfWin(story) : null) ?? selectedNarrativeId ?? narrs[0]?.id ?? null;
+  const narr = narrs.find((n) => n.id === narrId);
+  if (!narr) { void tell(t("nvf.noStory"), { kind: "nv-bring-none" }); return false; }
+  // the subject: the lane the companion follows (an epoch, an activity), else the view's epoch
+  const lane = from === "companion" ? (nvFocus3d?.lanes ?? []).find((id) => !!st.node(id)) : undefined;
+  const ref = lane ?? epochNow ?? null;
+  const node = ref ? st.node(ref) : null;
+  if (!node) { toast(t("nvf.noEpoch")); return false; }
+  // where: the active block, else a part that narrates the view's epoch (proposed)
+  let target: { chapter: number; block: number | null } | null =
+    nvActive && nvActive.narrativeId === narr.id && nvActive.chapter >= 0 ? { chapter: nvActive.chapter, block: nvActive.block }
+      : nvSel && nvFocus && nvSel.narrativeId === narr.id && nvSel.chapter >= 0 ? { chapter: nvSel.chapter, block: nvSel.block } : null;
+  if (from === "space" || !target) {
+    const epochName = String(st.node(epochNow ?? "")?.name ?? epochNow ?? "");
+    const body = document.createElement("div");
+    body.className = "nvf-bring";
+    let select: HTMLSelectElement | null = null;
+    if (!target) {
+      const parts = partsNarratingEpoch(narr.chapters, epochNow ?? node.id);
+      const lab = document.createElement("label");
+      lab.textContent = `${t("nvf.bringInto")} `;
+      select = document.createElement("select");
+      select.dataset.nvfTarget = "1";
+      const add = (v: string, label: string) => { const o = document.createElement("option"); o.value = v; o.textContent = label; select!.appendChild(o); };
+      for (const p of parts) add(`${p.chapter}:${p.block ?? ""}`, p.label);
+      const chs = narr.chapters as Array<{ title?: string }>;
+      if (!parts.length) chs.forEach((c, ci) => add(`${ci}:`, `${ci + 1} · ${String(c.title ?? "")}`));
+      lab.appendChild(select);
+      const note = document.createElement("p");
+      note.className = "nvf-bring-note";
+      note.textContent = parts.length ? t("nvf.bringProposed", { epoch: epochName }) : t("nvf.bringNoPart", { epoch: epochName });
+      body.append(note, lab);
+      if (!chs.length) { void tell(t("nvf.noChapter"), { kind: "nv-bring-none" }); return false; }
+    }
+    if (mode === null || select) {
+      const where = target ? partLabelOf(narr.chapters, target) : "";
+      const ans = await openDialog({
+        title: t("nvf.bringTitle"), kind: "nv-bring",
+        message: t(target ? "nvf.bringMsgActive" : "nvf.bringMsg", { epoch: epochName, where }),
+        body, ok: mode === "still" ? t("nvf.bringStatic") : t("nvf.bringDynamic"),
+        choices: mode === null ? [{ key: "still", label: t("nvf.bringStatic"), title: t("nvf.bringStaticTitle") }] : undefined,
+      });
+      if (!ans.ok) return false;
+      if (mode === null) mode = ans.choice === "still" ? "still" : "view";
+      if (select) { const [c, b] = select.value.split(":"); target = { chapter: Number(c), block: b === "" ? null : Number(b) }; }
+    }
+  }
+  if (!target || !mode) return false;
+  const view: Record<string, unknown> = { ...spaceViewParams(win, h), epoch: epochNow };
+  const options: Record<string, unknown> = { camera: cam, view };
+  if (mode === "still") {
+    const got = await windowStill(win, 2, false);
+    if (!got) { toast(t("nvf.stillFailed")); return false; }
+    const date = new Date();
+    const epochName = String(st.node(epochNow ?? "")?.name ?? "");
+    const shown = (view.layers as string[]).map((k) => t(`vis.cat.${k}`)).join(", ");
+    const sel = [...selectedIds].map((id) => String(st.node(id)?.name ?? id));
+    const camWords = viewName(h.view().view, h.view().ortho);
+    Object.assign(options, { still: got.image, still_w: got.width, still_h: got.height, frozen_at: date.toISOString(),
+      caption: t("nvf.stillCaption", { name: String(node.name ?? ref), date: date.toLocaleString(getLocale(), { dateStyle: "medium", timeStyle: "short" }),
+        epoch: epochName, cam: camWords, layers: shown }) + (sel.length ? t("nvf.stillSel", { list: sel.join(", ") }) : "") + ` · ${storyFileName() ? `Extended Matrix · ${storyFileName()}` : "Extended Matrix"}` });
+  } else {
+    // the still of this framing, for the export (as «Save this framing»)
+    const got = await windowStill(win, 1, true);
+    if (got) Object.assign(options, { still: got.image, still_w: got.width, still_h: got.height });
+  }
+  let at: { chapter: number; block: number; label: string } | null = null;
+  nedit.editChapters(st, narr.id, (cs) => {
+    const c = cs[target!.chapter];
+    if (!c) return;
+    const blocks = (c.blocks ??= []);
+    const i = figureInsertAt(blocks as never, target!.block);
+    const label = newFigureLabel(cs as never);
+    const b = figureBlock(node.id, mode!, label, figureSig(node, st.doc, mode!));
+    Object.assign(b.options, options);
+    blocks.splice(i, 0, b as never);
+    at = { chapter: target!.chapter, block: i, label };
+  });
+  if (!at) return false;
+  const placed = at as { chapter: number; block: number; label: string };
+  setNarrativeSelection(narr.id, { chapter: placed.chapter, block: placed.block });
+  logInfo(t("nvf.brought", { kind: t(`nv.fig.kind.${mode}`), what: String(node.name ?? ref), ref: `[[${FIGURE_REF_PREFIX}${placed.label}]]` }), [narr.id]);
+  toast(t("nvf.broughtToast", { kind: t(`nv.fig.kind.${mode}`) }));
+  return true;
+}
+
+/** «8 · Foundations» or «8 · Foundations › Pronao» for a block. */
+function partLabelOf(chapters: unknown[], p: { chapter: number; block: number | null }): string {
+  const c = (chapters as Array<{ title?: string; blocks?: Array<{ block_type?: string; text?: string }> }>)[p.chapter];
+  if (!c) return "";
+  const head = `${p.chapter + 1} · ${String(c.title ?? "")}`;
+  if (p.block === null) return head;
+  const b = c.blocks?.[p.block];
+  const words = String(b?.text ?? "").replace(/\[\[[^\]]*\]\]/g, "").trim().slice(0, 48);
+  return `${head} › ${b?.block_type === "heading" ? words : `¶ ${p.block + 1}${words ? ` «${words}${words.length >= 48 ? "…" : ""}»` : ""}`}`;
 }
 
 /**
@@ -27715,12 +28269,30 @@ function sweepNarrativeScenes(): void {
 /** The scene's items, as the Space draws them: the models (the version by the
  *  scene's rule, a container's alternative by the choice the graph keeps) and
  *  the units' proxies. */
-function narrativeSceneItems(node: EmNode): SceneItem[] {
+function narrativeSceneItems(node: EmNode, view?: Record<string, unknown> | null): SceneItem[] {
   const sp = currentSpace();
   const st = store;
   if (!sp || !st) return [];
   const c = sceneContent(node, st.doc);
   if (!c) return [];
+  const items = narrativeSceneItemsOf(sp, st, c);
+  // MICRO-SEG26 · a view brought from the Space draws as it was looked at: its
+  // layers, the objects it hid, the follower's filter, its selection lit
+  if (!view) return items;
+  const layers = Array.isArray(view.layers) ? new Set(view.layers as string[]) : null;
+  const hidden = new Set(Array.isArray(view.hidden) ? view.hidden as string[] : []);
+  const only = Array.isArray(view.only) ? new Set(view.only as string[]) : null;
+  const sel = new Set(Array.isArray(view.selection) ? view.selection as string[] : []);
+  return items.filter((i) => {
+    const key = `${i.kind}:${i.id}`;
+    if (hidden.has(key) || (only && !only.has(key))) return false;
+    if (!layers) return true;
+    if (i.kind === "proxy") return layers.has("s3_proxies");
+    const r = sp.rms.find((x) => x.id === i.id);
+    return !r || layers.has(rmLayerOf(r));
+  }).map((i) => (sel.has(i.id) ? { ...i, selected: true } : i));
+}
+function narrativeSceneItemsOf(sp: Space, st: DocumentStore, c: NonNullable<ReturnType<typeof sceneContent>>): SceneItem[] {
   const items: SceneItem[] = [];
   const alts = spaceAlternatives(sp).filter((a) => c.groups.includes(a.group));
   const altOf = new Map<string, { group: string; role: "tileset" | "models"; mode: Exclude<AltMode, "use"> }>();
@@ -27884,7 +28456,7 @@ const narrativeSceneFactory: SceneFactory = (stage, spec) => {
       // after the page; a model asked without it is counted «not found»)
       void (bridgeBaseNow || !currentFilePath ? Promise.resolve(bridgeBaseNow) : bridgeUrl()).then((b) => {
         if (b && !bridgeBaseNow) bridgeBaseNow = b;
-        entry.handle?.update(narrativeSceneItems(spec.node));
+        entry.handle?.update(narrativeSceneItems(spec.node, (spec.options.view ?? null) as Record<string, unknown> | null));
       });
       sweepNarrativeScenes();
     });
@@ -27975,8 +28547,17 @@ function applyFigureView(h: SpaceSceneHandle, kind: string | undefined): void {
  * its placeholder.
  */
 async function renderFigureStill(node: EmNode, kind: string, w = 1280, h = 800,
-                                 waitMs = 20000): Promise<{ image: string; width: number; height: number } | null> {
-  const items = narrativeSceneItems(node);
+                                 waitMs = 20000, camera?: CamState, view?: Record<string, unknown>): Promise<{ image: string; width: number; height: number } | null> {
+  // MICRO-SEG26 · a view brought from the Space: its camera, its layers and selection
+  return renderStill(() => narrativeSceneItems(node, view), w, h, waitMs,
+    (x) => { if (kind === "view" && camera) x.setCamera(camera); else applyFigureView(x, kind); }, false);
+}
+
+/** The off-screen drawing itself: the items (asked again while the Space's
+ *  geometry summary arrives), framed by `apply`, read back as a PNG (or a JPEG). */
+async function renderStill(itemsOf: () => SceneItem[], w: number, h: number, waitMs: number,
+                           apply: (h: SpaceSceneHandle) => void, jpeg: boolean): Promise<{ image: string; width: number; height: number } | null> {
+  const items = itemsOf();
   if (!items.length) return null;
   if (!bridgeBaseNow && currentFilePath) { try { bridgeBaseNow = await bridgeUrl(); } catch { /* offline */ } }
   const host = document.createElement("div");
@@ -28000,11 +28581,11 @@ async function renderFigureStill(node: EmNode, kind: string, w = 1280, h = 800,
     let asked = t0;
     while (!drawn() && Date.now() - t0 < waitMs) {
       await sleep(200);
-      if (Date.now() - asked > 2000) { asked = Date.now(); handle.update(narrativeSceneItems(node)); }
+      if (Date.now() - asked > 2000) { asked = Date.now(); handle.update(itemsOf()); }
     }
     if (!drawn()) return null;
     await sleep(1500);                     // the rest of the files, a moment
-    applyFigureView(handle, kind);
+    apply(handle);
     await sleep(450);                       // an aligned view's passage
     const canvas = host.querySelector<HTMLCanvasElement>("canvas.scn-canvas") ?? host.querySelector("canvas");
     if (!canvas) return null;
@@ -28019,7 +28600,7 @@ async function renderFigureStill(node: EmNode, kind: string, w = 1280, h = 800,
         const px = g.getImageData(0, 0, c2.width, c2.height).data;
         let ink = 0;
         for (let i = 0; i < px.length; i += 4 * 97) if (px[i] < 250 || px[i + 1] < 250 || px[i + 2] < 250) ink++;
-        resolve(ink > 20 ? { image: c2.toDataURL("image/png"), width: c2.width, height: c2.height } : null);
+        resolve(ink > 20 ? { image: jpeg ? c2.toDataURL("image/jpeg", 0.8) : c2.toDataURL("image/png"), width: c2.width, height: c2.height } : null);
       } catch { resolve(null); }
     }));
   } catch {
@@ -28492,6 +29073,8 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
   // the Index's find survives a repaint of the page
   if (narrativeQuery) highlightNarrative(narrativeQuery);
   sweepNarrativeScenes();
+  // MICRO-SEG26 C · the parts about the unit picked in the 3D stay lit
+  if (nvAbout) markNarrativeAbout();
 }
 
 /** p.10 · a chapter moved by dragging (the page or the Index): one undo step,
@@ -37821,6 +38404,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
       if (a === "sidebar") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, nShown: !p.nShown }); return true; }
+      // MICRO-SEG26 G · Shift+N: the view into the Narrative's active block
+      if (a === "to-narrative") { void bringViewIntoNarrative(win, null, "space"); return true; }
       // MICRO-SEG19 · T, the toolbar; Esc, back to «Select» from another tool
       if (a === "toolbar") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, tShown: p.tShown === false }); return true; }
       if (a === "cancel") {
@@ -37867,6 +38452,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   topline.className = "scn-topline";
   topline.appendChild(overlay);
   host.appendChild(topline);
+  // MICRO-SEG26 · the companion 3D of the Narrative: its strip
+  if (isFollowWin(win)) followStripFor(win, host);
   // (the scene makes its view's name and its stats once its engine is up: they join the line then)
   // MICRO-SEG15 (E.D., 21 Nov 2026: «desktop non lo trovavo») · the hardware
   // profile the scene loads for, a word of the information line — «User ·
@@ -38587,6 +39174,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       }
       out.push({ label: `⤢ ${t("space.frame")}`, act: "frame", run: () => handle.frame() },
         { label: t("geo.goSite"), act: "go-site", disabled: !geoSpace.isOn(), run: () => { geoSpace.goToSite(); } });
+      // MICRO-SEG26 G · the view as it is now into the Narrative (Shift+N)
+      out.push("sep", { label: `❧ ${t("nvf.bring")}  ⇧N`, act: "to-narrative", disabled: !narrativesIn(store?.doc ?? null).length,
+        run: () => { void bringViewIntoNarrative(win, null, "space"); } });
+      if (isFollowWin(win))
+        out.push({ label: `${nvFollowGlobal ? "☑" : "☐"} ${t("nvf.follow")}`, act: "follow-text", run: () => setNarrativeFollow(!nvFollowGlobal) });
       spaceMenu(r.left, r.bottom + 4, t("lay.moreHead"), out);
       return;
     }
@@ -38640,6 +39232,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   // of a scene with nothing coloured goes
   let shownDoc: string | undefined;
   const push = (its: SceneItem[]): void => {
+    sceneItemsNow.set(win.id, its);   // MICRO-SEG26 · what a still of this window draws
     const k = store ? `${emtree.activeId ?? ""}\u0000${colourDocKey()}` : "";
     handle.update(its, k !== shownDoc ? { release: true } : undefined);
     shownDoc = k;
@@ -39024,14 +39617,19 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     recomputeSubstituted();
     const isSel = (k: string) => ssel.keys.includes(k);
     const hidden = eyesOf(win.id).hidden;
-    const shown = (key: string) => !hidden.has(key) && (!spaceIsolated || spaceIsolated === key);
+    // MICRO-SEG26 · the 3D that follows the text: only what the active block
+    // narrates (an activity's proxies and models), the units it cites lit
+    const look = followLookOf(win);
+    const onlyKeys = look?.keys ?? null;   // a block with no ties keeps the last one
+    const shown = (key: string) => !hidden.has(key) && (!spaceIsolated || spaceIsolated === key) && (!onlyKeys || onlyKeys.has(key));
+    const litNow = look?.lit && sum.withProxy.some((u) => look.lit!.has(u)) ? look.lit : null;
     const items: SceneItem[] = [];
     // MICRO-SPAZIO-CONTAINER p.9 · why a model is not drawn, for the line of an empty scene
     const notDrawn: string[] = [];
     for (const r of sum.rms) {
       const isTiles = !!r.resource?.tiles;
       if (!space3dShown(rmLayerOf(r), win.id)) { notDrawn.push(t("space.why.layerOff", { name: r.name })); continue; }
-      if (!shown(`rm:${r.id}`)) { notDrawn.push(t(spaceIsolated ? "space.why.isolated" : "space.why.hidden", { name: r.name })); continue; }
+      if (!shown(`rm:${r.id}`)) { notDrawn.push(t(spaceIsolated ? "space.why.isolated" : onlyKeys && !onlyKeys.has(`rm:${r.id}`) ? "nvf.why.notInBlock" : "space.why.hidden", { name: r.name })); continue; }
       // p.12 · one of the two drawn: the other is «sostituito da» (manual modes), or the scene decides (auto)
       const alt = altOfRm.get(r.id);
       if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) { notDrawn.push(t("space.why.replaced", { name: r.name })); continue; }
@@ -39090,10 +39688,19 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (!px || !shown(`proxy:${u}`)) continue;
         if (!legendShows(cs, cplan, u)) continue;
         const type = st.node(u)?.node_type;
+        // MICRO-SEG26 · a unit the active block does not cite, faded while it cites others
+        const look3 = colourOfProxy(u, type);
+        const dim = !!litNow && !litNow.has(u);
+        const dimLook = dim && look3.rgb ? (() => {
+          const g: [number, number, number] = [0.48, 0.48, 0.48];
+          const rgb = look3.rgb!.map((c, i) => c * 0.35 + g[i] * 0.65) as [number, number, number];
+          return { rgb, threed: look3.threed ? { ...look3.threed, faces: { ...look3.threed.faces, show: true, rgb,
+            opacity: (look3.threed.faces.show ? look3.threed.faces.opacity : 1) * 0.3 } } : look3.threed };
+        })() : look3;
         const common = { kind: "proxy" as const, id: u, label: String(st.node(u)?.name ?? u), decor: decorOf(u),
           // NIGHT-TAGLI-E-NEUTRE · the type's 3D style (em_visual_rules threed): USN, USNt and the rest
           // MICRO-E p.6 · …or the colour «Colori ▾» gives it
-          ...colourOfProxy(u, type),
+          ...dimLook,
           edge: nodeStyle(type).border, selected: isSel(`proxy:${u}`), active: ssel.active === `proxy:${u}`,
           // MICRO-SERVSF-FINE-ISTANZE p.3 · an instance at its own model's transform
           pose: poseOfNode(px.instanceOf ? px.xfNode ?? px.shapeId : px.shapeId) };
@@ -39679,6 +40286,7 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
     const r = on.getBoundingClientRect(), v = scroller.getBoundingClientRect();
     if (r.top < v.top || r.bottom > v.bottom) on.scrollIntoView({ block: "nearest" });
   }
+  markIndexAbout(body);   // MICRO-SEG26 C
   if (hadFind) {
     const find = body.querySelector<HTMLInputElement>(".nidx-search");
     find?.focus();
@@ -68698,6 +69306,30 @@ async function scriptAppOp(op: string, args: Record<string, unknown>): Promise<u
       if (!svg) throw new Error(t("py.matrixNothing", { ref: String(store?.node(id)?.name ?? id) }));
       return { svg };
     }
+    // MICRO-SEG26 E · the 3D that follows the text, and the active block
+    case "narrative.follow":
+      return nvFollowGlobal;
+    case "narrative.set_follow":
+      setNarrativeFollow(!!args.on);
+      return nvFollowGlobal;
+    case "narrative.active": {
+      if (!nvActive || !store) return null;
+      const narr = narrativesIn(store.doc).find((n) => n.id === nvActive!.narrativeId);
+      const f = narr ? nfw.blockFocus(store.doc, narr.chapters as never, nvActive.chapter, nvActive.block) : null;
+      return { narrative: nvActive.narrativeId, chapter: nvActive.chapter, block: nvActive.block,
+        narrates: f?.narrates ?? [], cites: f?.cites ?? [], reading: nvActiveReading,
+        epoch: nvFocus3d?.epoch ?? null, following: nvFollowGlobal };
+    }
+    case "narrative.set_active": {
+      const narrId = String(args.narrative ?? "") || narrativesIn(store?.doc ?? null)[0]?.id || "";
+      const narr = narrativesIn(store?.doc ?? null).find((n) => n.id === narrId);
+      if (!narr) throw new Error(t("py.noNarrative", { id: narrId }));
+      const c = Number(args.chapter ?? 0), b = args.block == null ? null : Number(args.block);
+      if (!Number.isInteger(c) || c < 0 || c >= narr.chapters.length) throw new Error(t("py.noChapter", { n: String(args.chapter) }));
+      setNarrativeSelection(narr.id, { chapter: c, block: b });
+      noteActiveBlock({ narrativeId: narr.id, chapter: c, block: b }, "api");
+      return { narrative: narr.id, chapter: c, block: b };
+    }
     case "workspaces.list":
       return WORKSPACES.map((w) => ({ id: w.id, label: workspaceLabel(w, t), builtin: !!w.builtin, active: w.id === activeWorkspace() }));
     case "workspaces.active": return activeWorkspace();
@@ -68746,6 +69378,7 @@ async function scriptAppOp(op: string, args: Record<string, unknown>): Promise<u
 
 /** An event of the page to the Python listeners — only when one waits for it. */
 const pyPending = new Set<PyEvent>();
+const pyLastExtra = new Map<PyEvent, Record<string, unknown>>();
 function pyNudge(ev: PyEvent, extra: Record<string, unknown> = {}): void {
   if (ev === "selection-changed") schedulePluginCompute();   // MICRO-PL25 · a section, a panel's value are OF the selection
   // MICRO-PL17 · a plugin's listener hears every document: with one waiting,
@@ -68755,12 +69388,13 @@ function pyNudge(ev: PyEvent, extra: Record<string, unknown> = {}): void {
   if (!s) return;
   if (fromPlugins > 0) s.listeners[ev] = Math.max(s.listeners[ev] ?? 0, fromPlugins);
   if ((!s.id && !fromPlugins) || !(s.listeners[ev] > 0) || (ev === "graph-changed" && s.applying)) return;
+  pyLastExtra.set(ev, extra);       // MICRO-SEG26 · the LAST block said, not the first
   if (pyPending.has(ev)) return;
   pyPending.add(ev);
   setTimeout(() => {
     pyPending.delete(ev);
     const payload: Record<string, unknown> = ev === "selection-changed" ? { ids: [...selectedIds] }
-      : ev === "locale-changed" ? { lang: getLocale() } : { ...extra };
+      : ev === "locale-changed" ? { lang: getLocale() } : { ...(pyLastExtra.get(ev) ?? extra) };
     void s.event(ev, payload).catch((e) => logWarn(`Python · ${String((e as Error)?.message ?? e)}`));
   }, 60);
 }

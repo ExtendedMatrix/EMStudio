@@ -379,8 +379,13 @@ const eq = (got, want, what) => {
      "Spazio: Outliner · the Scena 3D above the Table (Modelli e proxy) — the table only under the 3D — · Matrix · Inspector");
   eq(W.WORKSPACES.find((w) => w.id === "space").arrangement.wins.find((w) => w.type === "table").state["current.table.sheet"],
      "Models", "…and the Table opens on «Modelli e proxy»");
-  eq(sig("narrative"), "row(col(narrative-index,outliner),row(narrative,row(graph:matrix,inspector)))",
-     "Narrativa: Index above the Outliner · the page · Matrix · Inspector");
+  // MICRO-SEG26 · the Matrix's area split: the 3D that accompanies the text above, the Matrix under it
+  eq(sig("narrative"), "row(col(narrative-index,outliner),row(narrative,row(col(scene,graph:matrix),inspector)))",
+     "Narrativa: Index above the Outliner · the page · the 3D above the Matrix · Inspector");
+  eq(W.WORKSPACES.find((w) => w.id === "narrative").arrangement.wins.find((w) => w.type === "scene").state.follow,
+     "narrative", "…and its 3D follows the text");
+  ok(W.LEGACY_SIGNATURES.narrative.includes("row(col(narrative-index,outliner),row(narrative,row(graph:matrix,inspector)))") && W.WORKSPACES_REV >= 7,
+     "the rev-6 Narrativa seed (no 3D) is a legacy signature: untouched, it is re-seeded with the 3D");
   const canvas = W.WORKSPACES.find((w) => w.id === "canvas").arrangement;
   ok(!canvas.wins.some((w) => w.type === "table"),
      "no table in Stratigrafia: the table stays only under the 3D view (the warnings: ⚠ in the status bar, the sheet «Issues»)");

@@ -17,7 +17,7 @@
  * palette in this app and this is not a second one.
  */
 
-import { t } from "./i18n";
+import { getLocale, t } from "./i18n";
 import { windowIcon } from "./window-icons";
 import { create3dEmbed, isRef3D, resolve3d } from "./embed3d";
 import { geoOf, georeferenceScene, reprojectPoint } from "./geo";
@@ -707,6 +707,30 @@ function sceneScopeCard(node: EmNode, doc: EmDocument | null, block: NarrativeBl
   return box;
 }
 
+/** MICRO-SEG26 · a FROZEN view brought from the Space: the picture taken then
+ *  (high resolution), the date it was taken; it does not follow the graph. */
+function frozenViewCard(node: EmNode, block: NarrativeBlock): HTMLElement {
+  const box = el("div", "nv-embed nv-3d nv-frozen");
+  box.appendChild(el("div", "nv-embed-kind", t("nv.fig.kind.still")));
+  box.appendChild(el("div", "nv-embed-title", String(node.name || node.id)));
+  const opts = block.options ?? {};
+  const still = typeof opts.still === "string" ? opts.still : "";
+  if (still) {
+    const img = document.createElement("img");
+    img.className = "nv-frozen-img";
+    img.src = still;
+    img.alt = String(opts.caption ?? node.name ?? node.id);
+    img.loading = "lazy";
+    box.appendChild(img);
+  }
+  const at = typeof opts.frozen_at === "string" ? new Date(opts.frozen_at) : null;
+  const note = el("div", "nv-embed-note nv-frozen-note",
+    at && !Number.isNaN(at.getTime()) ? t("nvf.frozenAt", { date: at.toLocaleString(getLocale(), { dateStyle: "medium", timeStyle: "short" }) }) : t("nvf.frozen"));
+  note.title = t("nvf.frozen");
+  box.appendChild(note);
+  return box;
+}
+
 function renderEmbed(
   block: NarrativeBlock,
   index: Map<string, EmNode>,
@@ -772,6 +796,9 @@ function renderEmbed(
     // 3D stage showed an empty viewer for a photograph, which is the wrong
     // answer twice: nothing to see, and a claim that there was.
     box = rmDocEmbed(node, doc, iiifBase());
+  } else if (viewType === "scene3d" && figureOf(block as never)?.kind === "still") {
+    // MICRO-SEG26 · a view of the Space frozen into the story: its picture
+    box = frozenViewCard(node, block);
   } else if (viewType === "scene3d" && isSceneScope(node)) {
     box = sceneScopeCard(node, doc, block, key, !!onReveal, onSave);
   } else if (viewType === "scene3d" || viewType === "rm") {

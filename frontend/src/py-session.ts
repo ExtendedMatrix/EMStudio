@@ -36,7 +36,9 @@ export const PY_DEV_LEVEL = 84;
 /** MICRO-PL25 (X5) · /py/compute, the values of the slots of phase 2 */
 export const PY_COMPUTE_LEVEL = 88;
 
-export type PyEvent = "selection-changed" | "graph-changed" | "document-opened" | "document-saved" | "document-closed" | "locale-changed";
+export type PyEvent = "selection-changed" | "graph-changed" | "document-opened" | "document-saved" | "document-closed" | "locale-changed"
+  // MICRO-SEG26 · the block of the story the person is writing or reading
+  | "narrative-block-changed";
 
 export interface PyStep {
   label: string;
