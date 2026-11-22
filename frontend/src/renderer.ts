@@ -85,6 +85,9 @@ export interface RenderState {
    *  evidence's accent, so the Matrix shows what the braces read — from
    *  earlier lanes too. Chrome, never the node's own style. */
   functionalLit?: Set<string> | null;
+  /** MICRO-MF02 · EMBARGO · the words under a border slot of the functional
+   *  overlay («on the border»), in the interface's language */
+  functionalBorderText?: string | null;
   /** edge_type predicate; edges failing it are skipped */
   edgeVisible: (edgeType: string | undefined) => boolean;
   /** index (into scene.edges) of the hovered connector, if any */
@@ -869,6 +872,10 @@ export function render(
       ctx.restore();
     }
   }
+
+  // MICRO-MF02 · EMBARGO · the functional overlay: the braces of the functional
+  // units around their members (under the edges and the nodes), the borders
+  if (scene.functional) drawFunctionalBraces(ctx, scene, vp.scale, state, drawLabels0(vp.scale));
 
   // edges (below nodes); incident edges of the HOVERED node get an accent pass
   // (a transient connection preview). Selection does NOT light up edges — that
@@ -1677,6 +1684,21 @@ export function render(
       if (!state.functionalLit.has(n.id)) continue;
       const vb = visibleBoxOf(n);
       ctx.strokeRect(vb.x - 5, vb.y - 5, vb.w + 10, vb.h + 10);
+    }
+    ctx.restore();
+  }
+
+  // MICRO-MF02 · EMBARGO · «↑epoch» over an instance whose master is in an earlier lane
+  if (scene.functional && vp.scale > 0.35) {
+    ctx.save();
+    ctx.fillStyle = canvasTheme().labelMuted;
+    ctx.font = canvasFont(500, 9);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+    for (const n of shown) {
+      const f = n.functional;
+      if (!f?.from) continue;
+      ctx.fillText(`↑${f.from}`, n.x + n.w, n.y - 2);
     }
     ctx.restore();
   }
@@ -2598,5 +2620,74 @@ function strokeNoEpoch(ctx: CanvasRenderingContext2D, r: { x: number; y: number;
   ctx.strokeStyle = canvasTheme().labelMuted;
   const m = 5 / scale;
   ctx.strokeRect(r.x - m, r.y - m, r.w + 2 * m, r.h + 2 * m);
+  ctx.restore();
+}
+
+const drawLabels0 = (scale: number): boolean => scale > 0.35;
+
+/** a brace in world units, `k` = +1 the left one, −1 the right one (the
+ *  scrivania's glyph, functional-matrix.ts bracePath) */
+function bracePathCanvas(ctx: CanvasRenderingContext2D, x: number, y: number, h: number, k: number): void {
+  const m = y + h / 2, b = x + 5 * k, c = x + 8 * k;
+  ctx.moveTo(c, y);
+  ctx.bezierCurveTo(b, y, b, y + 3, b, y + 8);
+  ctx.lineTo(b, m - 5);
+  ctx.bezierCurveTo(b, m - 2, x + 2 * k, m, x, m);
+  ctx.bezierCurveTo(x + 2 * k, m, b, m + 2, b, m + 5);
+  ctx.lineTo(b, y + h - 8);
+  ctx.bezierCurveTo(b, y + h - 3, b, y + h, c, y + h);
+}
+
+/** MICRO-MF02 · EMBARGO · the braces of the functional overlay (U6-bis: two
+ *  braces and two thin lines above and below, the colour of the degree of
+ *  evidence, dotted grey for a symbol); a unit's braces dimmed when another
+ *  functional unit is selected; «on the border» under a shared slot */
+function drawFunctionalBraces(ctx: CanvasRenderingContext2D, scene: Scene, scale: number,
+                              state: RenderState, labels: boolean): void {
+  const fd = scene.functional!;
+  const sel = state.selectedId ?? null;
+  const selIsBrace = !!sel && fd.braces.some((b) => b.unit === sel);
+  ctx.save();
+  for (const b of fd.braces) {
+    ctx.globalAlpha = selIsBrace && b.unit !== sel ? 0.35 : 1;
+    ctx.strokeStyle = b.colour;
+    ctx.lineWidth = (b.unit === sel ? 2.6 : 1.6) / Math.sqrt(scale);
+    ctx.setLineDash(b.evidence === "symbol" ? [1.5, 3] : []);
+    ctx.beginPath();
+    bracePathCanvas(ctx, b.x + 1, b.y, b.h, 1);
+    bracePathCanvas(ctx, b.x + b.w - 1, b.y, b.h, -1);
+    ctx.moveTo(b.x + 12, b.y + 1.5); ctx.lineTo(b.x + b.w - 12, b.y + 1.5);
+    ctx.moveTo(b.x + 12, b.y + b.h - 1.5); ctx.lineTo(b.x + b.w - 12, b.y + b.h - 1.5);
+    ctx.stroke();
+    if (labels) {
+      ctx.setLineDash([]);
+      ctx.fillStyle = canvasTheme().labelInk;
+      ctx.font = canvasFont(600, 10);
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      // the scale only where the name keeps at least eight characters beside it
+      const scaleW = b.scaleText ? b.scaleText.length * 5.5 + 8 : 0;
+      const withScale = !!b.scaleText && (b.w - 26 - scaleW) / 5.8 >= Math.min(8, b.name.length);
+      const room = b.w - 26 - (withScale ? scaleW : 0);
+      const max = Math.max(3, Math.floor(room / 5.8));
+      const name = b.name.length > max ? b.name.slice(0, max - 1) + "…" : b.name;
+      ctx.fillText(name, b.x + 13, b.y + 4);
+      if (withScale) {
+        ctx.fillStyle = canvasTheme().labelMuted;
+        ctx.font = canvasFont(500, 9);
+        ctx.textAlign = "right";
+        ctx.fillText(b.scaleText, b.x + b.w - 13, b.y + 5);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+  if (labels) {
+    ctx.fillStyle = canvasTheme().labelMuted;
+    ctx.font = canvasFont(500, 9);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (const d of fd.borders) ctx.fillText(state.functionalBorderText ?? "", d.x + d.w / 2, d.y + d.h + 3);
+  }
   ctx.restore();
 }

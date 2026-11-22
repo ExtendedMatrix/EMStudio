@@ -43,6 +43,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 // ── 1 · the rules ────────────────────────────────────────────────────────────
 const main = read("frontend/src/main.ts");
 ok(/const FM_ON = LAB && featureOn\("functional-matrix"\);/.test(main), "main.ts: FM_ON = LAB && featureOn(\"functional-matrix\")");
+ok(/const FO_ON = LAB && featureOn\("functional-overlay"\);/.test(main), "main.ts: FO_ON = LAB && featureOn(\"functional-overlay\") (MICRO-MF02)");
 {
   // every name imported from functional-matrix.ts is used only behind FM_ON
   const imp = /import \{([^}]+)\} from "\.\/functional-matrix";/.exec(main);
@@ -54,8 +55,10 @@ ok(/const FM_ON = LAB && featureOn\("functional-matrix"\);/.test(main), "main.ts
   for (const n of names) {
     lines.forEach((l, i) => {
       if (!new RegExp(`\\b${n}\\b`).test(l)) return;
-      const ctx = lines.slice(Math.max(0, i - 8), i + 1).join("\n");
-      if (!/FM_ON|\(LAB \?/.test(ctx)) bad.push(`${n} @${i + 1}`);
+      // MICRO-MF02 · the functional overlay reads the same answer behind its own
+      // guard FO_ON (= LAB && featureOn("functional-overlay"), checked above)
+      const ctx = lines.slice(Math.max(0, i - 16), i + 1).join("\n");
+      if (!/FM_ON|FO_ON|\(LAB \?/.test(ctx)) bad.push(`${n} @${i + 1}`);
     });
   }
   eq(bad, [], "every use of the module in main.ts sits behind FM_ON (or LAB)");

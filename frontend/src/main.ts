@@ -508,9 +508,27 @@ import { APP_NAME, EMBARGO_ON, LAB, embargoStored, featureOn, featuresOf, featur
 const SITE_ON = featureOn("site");
 // MICRO-MF01 · EMBARGO · the Functional Matrix, the lab build only: every use
 // below is behind FM_ON (`LAB` first, so the community build folds it away)
-import { fmAsk, fmInspectorInto, fmIssues, fmLitOf, fmMatrixLit, fmState, renderFunctionalMatrixInto,
+import { evidenceColour, fmAsk, fmInspectorInto, fmIssues, fmLitOf, fmMatrixLit, fmState, renderFunctionalMatrixInto,
          setFunctionalMatrixHost } from "./functional-matrix";
 const FM_ON = LAB && featureOn("functional-matrix");
+// MICRO-MF02 · EMBARGO · the functional overlay on the Matrix (the braces on the
+// Matrix itself, a spatial layout, the view by activity off): behind FO_ON
+import { hitBrace, overlayScene, type FoAnswer } from "./functional-overlay";
+const FO_ON = LAB && featureOn("functional-overlay");
+/** the Matrix windows with the overlay on (per person, this machine) */
+const foWins: Set<string> = FO_ON ? (() => {
+  try { return new Set<string>(JSON.parse(localStorage.getItem("emstudio.fo") ?? "[]")); } catch { return new Set<string>(); }
+})() : new Set<string>();
+function foOn(winId: string | null | undefined): boolean {
+  return FO_ON && !!winId && foWins.has(winId);
+}
+function setFoOn(winId: string, on: boolean): void {
+  if (!FO_ON) return;
+  if (on) foWins.add(winId); else foWins.delete(winId);
+  try { localStorage.setItem("emstudio.fo", JSON.stringify([...foWins])); } catch { /* storage refused */ }
+}
+/** the overlay's scene of a base scene, for the answer it was built from */
+const foScenes = new WeakMap<Scene, { answer: unknown; scene: Scene | null }>();
 import { betaMark } from "./beta";
 import { BUCKET_MIME, bucketView, bucketViewState } from "./bucket-view";
 import { initSiteDoor, onSiteMark, siteChip, siteDoorState, siteMarks, spaceButtons } from "./site-door";
@@ -2712,6 +2730,21 @@ window.__EM_SCENE__ = () => {
 // the selection, a node's first epoch, its stored position and the undo depth.
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
+  // MICRO-MF02 · EMBARGO · the functional overlay of a Matrix window: on or
+  // off, the braces and borders it draws, the instances and why, the measure
+  ...(FO_ON ? { functionalOverlay: (winId?: string) => {
+    const id = winId ?? windowsOf().find((w) => w.type === "graph" && winMode(w) === "matrix")?.id ?? null;
+    const sc = id ? sceneOfWin(id, "matrix") : null;
+    const fd = sc?.functional ?? null;
+    return { win: id, on: foOn(id), status: fmState().status, drawing: fd,
+             activityBoxes: (sc?.groups ?? []).filter((g) => sc?.byId.get(g.id)?.node.node_type === "ActivityNodeGroup").length,
+             nodes: sc ? sc.nodes.map((n) => ({ id: n.id, of: n.instanceOf ?? null, x: n.x, y: n.y, w: n.w, h: n.h,
+                                             type: n.node.node_type, name: n.node.name ?? null, functional: n.functional ?? null })) : [],
+             lanes: sc ? sc.lanes.map((l) => ({ id: l.id, y: l.y, height: l.height })) : [],
+             // where the canvas is and how it shows the world: a check clicks a brace
+             vp: id ? (({ x, y, scale }) => ({ x, y, scale }))(viewportFor(id, "matrix")) : null,
+             canvas: id ? (({ left, top }) => ({ left, top }))(graphWindows.get(id)?.cv.getBoundingClientRect() ?? { left: 0, top: 0 }) : null };
+  } } : {}),
   // MICRO-MF01 · EMBARGO · the Functional Matrix as the page has it: the
   // bridge's state, the units, what the selection lights (lab, switch on)
   ...(FM_ON ? { functionalMatrix: () => {
@@ -3735,7 +3768,8 @@ function paintGraphWindow(p: GraphPaint): void {
       vocabMarks: vocabMarksNow(),
       peerSelections: hubPeerSelections,   // P4.3 · awareness, never a lock
       // MICRO-MF01 · EMBARGO · the members of the selected functional unit
-      functionalLit: FM_ON ? fmMatrixLit(selId) : null,
+      functionalLit: FM_ON || FO_ON ? fmMatrixLit(selId) : null,
+      functionalBorderText: FO_ON ? t("fo.border") : null,
       highlightEdgeType: p.highlightEdgeType ?? null,
       // G3 · the liquid Graph: hover, selection, the panel's filter, the local graph
       liquid: p.mode === "graph" ? {
@@ -7456,6 +7490,48 @@ let lensBuild: ((leaves: Set<string>, cont: boolean) => Scene | null) | null = n
 let sharedLensKey = "";
 let lensFileCounts: ReturnType<typeof fileCounts> = new Map();
 function sceneOfWin(winId: string | null | undefined, mode: ViewKind): Scene | null {
+  const sc = sceneOfWinBase(winId, mode);
+  // MICRO-MF02 · EMBARGO · a Matrix window with the functional overlay on: a
+  // copy of its scene, laid out by the plan (the base scene is not touched)
+  // (a Matrix reading by horizons has no switch: its bands are laid out by themselves)
+  if (FO_ON && mode === "matrix" && sc && foOn(winId) && !hzWin(winId)) return foSceneOf(sc) ?? sc;
+  return sc;
+}
+
+/** MICRO-MF02 · EMBARGO · the overlay's scene of a Matrix scene: built once per
+ *  scene and answer of the bridge; null while no plan answers (the Matrix as it is) */
+function foSceneOf(base: Scene): Scene | null {
+  if (!FO_ON) return null;
+  const answer = fmState().answer as FoAnswer | null;
+  if (!answer?.overlay) return null;
+  // the plan's lanes are the Matrix's: a lane of the plan the scene does not
+  // have (the Functional Matrix reading by horizons) → no overlay here
+  const ids = new Set(base.lanes.map((l) => l.id));
+  if (!answer.overlay.lanes.some((l) => ids.has(l.lane))) return null;
+  const memo = foScenes.get(base);
+  if (memo && memo.answer === answer) return memo.scene;
+  const laneName = new Map(base.lanes.map((l) => [l.id, l.label]));
+  const sc = overlayScene(base, answer, {
+    keep: (n) => isStratigraphicType(n.node.node_type) || isContinuityType(n.node.node_type),
+    continuity: (n) => isContinuityType(n.node.node_type),
+    keepEdge: (e) => !MEMBERSHIP_EDGES.has(e.edge.edge_type ?? "") && e.edge.edge_type !== "is_in_functional_unit",
+    laneName: (id) => laneName.get(id) ?? answer.lanes.find((l) => l.id === id)?.name ?? null,
+    colour: (ev) => evidenceColour(ev),
+    scaleText: (sc0) => (sc0 ? t(`fm.scale.${sc0}`) : ""),
+  });
+  // a continuity node (BR) is seated in the band of its epoch, a phase too: the
+  // overlay does not draw the phases' bands (its slots span the whole lane),
+  // but the BR is placed by them, as in the Matrix
+  if (sc && store) {
+    sc.subBands = base.subBands;
+    seatContinuity(sc, viewDocNow());
+    sc.subBands = undefined;
+  }
+  foScenes.set(base, { answer, scene: sc });
+  return sc;
+}
+
+function sceneOfWinBase(winId: string | null | undefined, mode: ViewKind): Scene | null {
   ensureScenes();
   // MICRO-LAB orizzonti come bande · a Matrix window in horizons: its own picture
   if (mode === "matrix" && store && hzWin(winId)) return hzSceneOfWin(winId!).scene;
@@ -18664,7 +18740,7 @@ setTreeBridgeResolver(bridgeUrl);
 setChronologyBridgeResolver(bridgeUrl);
 // MICRO-MF01 · EMBARGO · the Functional Matrix asks the same bridge, of the
 // active graph; an answer repaints its areas, the issues, the Inspector
-if (FM_ON) setFunctionalMatrixHost({
+if (FM_ON || FO_ON) setFunctionalMatrixHost({
   bridge: bridgeUrl,
   doc: () => {
     const st = store;
@@ -23955,7 +24031,7 @@ function refreshIssues(): void {
   if (FM_ON) {
     currentIssues.push(...fmIssues((id) => String(s.node(id)?.name || id)));
     fmAsk();
-  }
+  } else if (FO_ON) fmAsk();   // MICRO-MF02 · the overlay reads the same answer
   schedulePluginChecks(s);
   schedulePluginCompute();                           // MICRO-PL25 · the values of phase 2
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
@@ -63902,6 +63978,46 @@ function buildAreaHeader(win: Win): DocumentFragment {
       chr.setAttribute("aria-label", t("chr.checkEllipsis"));
       chr.addEventListener("click", (e) => { e.stopPropagation(); focusThen(win, () => openChronology()); });
       frag.appendChild(chr);
+      // MICRO-MF02 · EMBARGO · «Functional overlay»: the braces on this Matrix,
+      // a spatial layout; while it is on the view by activity is off, and the
+      // header says so beside the switch
+      if (FO_ON && !hzWin(win.id)) {
+        const on = foOn(win.id);
+        const fo = document.createElement("button");
+        fo.type = "button";
+        fo.className = "win-act win-fo";
+        fo.dataset.act = "functional-overlay";
+        fo.dataset.foOn = on ? "1" : "0";
+        fo.setAttribute("aria-pressed", String(on));
+        // a head too tight (fitHeader): the words give way to «{ }», the note goes
+        fo.innerHTML = `<span class="hdr-long">${escapeHtml(t("fo.btn"))}</span><span class="hdr-short" aria-hidden="true">{ }</span>`;
+        fo.dataset.hdrCompact = "1";
+        fo.setAttribute("aria-label", t("fo.btn"));
+        fo.title = t(on ? "fo.btnTitleOn" : "fo.btnTitle");
+        fo.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const now = !foOn(win.id);
+          setFoOn(win.id, now);
+          if (FO_ON && now) {
+            fmAsk();
+            const st = fmState();
+            toast(st.status === "missing" ? t("fo.noBridge") : t("fo.onToast"));
+          }
+          renderAreaHeaders();
+          draw();
+        });
+        frag.appendChild(fo);
+        if (on) {
+          const note = document.createElement("span");
+          note.className = "win-fo-note";
+          note.dataset.foNote = "activities-off";
+          // a head too tight keeps it, shorter: the interface always says it
+          note.innerHTML = `<span class="hdr-long">${escapeHtml(t("fo.activitiesOff"))}</span><span class="hdr-short">${escapeHtml(t("fo.activitiesOffShort"))}</span>`;
+          note.title = t("fo.activitiesOffTitle");
+          note.dataset.hdrCompact = "1";
+          frag.appendChild(note);
+        }
+      }
     }
     // FONTE · «Indietro»: always on the bar, off while the stack is empty
     act("←", t("fonte.backEmpty"), false, () => {
@@ -66218,7 +66334,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     // MICRO-TIL001 · a continuity node is dragged like a unit now (E.D.: «deve
     // funzionare come per le altre unità»): its place is the hand's, its line
     // follows it (views/matrix.ts seatContinuity, continuity.ts continuityRoute)
-    if ((hit?.instanceOf && !instMovable) && (view === "matrix" || inContext())) {
+    // MICRO-MF02 · EMBARGO · the functional overlay places its units itself (a
+    // copy of the scene): a press there is a click, nothing is moved or stored
+    if ((hit?.instanceOf && !instMovable || (FO_ON && !!hit && !!s.functional)) && (view === "matrix" || inContext())) {
       // TOCCARE · a document INSTANCE is drawn by the view in its usage context;
       // it has no position of its own to store and no membership of its own to
       // change (a drop used to hand its scene id to moveToGroup, which wrote an
@@ -66891,8 +67009,12 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       } else {
         // a click (no drag) on empty canvas: select a connector if one is under
         // the cursor, otherwise clear the selection
-        const ei = pickEdgeAt(w.x, w.y);
-        if (ei >= 0) selectEdge(s.edges[ei].edge);
+        // MICRO-MF02 · EMBARGO · …unless it is the label row of a brace of the
+        // functional overlay: that selects its functional unit
+        const brace = FO_ON && s.functional ? hitBrace(s, w.x, w.y) : null;
+        const ei = brace ? -1 : pickEdgeAt(w.x, w.y);
+        if (brace) select(brace.unit);
+        else if (ei >= 0) selectEdge(s.edges[ei].edge);
         else select(null);
       }
       dragNodeId = null;
@@ -66901,6 +67023,12 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     }
     if (!moved) {
       const hit = hitTest(s, w.x, w.y, hitTol());
+      // MICRO-MF02 · EMBARGO · a click on the label row of a brace of the
+      // functional overlay selects its functional unit
+      if (FO_ON && !hit && s.functional) {
+        const b = hitBrace(s, w.x, w.y);
+        if (b) { select(b.unit); return; }
+      }
       // group container ± toggle
       const toggle = hitGroupToggle(s, w.x, w.y);
       if (toggle && store && hzWin(winId)) {

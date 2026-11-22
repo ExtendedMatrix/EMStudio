@@ -12,6 +12,7 @@ import {
   type Box,
 } from "./shape-geom";
 import type { EmEdge, EmNode } from "./types";
+import type { FoDrawing, FoReason } from "./functional-overlay";
 
 export interface SceneNode {
   id: string;
@@ -79,6 +80,10 @@ export interface SceneNode {
    *  screen rect), so the collapsed PDG needs NO SceneGroup at all — no phantom
    *  box, no ± toggle. Clicking the tablet selects/enters this PDG. */
   pdCollapsed?: string;
+  /** MICRO-MF02 · EMBARGO · an instance drawn by the functional overlay inside
+   *  the braces of `fu`: why it is an instance, and the lane its master comes
+   *  from («↑epoch») */
+  functional?: { fu: string; reason: FoReason; from: string | null };
 }
 
 export interface SceneEdge {
@@ -192,6 +197,9 @@ export interface Scene {
   /** MICRO-LAB bande-2 · member id → the outline group drawn around it
    *  (activities, time branches: a box from its members' extent) */
   outlineOf?: Map<string, string>;
+  /** MICRO-MF02 · EMBARGO · the functional overlay of a Matrix window: the
+   *  braces, the borders, what the plan placed (functional-overlay.ts) */
+  functional?: FoDrawing;
 }
 
 /** ± toggle button of a group container under a world-space point. */
