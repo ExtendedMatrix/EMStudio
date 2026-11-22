@@ -103,11 +103,15 @@ for (const [profile, embargo] of [["community", true], ["none", true], ["lab", f
   const W = await load("workspace.ts", profile, embargo);
   const want = profile === "lab" && embargo;
   eq([W.WORKSPACES.some((w) => w.id === "functional"), W.WORKSPACE_TEMPLATES.filter((w) => w.id.startsWith("functional-")).length],
-     [want, want ? 2 : 0], `${profile}${embargo ? " (switch on)" : ""}: the tab «Funzionale» and its two layouts ${want ? "are" : "are not"} there`);
+     [want, want ? 3 : 0], `${profile}${embargo ? " (switch on)" : ""}: the tab «Funzionale» and its three layouts (MF07: the desk, A, B) ${want ? "are" : "are not"} there`);
   if (want) {
     const f = W.WORKSPACES.find((w) => w.id === "functional");
-    eq(f.arrangement.wins.map((w) => w.type), ["functional-matrix", "graph", "landscape-matrix", "inspector", "table"],
-       "A: the Functional Matrix, the Matrix, the Landscape Matrix, the Inspector, the table");
+    // MICRO-MF07 · the tab is the desk; A of MF05 stays a model of the «+»
+    eq(f.arrangement.wins.map((w) => w.type), ["functional-matrix", "graph", "functional-plan", "landscape-cube", "functional-proposals", "inspector", "table"],
+       "the tab (MF07, the desk): the Functional Matrix, the Matrix, the Space as a plan, the Cube, the Proposals, the Inspector, the table");
+    const A = W.WORKSPACE_TEMPLATES.find((w) => w.id === "functional-a");
+    eq(A.arrangement.wins.map((w) => w.type), ["functional-matrix", "graph", "landscape-matrix", "inspector", "table"],
+       "A (a model of the «+»): the Functional Matrix, the Matrix, the Landscape Matrix, the Inspector, the table");
     eq(f.arrangement.wins.find((w) => w.name === "coherence").state, { "current.table.sheet": "Issues" }, "…the table on «Issues»: the coherence");
     const B = W.WORKSPACE_TEMPLATES.find((w) => w.id === "functional-b");
     eq(B.arrangement.wins.map((w) => w.type), ["functional-matrix", "graph", "landscape-cube", "inspector", "table"], "B: the Cube in the place of the landscape");
@@ -278,19 +282,19 @@ try {
   await page.click('[data-ws="functional"]');
   await page.waitForSelector(".tile-fmbody [data-fm-unit]", { timeout: 60000 });
   const wins = await H(page, () => window.__EM_DRAG__.wins().map((w) => w.type).sort());
-  eq(wins, ["functional-matrix", "graph", "inspector", "landscape-matrix", "table"].sort(),
-     "A · three views: Matrix | Functional Matrix | Landscape Matrix, the Inspector and the coherence under them");
+  eq(wins, ["functional-matrix", "functional-plan", "functional-proposals", "graph", "inspector", "landscape-cube", "table"].sort(),
+     "the tab (MF07, the desk): Matrix | Functional Matrix | Space and Cube, the Proposals, the Inspector and the coherence");
   ok(await H(page, () => window.__EM_DRAG__.wins().find((w) => w.type === "table")?.state?.["current.table.sheet"] === "Issues"),
      "…the coherence is the table on «Issues»");
-  // Landscape ⇄ Cube
-  await page.waitForSelector('[data-switch-to="landscape-cube"]', { timeout: 30000 });
-  await page.click('[data-switch-to="landscape-cube"]');
-  await page.waitForFunction(() => window.__EM_DRAG__.wins().some((w) => w.type === "landscape-cube") && !window.__EM_DRAG__.wins().some((w) => w.type === "landscape-matrix"));
-  ok(true, "«⇄ Cubo»: the same area becomes the Cube");
+  // Cube ⇄ Landscape
   await page.waitForSelector('[data-switch-to="landscape-matrix"]', { timeout: 30000 });
   await page.click('[data-switch-to="landscape-matrix"]');
-  await page.waitForFunction(() => window.__EM_DRAG__.wins().some((w) => w.type === "landscape-matrix"));
-  ok(true, "«⇄ Landscape Matrix»: and back");
+  await page.waitForFunction(() => window.__EM_DRAG__.wins().some((w) => w.type === "landscape-matrix") && !window.__EM_DRAG__.wins().some((w) => w.type === "landscape-cube"));
+  ok(true, "«⇄ Landscape Matrix»: the same area becomes the Landscape Matrix");
+  await page.waitForSelector('[data-switch-to="landscape-cube"]', { timeout: 30000 });
+  await page.click('[data-switch-to="landscape-cube"]');
+  await page.waitForFunction(() => window.__EM_DRAG__.wins().some((w) => w.type === "landscape-cube"));
+  ok(true, "«⇄ Cubo»: and back");
   await shot(page, "jar-0-workspace");
   const fm = () => H(page, () => window.__EM_DRAG__.functionalMatrix());
   await page.waitForFunction(() => window.__EM_DRAG__.functionalMatrix().status === "ok", null, { timeout: 60000 });
@@ -450,8 +454,9 @@ try {
   await page.click(".ws-tab.ws-add");
   await page.waitForSelector("[data-ws-add-menu]", { timeout: 10000 });
   const models = await H(page, () => [...document.querySelectorAll("[data-ws-add-menu] [data-ws-add]")].map((b) => [b.dataset.wsAdd, b.textContent.trim()]));
-  ok(models.some(([k, l]) => k === "functional-a" && /Funzionale A · tre viste/.test(l)) && models.some(([k, l]) => k === "functional-b" && /Funzionale B · zoom e cubo/.test(l)),
-     `the «+» offers the two layouts «Funzionale A · tre viste» and «Funzionale B · zoom e cubo» (${models.map((m) => m[0]).join(", ")})`);
+  ok(models.some(([k, l]) => k === "functional-desk" && /Funzionale · la scrivania/.test(l)) && models.some(([k, l]) => k === "functional-a" && /Funzionale A · tre viste/.test(l))
+     && models.some(([k, l]) => k === "functional-b" && /Funzionale B · zoom e cubo/.test(l)),
+     `the «+» offers the desk and the two layouts «Funzionale A · tre viste» and «Funzionale B · zoom e cubo» (${models.map((m) => m[0]).join(", ")})`);
   await page.click('[data-ws-add-menu] [data-ws-add="functional-b"]');
   await page.waitForSelector('[data-app-dialog="ws-add"] [data-dialog-ok]', { timeout: 10000 });
   await page.click('[data-app-dialog="ws-add"] [data-dialog-ok]');

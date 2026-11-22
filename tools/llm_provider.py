@@ -297,6 +297,8 @@ class EchoProvider(LLMProvider):
             return self._echo_reading(context["reading"])
         if context.get("translation"):
             return self._echo_translation(context["translation"])
+        if context.get("functional"):
+            return self._echo_functional(context)
         activity = (context.get("activity") or {}).get("name", "questa attività")
         actions = [a.get("name", "?") for a in context.get("actions") or []]
         epochs = [e.get("name", "?") for e in context.get("epochs") or []]
@@ -306,6 +308,33 @@ class EchoProvider(LLMProvider):
         if epochs:
             bits.append("collocata in " + ", ".join(epochs))
         return "; ".join(bits) + "."
+
+    @staticmethod
+    def _echo_functional(context: Dict[str, Any]) -> str:
+        """MICRO-MF07 · «Proponi con l'AI» with no model: one room per activity
+        (its members, by name) inside one container, every one marked «echo» —
+        obviously machine-made, and a VALID reply, so the whole path (briefing
+        → reply → parse → proposals → accepted with its paradata) can be
+        exercised with no key. A selection with no activity: one room of the
+        selected units."""
+        epochs = [e.get("name") for e in context.get("epochs") or [] if e.get("name")]
+        names = {u.get("name") for u in context.get("units") or []}
+        rooms = []
+        for i, a in enumerate(context.get("activities") or []):
+            ms = [m for m in a.get("members") or [] if m in names]
+            if ms:
+                rooms.append({"key": f"r{i + 1}", "name": f"{a.get('name', '?')} (echo)", "scale": "room",
+                              "function": "echo", "parent": "c0", "members": ms,
+                              "why": f"echo: the members of the activity {a.get('name', '?')}"})
+        if not rooms and names:
+            rooms.append({"key": "r1", "name": "selection (echo)", "scale": "room", "function": "echo",
+                          "parent": "c0", "members": sorted(n for n in names if n),
+                          "why": "echo: the selected units"})
+        units = [{"key": "c0", "name": "complex (echo)", "scale": "complex", "function": "echo",
+                  "parent": None, "members": [], "why": "echo: one container for the rooms"}] if rooms else []
+        if epochs and units:
+            units[0]["epoch"] = epochs[-1] if len(epochs) > 1 else epochs[0]
+        return json.dumps({"units": units + rooms})
 
     @staticmethod
     def _echo_translation(job: Dict[str, Any]) -> str:

@@ -98,6 +98,8 @@ export interface FmHost {
     /** «Read as…» on the selection */
     readAs(): void;
   };
+  /** MICRO-MF07 · a graph with no functional unit: the row with its actions */
+  empty?(body: HTMLElement): void;
 }
 
 let host: FmHost | null = null;
@@ -614,7 +616,7 @@ export function renderFunctionalMatrixInto(body: HTMLElement, winId: string): vo
   }
   if (state.stale) head.classList.add("fm-stale");
   body.appendChild(head);
-  if (!a.units.length) { body.appendChild(note("fm.none")); return; }
+  if (!a.units.length) { body.appendChild(note("fm.none")); host.empty?.(body); return; }
   const wrap = document.createElement("div");
   wrap.className = "fm-scroll";
   const width = Math.max(420, (body.clientWidth || 640) - 8);

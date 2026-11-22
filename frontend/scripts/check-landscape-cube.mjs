@@ -124,17 +124,22 @@ const answer = {
 {
   const o = { width: 800, rot: 45, gap: 200, sel: null, t: tt };
   const svg = LC.lcBuildingSvg(answer, o);
-  eq([...svg.matchAll(/data-lc-plane="([^"]+)"/g)].map((m) => m[1]), ["E4", "E2"], "pure · a plane per lane, the newest on top");
-  eq([...svg.matchAll(/class="lc-fp[^"]*" data-lc-unit="([^"]+)" data-lc-lane="([^"]+)"/g)].map((m) => `${m[1]}@${m[2]}`),
-     ["F1@E4", "F1@E2", "D1@E2"], "…the footprints of what lives on each plane");
+  // MICRO-MF07 · the oldest plane is painted first (the newer over it); its index says its place (0 = on top)
+  const planeOrder = (x) => [...x.matchAll(/data-lc-plane="([^"]+)" data-lc-plane-index="(\d+)"/g)].sort((a, b) => a[2] - b[2]).map((m) => m[1]);
+  eq(planeOrder(svg), ["E4", "E2"], "pure · a plane per lane, the newest on top");
+  eq([...svg.matchAll(/class="lc-fp[^"]*" data-lc-unit="([^"]+)" data-lc-lane="([^"]+)"/g)].map((m) => `${m[1]}@${m[2]}`).sort(),
+     ["D1@E2", "F1@E2", "F1@E4"], "…the footprints of what lives on each plane");
   ok(/data-lc-unit="F1" data-lc-lane="E4"[^>]*data-lc-instance="E2"[\s\S]*?stroke-dasharray="3 2"/.test(svg), "…the instance from II hatched");
   ok(/data-lc-unit="D1"[^>]*data-lc-evidence="none"[\s\S]*?stroke="#8c8c8c"/.test(svg), "…a unit no functional unit reads: grey");
   ok(/data-lc-unit="F1" data-lc-lane="E2"[^>]*data-lc-evidence="stratigraphic"[\s\S]*?stroke="#9B3333"/.test(svg), "…read: the colour of its degree (red)");
   ok(/data-lc-vertical="F1"/.test(svg), "…the vertical of F1");
   const h = (s) => Number(/height="(\d+)"/.exec(s)[1]);
   ok(h(LC.lcBuildingSvg(answer, { ...o, gap: 300 })) - h(svg) === 100, "the distance between the planes: +100 px → the drawing 100 px taller");
-  const firstPts = (s) => /data-lc-unit="D1"[^>]*><polygon points="([^"]+)"/.exec(s)[1];
-  ok(firstPts(LC.lcBuildingSvg(answer, { ...o, rot: 135 })) !== firstPts(svg), "the rotation moves the footprints");
+  // MICRO-MF07 · the geometry stays (metres from the centre), the rotation is the plane's transform
+  const tr = (x) => /data-lc-plane="E2" data-lc-plane-index="1" transform="([^"]+)"/.exec(x)[1];
+  const pts0 = (x) => /class="lc-fp" data-lc-unit="D1"/.test(x) && /points="([^"]+)"[^>]*class="lc-fp" data-lc-unit="D1"/.exec(x)[1];
+  ok(tr(LC.lcBuildingSvg(answer, { ...o, rot: 135 })) !== tr(svg), "the rotation moves the footprints (the plane's transform)");
+  eq(pts0(LC.lcBuildingSvg(answer, { ...o, rot: 135 })), pts0(svg), "…and not their geometry (cached, relative to the centre)");
   ok(/class="lc-fp lc-lit"/.test(LC.lcBuildingSvg(answer, { ...o, sel: "A" })), "a functional unit selected lights the footprints it reads");
   ok(/class="lc-fp lc-sel"/.test(LC.lcBuildingSvg(answer, { ...o, sel: "D1" })), "a unit selected is marked");
 }
@@ -307,8 +312,9 @@ try {
   const { ctx, page, errors } = await open([BUILDING]);
   const w = await area(page, "landscape-cube");
   await waitCube(page, ".lc-body .lc-fp[data-lc-unit]", w);
-  eq(await H(page, () => [...document.querySelectorAll(".lc-body [data-lc-plane]")].map((e) => e.getAttribute("data-lc-plane"))),
-     ["E4", "E3", "E2"], "B · the planes, stacked: today on top, the II century at the bottom");
+  const planesNow = (pg) => H(pg, () => [...document.querySelectorAll(".lc-body [data-lc-plane]")]
+    .sort((a, b) => a.dataset.lcPlaneIndex - b.dataset.lcPlaneIndex).map((e) => e.getAttribute("data-lc-plane")));
+  eq(await planesNow(page), ["E4", "E3", "E2"], "B · the planes, stacked: today on top, the II century at the bottom");
   let d = await drawn(page);
   const at = (id, lane) => d.find((x) => x.id === id && x.lane === lane);
   eq([at("F1", "E2").reader, at("F1", "E2").ev, at("W1", "E2").reader, at("D1", "E2").ev], ["A", "stratigraphic", "T", "none"],
@@ -322,7 +328,7 @@ try {
   eq([st.scale, st.status, st.answer.proxies.read], ["building", "ok", 4], "the hook: the building's answer, four proxies read");
   await shot(page, "lc-1-building");
   // the selection, shared: a click on a footprint selects the unit (Matrix, Inspector)…
-  await page.click('.lc-body .lc-fp[data-lc-unit="D1"][data-lc-lane="E2"] polygon', { force: true });
+  await page.click('.lc-body polygon.lc-fp[data-lc-unit="D1"][data-lc-lane="E2"]', { force: true });
   await page.waitForFunction(() => window.__EM_DRAG__.selected()[0] === "D1", null, { timeout: 10000 });
   ok(true, "a click on D1's footprint selects D1");
   await page.waitForFunction(() => /lc-sel/.test(document.querySelector('.lc-body .lc-fp[data-lc-unit="D1"]')?.getAttribute("class") ?? ""), null, { timeout: 10000 });
@@ -332,17 +338,27 @@ try {
   await page.waitForFunction(() => /lc-lit/.test(document.querySelector('.lc-body .lc-fp[data-lc-unit="F1"][data-lc-lane="E2"]')?.getAttribute("class") ?? ""), null, { timeout: 10000 });
   d = await drawn(page);
   eq(d.filter((x) => /lc-lit/.test(x.cls)).map((x) => `${x.id}@${x.lane}`), ["F1@E2"], "selecting the room «aedes» lights what it reads (F1 on II)");
-  // the sliders: the rotation and the distance between the planes
-  const pts = () => H(page, () => document.querySelector('.lc-body .lc-fp[data-lc-unit="D1"] polygon').getAttribute("points"));
+  // MICRO-MF07 · the turntable: a drag turns (and tilts), the wheel parts the planes; nothing redrawn meanwhile
+  const trE2 = () => H(page, () => document.querySelector('.lc-body [data-lc-plane="E2"]').getAttribute("transform"));
   const hgt = () => H(page, () => Number(document.querySelector(".lc-body svg.lc-svg").getAttribute("height")));
-  const p0 = await pts(), h0 = await hgt();
-  await page.fill(".lc-body [data-lc-rot]", "120");
-  await page.waitForFunction((p) => document.querySelector('.lc-body .lc-fp[data-lc-unit="D1"] polygon')?.getAttribute("points") !== p, p0, { timeout: 10000 });
-  ok(true, "the rotation slider turns the cube");
-  await page.fill(".lc-body [data-lc-gap]", "300");
+  await page.waitForTimeout(1500);   // the repaints of the selection above settle
+  const t0 = await trE2();
+  const r0 = (await cubeOf(page, w)).live.renders;
+  const bx = await page.locator(".lc-body svg.lc-svg").boundingBox();
+  await page.mouse.move(bx.x + bx.width / 2, bx.y + 20);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(bx.x + bx.width / 2 + i * 10, bx.y + 20 + i * 2);
+  await page.mouse.up();
+  ok((await trE2()) !== t0, "a drag turns the cube (the planes' transform)");
+  let cs = await cubeOf(page, w);
+  eq(cs.live.renders, r0, "…without drawing it again (only the transforms)");
+  ok(cs.view.rot !== 30 && cs.view.tilt > 0.34, "…turned and tilted (the vertical drag)");
+  const h0 = await hgt();
+  await page.mouse.move(bx.x + bx.width / 2, bx.y + 20);
+  await page.mouse.wheel(0, -400);
   await page.waitForFunction((h) => Number(document.querySelector(".lc-body svg.lc-svg")?.getAttribute("height")) > h, h0, { timeout: 10000 });
-  eq([(await cubeOf(page, w)).view.rot, (await cubeOf(page, w)).view.gap, (await hgt()) - h0], [120, 300, 200],
-     "…the planes part (gap 200 → 300: two gaps, 200 px taller), the view kept per window");
+  cs = await cubeOf(page, w);
+  ok(cs.view.gap > cs.live.planeH * 0.65, "the wheel parts the planes (the view kept per window)");
   await shot(page, "lc-2-turned");
   eq(errors, [], "no page error");
   await ctx.close();
@@ -353,8 +369,7 @@ try {
     const lw = await area(o.page, "landscape-cube");
     await waitCube(o.page, ".lc-body [data-lc-unit]", lw);
     eq((await cubeOf(o.page, lw)).scale, "landscape", "C · the landscape active: the Cube of the landscape");
-    eq(await H(o.page, () => [...document.querySelectorAll(".lc-body [data-lc-plane]")].map((e) => e.getAttribute("data-lc-plane"))),
-       ["H7", "H56", "H4", "H3", "H2", "H1", "H0"], "…a plane per horizon of the container");
+    eq(await planesNow(o.page), ["H7", "H56", "H4", "H3", "H2", "H1", "H0"], "…a plane per horizon of the container");
     const kinds = await H(o.page, () => Object.fromEntries([...document.querySelectorAll('.lc-body [data-lc-lane="H2"][data-lc-unit]')]
       .map((e) => [e.getAttribute("data-lc-unit"), [e.getAttribute("data-lc-kind"), e.getAttribute("data-lc-why") ?? ""]])));
     eq([kinds.TEMPLE, kinds.OLDER, kinds.TOMBS], [["footprint", ""], ["symbol", "no_outline"], ["symbol", "no_members"]],

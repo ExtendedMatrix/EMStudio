@@ -53,7 +53,10 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
               // MICRO-MF03 · the Landscape Matrix: three columns of braces, a hexagon
               "landscape-matrix": '<path d="M2.5 3h3M2.5 7h3M10.5 3h3M10.5 9h3M6.5 3v10M9.5 3v10"/><path d="M3 12l1-1.5h1.5l1 1.5-1 1.5H4z"/>',
               // MICRO-MF04 · the Cube: three planes stacked, a line crossing them
-              "landscape-cube": '<path d="M2 4.5 8 2.5l6 2-6 2zM2 8.5l6 2 6-2M2 12.5l6 2 6-2"/><path d="M8 6.5v8" stroke-dasharray="1.2 1.4"/>' } : {}),
+              "landscape-cube": '<path d="M2 4.5 8 2.5l6 2-6 2zM2 8.5l6 2 6-2M2 12.5l6 2 6-2"/><path d="M8 6.5v8" stroke-dasharray="1.2 1.4"/>',
+              // MICRO-MF07 · the plan by horizon (outlines seen from above) and the proposals (cards with a brace)
+              "functional-plan": '<rect x="2" y="2.5" width="12" height="11" rx="1"/><path d="M4.5 5h4v3.5h-4zM9.5 7.5h2.5v4h-2.5zM4.5 10h3v1.8h-3z"/>',
+              "functional-proposals": '<path d="M5 3c-1.2 0-1.2 1-1.2 2s0 1.6-1 2c1 .4 1 1 1 2s0 2 1.2 2"/><path d="M7 4.5h7M7 8h6M7 11.5h5"/>' } : {}),
 };
 
 /** The 16 px SVG for a window type (empty box for an unknown one). */

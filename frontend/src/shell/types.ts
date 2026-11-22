@@ -105,6 +105,9 @@ export interface SurfaceDeps {
   renderLandscapeMatrixInto?(body: HTMLElement, win: Win): void;
   /** MICRO-MF04 · EMBARGO (lab only) · the Cube */
   renderLandscapeCubeInto?(body: HTMLElement, win: Win): void;
+  /** MICRO-MF07 · EMBARGO: the plan by horizon and the proposals (lab only) */
+  renderFunctionalPlanInto?(body: HTMLElement, win: Win): void;
+  renderFunctionalProposalsInto?(body: HTMLElement, win: Win): void;
   /** Which of its tabs this hosted window is showing (per WINDOW, never per
    *  type — two Inspector windows can sit on different tabs, and that is what
    *  makes the second one a view of its own instead of a duplicate). */
@@ -697,6 +700,39 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
             const el = body;
             const ww = win;
             paintSurface(ww, el, () => lc(el, ww));
+          },
+          select() { this.refresh(); },
+          setFocused(on) { markFocus(body, on); },
+          destroy() { body?.remove(); body = null; win = null; },
+        };
+      },
+    });
+  }
+
+  // ── MICRO-MF07 · THE PLAN BY HORIZON and THE PROPOSALS (EMBARGO: lab) ──
+  //
+  // The shape of the Cube's: a body repainted through `paintSurface`.
+  for (const [id, draw] of [["functional-plan", deps.renderFunctionalPlanInto],
+                            ["functional-proposals", deps.renderFunctionalProposalsInto]] as const) {
+    if (!LAB || !draw) continue;
+    registerSurfaceType({
+      id,
+      create(): Surface {
+        let body: HTMLElement | null = null;
+        let win: Win | null = null;
+        return {
+          mount(area, w) {
+            win = w;
+            body = document.createElement("div");
+            body.className = "tile-fmbody";
+            area.appendChild(body);
+            this.refresh();
+          },
+          refresh() {
+            if (!body || !win || !body.isConnected) return;
+            const el = body;
+            const ww = win;
+            paintSurface(ww, el, () => draw(el, ww));
           },
           select() { this.refresh(); },
           setFocused(on) { markFocus(body, on); },

@@ -215,10 +215,24 @@ def landscape_cube_answer(body: Dict[str, Any], inside: Any = None) -> Tuple[int
         return 400, {"ok": False, "error": "doc (an em.json) is required"}
     graph, _w = api.load_emjson(doc)
     fps = PF.proxy_footprints(graph, base_dir, inside=inside) if base_dir else {}
-    out = CU.cube_view(graph, proxy_footprints=fps, lanes=lanes, lang=lang)
+    # MICRO-MF07 · the layer «RM»: the models of each epoch in plan (.glb /
+    # .gltf bounds, beside the em.json, through the same sandbox); an older
+    # s3Dgraphy without rm_footprints still answers the other three layers
+    rms, unread = ({}, [])
+    if base_dir and hasattr(PF, "rm_footprints"):
+        try:
+            rms, unread = PF.rm_footprints(graph, base_dir, inside=inside)
+        except Exception:  # noqa: BLE001 — the RM layer is said empty, the cube still answers
+            rms, unread = ({}, [])
+    try:
+        out = CU.cube_view(graph, proxy_footprints=fps, lanes=lanes, lang=lang,
+                           rm_footprints=rms, rm_unread=unread)
+    except TypeError:  # s3Dgraphy before MF07
+        out = CU.cube_view(graph, proxy_footprints=fps, lanes=lanes, lang=lang)
     out["ok"] = True
     out["proxies"] = {"folder": base_dir, "read": len(fps),
                       "stale": sorted(u for u, f in fps.items() if f.get("stale"))}
+    out["models"] = {"read": len(rms), "unread": len(unread)}
     return 200, out
 
 
@@ -239,12 +253,116 @@ def _landscape_cube_route(handler: Any, route: str, raw: bytes) -> None:
     handler._json(out, status)
 
 
+# ── MICRO-MF07 · the proposals of functional units ──────────────────────────
+#
+# ``POST /functional-proposals`` → s3Dgraphy's ``functional_proposals``.
+# ``mode activities`` (default): one brace per activity, deterministic.
+# ``mode ai``: the briefing (``ai_context``: the units — the selection when
+# ``units`` is given —, their descriptions, activities, first epochs, the
+# nearness of their footprints read from the proxies beside ``base``, the
+# Narrative's prose, the identities of the Landscape Matrix the page sends)
+# goes to the model the AI drafts of the Narrative use (``llm_provider``:
+# ``provider`` / ``model`` of the request, the key in the bridge's memory); the
+# reply is read by ``parse_ai_reply`` (only what the graph can hold). Nothing
+# is written: the page writes an ACCEPTED proposal, with its paradata. 501 =
+# the AI is not configured (no key): the page says it and keeps «from the
+# activities».
+
+def functional_proposals_answer(body: Dict[str, Any], inside: Any = None) -> Tuple[int, Dict[str, Any]]:
+    """``{mode?, doc, base?, lanes?, units?, identities?, provider?, model?,
+    instruction?, date?, lang?}`` → ``(status, answer)``."""
+    import os  # noqa: PLC0415
+    try:
+        from s3dgraphy import api  # noqa: PLC0415
+        from s3dgraphy import functional_proposals as FP  # noqa: PLC0415
+    except ImportError as exc:
+        return 501, {"ok": False, "error": f"this s3dgraphy has no functional_proposals: {exc}"}
+    doc = body.get("doc")
+    if not isinstance(doc, dict):
+        return 400, {"ok": False, "error": "doc (an em.json) is required"}
+    lang = "it" if str(body.get("lang") or "en").lower().startswith("it") else "en"
+    lanes = body.get("lanes") if isinstance(body.get("lanes"), list) and body.get("lanes") else None
+    graph, _w = api.load_emjson(doc)
+    if body.get("mode", "activities") != "ai":
+        return 200, {"ok": True, "mode": "activities",
+                     "proposals": FP.from_activities(graph, lanes=lanes, lang=lang)}
+    try:
+        import pathlib  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+        here = str(pathlib.Path(__file__).resolve().parent)
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        from llm_provider import LLMError, get_provider  # noqa: PLC0415
+    except ImportError as exc:
+        return 501, {"ok": False, "error": f"LLM seam unavailable: {exc}"}
+    fps: Dict[str, Any] = {}
+    base = body.get("base")
+    base_dir = os.path.dirname(base) if isinstance(base, str) and base else None
+    if base_dir and inside is not None:
+        base_dir = inside(base_dir)
+    if base_dir:
+        try:
+            from s3dgraphy import functional_cube as CU  # noqa: PLC0415
+            from s3dgraphy.gis import proxy_footprint as PF  # noqa: PLC0415
+            fps = CU.unit_footprints(graph, PF.proxy_footprints(graph, base_dir, inside=inside))
+        except Exception:  # noqa: BLE001 — without footprints the briefing says no nearness
+            fps = {}
+    units = body.get("units") if isinstance(body.get("units"), list) and body.get("units") else None
+    idents = body.get("identities") if isinstance(body.get("identities"), list) else None
+    context = FP.ai_context(graph, units=units, footprints=fps, identities=idents, lanes=lanes, lang=lang)
+    prompt = FP.build_ai_prompt(context, str(body.get("instruction") or ""))
+    try:
+        opts = {"max_tokens": 4000}
+        if str(body.get("model") or "").strip():
+            opts["model"] = str(body["model"]).strip()
+        provider = get_provider(body.get("provider"), **opts)
+        text = provider.generate(FP.AI_SYSTEM_PROMPT, prompt, context)
+    except LLMError as exc:
+        return exc.status, {"ok": False, "error": str(exc)}
+    except TypeError:
+        provider = get_provider(body.get("provider"))
+        text = provider.generate(FP.AI_SYSTEM_PROMPT, prompt, context)
+    except Exception as exc:  # noqa: BLE001
+        return 502, {"ok": False, "error": f"the model failed: {exc}"}
+    model = getattr(provider, "model", "") or provider.name
+    try:
+        read = FP.parse_ai_reply(graph, text, lanes=lanes, model=model,
+                                 date=str(body.get("date") or "") or None, lang=lang)
+    except ValueError as exc:
+        return 502, {"ok": False, "error": f"the model's reply could not be read: {exc}"}
+    return 200, {"ok": True, "mode": "ai", "provider": provider.name, "model": model,
+                 "scope": context["scope"], "sent": {"units": len(context["units"]),
+                                                     "activities": len(context["activities"]),
+                                                     "narrative_chars": len(context["narrative"]),
+                                                     "identities": len(context["identities"]),
+                                                     "footprints": sum(1 for u in context["units"] if u.get("footprint"))},
+                 **read}
+
+
+def _functional_proposals_route(handler: Any, route: str, raw: bytes) -> None:
+    import json  # noqa: PLC0415
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else {}
+    except Exception as exc:  # noqa: BLE001
+        handler._fail(400, f"bad JSON: {exc}")
+        return
+    try:
+        status, out = functional_proposals_answer(body if isinstance(body, dict) else {},
+                                                  inside=getattr(handler, "_geo_inside", None))
+    except Exception as exc:  # pragma: no cover — surface to the UI
+        import traceback  # noqa: PLC0415
+        traceback.print_exc()
+        status, out = 500, {"ok": False, "error": f"proposals failed: {exc}"}
+    handler._json(out, status)
+
+
 #: the bridge's POST routes this module adds (em_bridge.py merges them into
 #: POST_ROUTES when this module is importable: the dev stack and the lab sidecar)
 POST_ROUTES: Dict[str, Callable[[Any, str, bytes], None]] = {
     "/functional-matrix": _functional_matrix_route,
     "/landscape-matrix": _landscape_matrix_route,
     "/landscape-cube": _landscape_cube_route,
+    "/functional-proposals": _functional_proposals_route,
 }
 
 

@@ -103,7 +103,12 @@ export type WindowType =
   | "landscape-matrix"
   // MICRO-MF04 · EMBARGO (landscape-cube): the Cube — the real footprints of the
   // proxies stacked by horizon. Lab only.
-  | "landscape-cube";
+  | "landscape-cube"
+  // MICRO-MF07 · EMBARGO (functional-workspace): the Space as a PLAN BY HORIZON
+  // (the cube's footprints from above, the lasso) and the PROPOSALS of
+  // functional units (from the activities, from the AI). Lab only.
+  | "functional-plan"
+  | "functional-proposals";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -296,11 +301,38 @@ const FUNCTIONAL_B: Arrangement = {
                  b: { win: "cube" } },
             b: { dir: "row", ratio: 0.56, a: { win: "inspector" }, b: { win: "coherence" } } },
 };
+/**
+ * MICRO-MF07 (E.D., 22 Nov 2026: «Accetto la scrivania in tutte le sue parti»)
+ * · THE DESK — the tab «Functional»: the Matrix narrow (the source of the
+ * drags) | the Functional Matrix in the centre | the Space as a plan by
+ * horizon above and the Cube below, on the right; at the bottom the
+ * Proposals · the Inspector · the coherence (the Table on «Issues»). A and B
+ * of MF05 stay as models of the «+».
+ */
+const FUNCTIONAL_DESK: Arrangement = {
+  // the Functional Matrix first: the ANCHOR (`windowType`) of the tab
+  wins: [
+    { name: "fm", type: "functional-matrix" },
+    { name: "canvas", type: "graph", state: { mode: "matrix" } },
+    { name: "plan", type: "functional-plan" },
+    { name: "cube", type: "landscape-cube" },
+    { name: "proposals", type: "functional-proposals" },
+    { name: "inspector", type: "inspector" },
+    { name: "coherence", type: "table", state: { "current.table.sheet": "Issues" } },
+  ],
+  active: "fm",
+  layout: { dir: "col", ratio: 0.68,
+            a: { dir: "row", ratio: 0.2, a: { win: "canvas" },
+                 b: { dir: "row", ratio: 0.52, a: { win: "fm" },
+                      b: { dir: "col", ratio: 0.5, a: { win: "plan" }, b: { win: "cube" } } } },
+            b: { dir: "row", ratio: 0.42, a: { win: "proposals" },
+                 b: { dir: "row", ratio: 0.52, a: { win: "inspector" }, b: { win: "coherence" } } } },
+};
 const FUNCTIONAL_ON: boolean = LAB && featureOn("functional-workspace");
 const FUNCTIONAL: WorkspacePreset | null = FUNCTIONAL_ON ? {
   id: "functional", labelKey: "ws.functional", hintKey: "ws.qFunctional",
   icon: "{}", windowType: "functional-matrix", builtin: true,
-  arrangement: FUNCTIONAL_A,
+  arrangement: FUNCTIONAL_DESK,
 } : null;
 
 /**
@@ -573,6 +605,9 @@ export const WORKSPACE_TEMPLATES: WorkspacePreset[] = [
   (({ builtin: _b, ...model }) => ({ ...model, arrangement: JSON.parse(JSON.stringify(SCRIPTING.arrangement)) as Arrangement }))(SCRIPTING),
   // MICRO-MF05 · EMBARGO · the two layouts of «Funzionale» (lab, its switch on)
   ...(FUNCTIONAL_ON ? [
+    // MICRO-MF07 · the desk (the tab's own arrangement) as a model too
+    { id: "functional-desk", labelKey: "ws.functionalDesk", hintKey: "ws.qFunctional", icon: "{}", windowType: "functional-matrix" as WindowType,
+      arrangement: JSON.parse(JSON.stringify(FUNCTIONAL_DESK)) as Arrangement },
     { id: "functional-a", labelKey: "ws.functionalA", hintKey: "ws.qFunctional", icon: "{}", windowType: "functional-matrix" as WindowType,
       arrangement: JSON.parse(JSON.stringify(FUNCTIONAL_A)) as Arrangement },
     { id: "functional-b", labelKey: "ws.functionalB", hintKey: "ws.qFunctional", icon: "{}", windowType: "functional-matrix" as WindowType,
@@ -771,7 +806,10 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
               // MICRO-MF03 · the Landscape Matrix
               "landscape-matrix": { icon: windowIcon("landscape-matrix"), labelKey: "feat.landscapeMatrix.title" },
               // MICRO-MF04 · the Cube
-              "landscape-cube": { icon: windowIcon("landscape-cube"), labelKey: "feat.landscapeCube.title" } } : {}),
+              "landscape-cube": { icon: windowIcon("landscape-cube"), labelKey: "feat.landscapeCube.title" },
+              // MICRO-MF07 · the plan by horizon and the proposals
+              "functional-plan": { icon: windowIcon("functional-plan"), labelKey: "fw.plan.title" },
+              "functional-proposals": { icon: windowIcon("functional-proposals"), labelKey: "fw.proposals.title" } } : {}),
 } as Record<WindowType, { icon: string; labelKey: string }>;
 
 /** The window type the active workspace currently shows — the ACTIVE window's
@@ -1068,6 +1106,16 @@ function loadRegistry(): Registry {
       parsed = m.parsed as Partial<Registry>;
       if (m.reseeded.length) migratedOnLoad = true;
       localStorage.setItem(REV_KEY, String(WORKSPACES_REV));
+    }
+    // MICRO-MF07 · EMBARGO · the tab «Functional» saved as MF05 seeded it (A)
+    // opens as the desk: reseeded once, a layout the user reshaped is kept
+    if (FUNCTIONAL_ON) {
+      const fw = (parsed as Record<string, Partial<WorkspaceWindows> | undefined>).functional;
+      const tree = fw ? (fw.maxOf ? fw.saved : fw.layout) as Pane | undefined : undefined;
+      if (fw && Array.isArray(fw.wins) && tree && paneSignature(tree, fw.wins as Win[]) === arrangementSignature(FUNCTIONAL_A)) {
+        delete (parsed as Record<string, unknown>).functional;
+        migratedOnLoad = true;
+      }
     }
     for (const preset of WORKSPACES) {
       const entry = parsed[preset.id];

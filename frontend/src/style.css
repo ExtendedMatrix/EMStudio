@@ -13138,6 +13138,69 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .lc-sw-inst { border-style: dashed !important; border-color: var(--text-muted) !important; }
 .lc-sw-vert { display: inline-block; width: 0; height: 12px; margin: 0 6px 0 4px; vertical-align: middle; border-left: 1.5px dashed var(--text-muted); }
 .lc-foot { margin-top: 6px; font-size: 12px; }
+/* MICRO-MF07 · the four layers, the turntable, the plan by horizon, the proposals (lab) */
+.lc-layers, .lc-hz { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.lc-layer-btn { font: inherit; font-size: 11.5px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); cursor: pointer; }
+.lc-layer-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.lc-svg { cursor: grab; user-select: none; -webkit-user-select: none; }
+.lc-svg.lc-grabbing { cursor: grabbing; }
+.lc-svg .lc-plane-face { fill-opacity: .55; }
+.lc-svg .lc-plane-face, .lc-svg .lc-layer-rm, .lc-svg polygon.lc-rm { pointer-events: none; }
+.lc-svg polygon.lc-fp, .lc-svg polygon.lc-prx { pointer-events: all; }
+.lc-svg polygon.lc-sym-hull { pointer-events: visibleStroke; }
+.lc-svg polygon.lc-fp { fill-opacity: 1; stroke-opacity: .85; }
+.lc-svg polygon.lc-fp[fill="none"] { fill-opacity: 0; }
+.lc-svg polygon.lc-fp:hover, .lc-svg polygon.lc-sym-hull:hover { stroke-width: 1.8; }
+.lc-svg polygon.lc-sel { stroke-width: 2.6 !important; stroke: var(--accent); }
+.lc-svg polygon.lc-lit { stroke-width: 2.2 !important; }
+.lc-svg .lc-hatch-line, .lc-plan-svg .lc-hatch-line { stroke: var(--text-muted); opacity: .6; }
+.lc-svg .lc-rm-line { stroke: var(--text-muted); opacity: .5; }
+.lc-svg polygon.lc-rm { color: var(--text-muted); fill-opacity: 1; }
+.lc-svg .lc-sym-name { font-size: 10px; font-weight: 600; fill: var(--text); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; pointer-events: none; }
+.lc-svg .lc-sym-name.lc-sel { fill: var(--accent); }
+.lc-svg .lc-chain line { stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 0.1 5; }
+.lc-svg .lc-chain line.lc-hit { stroke: transparent; stroke-width: 8; stroke-dasharray: none; }
+.lc-svg .lc-chain text { font-size: 9px; fill: var(--text-muted); }
+.lc-svg .lc-prx-edge { stroke-width: .6; opacity: .7; pointer-events: none; }
+.lc-svg polygon.lc-prx { stroke-width: .8; }
+.lc-sw-buried { background: repeating-linear-gradient(45deg, var(--text-muted) 0 1px, transparent 1px 4px); border-width: 1px !important; }
+.lc-sw-exposed { background: var(--text-muted); opacity: .6; }
+.lc-plan-body .lc-plan-hint { margin: 2px 0 4px; font-size: 11.5px; }
+.lc-plan-svg { display: block; user-select: none; -webkit-user-select: none; }
+.lc-plan-svg.lc-armed { cursor: crosshair; }
+.lc-plan-svg .lc-plan-ground { fill: var(--surface-2, rgba(127,127,127,.06)); }
+.lc-plan-svg .lc-plan-fp { cursor: pointer; }
+.lc-plan-svg.lc-armed .lc-plan-fp { cursor: crosshair; }
+.lc-plan-svg .lc-plan-fp.lc-sel polygon { stroke: var(--accent); }
+.lc-plan-svg .lc-plan-scale line { stroke: var(--text-muted); stroke-width: 1.5; }
+.lc-plan-svg .lc-plan-scale text { font-size: 10px; fill: var(--text-muted); }
+.lc-plan-svg .lc-lasso-line { fill: var(--accent); fill-opacity: .12; stroke: var(--text); stroke-dasharray: 4 3; pointer-events: none; }
+.fp-body { gap: 4px; }
+.fp-head { flex-wrap: wrap; gap: 6px; }
+.fp-head .fp-btn, .fp-acts .fp-btn, .fp-ai-state .fp-btn { width: auto; flex: 0 0 auto; margin: 0; white-space: nowrap; }
+.fp-list { display: grid; gap: 6px; align-content: start; }
+.fp-card { border: 1px solid var(--border); border-left: 3px solid #7a5ab8; border-radius: 6px; padding: 6px 8px; display: grid; gap: 3px; }
+.fp-card.fp-done { opacity: .55; border-left-color: #2d7a4b; }
+.fp-card.fp-shown { box-shadow: 0 0 0 2px var(--accent) inset; }
+.fp-card .fp-t { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.fp-card .fp-src { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: #7a5ab8; border: 1px solid #7a5ab8; border-radius: 3px; padding: 0 4px; }
+.fp-card .fp-name[contenteditable="true"] { outline: 1px solid var(--accent); padding: 0 2px; }
+.fp-card .fp-why { font-size: 12px; color: var(--text-muted); }
+.fp-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.fw-empty-row { position: static; transform: none; margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fw-flash { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tile-fmbody.lc-body { display: flex; flex-direction: column; overflow: hidden; }
+.tile-fmbody.lc-body > .lc-head { flex: 0 0 auto; }
+.tile-fmbody.lc-body > .lc-scroll { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.tile-fmbody.lc-body > .fm-note { flex: 0 0 auto; }
+.lc-footer { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; font-size: 11.5px; }
+.lc-footer .fm-legend { margin: 0; }
+.lc-footer .lc-foot, .lc-footer .lc-plan-hint { margin: 0; font-size: 11px; flex: 1 1 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-footer .fm-legend { font-size: 10.5px; gap: 2px 8px; }
+.lc-footer .fm-count-line { font-size: 11px; }
+.tile-fmbody.lc-body > .lc-switch, .tile-fmbody.lc-body > .lm-switch { align-self: flex-start; flex: 0 0 auto; }
+.lc-plan-body .lc-plan-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-head { justify-content: flex-start; }
 /* MICRO-MF03 · the Landscape Matrix and the zoom of the Functional Matrix (embargo: landscape-matrix) */
 .fm-zoombar { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; padding-right: 84px; }
 .lm-zoom { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }

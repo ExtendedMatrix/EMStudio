@@ -535,6 +535,13 @@ import { FU_TYPE as JAR_FU_TYPE, MEMBER_EDGE as JAR_MEMBER_EDGE, defaultEpoch as
 // horizon (an area), at the scale of the building or of the landscape: behind LC_ON
 import { lcAnswerOf, lcAsk, lcScaleOf, renderLandscapeCubeInto, setLandscapeCubeHost, setLcView } from "./landscape-cube";
 const LC_ON = LAB && featureOn("landscape-cube");
+// MICRO-MF07 · EMBARGO (functional-workspace) · the workspace Functional as the
+// desk: the Space as a plan by horizon (the Cube's footprints from above, the
+// lasso) and the Proposals (from the activities, from the AI): behind FW_ON
+import { lcPlanOf, planLassoAt, renderFunctionalPlanInto, setPlanView } from "./landscape-cube";
+import { fpAccept, fpAsk, fpAskAi, fpDiscard, fpRename, fpShow, fpState, renderFunctionalProposalsInto, setProposalsHost,
+         type Proposal } from "./functional-proposals";
+const FW_ON = LAB && featureOn("functional-workspace");
 /** the Matrix windows with the overlay on (per person, this machine) */
 const foWins: Set<string> = FO_ON ? (() => {
   try { return new Set<string>(JSON.parse(localStorage.getItem("emstudio.fo") ?? "[]")); } catch { return new Set<string>(); }
@@ -1418,7 +1425,7 @@ function ensureCircleVisibleFor(nodeType: string | undefined): void {
 function leafLabel(leaf: string): string {
   const fam = familyOfLeaf(leaf);
   const type = leaf.slice(2);
-  const name = type === "*" ? t("fp.unknown") : leaf.startsWith("n:") ? datamodelTypeLabel(type) : edgeLabel(type);
+  const name = type === "*" ? t("fwp.unknown") : leaf.startsWith("n:") ? datamodelTypeLabel(type) : edgeLabel(type);
   return fam ? `${t(fam.label)} › ${name}` : name;
 }
 /** group-context navigation stack; empty = full canvas */
@@ -2772,12 +2779,25 @@ window.__EM_SCENE__ = () => {
   ...(LC_ON ? { landscapeCube: (winId?: string) => {
     const id = winId ?? windowsOf().find((w) => w.type === "landscape-cube")?.id ?? null;
     if (!id) return null;
-    const { scale, state, view } = lcAnswerOf(id);
+    const { scale, state, view, live } = lcAnswerOf(id);
     return { win: id, scale: lcScaleOf(id), status: state.status, stale: state.stale, error: state.error ?? null,
-             answer: state.answer, view: { ...view, scale } };
-  }, setCube: (winId: string, v: { rot?: number; gap?: number; scale?: "building" | "landscape" | null }) => {
-    setLcView(winId, v); refreshSurfaces("landscape-cube");
+             answer: state.answer, view: { ...view, scale }, live };
+  }, setCube: (winId: string, v: { rot?: number; gap?: number | null; tilt?: number; scale?: "building" | "landscape" | null;
+                                    layers?: Partial<Record<"sym" | "plan" | "prx" | "rm", boolean>> }) => {
+    setLcView(winId, v); if (v.layers || v.scale !== undefined) refreshSurfaces("landscape-cube");
   } } : {}),
+  // MICRO-MF07 · EMBARGO · the plan by horizon and the proposals (lab, switches on)
+  ...(FW_ON && LC_ON ? { functionalPlan: (winId?: string) => {
+    const id = winId ?? windowsOf().find((w) => w.type === "functional-plan")?.id ?? null;
+    return id ? { win: id, ...lcPlanOf(id) } : null;
+  }, setPlan: (winId: string, v: { lane?: string | null; lasso?: boolean }) => {
+    setPlanView(winId, v); refreshSurfaces("functional-plan");
+  }, planLasso: (winId: string, poly: Array<[number, number]>) => planLassoAt(winId, poly) } : {}),
+  ...(FW_ON && FM_ON ? { proposals: () => fpState(), proposalsAi: (scope: "selection" | "graph") => fpAskAi(scope),
+    proposalsAsk: () => { fpAsk(); }, proposalAccept: (key: string) => fpAccept(key), proposalShow: (key: string) => fpShow(key),
+    proposalRename: (key: string, name: string) => { fpRename(key, name); }, proposalDiscard: (key: string) => { fpDiscard(key); },
+    selectedIds: () => [...selectedIds], selectMany: (ids: string[]) => { selectMany(ids); },
+    magnify: (winId: string) => { toggleMaximize(winId); } } : {}),
   ...(LM_ON ? { landscapeMatrix: (winId?: string) => {
     const st = lmState("landscape");
     const id = lmState("identities");
@@ -4445,6 +4465,7 @@ function select(nodeId: string | null): void {
   if (FM_ON) selectInSurfaces("functional-matrix", nodeId);
   if (LM_ON) selectInSurfaces("landscape-matrix", nodeId);   // MICRO-MF03
   if (LC_ON) selectInSurfaces("landscape-cube", nodeId);     // MICRO-MF04
+  if (FW_ON && LC_ON) selectInSurfaces("functional-plan", nodeId);   // MICRO-MF07
   draw();
   // «Zoom to selection» · the other windows show the node — after the scenes
   // this pick may rebuild (a DTC set opening, a jump that rebuilds)
@@ -4591,6 +4612,9 @@ function selectMany(ids: string[]): void {
   selectedIds = new Set(ids);
   selectedId = ids.length ? ids[ids.length - 1] : null;
   dropSketchSel();
+  // MICRO-MF07 · EMBARGO · what is lit (a proposal shown, a lasso) in the lab areas
+  if (FM_ON) queueMicrotask(() => refreshSurfaces("functional-matrix"));
+  if (LC_ON) queueMicrotask(() => { refreshSurfaces("landscape-cube"); if (FW_ON) refreshSurfaces("functional-plan"); });
   // MICRO-SPAZIO-3D-3 · the Space sees the same selection, and the tables
   if (windowsOf().some((w) => w.type === "scene")) queueMicrotask(() => refreshSurfaces("scene"));
   queueMicrotask(markTableSelection);
@@ -18880,7 +18904,11 @@ if (FM_ON || FO_ON) setFunctionalMatrixHost({
     if (FM_ON) jarCheckPending();
     // MICRO-MF05 (C) · the overlay's note follows the answer (applied / why not)
     if (FO_ON && foWins.size) renderAreaHeaders();
+    // MICRO-MF07 · the proposals follow the graph (an accepted one marked)
+    if (FW_ON) refreshSurfaces("functional-proposals");
   },
+  // MICRO-MF07 · the graph with no functional unit: the row with its actions
+  ...(FM_ON ? { empty: (el: HTMLElement) => fwEmptyRow(el) } : {}),
   // MICRO-MF05 · the jar's gestures inside the Functional Matrix
   ...(FM_ON ? { jar: {
     move: (member: string, from: string, to: string, copy: boolean) => jarGesture([member], to, { kind: copy ? "copy" : "move", from }),
@@ -19235,7 +19263,149 @@ if (LC_ON) {
     selected: () => selectedId,
     select: (id) => { select(id); },
     t: (k, v) => t(k, v as Record<string, string>),
-    changed: () => { refreshSurfaces("landscape-cube"); },
+    changed: () => { refreshSurfaces("landscape-cube"); if (FW_ON) refreshSurfaces("functional-plan"); },
+    // MICRO-MF07 · what is lit everywhere, and the lasso of the plan → the jar
+    lit: () => selectedIds,
+    ...(FW_ON && FM_ON ? { lasso: (units: string[]) => {
+      selectMany(units);
+      jarLassoDone(units);
+    } } : {}),
+  });
+}
+// ── MICRO-MF07 · EMBARGO · THE PROPOSALS (functional-proposals.ts) ─────────
+//
+// «Nel grafo entra solo l'accettato»: an accepted proposal is ONE step of the
+// store — the functional unit (name, scale), its first epoch, its container,
+// its function (`primary_function`), its members — with its PARADATA: an
+// extractor under the function, `has_author` the AI author for a proposal of
+// the AI (find-or-create by model, as for the drafts of the Narrative,
+// `author_ai`), the person who accepts in `validated_by` / `validated_at` and
+// in the description; a proposal from the activities is the reading of the
+// person who accepts (as the jar's, MF05). Then the coherence (fmAsk).
+function fwAiAuthor(st: DocumentStore, model: string): string {
+  const hit = st.liveNodes().find((n) => n.node_type === "author_ai" && String((n.data as Record<string, unknown> | undefined)?.model ?? "") === model);
+  if (hit) return hit.id;
+  let id = `AI.${model}`;
+  if (st.node(id)) id = st.newId();
+  st.addNode({ id, node_type: "author_ai", name: model, description: "", data: { model } } as EmNode);
+  return id;
+}
+function fwAccept(p: Proposal, parentId: string | null): string | null {
+  const st = store;
+  if (!FW_ON || !FM_ON || !st) return null;
+  const members = p.members.filter((m) => st.node(m) && jarCanBeMember(st.node(m)?.node_type));
+  const day = jarToday();
+  const me = identityForSigning();
+  let fu = "";
+  let who = t("fwp.someone");
+  st.batch(() => {
+    fu = st.newId();
+    st.addNode({ id: fu, node_type: JAR_FU_TYPE, name: p.name, description: p.source === "ai" ? p.why : "", data: { scale: p.scale } } as EmNode);
+    if (p.epoch && st.node(p.epoch)) st.addEdge(fu, p.epoch, "has_first_epoch");
+    if (parentId && st.node(parentId)) st.addEdge(fu, parentId, JAR_MEMBER_EDGE);
+    for (const m of members) st.addEdge(m, fu, JAR_MEMBER_EDGE);
+    const human = me ? nauth.authorForIdentity(st, me) : null;
+    if (human) who = String(st.node(human)?.name ?? who);
+    if (p.function) {
+      const pid = st.newId();
+      st.addNode({ id: pid, node_type: "property", name: "primary_function", description: p.function,
+                   data: { property_type: "primary_function", value: p.function } } as EmNode);
+      st.addEdge(fu, pid, "has_property");
+      const x = st.newId();
+      const ai = p.source === "ai";
+      const desc = ai ? t("fwp.readingAi", { model: p.model ?? "", date: p.date ?? day, who, day, why: p.why })
+        : t("fwp.readingActivity", { act: String(st.node(p.activity ?? "")?.name ?? p.activity ?? ""), who, day });
+      st.addNode({ id: x, node_type: "extractor", name: initialName(st.doc, "extractor") ?? "Temp1", description: desc,
+                   data: { act_start: ai ? (p.date ?? day) : day,
+                           ...(ai ? { ai_generated: true, model: p.model ?? "", validated_at: day, ...(human ? { validated_by: human } : {}) } : {}) } } as EmNode);
+      if (ai && p.model) st.addEdge(x, fwAiAuthor(st, p.model), "has_author");
+      else if (human) st.addEdge(x, human, "has_author");
+      chain.linkExtraction(st, pid, x);
+    }
+  });
+  const msg = p.source === "ai"
+    ? t("fwp.toast.acceptedAi", { name: p.name, n: members.length, model: p.model ?? "", date: p.date ?? day, who })
+    : t("fwp.toast.accepted", { name: p.name, n: members.length });
+  toastUndo(msg, st);
+  logInfo(`${t("log.edit.prefix")}: ${msg}`, [fu, ...members]);
+  jarPending = members.length ? { pairs: members.map((m) => [m, fu] as [string, string]), after: fmSeq().asked, msg, st } : null;
+  select(fu);
+  if (FM_ON) fmAsk();
+  return fu;
+}
+/** MICRO-MF07 (A) · the Functional Matrix of a graph with no functional unit:
+ *  the row «No functional unit…» with its actions (MF06's): the Proposals
+ *  (the area of the workspace, or the workspace itself), «Read as…», the
+ *  proof file when it is beside the em.json. */
+function fwEmptyRow(el: HTMLElement): void {
+  if (!FM_ON) return;
+  const row = document.createElement("div");
+  row.className = "fo-empty-row fw-empty-row";
+  const say = document.createElement("span");
+  say.className = "fo-empty-say";
+  say.textContent = t("fo.empty.say");
+  say.title = t("fo.empty.sayTitle");
+  row.appendChild(say);
+  const act = (id: string, label: string, title: string, run: () => void): void => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "insp-btn";
+    b.dataset.fwEmptyAct = id;
+    b.textContent = label;
+    b.title = title;
+    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    row.appendChild(b);
+  };
+  if (FW_ON) act("proposals", t("fw.empty.proposals"), t("fw.empty.proposalsTitle"), () => {
+    const w = windowsOf().find((x) => x.type === "functional-proposals");
+    if (w) { winAreas.get(w.id)?.scrollIntoView?.({ block: "nearest" }); winAreas.get(w.id)?.classList.add("fw-flash"); setTimeout(() => winAreas.get(w.id)?.classList.remove("fw-flash"), 900); }
+    else if (WORKSPACES.some((x) => x.id === "functional")) setWorkspace("functional" as WorkspaceId);
+  });
+  act("read-as", t("fo.empty.readAs"), t("fo.empty.readAsTitle"), () => { void jarReadAs(); });
+  const proof = FO_ON ? foProofPath() : null;
+  if (FO_ON && proof && foProofThere(proof)) act("proof", t("fo.empty.proof"), t("fo.empty.proofTitle", { name: paths.basename(proof) }),
+                                                 () => { void foOpenProof(proof); });
+  el.appendChild(row);
+}
+/** the identities of the Landscape Matrix bound to the active graph (what the
+ *  AI is told of the landscape), null when no landscape answered */
+function fwIdentities(): Array<Record<string, unknown>> | null {
+  if (!LM_ON) return null;
+  const a = lmState("landscape").answer;
+  const sl = emtree.active();
+  if (!a || !sl) return null;
+  const gid = graphIdOfSlot(sl);
+  const site = a.bindings.find((b) => b.graph_id === gid)?.site ?? null;
+  if (!site) return null;
+  const lane = (id: string) => a.lanes.find((l) => l.id === id)?.name ?? id;
+  return a.rows.filter((r) => r.site === site).map((r) => ({ id: r.id, name: r.name, kind: r.kind, scale: r.scale, lanes: r.lanes.map(lane) }));
+}
+if (FW_ON && FM_ON) {
+  setProposalsHost({
+    bridge: bridgeUrl,
+    active: () => {
+      const sl = emtree.active();
+      if (!sl) return null;
+      const st = sl.store;
+      return { graphId: graphIdOfSlot(sl), sig: `${sl.id}:${st.rev}`, json: () => st.toJSON(), path: emtree.fileOf(sl)?.path ?? null,
+               has: (id: string) => !!st.node(id), name: (id: string) => String(st.node(id)?.name ?? id) };
+    },
+    lanes: () => fmHorizonLanes(),
+    laneName: (id) => (id ? String(store?.node(id)?.name ?? fmHorizonLanes()?.find((l) => l.id === id)?.name ?? id) : ""),
+    lang: () => getLocale(),
+    t: (k, v) => t(k, v as Record<string, string>),
+    selection: () => (selectedIds.size ? [...selectedIds] : selectedId ? [selectedId] : []),
+    identities: () => fwIdentities(),
+    ai: {
+      provider: () => getSettings().ai.provider,
+      model: () => getSettings().ai.model,
+      ready: () => aiConfigured(),
+      configure: (then) => askForAiThen(then),
+    },
+    accept: (p, parentId) => fwAccept(p, parentId),
+    show: (ids) => { selectMany(ids); },
+    exists: (id) => !!store?.node(id),
+    changed: () => { refreshSurfaces("functional-proposals"); },
   });
 }
 /** MICRO-MF01 · the lanes of the Functional Matrix: the horizons a Matrix
@@ -23113,7 +23283,7 @@ function renderCirclesPanel(): void {
           type: "*",
           leaf: kind === "node" ? UNKNOWN_NODE_LEAF : UNKNOWN_EDGE_LEAF,
           count: unknownTypes.reduce((a, x) => a + (counts.get(x) ?? 0), 0),
-          label: t("fp.unknown"),
+          label: t("fwp.unknown"),
           tip: unknownTypes.join(", "),
         });
       const leaves = familyLeaves(fam, fv);
@@ -23192,7 +23362,7 @@ function renderCirclesPanel(): void {
       name.addEventListener("click", toggle);
       row.append(cb, name, count,
         mk(t("fp.all"), t("fp.allTitle", { family: famLabel }), true),
-        mk(t("fp.none"), t("fp.noneTitle", { family: famLabel }), false), exp);
+        mk(t("fwp.none"), t("fp.noneTitle", { family: famLabel }), false), exp);
       box.appendChild(row);
 
       const types = document.createElement("div");
@@ -30358,6 +30528,8 @@ function foProofThere(path: string): boolean {
     } catch { ok = false; }
     foProof.set(path, ok);
     if (ok) draw();
+    // MICRO-MF07 · the Functional Matrix's empty row offers it too
+    if (ok && FM_ON) refreshSurfaces("functional-matrix");
   })();
   return false;
 }
@@ -31905,6 +32077,9 @@ const TRANSFORM_TYPES: WindowType[] = [
   ...(LM_ON ? ["landscape-matrix" as WindowType] : []),
   // MICRO-MF04 · EMBARGO · the Cube (lab build, its switch on)
   ...(LC_ON ? ["landscape-cube" as WindowType] : []),
+  // MICRO-MF07 · EMBARGO · the plan by horizon and the proposals (the workspace's switch)
+  ...(FW_ON && LC_ON ? ["functional-plan" as WindowType] : []),
+  ...(FW_ON && FM_ON ? ["functional-proposals" as WindowType] : []),
 ];
 /** MICRO-TIL002 · the types the selector marks «beta» (beta.ts) */
 const BETA_TYPES: ReadonlySet<WindowType> = new Set<WindowType>(["console", "script"]);
@@ -65946,7 +66121,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   console: [],
   script: [],
   // MICRO-MF01 · EMBARGO (lab): no «⋯» of its own yet
-  ...(LAB ? { "functional-matrix": [], "landscape-matrix": [], "landscape-cube": [] } : {}),
+  ...(LAB ? { "functional-matrix": [], "landscape-matrix": [], "landscape-cube": [], "functional-plan": [], "functional-proposals": [] } : {}),
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -70327,7 +70502,8 @@ function lmCubeSwitch(body: HTMLElement, win: Win, to: WindowType): void {
   b.textContent = t(to === "landscape-cube" ? "fw.toCube" : "fw.toLandscape");
   b.title = t("fw.switchTitle");
   b.addEventListener("click", () => transformWindowOf(win, to));
-  body.prepend(b);
+  // MICRO-MF07 · in the Cube's head (its drawing is measured to the area)
+  (body.querySelector<HTMLElement>(":scope > .lc-head") ?? body).prepend(b);
 }
 
 registerBuiltinSurfaces({
@@ -70357,6 +70533,15 @@ registerBuiltinSurfaces({
   ...(LAB ? { renderLandscapeCubeInto: (body: HTMLElement, win: Win) => {
     if (LC_ON) { renderLandscapeCubeInto(body, win.id); if (LM_ON) lmCubeSwitch(body, win, "landscape-matrix"); }
     else { body.textContent = ""; body.appendChild(emptyState("lc.offSwitch")); }
+  } } : {}),
+  // MICRO-MF07 · EMBARGO · the plan by horizon (it reads the Cube's answer) and
+  // the proposals (they write functional units): the lab build only
+  ...(LAB ? { renderFunctionalPlanInto: (body: HTMLElement, win: Win) => {
+    if (FW_ON && LC_ON) renderFunctionalPlanInto(body, win.id);
+    else { body.textContent = ""; body.appendChild(emptyState("lc.offSwitch")); }
+  }, renderFunctionalProposalsInto: (body: HTMLElement, win: Win) => {
+    if (FW_ON && FM_ON) renderFunctionalProposalsInto(body, win.id);
+    else { body.textContent = ""; body.appendChild(emptyState("fm.offSwitch")); }
   } } : {}),
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
