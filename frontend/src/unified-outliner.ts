@@ -12,8 +12,8 @@
  */
 import { floating } from "./floating";
 import {
-  DEFAULT_OPTS, DIMS, flattenOutliner, isTemporalHierarchy, opensForNode, paradataShown,
-  type Dim, type Hierarchy, type OutlinerOpts, type OutlinerSourceIn, type Texts, type URow,
+  DEFAULT_OPTS, DIMS, OUTLINER_VIEWS, flattenOutliner, isTemporalHierarchy, opensForNode, paradataShown,
+  type Dim, type DocGroup, type Hierarchy, type OutlinerView, type OutlinerOpts, type OutlinerSourceIn, type Texts, type URow,
 } from "./outliner-tree";
 
 export const ROW_H = 22;
@@ -97,6 +97,14 @@ export interface UnifiedDeps {
   strata?: () => { label: string; button: string; title: string; on: boolean } | null;
   /** …the switch pressed («Show all» / back to the units alone) */
   toggleStrata?: () => void;
+  /** MICRO-SEG28 · a file carried from Files (HTML5 drag, the Storage's MIME) onto
+   *  a document of the documents' index: whether the drag is one (`accepts`), the
+   *  words by the pointer, and the drop (stamp it, link it — the page confirms) */
+  fileDrop?: {
+    accepts: (types: readonly string[]) => boolean;
+    label: (row: URow) => string;
+    drop: (row: URow, dt: DataTransfer) => void;
+  };
 }
 
 /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · what the old Outliner of the scene did on
@@ -318,6 +326,9 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     el.dataset.key = r.key;
     if (r.id) el.dataset.id = r.id;
     el.dataset.i = String(i);
+    // MICRO-SEG28 · a document of the documents' index, a file's sign
+    if (r.docDrop) el.dataset.docRow = "1";
+    if (r.sign) el.dataset.sign = r.sign;
     const tw = document.createElement("span");
     tw.className = "uo-tw";
     if (r.parent) { tw.textContent = r.open ? "▾" : "▸"; tw.dataset.tw = "1"; }
@@ -779,6 +790,33 @@ export function mountUnifiedOutliner(host: HTMLElement, d: UnifiedDeps): Unified
     document.addEventListener("keyup", key, true);
   });
   layer.addEventListener("click", (e) => { if (Date.now() - dragEnded < 300) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+  // MICRO-SEG28 · a file of Files dropped on a document: stamped and linked to it
+  // (HTML5 drag and drop: the Storage's rows carry their path that way)
+  let fileOver: HTMLElement | null = null;
+  const fileClear = () => { fileOver?.classList.remove("uo-drop"); fileOver?.removeAttribute("title"); fileOver = null; };
+  const fileTarget = (e: DragEvent): { el: HTMLElement; r: URow } | null => {
+    const F = d.fileDrop;
+    if (!F || !e.dataTransfer || !F.accepts([...e.dataTransfer.types])) return null;
+    const el = (e.target as HTMLElement | null)?.closest<HTMLElement>(".uo-row") ?? null;
+    const r = el && layer.contains(el) ? rows[Number(el.dataset.i ?? -1)] : null;
+    return el && r?.docDrop && r.id ? { el, r } : null;
+  };
+  layer.addEventListener("dragover", (e) => {
+    const t = fileTarget(e);
+    if (!t) { fileClear(); return; }
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "link";
+    if (fileOver !== t.el) { fileClear(); fileOver = t.el; t.el.classList.add("uo-drop"); t.el.dataset.uoFileDrop = "1"; t.el.title = d.fileDrop!.label(t.r); }
+  });
+  layer.addEventListener("dragleave", (e) => { if (fileOver && !fileOver.contains(e.relatedTarget as Node | null)) fileClear(); });
+  layer.addEventListener("drop", (e) => {
+    const t = fileTarget(e);
+    fileClear();
+    if (!t || !e.dataTransfer) return;
+    e.preventDefault();
+    e.stopPropagation();
+    d.fileDrop!.drop(t.r, e.dataTransfer);
+  });
   layer.addEventListener("dblclick", (e) => {
     const r = rowOf(e.target);
     if (!r || (e.target as HTMLElement).closest("[data-tw],[data-eye],[data-menu]")) return;
@@ -929,6 +967,15 @@ export interface HeaderWords {
   help: string;
   /** MICRO-PL00 · «only the objects with their own georeference» */
   geoOwn?: string;
+  /** MICRO-SEG28 · the kind of Outliner (the graph, the documents and their
+   *  files), how the documents are grouped, the DTC branch */
+  view?: string;
+  views?: Record<OutlinerView, string>;
+  viewHints?: Record<OutlinerView, string>;
+  docGroup?: string;
+  docGroups?: Record<DocGroup, string>;
+  dtc?: string;
+  dtcHint?: string;
 }
 
 /** The selector «☰» and its popover: hierarchy, dimensions, sync, the absent
@@ -942,7 +989,9 @@ export function outlinerSelector(opts: () => OutlinerOpts, set: (o: OutlinerOpts
   btn.dataset.uoSelector = "1";
   const o0 = opts();
   // MICRO-SEG15 · in a tight head «3D» goes first (level 1): the button stays lit
-  btn.innerHTML = o0.sync3d ? `☰<span class="hdr-long"> 3D</span>` : "☰";
+  btn.innerHTML = o0.view === "documents" && w.views ? `☰<span class="hdr-long"> ${w.views.documents.replace(/[<>&]/g, "")}</span>`
+    : o0.sync3d ? `☰<span class="hdr-long"> 3D</span>` : "☰";
+  if (o0.view === "documents") btn.dataset.uoView = "documents";
   btn.dataset.hdrCompact = "1";
   btn.classList.toggle("win-act-on", o0.sync3d);
   btn.title = w.selector;
@@ -968,6 +1017,20 @@ export function outlinerSelector(opts: () => OutlinerOpts, set: (o: OutlinerOpts
         b.addEventListener("click", (ev) => { ev.stopPropagation(); run(); draw(); });
         pop.appendChild(b);
       };
+      // MICRO-SEG28 · first, WHAT the Outliner indexes: the graph, or the documents
+      // and their files (the Archive's, offered everywhere)
+      if (w.views && !o.strata) {
+        head(w.view ?? "");
+        for (const v of OUTLINER_VIEWS)
+          item(w.views[v], (o.view ?? "graph") === v, "radio", () => set({ ...opts(), view: v }), `view:${v}`, w.viewHints?.[v]);
+        if (o.view === "documents") {
+          head(w.docGroup ?? "");
+          for (const gq of ["state", "type"] as DocGroup[])
+            item(w.docGroups?.[gq] ?? gq, (o.docGroup ?? "state") === gq, "radio", () => set({ ...opts(), docGroup: gq }), `docgroup:${gq}`);
+          item(w.dtc ?? "DTC", !!o.dtc, "check", () => set({ ...opts(), dtc: !opts().dtc }), "dtc", w.dtcHint);
+          return;
+        }
+      }
       head(w.hierarchy);
       for (const h of ["epoch", "alpha", "type"] as Hierarchy[])
         item(w.hier[h], o.hierarchy === h, "radio", () => set({ ...opts(), hierarchy: h }), `hier:${h}`);
@@ -1014,6 +1077,10 @@ export function readOpts(v: unknown): OutlinerOpts {
     absent: o.absent === "filter" ? "filter" : "grey",
     ...(typeof o.paradata === "boolean" ? { paradata: o.paradata } : {}),
     ...(o.geoOwn ? { geoOwn: true } : {}),
+    // MICRO-SEG28 · the kind of Outliner, when the person chose one (absent: the place decides)
+    ...(o.view === "documents" || o.view === "graph" ? { view: o.view } : {}),
+    ...(o.docGroup === "type" || o.docGroup === "state" ? { docGroup: o.docGroup } : {}),
+    ...(o.dtc ? { dtc: true } : {}),
     query: "",
   };
 }

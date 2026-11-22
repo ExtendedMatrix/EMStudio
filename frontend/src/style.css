@@ -12894,3 +12894,19 @@ td.plg-col { color: var(--muted, #888); }
 .nvf-bring { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .nvf-bring select { max-width: 100%; }
 .nvf-bring-note { margin: 0; font-size: 0.85em; opacity: 0.8; }
+
+/* MICRO-SEG28 · the Archive's Outliner: a file's quiet sign, the line «Holds», the
+   document's files at the head of the Shelf */
+.uo-row[data-sign="unstamped"] .uo-note { color: var(--muted, #8a8f98); }
+.uo-row[data-sign="changed"] .uo-note { color: var(--warn, #b7791f); }
+.uo-row[data-sign="missing"] .uo-note { color: var(--danger, #c0392b); }
+.insp-holdings { font-size: 11.5px; margin: 2px 0 6px; }
+.dcard-holdings .dcard-stamp { margin-left: auto; }
+.shelf-docfiles { border-bottom: 1px solid var(--line, rgba(127, 127, 127, 0.2)); padding: 4px 8px 6px; font-size: 11.5px; }
+.shelf-docfiles-h { font-weight: 600; margin-bottom: 3px; }
+.shelf-docfiles-h .dcard-dim { font-weight: 400; }
+.shelf-docfile { display: flex; gap: 6px; align-items: center; width: 100%; text-align: left; font: inherit; border: 0; background: none; padding: 1px 0; cursor: pointer; color: inherit; }
+.shelf-docfile:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.08)); }
+.shelf-docfile[data-sign="missing"] .uo-note { color: var(--danger, #c0392b); }
+.shelf-docfile[data-sign="changed"] .uo-note { color: var(--warn, #b7791f); }
+.shelf-docfile[data-sign="unstamped"] .uo-note { color: var(--muted, #8a8f98); }

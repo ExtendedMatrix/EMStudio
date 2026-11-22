@@ -238,6 +238,7 @@ import { countUnits, emptyFacts, type Dim, type OutlinerOpts, type OutlinerSourc
 import { buildOutline } from "./outline";
 import { epochKind, epochsOf as epochsOfNode, planDoes, planEpochs, type EpochPlan, type EpochVerb } from "./epoch-moves";
 import { mountUnifiedOutliner, outlinerSelector, readOpts, type SpaceRowDeps } from "./unified-outliner";
+import { documentHoldings, holdingCounts, holdingLine, type HoldingCounts, type HoldingWords } from "./archive-tree";
 import { helpGlyph } from "./help-glyph";
 import { installHelpTips } from "./help-tip";
 // MICRO-OUTLINER-EPOCHE-TOOLTIP p.3 · every «?» of the app opens beside itself
@@ -2759,6 +2760,8 @@ window.__EM_SCENE__ = () => {
     if (w) setStoragePath(w, path);
     return !!w;
   },
+  /** MICRO-SEG28 · where the File windows of the workspace are, and what they hold selected */
+  storageAt: () => windowsOf().filter((x) => x.type === "storage").map((w) => ({ id: w.id, mode: winModeOf(w), path: storagePath(w), selected: storageSelected(w) })),
   /** MICRO-TILESET-CARTELLA · a drop of a tileset on a window, as the drop
    *  handler does it: files of the system (path + Blob) or a Storage path */
   tilesetDrop: async (winId: string, files: Array<{ path: string; blob: Blob }>) => {
@@ -4669,6 +4672,7 @@ function renderInspectorInto(host: HTMLElement): void {
   if (selectedId) renderTraceBanner(host, owning, selectedId);   // FONTE · a trace, and «Ripristina»
   if (selectedId) {
     renderDocumentCard(host, owning, selectedId);        // MICRO-VIEWER-UNICO p.5 · the Doc's fields
+    renderHoldingsLine(host, owning, selectedId);        // MICRO-SEG28 · what it holds, the Archive's words
     renderMediaStrip(host, owning, selectedId);          // MICRO-B-DOCUMENTI-MEDIA · its media, the strip
     renderCatalogueLine(host, owning, selectedId);       // …and a catalogue's state
     renderAltLabels(host, owning, selectedId);           // A1 · its other labels
@@ -13304,7 +13308,10 @@ function unifiedOptsOf(win: Win): OutlinerOpts {
     // MICRO-SPAZIO-CONTAINER p.8 · in the Space the dimensions are the 3D's, the epoch above them
     ...(win.id.startsWith("space:") ? { space: true } : {}),
     // MICRO-SEG17 · in the Sheets the stratigraphic units alone, unless «Show all»
-    ...(uoStrataHere(win) && !uoStrataAll(win) ? { strata: true } : {}) };
+    ...(uoStrataHere(win) && !uoStrataAll(win) ? { strata: true } : {}),
+    // MICRO-SEG28 · in the Archive the Outliner is the index of the documents and
+    // their files, unless the person chose the graph in this window
+    view: o.view ?? (uoWorkspaceOf(win) === "assets" ? "documents" : "graph") };
 }
 /** MICRO-SEG17 · the Outliners that filter to the stratigraphic units: the ones of
  *  the Sheets workspace (the sheets describe the units, and only them). The
@@ -13376,6 +13383,14 @@ function unifiedFacts(): ThreeFacts {
   // MICRO-GEO16 (row G16 f) · the plugins' stacks, read live (their answers come after the graph's revision)
   v.layers = () => pluginLayersNow().map((p) => ({ key: layerKey(p), id: p.layer.id, name: p.layer.name,
     slices: horizontalsOf(p.layer).length, sections: verticalsOf(p.layer).length }));
+  // MICRO-SEG28 · what the resolver said of a file, read live (the answers come
+  // after the graph's revision: «Check files»)
+  v.fileFact = (id) => {
+    const f = fileStateOf(id);
+    if (!f) return null;
+    const x = f as typeof f & { changed?: boolean; sha256_now?: string };
+    return { state: f.state, path: f.path, changed: !!x.changed || !!x.sha256_now };
+  };
   unifiedFactsMemo = { store: st, rev: st.rev, sp, v };
   v.sketches = sp ? listSketches().map((x) => ({ id: x.id, name: x.name })) : [];
   return v;
@@ -14479,7 +14494,8 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
                                .map(([w, n]) => t(`plyr.planes.${w}.${n === 1 ? "one" : "other"}`, { n: String(n) })).join(", ") },
                     container: { alternative: t("uo.c.alternative"), livesIn: (e) => t("uo.c.livesIn", { epochs: e }),
                                  outOfStep: (n, theirs, ref) => t("al.epochsOut", { n: String(n), theirs, ref }), follows: t("uo.c.follows"),
-                                 ownChoice: (e) => t("uo.c.ownChoice", { epochs: e }) } }),
+                                 ownChoice: (e) => t("uo.c.ownChoice", { epochs: e }) },
+                    docs: uoDocTexts() }),
     opts: () => unifiedOptsOf(win),
     // MICRO-SEG17 · the Sheets' filter said at the head, and its switch (per window)
     strata: () => {
@@ -14499,7 +14515,17 @@ function unifiedDeps(win: Win): Parameters<typeof mountUnifiedOutliner>[1] {
     selectedId: () => selectedId,
     contextEpoch: () => spaceEpochId,   // MICRO-SEG10 p.2 · the epoch in front
     sameWord: () => t("uo.sameUnit"),
-    pick: (r, e) => unifiedPick(r, e),
+    pick: (r, e) => { unifiedPick(r, e); if (r.docDrop && r.id && !(e.metaKey || e.ctrlKey)) void archiveFollowDocument(r.id); },
+    // MICRO-SEG28 · a file of Files onto a document: stamped and linked to it
+    fileDrop: {
+      accepts: (types) => types.includes(STORAGE_MIME),
+      label: (r) => t("uo.doc.dropLabel", { doc: r.label }),
+      drop: (r, dt) => {
+        let p: StorageDragPayload | null = null;
+        try { p = JSON.parse(dt.getData(STORAGE_MIME)) as StorageDragPayload; } catch { p = null; }
+        if (p && r.id) void stampOntoDocument(r.id, p);
+      },
+    },
     frame: (r) => {
       const key = r.eye ?? (r.id && unifiedFacts().proxies.has(r.id) ? `proxy:${r.id}` : null);
       if (!key) { if (r.id) unifiedReveal(r.id); return; }
@@ -14925,6 +14951,11 @@ function unifiedHeader(win: Win): HTMLElement[] {
     hier: { epoch: t("uo.hier.epoch"), alpha: t("uo.hier.alpha"), type: t("uo.hier.type") },
     dims: t("uo.dims"), dim: uoDimWords(), sync: t("uo.sync"), syncHint: t("uo.syncHint"),
     grey: t("uo.grey"), filter: t("uo.filter"), paradata: t("uo.dim.paradata"), help: t("uo.help"), geoOwn: t("uo.geoOwn"),
+    // MICRO-SEG28 · the kind of Outliner, the documents' grouping, the DTC branch
+    view: t("uo.view"), views: { graph: t("uo.view.graph"), documents: t("uo.view.documents") },
+    viewHints: { graph: t("uo.viewHint.graph"), documents: t("uo.viewHint.documents") },
+    docGroup: t("uo.docGroup"), docGroups: { state: t("uo.docGroup.state"), type: t("uo.docGroup.type") },
+    dtc: t("uo.docDtc"), dtcHint: t("uo.docDtcHint"),
   });
   let inp = unifiedSearchEls.get(win.id);
   if (!inp) {
@@ -41118,6 +41149,7 @@ function renderShelfInto(win: Win, body: HTMLElement,
   body.textContent = "";
   body.classList.remove("shelf-searching");
   body.appendChild(shelfHead());
+  { const strip = shelfDocStrip(win); if (strip) body.appendChild(strip); }   // MICRO-SEG28 B
   if (!entries.length) {
     shelfPreviewDispose(win.id);
     const empty = document.createElement("div");
@@ -43759,17 +43791,27 @@ function documentCard(): HTMLElement | null {
     tag.textContent = t(`dcard.m.${mediumOfFile(filename)}`);
     head.appendChild(tag);
   }
-  const files = st.doc.graph.edges
-    .filter((e) => e.source === d.id && e.edge_type === "has_linked_resource")
-    .map((e) => st.node(e.target))
-    .filter((n): n is EmNode => !!n);
+  // MICRO-SEG28 · what it holds, by the three roads (its own files, its models',
+  // their containers' tilesets): the line Sources' Inspector says too
+  const hold = documentHoldings(st.doc.graph, d.id);
+  const hl = document.createElement("div");
+  hl.className = "dcard-row dcard-holdings";
+  hl.dataset.docHoldings = d.id;
+  const hk = document.createElement("span");
+  hk.className = "dcard-dim";
+  hk.textContent = t("dcard.holdings") + " ";
+  hl.append(hk, document.createTextNode(holdingLine(holdingCounts(hold), holdingWords())));
+  const unst = hold.top.filter((x) => !x.stamped);
+  if (unst.length) hl.appendChild(stampLinkedButton(st, d.id, unst.map((x) => x.id)));
+  // the files it links ITSELF (a model's are under the model, in the Outliner)
+  const files = hold.top.filter((x) => x.via === d.id || x.kind === "tileset").map((x) => st.node(x.id)).filter((n): n is EmNode => !!n);
   const fl = document.createElement("div");
   fl.className = "dcard-row";
   const fk = document.createElement("span");
   fk.className = "dcard-dim";
   fk.textContent = t("dcard.files") + " ";
   fl.appendChild(fk);
-  if (!files.length && !filename) fl.appendChild(document.createTextNode(t("dcard.nofile")));
+  if (!files.length && !filename && !hold.top.length) fl.appendChild(document.createTextNode(t("dcard.nofile")));
   if (filename && !files.length) fl.appendChild(document.createTextNode(filename));
   for (const f of files) {
     const fd = (f.data ?? {}) as Record<string, unknown>;
@@ -43801,14 +43843,264 @@ function documentCard(): HTMLElement | null {
     renderDocView();
   });
   rd.appendChild(go);
-  box.append(eyebrow, head, fl, rd);
+  box.append(eyebrow, head, hl, ...(files.length || filename || !hold.top.length ? [fl] : []), rd);
+  return box;
+}
+
+// ── MICRO-SEG28 · the Archive's Outliner: the documents and their files ─────
+
+/** the words of «10 models and 1 tileset linked · 11 of 11 files stamped» */
+function holdingWords(): HoldingWords {
+  return {
+    models: (n) => tn("dcard.h.models", n, { n: String(n) }),
+    tilesets: (n) => tn("dcard.h.tilesets", n, { n: String(n) }),
+    files: (n) => tn("dcard.h.files", n, { n: String(n) }),
+    and: t("dcard.h.and"),
+    linked: (what) => t("dcard.h.linked", { what }),
+    stamped: (s, n) => t("dcard.h.stamped", { s: String(s), n: String(n) }),
+    nothing: t("dcard.nofile"),
+  };
+}
+const holdingLineOf = (c: HoldingCounts): string => holdingLine(c, holdingWords());
+
+function uoDocTexts() {
+  return {
+    state: { with: t("uo.doc.state.with"), without: t("uo.doc.state.without"), changed: t("uo.doc.state.changed"), missing: t("uo.doc.state.missing") },
+    kind: { models: t("uo.doc.kind.models"), images: t("uo.doc.kind.images"), pdf: t("uo.doc.kind.pdf"), drawings: t("uo.doc.kind.drawings"), other: t("uo.doc.kind.other") },
+    models: t("uo.doc.models"),
+    sign: { stamped: t("uo.doc.sign.stamped"), unstamped: t("uo.doc.sign.unstamped"), changed: t("uo.doc.sign.changed"), missing: t("uo.doc.sign.missing") },
+    line: holdingLineOf,
+    tilesetOf: (group: string, n: number) => t("uo.doc.tilesetOf", { group, n: String(n) }),
+    version: t("uo.doc.version"),
+    license: (v: string) => t("uo.doc.license", { v }),
+    embargo: (v: string) => t("uo.doc.embargo", { v }),
+    dtc: t("uo.docDtc"), input: t("uo.doc.input"), output: t("uo.doc.output"),
+    none: t("uo.doc.none"),
+  };
+}
+
+/** a file of the graph as a path on this computer: what the resolver found, else
+ *  its address read against the em.json's folder (a `blend://` is its .blend) */
+function holdingPath(id: string): string | null {
+  const f = fileStateOf(id);
+  if (f?.path && paths.isAbsolute(f.path)) return f.path;
+  const d = (store?.node(id)?.data ?? {}) as Record<string, unknown>;
+  let url = String(d.url ?? d.filename ?? d.path ?? "");
+  if (url.startsWith("blend://")) url = url.slice(8).replace(/#.*$/, "");
+  if (!url || (paths.hasScheme(url) && !/^[A-Za-z]:/.test(url))) return null;
+  const abs = paths.resolveRelative(currentFilePath, url);
+  return paths.isAbsolute(abs) ? abs : null;
+}
+
+/** «Archivio ▸ un documento cliccato»: every File window of the workspace goes to
+ *  its folder — or the nearest one the bridge serves — with its file selected
+ *  (the chain DTC follows the file, the Shelf lists the document's files, the
+ *  card is the selection's). Nothing is asked: a folder not served is not added. */
+async function archiveFollowDocument(docId: string): Promise<void> {
+  const st = store;
+  if (!st || st.node(docId)?.node_type !== "document") return;
+  renderShelf();
+  const wins = windowsOf().filter((w) => w.type === "storage" && winModeOf(w) !== "s3" && winAreas.has(w.id));
+  if (!wins.length) return;
+  const h = documentHoldings(st.doc.graph, docId);
+  const files = [...new Set([...h.top, ...h.all].map((x) => holdingPath(x.id)).filter((p): p is string => !!p))];
+  const name = String(st.node(docId)?.name ?? docId);
+  if (!files.length) return;
+  const go = (dir: string, file: string | null): void => {
+    for (const w of wins) {
+      if (winModeOf(w) !== "filesystem") setWinModeOf(w, "filesystem");
+      setStoragePath(w, dir);
+      if (file) setStorageSelected(w, file);
+    }
+    renderAreaHeaders();
+  };
+  // the first of its files that IS in its folder: that folder, that file selected
+  const tried = new Map<string, Set<string> | null>();
+  for (const file of files.slice(0, 12)) {
+    const dir = paths.dirname(file);
+    if (!tried.has(dir)) {
+      try {
+        const l = await fsList(dir);
+        tried.set(dir, new Set(l.entries.map((e) => e.name)));
+      } catch (e) {
+        if (e instanceof BridgeDownError) return;
+        tried.set(dir, null);
+      }
+    }
+    if (selectedId !== docId) return;   // another pick meanwhile
+    if (tried.get(dir)?.has(paths.basename(file))) { go(dir, file); return; }
+  }
+  // none on the disk: the nearest folder the bridge serves, above the first
+  let dir = paths.dirname(files[0]);
+  for (let up = 0; dir && up < 8; up++) {
+    const known = tried.get(dir);
+    let served = known !== undefined ? known !== null : false;
+    if (known === undefined) {
+      try { await fsList(dir); served = true; } catch (e) { if (e instanceof BridgeDownError) return; }
+    }
+    if (selectedId !== docId) return;
+    if (served) { go(dir, null); toast(t("uo.doc.folderNear", { dir })); return; }
+    const parent = paths.dirname(dir);
+    if (!parent || parent === dir) break;
+    dir = parent;
+  }
+  toast(t("uo.doc.folderNone", { doc: name }));
+}
+
+/**
+ * MICRO-SEG28 C · a file of Files dropped on a document of the Outliner: STAMPED
+ * (the bridge computes its sha256: `/fs/checksum`) and LINKED to the document
+ * (`has_linked_resource`) — the resource «stamp a file and promote it» makes.
+ * Asked first; one undo step. The same bytes already a resource of the graph:
+ * that resource is linked, no second one is made.
+ */
+async function stampOntoDocument(docId: string, p: StorageDragPayload): Promise<void> {
+  const st = store;
+  const d = st?.node(docId);
+  if (!st || !d) return;
+  const docName = String(d.name ?? docId);
+  if (p.type !== "file") { toast(t("uo.doc.dropFolder")); return; }
+  const yes = await askConfirm(t("uo.doc.dropAsk", { file: p.name, doc: docName }), { ok: t("uo.doc.dropOk"), kind: "stamp-onto-doc" });
+  if (!yes || store !== st) return;
+  const sum = await bridgeChecksum(p.path);
+  const known = sum ? findResource(st, sum) : null;
+  const url = currentFilePath ? paths.relativeTo(currentFilePath, p.path) : p.path;
+  const linked = (rid: string) => st.doc.graph.edges.some((e) => e.source === docId && e.target === rid && e.edge_type === "has_linked_resource"
+    && !(e as { attributes?: { removed?: unknown } }).attributes?.removed);
+  if (known && linked(known.id)) { toast(t("uo.doc.dropAgain", { file: p.name, doc: docName })); return; }
+  st.batch(() => {
+    const rid = known?.id ?? addResource(storeGraph(st), { resourceId: st.newId(), name: p.name, kind: "",
+      files: [{ path: url, ...(sum ? { checksum: sum } : {}) }], residency: "resident" }).id;
+    st.addEdge(docId, rid, "has_linked_resource");
+  });
+  toastUndo(known ? t("uo.doc.dropKnown", { name: String(known.name ?? known.id), doc: docName })
+    : sum ? t("uo.doc.dropDone", { file: p.name, doc: docName }) : t("uo.doc.dropNoSum", { file: p.name }), st);
+  refreshInspector();
+  renderStorage();
+}
+
+/** E · «Stamp the N linked files not stamped yet»: each one found on the disk is
+ *  hashed by the bridge and its digest written on its resource (one undo step) */
+function stampLinkedButton(st: DocumentStore, docId: string, ids: string[]): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "dcard-go dcard-stamp";
+  b.dataset.action = "stamp-linked";
+  b.dataset.doc = docId;
+  b.textContent = tn("dcard.stampLinked", ids.length, { n: String(ids.length) });
+  b.title = t("dcard.stampLinkedHint");
+  b.addEventListener("click", () => {
+    void (async () => {
+      b.disabled = true;
+      const sums = new Map<string, string>();
+      for (const id of ids) {
+        const at = holdingPath(id);
+        const sum = at ? await bridgeChecksum(at) : null;
+        if (sum) sums.set(id, sum);
+      }
+      if (store !== st) return;
+      if (!sums.size) { toast(t("dcard.stampNone")); b.disabled = false; return; }
+      st.batch(() => {
+        for (const [id, sum] of sums) {
+          const n = st.node(id);
+          if (n) st.updateNode(id, { data: { ...((n.data ?? {}) as Record<string, unknown>), checksum: sum } } as Partial<EmNode>);
+        }
+      });
+      toastUndo(t("dcard.stampedNow", { s: String(sums.size), n: String(ids.length) }), st);
+      renderStorage();
+      refreshInspector();
+    })();
+  });
+  return b;
+}
+
+/** MICRO-SEG28 E · the same line in the Inspector of a document (Sources): what it
+ *  holds, in the Archive card's words */
+function renderHoldingsLine(host: HTMLElement, st: DocumentStore, id: string): void {
+  if (st.node(id)?.node_type !== "document") return;
+  const h = documentHoldings(st.doc.graph, id);
+  const line = document.createElement("div");
+  line.className = "insp-holdings";
+  line.dataset.docHoldings = id;
+  const k = document.createElement("span");
+  k.className = "dcard-dim";
+  k.textContent = t("dcard.holdings") + " ";
+  line.append(k, document.createTextNode(holdingLineOf(holdingCounts(h))));
+  const card = host.querySelector(".insp-doc-card");
+  if (card) card.querySelector("h3")?.after(line) ?? card.prepend(line);
+  else (host.querySelector(".insp-head") ?? host.firstElementChild)?.after(line);
+}
+
+/** MICRO-SEG28 B · at the head of the Shelf in the Archive: the files of the
+ *  document selected (its linked files, its models' and tilesets'), each with its
+ *  sign; a click selects it in Files */
+function shelfDocStrip(win: Win): HTMLElement | null {
+  const st = store;
+  if (!st || !selectedId || uoWorkspaceOf(win) !== "assets") return null;
+  const d = st.node(selectedId);
+  if (d?.node_type !== "document") return null;
+  const h = documentHoldings(st.doc.graph, d.id);
+  const box = document.createElement("div");
+  box.className = "shelf-docfiles";
+  box.dataset.shelfDoc = d.id;
+  const head = document.createElement("div");
+  head.className = "shelf-docfiles-h";
+  head.textContent = t("uo.doc.shelfHead", { doc: String(d.name ?? d.id) });
+  const line = document.createElement("span");
+  line.className = "dcard-dim";
+  line.textContent = ` · ${holdingLineOf(holdingCounts(h))}`;
+  head.appendChild(line);
+  box.appendChild(head);
+  if (!h.top.length) {
+    const p = document.createElement("div");
+    p.className = "insp-hint";
+    p.textContent = t("uo.doc.shelfNone", { doc: String(d.name ?? d.id) });
+    box.appendChild(p);
+    return box;
+  }
+  const SIGN: Record<string, string> = { stamped: "✓", unstamped: "○", changed: "≠", missing: "✕" };
+  for (const x of h.top.slice(0, 40)) {
+    const f = fileStateOf(x.id);
+    const sign = f?.state === "missing" || f?.state === "empty_copy" ? "missing" : (f as { changed?: boolean } | undefined)?.changed ? "changed" : x.stamped ? "stamped" : "unstamped";
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "shelf-docfile";
+    row.dataset.shelfDocFile = x.id;
+    row.dataset.sign = sign;
+    const s = document.createElement("span");
+    s.className = "uo-note";
+    s.textContent = SIGN[sign];
+    s.title = t(`uo.doc.sign.${sign}`);
+    const n = document.createElement("span");
+    n.textContent = x.name;
+    row.append(s, n);
+    const at = holdingPath(x.id);
+    row.title = at ?? x.url;
+    row.addEventListener("click", () => {
+      if (!at) { select(x.id); refreshInspector(); return; }
+      for (const w of windowsOf().filter((w2) => w2.type === "storage" && winModeOf(w2) !== "s3" && winAreas.has(w2.id))) {
+        void (async () => {
+          try { await fsList(paths.dirname(at)); } catch { return; }
+          setStoragePath(w, paths.dirname(at));
+          setStorageSelected(w, at);
+        })();
+      }
+    });
+    box.appendChild(row);
+  }
+  if (h.top.length > 40) {
+    const more = document.createElement("div");
+    more.className = "dcard-dim";
+    more.textContent = `+${h.top.length - 40}`;
+    box.appendChild(more);
+  }
   return box;
 }
 
 // ── R1/R2 (E.D., 4 Oct 2026) · where the files are, with the ONE resolver ──
 let filesChecking = false;
 
-function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); renderMissingPill(); }
+function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); renderMissingPill(); nodeList.refresh(); }
 
 function fileRoom(): { base: string; room_id: string; token?: string | null } | null {
   const base = (hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");

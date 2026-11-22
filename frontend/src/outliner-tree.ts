@@ -37,6 +37,10 @@ import { buildOutline } from "./outline";
 import { presenceIndex } from "./epoch-presence";
 import { classIsA, classOf, typesOfClass } from "./rules";
 import type { EmDocument, EmNode } from "./types";
+import {
+  DOC_KINDS, DOC_STATES, docKind, docRights, docState, documentHoldings, dtcProcesses, fileSign, holdingCounts, indexOf,
+  type DocKind, type DocState, type FileFact, type FileSign, type Holding, type HoldingCounts,
+} from "./archive-tree";
 
 export type Dim = "units" | "documents" | "authors" | "epochs" | "models" | "proxies" | "gis" | "paradata" | "other" | "aux";
 /** every dimension, in the order the graph shows them */
@@ -50,6 +54,12 @@ export type Hierarchy = "epoch" | "alpha" | "type";
 export const TEMPORAL_HIERARCHIES: readonly Hierarchy[] = ["epoch"];
 export const isTemporalHierarchy = (h: Hierarchy): boolean => TEMPORAL_HIERARCHIES.includes(h);
 export type Absent = "grey" | "filter";
+/** MICRO-SEG28 · what the Outliner is an index OF: the graph (its dimensions), or
+ *  the DOCUMENTS and their files (the Archive's: `archive-tree.ts`) */
+export type OutlinerView = "graph" | "documents";
+export const OUTLINER_VIEWS: readonly OutlinerView[] = ["graph", "documents"];
+/** …the documents grouped by the state of their files, or by their kind */
+export type DocGroup = "state" | "type";
 
 export interface OutlinerOpts {
   hierarchy: Hierarchy;
@@ -74,6 +84,13 @@ export interface OutlinerOpts {
    *  organised as ever — no other dimension, no paradata, no RMSF under a find.
    *  Set by the window (never persisted in its options) unless «Show all» */
   strata?: boolean;
+  /** MICRO-SEG28 · the index of the documents and their files (undefined: the
+   *  window's place decides — the Archive's Outliner is it by default) */
+  view?: OutlinerView;
+  /** …grouped by state (default) or by kind */
+  docGroup?: DocGroup;
+  /** …with the DTC processes as a second branch (input → process → product) */
+  dtc?: boolean;
   query: string;
 }
 
@@ -126,6 +143,9 @@ export interface ThreeFacts {
    *  (`space.layer@1`), read live: a row each under «no epoch», its eye the
    *  stack's «shown», a click selects the stack's node (the acquisition) */
   layers?: () => Array<{ key: string; id: string; name: string; slices: number; sections: number }>;
+  /** MICRO-SEG28 · what the resolver said of a file (missing, changed since its
+   *  stamp), when it was asked («Check files»); null: not asked */
+  fileFact?: (id: string) => FileFact | null;
 }
 
 export interface VersionIn { id: string; name: string; drawn: boolean; chosen: boolean; level?: string; uses?: string[]; auto?: boolean }
@@ -187,6 +207,31 @@ export interface Texts {
   container?: { alternative: string; livesIn: (epochs: string) => string; outOfStep: (n: number, theirs: string, ref: string) => string; follows: string;
     /** MICRO-TESTATE-COERENTI p.11 · a member in an epoch of its own choice */
     ownChoice?: (epochs: string) => string };
+  /** MICRO-SEG28 · the words of the documents' index */
+  docs?: DocTexts;
+}
+
+export interface DocTexts {
+  state: Record<DocState, string>;
+  kind: Record<DocKind, string>;
+  /** the heading of a document's models */
+  models: string;
+  /** a file's quiet sign, in words */
+  sign: Record<FileSign, string>;
+  /** a document's line (its tooltip): «10 models and 1 tileset linked · …» */
+  line: (c: HoldingCounts) => string;
+  /** a tileset row's tooltip: «the tileset of the container «Survey2015», 11 models» */
+  tilesetOf: (group: string, models: number) => string;
+  /** a version of a file */
+  version: string;
+  license: (s: string) => string;
+  embargo: (s: string) => string;
+  /** the DTC branch: its heading, an input, an output */
+  dtc: string;
+  input: string;
+  output: string;
+  /** the drop words on a document («Stamp it and link it to D.01») — shown by the page */
+  none?: string;
 }
 
 export type RowKind = "source" | "graph" | "dim" | "group" | "node" | "sub" | "gis" | "aux" | "empty" | "version";
@@ -252,6 +297,11 @@ export interface URow {
   followGroup?: string;
   /** MICRO-PL00 · its own georeference, in words (the row's discreet mark) */
   geo?: string;
+  /** MICRO-SEG28 · a document of the documents' index: a file from Files may be
+   *  dropped on it (stamped and linked to it) */
+  docDrop?: boolean;
+  /** …a file's quiet sign (stamped, not stamped, changed, missing) */
+  sign?: FileSign;
 }
 
 interface TNode {
@@ -325,6 +375,7 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
   if (!doc) return [];
   const { opts, texts } = b;
   const facts = g.facts();
+  if (opts.view === "documents") return documentsKids(g, doc, b, facts);
   const live = doc.graph.nodes.filter((n) => !removed(n));
   const byId = new Map(live.map((n) => [n.id, n]));
   const gisIds = new Set(facts.gis.map((x) => x.id));
@@ -803,6 +854,112 @@ function graphKids(g: OutlinerGraphIn, b: BuildIn): TNode[] {
     if (d === "aux" && !g.aux.length) continue;
     if (d === "gis" && !facts.gis.length) continue;
     out.push({ row: { key: k(`dim:${d}`), kind: "dim", label: texts.dim[d], slot: g.slot }, lazy: make[d], def: d === (opts.firstOpen ?? "units") || (opts.sync3d && (d === "models" || d === "proxies")) });
+  }
+  return out;
+}
+
+const SIGN_GLYPH: Record<FileSign, string> = { stamped: "✓", unstamped: "○", changed: "≠", missing: "✕" };
+const mb = (n: number | null): string => (n == null || n <= 0 ? "" : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
+
+/**
+ * MICRO-SEG28 · THE DOCUMENTS' INDEX: what the graph knows of its files.
+ *
+ *   Graph
+ *     ├ With files / Without files (to stamp) / File changed / File missing   (by state)
+ *     │   or Models & tilesets / Images / PDF / Drawings / Other              (by type)
+ *     │     └ D.01                      © ⏳ (its own licence, embargo)
+ *     │         ├ OB_PRATO.pdf  ✓        a file it links, its members, its versions
+ *     │         ├ Models (10)
+ *     │         │   └ SM_OB_EST_L_LOD1 → OB_EST_L (surveyed mesh) ✓ → LOD0 (OBJ) ✓
+ *     │         └ Survey2015 · TempluMare (Cesium 3D Tiles tileset) ✓
+ *     └ DTC processes (an option)  input ← process → product
+ */
+function documentsKids(g: OutlinerGraphIn, doc: EmDocument, b: BuildIn, facts: ThreeFacts): TNode[] {
+  const W = b.texts.docs;
+  if (!W) return [];
+  const k = (s: string) => `${g.slot}|${s}`;
+  const ix = indexOf(doc.graph);
+  const fact = (id: string): FileFact | null => facts.fileFact?.(id) ?? null;
+  const docs = doc.graph.nodes.filter((n) => !removed(n) && n.node_type === "document").sort(byName);
+  const fileRow = (x: Holding, pre: string, kids: Holding[]): TNode => {
+    const sign = fileSign(x, fact(x.id));
+    const under = kids.filter((y) => y.via === x.id);
+    return {
+      row: { key: k(`${pre}/f:${x.id}`), kind: "sub", label: x.name, id: x.id, slot: g.slot, glyph: x.kind === "file" ? "resource_file" : "resource",
+        ...(x.kind === "tileset" ? { icon: "tileset" } : {}),
+        ...(mb(x.bytes) ? { desc: mb(x.bytes) } : {}),
+        note: SIGN_GLYPH[sign], noteTitle: x.kind === "version" ? `${W.version} · ${W.sign[sign]}` : W.sign[sign], sign },
+      present: true, match: `${x.name} ${x.url}`.toLowerCase(),
+      ...(under.length ? { kids: under.map((y) => fileRow(y, `${pre}/f:${x.id}`, kids)), def: false } : {}),
+    };
+  };
+  const docRow = (n: EmNode, pre: string): TNode => {
+    const h = documentHoldings(ix, n.id);
+    const kids: TNode[] = [];
+    const ownRoots = h.own.filter((x) => x.via === n.id);
+    for (const x of ownRoots) kids.push(fileRow(x, `${pre}/${n.id}`, h.own));
+    if (h.models.length) {
+      kids.push({ row: { key: k(`${pre}/${n.id}/models`), kind: "group", label: W.models, glyph: "representation_model", count: String(h.models.length) },
+        def: false, present: true,
+        kids: h.models.map((m) => ({
+          row: { key: k(`${pre}/${n.id}/rm:${m.id}`), kind: "sub" as const, label: m.name, id: m.id, slot: g.slot, glyph: m.type },
+          present: true, match: m.name.toLowerCase(),
+          ...(m.files.length ? { kids: m.files.filter((x) => x.via === m.id).map((x) => fileRow(x, `${pre}/${n.id}/rm:${m.id}`, m.files)), def: false } : {}),
+        })) });
+    }
+    for (const ts of h.tilesets) {
+      const t = fileRow(ts.resource, `${pre}/${n.id}/ts:${ts.group}`, []);
+      t.row = { ...t.row, label: `${ts.groupName} · ${ts.resource.name}`, title: W.tilesetOf(ts.groupName, ts.models) };
+      kids.push(t);
+    }
+    const r = docRights(ix, n.id);
+    const marks = [r.license ? "©" : "", r.embargo ? "⏳" : ""].filter(Boolean).join(" ");
+    const tips = [r.license ? W.license(r.license) : "", r.embargo ? W.embargo(r.embargo) : ""].filter(Boolean).join(" · ");
+    return {
+      row: { key: k(`${pre}/${n.id}`), kind: "node", label: nameOf(n), id: n.id, slot: g.slot, glyph: "document", docDrop: true,
+        ...(n.description ? { desc: String(n.description) } : {}),
+        title: W.line(holdingCounts(h)),
+        ...(marks ? { note: marks, noteTitle: tips } : {}) },
+      present: true, match: `${nameOf(n)} ${String(n.description ?? "")}`.toLowerCase(),
+      ...(kids.length ? { kids, def: false } : {}),
+    };
+  };
+  const out: TNode[] = [];
+  if ((b.opts.docGroup ?? "state") === "type") {
+    const by = new Map<DocKind, EmNode[]>();
+    for (const n of docs) { const kd = docKind(documentHoldings(ix, n.id)); const l = by.get(kd); if (l) l.push(n); else by.set(kd, [n]); }
+    for (const kd of DOC_KINDS) {
+      const l = by.get(kd);
+      if (!l?.length) continue;
+      out.push({ row: { key: k(`docs/type:${kd}`), kind: "group", label: W.kind[kd] }, def: true, present: true,
+        kids: l.map((n) => docRow(n, `docs/type:${kd}`)) });
+    }
+  } else {
+    const by = new Map<DocState, EmNode[]>();
+    for (const n of docs) { const st = docState(documentHoldings(ix, n.id), fact); const l = by.get(st); if (l) l.push(n); else by.set(st, [n]); }
+    for (const st of DOC_STATES) {
+      const l = by.get(st);
+      if (!l?.length) continue;
+      out.push({ row: { key: k(`docs/state:${st}`), kind: "group", label: W.state[st] }, def: true, present: true,
+        kids: l.map((n) => docRow(n, `docs/state:${st}`)) });
+    }
+  }
+  if (!docs.length && W.none) out.push({ row: { key: k("docs/none"), kind: "group", label: W.none }, def: false, kids: [] });
+  // the optional second branch: the DTC processes, input ← process → product
+  if (b.opts.dtc) {
+    const ps = dtcProcesses(doc.graph, ix);
+    const io = (id: string, pre: string, dir: "in" | "out"): TNode => {
+      const nn = ix.node(id);
+      const name = String(nn?.name ?? id);
+      return { row: { key: k(`${pre}/${dir}:${id}`), kind: "sub", label: `${dir === "in" ? "←" : "→"} ${name}`, id, slot: g.slot,
+        glyph: String(nn?.node_type ?? "resource"), title: dir === "in" ? W.input : W.output }, present: true, match: name.toLowerCase() };
+    };
+    out.push({ row: { key: k("docs/dtc"), kind: "group", label: W.dtc, glyph: "dtc_process", count: String(ps.length) }, def: false, present: true,
+      kids: ps.map((p) => ({
+        row: { key: k(`docs/dtc/${p.id}`), kind: "node" as const, label: p.name, id: p.id, slot: g.slot, glyph: "dtc_process" },
+        present: true, match: p.name.toLowerCase(),
+        kids: [...p.inputs.map((x) => io(x, `docs/dtc/${p.id}`, "in")), ...p.outputs.map((x) => io(x, `docs/dtc/${p.id}`, "out"))], def: false,
+      })) });
   }
   return out;
 }
