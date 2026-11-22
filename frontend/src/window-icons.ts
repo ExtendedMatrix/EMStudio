@@ -51,7 +51,9 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
   // glyph of a functional unit (U6-bis)
   ...(LAB ? { "functional-matrix": '<path d="M6 2.5c-1.4 0-2 .6-2 2v2c0 .9-.5 1.5-1.5 1.5 1 0 1.5.6 1.5 1.5v2c0 1.4.6 2 2 2M10 2.5c1.4 0 2 .6 2 2v2c0 .9.5 1.5 1.5 1.5-1 0-1.5.6-1.5 1.5v2c0 1.4-.6 2-2 2"/>',
               // MICRO-MF03 · the Landscape Matrix: three columns of braces, a hexagon
-              "landscape-matrix": '<path d="M2.5 3h3M2.5 7h3M10.5 3h3M10.5 9h3M6.5 3v10M9.5 3v10"/><path d="M3 12l1-1.5h1.5l1 1.5-1 1.5H4z"/>' } : {}),
+              "landscape-matrix": '<path d="M2.5 3h3M2.5 7h3M10.5 3h3M10.5 9h3M6.5 3v10M9.5 3v10"/><path d="M3 12l1-1.5h1.5l1 1.5-1 1.5H4z"/>',
+              // MICRO-MF04 · the Cube: three planes stacked, a line crossing them
+              "landscape-cube": '<path d="M2 4.5 8 2.5l6 2-6 2zM2 8.5l6 2 6-2M2 12.5l6 2 6-2"/><path d="M8 6.5v8" stroke-dasharray="1.2 1.4"/>' } : {}),
 };
 
 /** The 16 px SVG for a window type (empty box for an unknown one). */

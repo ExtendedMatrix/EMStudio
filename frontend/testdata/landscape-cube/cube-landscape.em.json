@@ -1,0 +1,457 @@
+{
+  "active_graph_id": "LAND",
+  "graphs": {
+    "LAND": {
+      "edges": [
+        {
+          "edge_type": "is_in_location",
+          "id": "TEMPLE_loc",
+          "source": "TEMPLE",
+          "target": "site_S03"
+        },
+        {
+          "edge_type": "is_in_location",
+          "id": "RUIN_loc",
+          "source": "RUIN",
+          "target": "site_S03"
+        },
+        {
+          "edge_type": "is_in_location",
+          "id": "REST_loc",
+          "source": "REST",
+          "target": "site_S03"
+        },
+        {
+          "edge_type": "is_in_location",
+          "id": "OLDER_loc",
+          "source": "OLDER",
+          "target": "site_S03"
+        },
+        {
+          "edge_type": "is_in_location",
+          "id": "COLONY_loc",
+          "source": "COLONY",
+          "target": "site_S01"
+        },
+        {
+          "edge_type": "is_in_location",
+          "id": "TOMBS_loc",
+          "source": "TOMBS",
+          "target": "site_S02"
+        },
+        {
+          "edge_type": "is_in_location",
+          "id": "ALT_loc",
+          "source": "ALT",
+          "target": "site_S05"
+        },
+        {
+          "attributes": {
+            "change_type": "transformation",
+            "transformation_kind": "ruin"
+          },
+          "edge_type": "changed_from",
+          "id": "RUIN_cf_TEMPLE",
+          "source": "RUIN",
+          "target": "TEMPLE"
+        },
+        {
+          "edge_type": "changed_from",
+          "id": "REST_cf_RUIN",
+          "source": "REST",
+          "target": "RUIN"
+        },
+        {
+          "edge_type": "is_after",
+          "id": "TOMBS_after_COLONY",
+          "source": "TOMBS",
+          "target": "COLONY"
+        },
+        {
+          "edge_type": "is_in_location",
+          "id": "UT20_loc",
+          "source": "UT20",
+          "target": "site_S04"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "UT20_hp_start",
+          "source": "UT20",
+          "target": "UT20.start"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "UT20_hp_end",
+          "source": "UT20",
+          "target": "UT20.end"
+        }
+      ],
+      "graph_id": "LAND",
+      "name": "Città (sintetica)",
+      "nodes": [
+        {
+          "data": {
+            "rotation": 0.0,
+            "rotation_reference": "grid",
+            "shift_x": 0.0,
+            "shift_y": 0.0,
+            "shift_z": 0.0
+          },
+          "id": "geo_LAND",
+          "name": "geo_position",
+          "node_type": "geo_position"
+        },
+        {
+          "data": {
+            "kind": "toponym",
+            "level": "sito",
+            "propagation": "additive",
+            "sito_id": "S03"
+          },
+          "id": "site_S03",
+          "name": "Sito S03",
+          "node_type": "LocationNodeGroup"
+        },
+        {
+          "data": {
+            "kind": "toponym",
+            "level": "sito",
+            "propagation": "additive",
+            "sito_id": "S01"
+          },
+          "id": "site_S01",
+          "name": "Sito S01",
+          "node_type": "LocationNodeGroup"
+        },
+        {
+          "data": {
+            "kind": "toponym",
+            "level": "sito",
+            "propagation": "additive",
+            "sito_id": "S02"
+          },
+          "id": "site_S02",
+          "name": "Sito S02",
+          "node_type": "LocationNodeGroup"
+        },
+        {
+          "data": {
+            "kind": "toponym",
+            "level": "sito",
+            "propagation": "additive",
+            "sito_id": "S05"
+          },
+          "id": "site_S05",
+          "name": "Sito S05",
+          "node_type": "LocationNodeGroup"
+        },
+        {
+          "data": {
+            "kind": "toponym",
+            "level": "sito",
+            "propagation": "additive",
+            "sito_id": "S04"
+          },
+          "id": "site_S04",
+          "name": "Sito S04",
+          "node_type": "LocationNodeGroup"
+        },
+        {
+          "data": {
+            "kind": "toponym",
+            "level": "sito",
+            "propagation": "additive",
+            "sito_id": "S10"
+          },
+          "id": "site_S10",
+          "name": "Sito S10",
+          "node_type": "LocationNodeGroup"
+        },
+        {
+          "data": {
+            "declared_horizon": "H2",
+            "scale": "building"
+          },
+          "id": "TEMPLE",
+          "name": "tempio",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "declared_horizon": "H4–H7",
+            "scale": "building"
+          },
+          "id": "RUIN",
+          "name": "rudere",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "declared_horizon": "H7",
+            "scale": "building"
+          },
+          "id": "REST",
+          "name": "tempio restaurato: sito da visitare",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "declared_horizon": "H1–H2",
+            "scale": "building"
+          },
+          "id": "OLDER",
+          "name": "fase precedente al tempio: un canale",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "declared_horizon": "H1–H3",
+            "scale": "building"
+          },
+          "id": "COLONY",
+          "name": "colonia",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "declared_horizon": "H2–H3?",
+            "scale": "building"
+          },
+          "id": "TOMBS",
+          "name": "cimitero",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "alternative_reading": "lettura alternativa di S05",
+            "declared_horizon": "?",
+            "scale": "building"
+          },
+          "id": "ALT",
+          "name": "edificio pubblico",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "id": "UT20",
+          "name": "UT20",
+          "node_type": "UT"
+        },
+        {
+          "data": {
+            "property_type": "string",
+            "value": "2015"
+          },
+          "description": "2015",
+          "id": "UT20.start",
+          "name": "absolute_time_start",
+          "node_type": "property"
+        },
+        {
+          "data": {
+            "property_type": "string",
+            "value": "2015"
+          },
+          "description": "2015",
+          "id": "UT20.end",
+          "name": "absolute_time_end",
+          "node_type": "property"
+        }
+      ]
+    },
+    "periodizations": {
+      "data": {
+        "active_periodization": "PER",
+        "em_collection": "Periodizations"
+      },
+      "edges": [
+        {
+          "edge_type": "is_in_periodization",
+          "id": "H0_is_in_periodization_PER",
+          "source": "H0",
+          "target": "PER"
+        },
+        {
+          "edge_type": "is_in_periodization",
+          "id": "H1_is_in_periodization_PER",
+          "source": "H1",
+          "target": "PER"
+        },
+        {
+          "edge_type": "is_in_periodization",
+          "id": "H2_is_in_periodization_PER",
+          "source": "H2",
+          "target": "PER"
+        },
+        {
+          "edge_type": "is_in_periodization",
+          "id": "H3_is_in_periodization_PER",
+          "source": "H3",
+          "target": "PER"
+        },
+        {
+          "edge_type": "is_in_periodization",
+          "id": "H4_is_in_periodization_PER",
+          "source": "H4",
+          "target": "PER"
+        },
+        {
+          "edge_type": "is_in_periodization",
+          "id": "H56_is_in_periodization_PER",
+          "source": "H56",
+          "target": "PER"
+        },
+        {
+          "edge_type": "is_in_periodization",
+          "id": "H7_is_in_periodization_PER",
+          "source": "H7",
+          "target": "PER"
+        }
+      ],
+      "graph_id": "periodizations",
+      "name": "Periodizations",
+      "nodes": [
+        {
+          "data": {
+            "rotation": 0.0,
+            "rotation_reference": "grid",
+            "shift_x": 0.0,
+            "shift_y": 0.0,
+            "shift_z": 0.0
+          },
+          "id": "geo_periodizations",
+          "name": "geo_position",
+          "node_type": "geo_position"
+        },
+        {
+          "id": "PER",
+          "name": "Orizzonti (sintetici)",
+          "node_type": "periodization"
+        },
+        {
+          "data": {
+            "color": "#888888",
+            "enabled": true,
+            "end_time": 105.0,
+            "order": 0,
+            "start_time": -200.0
+          },
+          "id": "H0",
+          "name": "H0 · prima della colonia",
+          "node_type": "horizon"
+        },
+        {
+          "data": {
+            "color": "#888888",
+            "enabled": true,
+            "end_time": 116.0,
+            "order": 1,
+            "start_time": 106.0
+          },
+          "id": "H1",
+          "name": "H1 · Traiano",
+          "node_type": "horizon"
+        },
+        {
+          "data": {
+            "color": "#888888",
+            "enabled": true,
+            "end_time": 179.0,
+            "order": 2,
+            "start_time": 117.0
+          },
+          "id": "H2",
+          "name": "H2 · Adriano e Antonini",
+          "node_type": "horizon"
+        },
+        {
+          "data": {
+            "color": "#888888",
+            "enabled": true,
+            "end_time": 299.0,
+            "order": 3,
+            "start_time": 180.0
+          },
+          "id": "H3",
+          "name": "H3 · Severi e III sec.",
+          "node_type": "horizon"
+        },
+        {
+          "data": {
+            "color": "#888888",
+            "enabled": true,
+            "end_time": 1199.0,
+            "order": 4,
+            "start_time": 300.0
+          },
+          "id": "H4",
+          "name": "H4 · post-romano",
+          "node_type": "horizon"
+        },
+        {
+          "data": {
+            "color": "#888888",
+            "enabled": true,
+            "end_time": 1899.0,
+            "order": 5,
+            "start_time": 1200.0
+          },
+          "id": "H56",
+          "name": "H5–H6 · medievale e moderno",
+          "node_type": "horizon"
+        },
+        {
+          "data": {
+            "color": "#888888",
+            "enabled": true,
+            "end_time": 2026.0,
+            "order": 6,
+            "start_time": 1900.0
+          },
+          "id": "H7",
+          "name": "H7 · contemporaneo",
+          "node_type": "horizon"
+        }
+      ]
+    }
+  },
+  "header": {
+    "composition": [
+      {
+        "id": "TEMPLE-GRAPH",
+        "path": "cube-temple.em.json",
+        "site": "site_S03",
+        "title": "Tempio (sintetico)"
+      }
+    ],
+    "datamodel_versions": {
+      "connections": "1.6.57",
+      "nodes": "1.6.52",
+      "qualia": "1.6.14"
+    },
+    "format": "em.json",
+    "generator": {
+      "tool": "s3dgraphy",
+      "version": "1.6.0.dev136"
+    },
+    "kind": "landscape",
+    "ontology_versions": {
+      "CIDOC-CRM": "7.1.3",
+      "CRMarchaeo": "2.1.1",
+      "CRMdig": "5.0",
+      "CRMem": "1.6.27",
+      "CRMgeo": "1.2",
+      "CRMinf": "1.2.1",
+      "CRMsci": "3.2",
+      "HDT-O": "1.0",
+      "PROV-O": "W3C Recommendation 2013-04-30"
+    },
+    "schema_version": 2,
+    "title": "Città (sintetica, cubo)",
+    "version": "1.1"
+  },
+  "version": {
+    "id": "sha256:27047cd22ff7",
+    "modified_at": "2026-11-22T11:31:33Z",
+    "number": 1
+  }
+}

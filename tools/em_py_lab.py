@@ -161,11 +161,90 @@ def _landscape_matrix_route(handler: Any, route: str, raw: bytes) -> None:
     handler._json(out, status)
 
 
+# ── MICRO-MF04 · the Cube: the real footprints stacked by horizon ───────────
+#
+# ``POST /landscape-cube`` → s3Dgraphy's ``functional_cube``. ``mode
+# building`` (default): the ACTIVE graph (``doc``) and the path of its file
+# (``base``: its proxies are read beside it, ``proxies/<unit>.glb``), the lanes
+# the Matrix reads by → ``cube_view`` with the LOD0 footprints computed from
+# the proxies (``gis.proxy_footprint``, cached by the file's signature in the
+# bridge's process). ``mode landscape``: as ``/landscape-matrix`` (the
+# landscape's graph with its header, the open sources, ``base``) →
+# ``landscape_cube``: the presences of the handles, symbols for the others.
+# Every path passes through the bridge's sandbox (``_geo_inside``: inside the
+# served roots); only ``.glb`` files are read. Computed, never written.
+
+def landscape_cube_answer(body: Dict[str, Any], inside: Any = None) -> Tuple[int, Dict[str, Any]]:
+    """``{mode?, doc | landscape, base?, lanes?, sources?, lang?}`` →
+    ``(status, answer)``."""
+    import os  # noqa: PLC0415
+    try:
+        from s3dgraphy import api  # noqa: PLC0415
+        from s3dgraphy import functional_cube as CU  # noqa: PLC0415
+        from s3dgraphy.gis import proxy_footprint as PF  # noqa: PLC0415
+    except ImportError as exc:
+        return 501, {"ok": False, "error": f"this s3dgraphy has no functional_cube: {exc}"}
+    lang = "it" if str(body.get("lang") or "en").lower().startswith("it") else "en"
+    lanes = body.get("lanes") if isinstance(body.get("lanes"), list) and body.get("lanes") else None
+    base = body.get("base")
+    base_dir = os.path.dirname(base) if isinstance(base, str) and base else None
+    if base_dir and inside is not None:
+        base_dir = inside(base_dir)
+    if body.get("mode") == "landscape":
+        doc = body.get("landscape")
+        if not isinstance(doc, dict):
+            return 400, {"ok": False, "error": "landscape (an em.json) is required"}
+        landscape, _w = api.load_emjson(doc)
+        sources, dirs = [], {}
+        for item in body.get("sources") or []:
+            sdoc = item.get("doc") if isinstance(item, dict) else None
+            if isinstance(sdoc, dict):
+                g, _sw = api.load_emjson(sdoc)
+                sources.append((str(item.get("origin") or "open"), g))
+                p = item.get("path")
+                if isinstance(p, str) and p:
+                    d = os.path.dirname(p)
+                    dirs[g.graph_id] = inside(d) if inside is not None else d
+        out = CU.landscape_cube(landscape, header=doc.get("header") or {}, lanes=lanes or [],
+                                sources=sources, base_dir=base_dir, read_missing=base_dir is not None,
+                                proxy_dirs=dirs, lang=lang)
+        out["ok"] = True
+        return 200, out
+    doc = body.get("doc")
+    if not isinstance(doc, dict):
+        return 400, {"ok": False, "error": "doc (an em.json) is required"}
+    graph, _w = api.load_emjson(doc)
+    fps = PF.proxy_footprints(graph, base_dir, inside=inside) if base_dir else {}
+    out = CU.cube_view(graph, proxy_footprints=fps, lanes=lanes, lang=lang)
+    out["ok"] = True
+    out["proxies"] = {"folder": base_dir, "read": len(fps),
+                      "stale": sorted(u for u, f in fps.items() if f.get("stale"))}
+    return 200, out
+
+
+def _landscape_cube_route(handler: Any, route: str, raw: bytes) -> None:
+    import json  # noqa: PLC0415
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else {}
+    except Exception as exc:  # noqa: BLE001
+        handler._fail(400, f"bad JSON: {exc}")
+        return
+    try:
+        status, out = landscape_cube_answer(body if isinstance(body, dict) else {},
+                                            inside=getattr(handler, "_geo_inside", None))
+    except Exception as exc:  # pragma: no cover — surface to the UI
+        import traceback  # noqa: PLC0415
+        traceback.print_exc()
+        status, out = 500, {"ok": False, "error": f"cube failed: {exc}"}
+    handler._json(out, status)
+
+
 #: the bridge's POST routes this module adds (em_bridge.py merges them into
 #: POST_ROUTES when this module is importable: the dev stack and the lab sidecar)
 POST_ROUTES: Dict[str, Callable[[Any, str, bytes], None]] = {
     "/functional-matrix": _functional_matrix_route,
     "/landscape-matrix": _landscape_matrix_route,
+    "/landscape-cube": _landscape_cube_route,
 }
 
 
@@ -187,6 +266,28 @@ class LandscapeMatrix:
     def bind(self, header: Any, graph_id: str, site_id: Any) -> Dict[str, Any]:
         from s3dgraphy import functional_zoom as Z  # noqa: PLC0415
         return Z.bind_site(header, graph_id, site_id)
+
+
+@lab_api("landscape-cube", "landscape_cube")
+class LandscapeCube:
+    """``em.app.landscape_cube`` — the Cube from a script:
+    ``em.app.landscape_cube.compute(graph, folder)`` answers what the page
+    draws at the scale of the building (s3Dgraphy ``functional_cube.cube_view``
+    with the footprints of the proxies beside ``folder``);
+    ``footprints(graph, folder)`` the LOD0 footprints alone
+    (``gis.proxy_footprint.proxy_footprints``)."""
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    def footprints(self, graph: Any, folder: str) -> Dict[str, Any]:
+        from s3dgraphy.gis import proxy_footprint as PF  # noqa: PLC0415
+        return PF.proxy_footprints(graph, folder)
+
+    def compute(self, graph: Any, folder: Any = None, lanes: Any = None, lang: str = "en") -> Dict[str, Any]:
+        from s3dgraphy import functional_cube as CU  # noqa: PLC0415
+        return CU.cube_view(graph, proxy_footprints=self.footprints(graph, folder) if folder else {},
+                            lanes=lanes, lang=lang)
 
 
 @lab_api("functional-matrix", "functional_matrix")

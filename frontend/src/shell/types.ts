@@ -103,6 +103,8 @@ export interface SurfaceDeps {
   renderFunctionalMatrixInto?(body: HTMLElement, win: Win): void;
   /** MICRO-MF03 · EMBARGO (lab only) · the Landscape Matrix of THIS window. */
   renderLandscapeMatrixInto?(body: HTMLElement, win: Win): void;
+  /** MICRO-MF04 · EMBARGO (lab only) · the Cube */
+  renderLandscapeCubeInto?(body: HTMLElement, win: Win): void;
   /** Which of its tabs this hosted window is showing (per WINDOW, never per
    *  type — two Inspector windows can sit on different tabs, and that is what
    *  makes the second one a view of its own instead of a duplicate). */
@@ -662,6 +664,39 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
             const el = body;
             const ww = win;
             paintSurface(ww, el, () => lm(el, ww));
+          },
+          select() { this.refresh(); },
+          setFocused(on) { markFocus(body, on); },
+          destroy() { body?.remove(); body = null; win = null; },
+        };
+      },
+    });
+  }
+
+  // ── MICRO-MF04 · THE CUBE (EMBARGO: the lab build only) ──────────────────
+  //
+  // The shape of the Landscape Matrix's: a body repainted through
+  // `paintSurface`; the selection moving repaints it.
+  const lc = deps.renderLandscapeCubeInto;
+  if (LAB && lc) {
+    registerSurfaceType({
+      id: "landscape-cube",
+      create(): Surface {
+        let body: HTMLElement | null = null;
+        let win: Win | null = null;
+        return {
+          mount(area, w) {
+            win = w;
+            body = document.createElement("div");
+            body.className = "tile-fmbody";
+            area.appendChild(body);
+            this.refresh();
+          },
+          refresh() {
+            if (!body || !win || !body.isConnected) return;
+            const el = body;
+            const ww = win;
+            paintSurface(ww, el, () => lc(el, ww));
           },
           select() { this.refresh(); },
           setFocused(on) { markFocus(body, on); },

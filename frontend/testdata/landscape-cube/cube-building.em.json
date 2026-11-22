@@ -1,0 +1,432 @@
+{
+  "active_graph_id": "B",
+  "graphs": {
+    "B": {
+      "edges": [
+        {
+          "edge_type": "has_first_epoch",
+          "id": "F1_fe",
+          "source": "F1",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_linked_resource",
+          "id": "c03874f2-6d3f-51b4-aa38-1e319406f50f",
+          "source": "53fe2610-55a8-5ebc-ac88-b0b82ad2e970",
+          "target": "60d02722-f007-59ac-8cd8-c1abb975625f"
+        },
+        {
+          "edge_type": "has_semantic_shape",
+          "id": "e9873152-6e8d-5537-af4e-e7327e0f6153",
+          "source": "14b04ac8-9852-5050-96f7-0d645fe2325b",
+          "target": "53fe2610-55a8-5ebc-ac88-b0b82ad2e970"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "af69aae9-d53d-5d5f-9517-58039298f8fc",
+          "source": "F1",
+          "target": "14b04ac8-9852-5050-96f7-0d645fe2325b"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "W1_fe",
+          "source": "W1",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_linked_resource",
+          "id": "f67b0814-dee5-55d0-a979-8de19fe6cffe",
+          "source": "f37d810c-b623-5cea-87b0-170fb2302146",
+          "target": "cb5a6f8c-0a82-575d-989a-1ceea2d2c1a8"
+        },
+        {
+          "edge_type": "has_semantic_shape",
+          "id": "12fc138b-1b8d-5a48-8ce1-fa45da36d0ee",
+          "source": "c1f80279-e1ab-5034-90ae-3b3308e6a35e",
+          "target": "f37d810c-b623-5cea-87b0-170fb2302146"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "f8af98f2-0fd2-518e-b7dc-867b81648d4f",
+          "source": "W1",
+          "target": "c1f80279-e1ab-5034-90ae-3b3308e6a35e"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "D1_fe",
+          "source": "D1",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_linked_resource",
+          "id": "207b4c14-4d09-57f8-98c5-16aedaa08cef",
+          "source": "5a37aade-e3bc-5783-96f7-b0fb697316ca",
+          "target": "3ce7432b-a5a3-5212-95f9-e1256b5b3a78"
+        },
+        {
+          "edge_type": "has_semantic_shape",
+          "id": "79e070fa-025c-5a16-a2a1-15b9e08e659c",
+          "source": "55b0d931-970b-59f0-aac9-234b7aff2759",
+          "target": "5a37aade-e3bc-5783-96f7-b0fb697316ca"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "96bb90ac-e8e9-5790-a42b-d7600ef81e4c",
+          "source": "D1",
+          "target": "55b0d931-970b-59f0-aac9-234b7aff2759"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "R1_fe",
+          "source": "R1",
+          "target": "E4"
+        },
+        {
+          "edge_type": "has_linked_resource",
+          "id": "e46788a3-4c2b-5493-8563-fb9fbb702426",
+          "source": "ecd97038-4409-5503-b637-8c39d4bfe000",
+          "target": "89be8545-a572-5f63-94f1-9b66dd30533e"
+        },
+        {
+          "edge_type": "has_semantic_shape",
+          "id": "84b76a9f-9868-5324-a288-8e5a6af9ee8b",
+          "source": "3e551574-4a50-5169-9bbe-82cba121dd75",
+          "target": "ecd97038-4409-5503-b637-8c39d4bfe000"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "f7614187-41a5-50a5-a240-6ed8afd6ea9a",
+          "source": "R1",
+          "target": "3e551574-4a50-5169-9bbe-82cba121dd75"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "NOPROXY_fe",
+          "source": "NOPROXY",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "T_fe",
+          "source": "T",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "A_fe",
+          "source": "A",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "RU_fe",
+          "source": "RU",
+          "target": "E3"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "RE_fe",
+          "source": "RE",
+          "target": "E4"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "A_in_T",
+          "source": "A",
+          "target": "T"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "F1_in_A",
+          "source": "F1",
+          "target": "A"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "W1_in_T",
+          "source": "W1",
+          "target": "T"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "F1_in_RU",
+          "source": "F1",
+          "target": "RU"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "F1_in_RE",
+          "source": "F1",
+          "target": "RE"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "R1_in_RE",
+          "source": "R1",
+          "target": "RE"
+        }
+      ],
+      "graph_id": "B",
+      "name": "tempio",
+      "nodes": [
+        {
+          "data": {
+            "rotation": 0.0,
+            "rotation_reference": "grid",
+            "shift_x": 0.0,
+            "shift_y": 0.0,
+            "shift_z": 0.0
+          },
+          "id": "geo_B",
+          "name": "geo_position",
+          "node_type": "geo_position"
+        },
+        {
+          "data": {
+            "color": "#FFFFFF",
+            "end_time": 199,
+            "start_time": 100
+          },
+          "id": "E2",
+          "name": "II",
+          "node_type": "EpochNode"
+        },
+        {
+          "data": {
+            "color": "#FFFFFF",
+            "end_time": 1800,
+            "start_time": 200
+          },
+          "id": "E3",
+          "name": "Post",
+          "node_type": "EpochNode"
+        },
+        {
+          "data": {
+            "color": "#FFFFFF",
+            "end_time": 2026,
+            "start_time": 1801
+          },
+          "id": "E4",
+          "name": "Oggi",
+          "node_type": "EpochNode"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "F1",
+          "name": "F1",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "convexshapes": [],
+            "spheres": []
+          },
+          "id": "53fe2610-55a8-5ebc-ac88-b0b82ad2e970",
+          "name": "F1 geometry",
+          "node_type": "semantic_shape"
+        },
+        {
+          "data": {
+            "property_type": "geometry",
+            "value": "53fe2610-55a8-5ebc-ac88-b0b82ad2e970"
+          },
+          "id": "14b04ac8-9852-5050-96f7-0d645fe2325b",
+          "name": "geometry",
+          "node_type": "property"
+        },
+        {
+          "data": {
+            "description": "",
+            "url": "proxies/F1.glb",
+            "url_type": "proxy_model"
+          },
+          "id": "60d02722-f007-59ac-8cd8-c1abb975625f",
+          "name": "F1.glb",
+          "node_type": "resource"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "W1",
+          "name": "W1",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "convexshapes": [],
+            "spheres": []
+          },
+          "id": "f37d810c-b623-5cea-87b0-170fb2302146",
+          "name": "W1 geometry",
+          "node_type": "semantic_shape"
+        },
+        {
+          "data": {
+            "property_type": "geometry",
+            "value": "f37d810c-b623-5cea-87b0-170fb2302146"
+          },
+          "id": "c1f80279-e1ab-5034-90ae-3b3308e6a35e",
+          "name": "geometry",
+          "node_type": "property"
+        },
+        {
+          "data": {
+            "description": "",
+            "url": "proxies/W1.glb",
+            "url_type": "proxy_model"
+          },
+          "id": "cb5a6f8c-0a82-575d-989a-1ceea2d2c1a8",
+          "name": "W1.glb",
+          "node_type": "resource"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "D1",
+          "name": "D1",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "convexshapes": [],
+            "spheres": []
+          },
+          "id": "5a37aade-e3bc-5783-96f7-b0fb697316ca",
+          "name": "D1 geometry",
+          "node_type": "semantic_shape"
+        },
+        {
+          "data": {
+            "property_type": "geometry",
+            "value": "5a37aade-e3bc-5783-96f7-b0fb697316ca"
+          },
+          "id": "55b0d931-970b-59f0-aac9-234b7aff2759",
+          "name": "geometry",
+          "node_type": "property"
+        },
+        {
+          "data": {
+            "description": "",
+            "url": "proxies/D1.glb",
+            "url_type": "proxy_model"
+          },
+          "id": "3ce7432b-a5a3-5212-95f9-e1256b5b3a78",
+          "name": "D1.glb",
+          "node_type": "resource"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "R1",
+          "name": "R1",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "convexshapes": [],
+            "spheres": []
+          },
+          "id": "ecd97038-4409-5503-b637-8c39d4bfe000",
+          "name": "R1 geometry",
+          "node_type": "semantic_shape"
+        },
+        {
+          "data": {
+            "property_type": "geometry",
+            "value": "ecd97038-4409-5503-b637-8c39d4bfe000"
+          },
+          "id": "3e551574-4a50-5169-9bbe-82cba121dd75",
+          "name": "geometry",
+          "node_type": "property"
+        },
+        {
+          "data": {
+            "description": "",
+            "url": "proxies/R1.glb",
+            "url_type": "proxy_model"
+          },
+          "id": "89be8545-a572-5f63-94f1-9b66dd30533e",
+          "name": "R1.glb",
+          "node_type": "resource"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "NOPROXY",
+          "name": "NOPROXY",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "scale": "building"
+          },
+          "id": "T",
+          "name": "tempio",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "room"
+          },
+          "id": "A",
+          "name": "aedes",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "building"
+          },
+          "id": "RU",
+          "name": "rudere",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "building"
+          },
+          "id": "RE",
+          "name": "restauro",
+          "node_type": "FunctionalUnitNodeGroup"
+        }
+      ]
+    }
+  },
+  "header": {
+    "datamodel_versions": {
+      "connections": "1.6.57",
+      "nodes": "1.6.52",
+      "qualia": "1.6.14"
+    },
+    "format": "em.json",
+    "generator": {
+      "tool": "s3dgraphy",
+      "version": "1.6.0.dev136"
+    },
+    "ontology_versions": {
+      "CIDOC-CRM": "7.1.3",
+      "CRMarchaeo": "2.1.1",
+      "CRMdig": "5.0",
+      "CRMem": "1.6.27",
+      "CRMgeo": "1.2",
+      "CRMinf": "1.2.1",
+      "CRMsci": "3.2",
+      "HDT-O": "1.0",
+      "PROV-O": "W3C Recommendation 2013-04-30"
+    },
+    "schema_version": 2,
+    "title": "Tempio (sintetico, cubo)",
+    "version": "1.1"
+  },
+  "version": {
+    "id": "sha256:e5f4bece2d8c",
+    "modified_at": "2026-11-22T11:31:33Z",
+    "number": 1
+  }
+}

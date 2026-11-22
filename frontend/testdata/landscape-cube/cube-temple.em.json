@@ -1,0 +1,376 @@
+{
+  "active_graph_id": "TEMPLE-GRAPH",
+  "graphs": {
+    "TEMPLE-GRAPH": {
+      "edges": [
+        {
+          "edge_type": "has_first_epoch",
+          "id": "SU1_fe",
+          "source": "SU1",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "SU2_fe",
+          "source": "SU2",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "USD1_fe",
+          "source": "USD1",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "USD2_fe",
+          "source": "USD2",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "SU20_fe",
+          "source": "SU20",
+          "target": "E20"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "T_fe",
+          "source": "T",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "A_fe",
+          "source": "A",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "P_fe",
+          "source": "P",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "F_fe",
+          "source": "F",
+          "target": "E2"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "A_in_T",
+          "source": "A",
+          "target": "T"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "P_in_T",
+          "source": "P",
+          "target": "T"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "SU1_in_A",
+          "source": "SU1",
+          "target": "A"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "SU2_in_P",
+          "source": "SU2",
+          "target": "P"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "USD1_in_F",
+          "source": "USD1",
+          "target": "F"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "USD2_in_F",
+          "source": "USD2",
+          "target": "F"
+        },
+        {
+          "edge_type": "has_linked_resource",
+          "id": "4c0d1355-bac1-556d-8896-f14fec5789ff",
+          "source": "20429b7c-8aa9-5081-a16a-68eeacf87d78",
+          "target": "f655fdb3-c819-58cb-a1dd-0c1afb7bc7d8"
+        },
+        {
+          "edge_type": "has_semantic_shape",
+          "id": "4af644e3-66da-59ad-b2a8-ce158e9c7e03",
+          "source": "8d316e2e-4633-51d2-b468-5ea8b9cffe03",
+          "target": "20429b7c-8aa9-5081-a16a-68eeacf87d78"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "4d574498-b651-56cc-9f2c-c2ebb572c004",
+          "source": "SU1",
+          "target": "8d316e2e-4633-51d2-b468-5ea8b9cffe03"
+        },
+        {
+          "edge_type": "has_linked_resource",
+          "id": "98cd37b3-6bfc-5f8c-9ace-107acd0c97e3",
+          "source": "d634b383-5327-5061-9b9a-6277f0325541",
+          "target": "bdc58109-331f-5800-bacb-33cc6ccf1f97"
+        },
+        {
+          "edge_type": "has_semantic_shape",
+          "id": "b533da3c-5e11-5536-bd5e-f6ed75bc6b64",
+          "source": "7a1698e7-7c6e-57f9-99c5-489b2e75a3cb",
+          "target": "d634b383-5327-5061-9b9a-6277f0325541"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "f4e3e07f-3f0e-5fdc-b4f9-ed0462f7f8de",
+          "source": "SU2",
+          "target": "7a1698e7-7c6e-57f9-99c5-489b2e75a3cb"
+        },
+        {
+          "edge_type": "has_linked_resource",
+          "id": "0fdf258f-35ca-53d9-81f4-2c82740f903c",
+          "source": "cbd50f82-9fe8-5058-ba92-6a2ee615df40",
+          "target": "673dc0f0-463e-5813-9878-75877b216b45"
+        },
+        {
+          "edge_type": "has_semantic_shape",
+          "id": "d8c060eb-3029-5264-bbb0-98bde76b7607",
+          "source": "9751f5d4-8dc0-59b8-b97e-1f6b1a07513a",
+          "target": "cbd50f82-9fe8-5058-ba92-6a2ee615df40"
+        },
+        {
+          "edge_type": "has_property",
+          "id": "badda8ae-f096-50ab-9965-9e46b0370db3",
+          "source": "SU20",
+          "target": "9751f5d4-8dc0-59b8-b97e-1f6b1a07513a"
+        }
+      ],
+      "graph_id": "TEMPLE-GRAPH",
+      "name": "Tempio (sintetico)",
+      "nodes": [
+        {
+          "data": {
+            "rotation": 0.0,
+            "rotation_reference": "grid",
+            "shift_x": 0.0,
+            "shift_y": 0.0,
+            "shift_z": 0.0
+          },
+          "id": "geo_TEMPLE-GRAPH",
+          "name": "geo_position",
+          "node_type": "geo_position"
+        },
+        {
+          "data": {
+            "color": "#FFFFFF",
+            "end_time": 179,
+            "start_time": 117
+          },
+          "id": "E2",
+          "name": "II d.C.",
+          "node_type": "EpochNode"
+        },
+        {
+          "data": {
+            "color": "#FFFFFF",
+            "end_time": 2026,
+            "start_time": 1990
+          },
+          "id": "E20",
+          "name": "Oggi",
+          "node_type": "EpochNode"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "SU1",
+          "name": "SU1",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "SU2",
+          "name": "SU2",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "label": "USD"
+          },
+          "id": "USD1",
+          "name": "USD1",
+          "node_type": "USD"
+        },
+        {
+          "data": {
+            "label": "USD"
+          },
+          "id": "USD2",
+          "name": "USD2",
+          "node_type": "USD"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "SU20",
+          "name": "SU20",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "scale": "building"
+          },
+          "id": "T",
+          "name": "tempio",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "room"
+          },
+          "id": "A",
+          "name": "aedes",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "room"
+          },
+          "id": "P",
+          "name": "portico",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "component"
+          },
+          "id": "F",
+          "name": "fase precedente: drenaggio e forno",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "convexshapes": [],
+            "spheres": []
+          },
+          "id": "20429b7c-8aa9-5081-a16a-68eeacf87d78",
+          "name": "SU1 geometry",
+          "node_type": "semantic_shape"
+        },
+        {
+          "data": {
+            "property_type": "geometry",
+            "value": "20429b7c-8aa9-5081-a16a-68eeacf87d78"
+          },
+          "id": "8d316e2e-4633-51d2-b468-5ea8b9cffe03",
+          "name": "geometry",
+          "node_type": "property"
+        },
+        {
+          "data": {
+            "description": "",
+            "url": "proxies/SU1.glb",
+            "url_type": "proxy_model"
+          },
+          "id": "f655fdb3-c819-58cb-a1dd-0c1afb7bc7d8",
+          "name": "SU1.glb",
+          "node_type": "resource"
+        },
+        {
+          "data": {
+            "convexshapes": [],
+            "spheres": []
+          },
+          "id": "d634b383-5327-5061-9b9a-6277f0325541",
+          "name": "SU2 geometry",
+          "node_type": "semantic_shape"
+        },
+        {
+          "data": {
+            "property_type": "geometry",
+            "value": "d634b383-5327-5061-9b9a-6277f0325541"
+          },
+          "id": "7a1698e7-7c6e-57f9-99c5-489b2e75a3cb",
+          "name": "geometry",
+          "node_type": "property"
+        },
+        {
+          "data": {
+            "description": "",
+            "url": "proxies/SU2.glb",
+            "url_type": "proxy_model"
+          },
+          "id": "bdc58109-331f-5800-bacb-33cc6ccf1f97",
+          "name": "SU2.glb",
+          "node_type": "resource"
+        },
+        {
+          "data": {
+            "convexshapes": [],
+            "spheres": []
+          },
+          "id": "cbd50f82-9fe8-5058-ba92-6a2ee615df40",
+          "name": "SU20 geometry",
+          "node_type": "semantic_shape"
+        },
+        {
+          "data": {
+            "property_type": "geometry",
+            "value": "cbd50f82-9fe8-5058-ba92-6a2ee615df40"
+          },
+          "id": "9751f5d4-8dc0-59b8-b97e-1f6b1a07513a",
+          "name": "geometry",
+          "node_type": "property"
+        },
+        {
+          "data": {
+            "description": "",
+            "url": "proxies/SU20.glb",
+            "url_type": "proxy_model"
+          },
+          "id": "673dc0f0-463e-5813-9878-75877b216b45",
+          "name": "SU20.glb",
+          "node_type": "resource"
+        }
+      ]
+    }
+  },
+  "header": {
+    "datamodel_versions": {
+      "connections": "1.6.57",
+      "nodes": "1.6.52",
+      "qualia": "1.6.14"
+    },
+    "format": "em.json",
+    "generator": {
+      "tool": "s3dgraphy",
+      "version": "1.6.0.dev136"
+    },
+    "ontology_versions": {
+      "CIDOC-CRM": "7.1.3",
+      "CRMarchaeo": "2.1.1",
+      "CRMdig": "5.0",
+      "CRMem": "1.6.27",
+      "CRMgeo": "1.2",
+      "CRMinf": "1.2.1",
+      "CRMsci": "3.2",
+      "HDT-O": "1.0",
+      "PROV-O": "W3C Recommendation 2013-04-30"
+    },
+    "schema_version": 2,
+    "title": "Tempio (sintetico)",
+    "version": "1.1"
+  },
+  "version": {
+    "id": "sha256:541ba43c406c",
+    "modified_at": "2026-11-22T11:31:33Z",
+    "number": 1
+  }
+}

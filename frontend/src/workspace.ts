@@ -100,7 +100,10 @@ export type WindowType =
   | "functional-matrix"
   // MICRO-MF03 · EMBARGO (landscape-matrix): the Landscape Matrix — the highest
   // identities of the sites in the lanes of the container's horizons. Lab only.
-  | "landscape-matrix";
+  | "landscape-matrix"
+  // MICRO-MF04 · EMBARGO (landscape-cube): the Cube — the real footprints of the
+  // proxies stacked by horizon. Lab only.
+  | "landscape-cube";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -703,7 +706,9 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   // MICRO-MF01 · EMBARGO: the lab build only (folded out of the community)
   ...(LAB ? { "functional-matrix": { icon: windowIcon("functional-matrix"), labelKey: "feat.functionalMatrix.title" },
               // MICRO-MF03 · the Landscape Matrix
-              "landscape-matrix": { icon: windowIcon("landscape-matrix"), labelKey: "feat.landscapeMatrix.title" } } : {}),
+              "landscape-matrix": { icon: windowIcon("landscape-matrix"), labelKey: "feat.landscapeMatrix.title" },
+              // MICRO-MF04 · the Cube
+              "landscape-cube": { icon: windowIcon("landscape-cube"), labelKey: "feat.landscapeCube.title" } } : {}),
 } as Record<WindowType, { icon: string; labelKey: string }>;
 
 /** The window type the active workspace currently shows — the ACTIVE window's
