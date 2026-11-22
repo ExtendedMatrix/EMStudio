@@ -533,7 +533,7 @@ import { FU_TYPE as JAR_FU_TYPE, MEMBER_EDGE as JAR_MEMBER_EDGE, defaultEpoch as
          unitsOfSpaceKeys as jarUnitsOfSpaceKeys, type JarRefusal } from "./functional-jar";
 // MICRO-MF04 · EMBARGO · the Cube: the real footprints of the proxies stacked by
 // horizon (an area), at the scale of the building or of the landscape: behind LC_ON
-import { lcAnswerOf, lcAsk, lcScaleOf, renderLandscapeCubeInto, setLandscapeCubeHost, setLcView } from "./landscape-cube";
+import { lcAnswerOf, lcAsk, lcBesides, lcEnter, lcScaleOf, lcScaleStep, renderLandscapeCubeInto, setLandscapeCubeHost, setLcView, type LcFScale, type LcHorizon } from "./landscape-cube";
 const LC_ON = LAB && featureOn("landscape-cube");
 // MICRO-MF07 · EMBARGO (functional-workspace) · the workspace Functional as the
 // desk: the Space as a plan by horizon (the Cube's footprints from above, the
@@ -2783,9 +2783,17 @@ window.__EM_SCENE__ = () => {
     return { win: id, scale: lcScaleOf(id), status: state.status, stale: state.stale, error: state.error ?? null,
              answer: state.answer, view: { ...view, scale }, live };
   }, setCube: (winId: string, v: { rot?: number; gap?: number | null; tilt?: number; scale?: "building" | "landscape" | null;
-                                    layers?: Partial<Record<"sym" | "plan" | "prx" | "rm", boolean>> }) => {
-    setLcView(winId, v); if (v.layers || v.scale !== undefined) refreshSurfaces("landscape-cube");
-  } } : {}),
+                                    layers?: Partial<Record<"sym" | "plan" | "prx" | "rm", boolean>>;
+                                    // MICRO-MF08 · the functional scale, the unit entered, the horizon, the lock
+                                    fs?: LcFScale | "all"; focus?: string | null; hz?: LcHorizon | null; sync?: boolean }) => {
+    setLcView(winId, v);
+    if (v.layers || v.scale !== undefined || v.fs !== undefined || v.focus !== undefined || v.hz !== undefined || v.sync !== undefined) refreshSurfaces("landscape-cube");
+  },
+  // MICRO-MF08 · enter a unit (one scale down), a scale up/down, a cube beside
+  cubeEnter: (winId: string, id: string) => { lcEnter(winId, id); },
+  cubeStep: (winId: string, dir: 1 | -1) => { lcScaleStep(winId, dir); },
+  cubeBesides: (winId: string) => lcBesides(winId),
+  cubes: () => windowsOf().filter((w) => w.type === "landscape-cube").map((w) => w.id) } : {}),
   // MICRO-MF07 · EMBARGO · the plan by horizon and the proposals (lab, switches on)
   ...(FW_ON && LC_ON ? { functionalPlan: (winId?: string) => {
     const id = winId ?? windowsOf().find((w) => w.type === "functional-plan")?.id ?? null;
@@ -19266,6 +19274,14 @@ if (LC_ON) {
     changed: () => { refreshSurfaces("landscape-cube"); if (FW_ON) refreshSurfaces("functional-plan"); },
     // MICRO-MF07 · what is lit everywhere, and the lasso of the plan → the jar
     lit: () => selectedIds,
+    // MICRO-MF08 · a second Cube beside this one (the area split in two)
+    besides: (winId: string) => {
+      const made = splitWindow(winId, "row", activeWorkspace(), 0.5, "b");
+      if (!made) return null;
+      if (made.type !== "landscape-cube") setWinType(made, "landscape-cube");
+      renderTiles();
+      return made.id;
+    },
     ...(FW_ON && FM_ON ? { lasso: (units: string[]) => {
       selectMany(units);
       jarLassoDone(units);

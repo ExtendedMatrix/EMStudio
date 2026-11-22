@@ -50,6 +50,29 @@
  * outlines, from the graph bound to their site) when it exists, a SYMBOL in the
  * plane's margin for the identities without members or without outlines.
  *
+ * MICRO-MF08 (E.D., 22 Nov 2026: «posso rappresentare lo stesso paesaggio a
+ * diversi livelli di scala funzionale … più cubi, ognuno con una scala
+ * diversa, uno accanto all'altro, sincronizzando il punto di vista») · THE
+ * FUNCTIONAL SCALE of a window — territory · complex · building · room ·
+ * component (the scales of the datamodel), or «all» (the cube of MF04–MF07):
+ * at a scale the cube shows the functional units OF THAT SCALE as VOLUMES (the
+ * hull of their members' footprints raised by their proxies' heights), the
+ * units directly in them as thin outlines (the temple's rooms), and below the
+ * ACTUAL ELEMENTS — the members' footprints, coloured by the unit of that
+ * scale that reads them — with the four layers of MF07; a unit alive in a
+ * plane with no outline is a symbol at the plane's margin. The territory is
+ * the landscape when one is open (the identities of the Landscape Matrix,
+ * symbols where they have no members). Going DOWN a scale ENTERS the focused
+ * unit (city → site → building → room → component: double click on a volume,
+ * or ↓): only what is inside it is shown, the selection stays; the bound
+ * handle of a landscape identity is the same identity in its graph. SEVERAL
+ * CUBES side by side (⧉ opens one beside, one scale down): the lock «sync the
+ * view» binds turn, tilt, distance between the planes, the horizon and the
+ * focus of every window whose lock is on — a drag moves them all on the same
+ * frames (transforms only, no redraw). The horizon of one window is found in
+ * another by id, by name, or by the widest overlap of their intervals (the
+ * landscape's H0–H7 and the graph's epochs).
+ *
  * NOTHING IS COMPUTED HERE (invariant 2): `POST /landscape-cube` (tools/
  * em_py_lab.py) answers s3Dgraphy's `functional_cube`. This module asks,
  * keeps the answer, draws it.
@@ -67,14 +90,26 @@ export interface LcItem {
   instance: boolean; from_lane: string | null;
   /** MICRO-MF07 · its visibility in the plane (s3Dgraphy before MF07: absent) */
   visibility?: LcSeen;
+  /** MICRO-MF08 · the functional unit of each scale reading it in the plane */
+  by_scale?: Partial<Record<LcFScale, string>>;
 }
+/** MICRO-MF08 · the functional scales of the datamodel, from the widest */
+export type LcFScale = "territory" | "complex" | "building" | "room" | "component";
+export const LC_FSCALES: readonly LcFScale[] = ["territory", "complex", "building", "room", "component"];
+const RANK: Record<LcFScale, number> = { territory: 0, complex: 1, building: 2, room: 3, component: 4 };
+/** MICRO-MF08 · a functional unit alive in a plane with no outline there */
+export interface LcAbsent { fu: string; name: string; scale: LcFScale | null; evidence: Evidence | null; why: "no_members" | "no_outline"; ancestors: string[] }
 /** MICRO-MF07 · the symbolic layer: the hull of a functional unit's members in a plane */
-export interface LcSymbol { fu: string; name: string; ring: Ring; evidence: Evidence | null; container: boolean; parent: string | null; members: string[] }
+export interface LcSymbol {
+  fu: string; name: string; ring: Ring; evidence: Evidence | null; container: boolean; parent: string | null; members: string[];
+  /** MICRO-MF08 · its scale, lineage and the heights of its members (the volume) */
+  scale?: LcFScale | null; ancestors?: string[]; children?: string[]; z_range?: [number, number] | null;
+}
 /** MICRO-MF07 · a representation model of the plane's epochs, in plan */
 export interface LcModel { id: string; name: string; epoch: string; rings: Ring[]; z_range: [number, number] | null; url: string | null }
 export interface LcPlane {
   lane: string; name: string; start: number | null; end: number | null; items: LcItem[]; without: string[];
-  symbols?: LcSymbol[]; rm?: LcModel[]; rm_unread?: Array<{ id: string; name: string; url: string | null; why: string; epoch?: string }>;
+  symbols?: LcSymbol[]; absent?: LcAbsent[]; rm?: LcModel[]; rm_unread?: Array<{ id: string; name: string; url: string | null; why: string; epoch?: string }>;
 }
 export interface LcUnit {
   name: string; type: string | null; rings: Ring[]; centroid: [number, number]; lane: string | null;
@@ -83,7 +118,9 @@ export interface LcUnit {
 export interface LcBuilding {
   scale: "building"; lanes: Lane[]; planes: LcPlane[]; units: Record<string, LcUnit>;
   verticals: Array<{ id: string; lanes: string[] }>; bbox: [number, number, number, number] | null; crs: string[];
-  functional_units: Record<string, { name: string; scale: string | null; parent?: string | null }>;
+  functional_units: Record<string, { name: string; scale: string | null; parent?: string | null; ancestors?: string[]; children?: string[] }>;
+  /** MICRO-MF08 · the number of functional units of each scale */
+  scales?: Partial<Record<LcFScale, number>>;
   proxies?: { folder: string | null; read: number; stale: string[] };
   /** MICRO-MF07 · the chain of identities between the planes */
   chains?: Array<{ latter: string; former: string; change_type: string | null }>;
@@ -95,8 +132,10 @@ export interface LcLandItem {
 }
 export interface LcLandscape {
   scale: "landscape"; lanes: Lane[]; planes: Array<{ lane: string; name: string; start: number | null; end: number | null; items: LcLandItem[] }>;
-  rows: Record<string, { name: string; kind: "identity" | "ut"; site: string | null; evidence: Evidence | null; lanes: string[] }>;
-  shapes: Record<string, { rings_by_lane: Record<string, Ring[]> }>;
+  rows: Record<string, { name: string; kind: "identity" | "ut"; site: string | null; evidence: Evidence | null; lanes: string[];
+                         /** MICRO-MF08 · its scale and its bound handle in each cited graph */
+                         scale?: string | null; handles?: Array<{ graph_id: string; handle: string }> }>;
+  shapes: Record<string, { rings_by_lane: Record<string, Ring[]>; hull_by_lane?: Record<string, Ring> }>;
   verticals: Array<{ id: string; lanes: string[] }>; bbox: [number, number, number, number] | null; crs: string[];
   sites: Array<{ id: string; name: string; code: string }>;
 }
@@ -126,6 +165,8 @@ export interface LcHost {
   lit?(): ReadonlySet<string>;
   /** MICRO-MF07 · the lasso of the plan closed on these units (the jar, MF05) */
   lasso?(units: string[]): void;
+  /** MICRO-MF08 · a new Cube area beside this one; its window id */
+  besides?(winId: string): string | null;
 }
 
 let host: LcHost | null = null;
@@ -187,8 +228,12 @@ export function lcAsk(): void {
   const h = host;
   const L = lang();
   const want = new Set([...scaleOf.values()]);
+  for (const w of fsOf.keys()) want.add(lcScaleOf(w));
+  // MICRO-MF08 · a window at a functional scale needs the building's answer
+  // too (how many units each scale has: where ↓ and ⧉ go)
+  if ([...fsOf.values()].some((f) => f !== "all")) want.add("building");
   if (!want.size) want.add("building");
-  const act = h.active();
+  const act = buildingSource();
   if (want.has("building") || !h.landscape()) {
     if (!act) {
       const a = asks.building;
@@ -217,6 +262,21 @@ export function lcAsk(): void {
   }
 }
 
+/** MICRO-MF08 · the graph the cube reads below the territory: the active
+ *  graph — or, when the active graph IS the landscape, the open graph it cites
+ *  (the temple bound to S15), so «building» goes into the bound building. */
+function buildingSource(): ReturnType<LcHost["active"]> {
+  if (!host) return null;
+  const act = host.active();
+  const land = host.landscape();
+  if (!land || !act || act.graphId !== land.graphId) return act;
+  const comp = land.header().composition;
+  const cited = new Set(Array.isArray(comp) ? comp.map((c) => String((c as { id?: unknown }).id ?? "")) : []);
+  const others = host.sources().filter((x) => x.graphId !== land.graphId);
+  const src = others.find((x) => cited.has(x.graphId)) ?? null;
+  return src ? { ...src, has: () => false } : act;
+}
+
 /** For a test or a reload: forget the answers. */
 export function lcReset(): void {
   for (const k of ["building", "landscape"] as const) {
@@ -230,9 +290,15 @@ export function lcReset(): void {
 /** MICRO-MF07 · the four layers of the cube, each with its switch */
 export type LcLayer = "sym" | "plan" | "prx" | "rm";
 export const LC_LAYERS: readonly LcLayer[] = ["sym", "plan", "prx", "rm"];
+/** MICRO-MF08 · a horizon, kept by its id, name and interval: another
+ *  window (other lanes) finds its own by them */
+export interface LcHorizon { id: string; name: string; start: number | null; end: number | null }
 export interface LcView {
   scale: LcScale | null; rot: number; gap: number | null; tilt: number;
   layers: Record<LcLayer, boolean>;
+  /** MICRO-MF08 · the functional scale («all»: every unit, MF04–MF07), the
+   *  unit entered, the horizon, the lock «sync the view» */
+  fs?: LcFScale | "all"; focus?: string | null; hz?: LcHorizon | null; sync?: boolean;
 }
 const ROT0 = 30;
 const TILT0 = 0.34;
@@ -251,7 +317,62 @@ function vs(winId: string): ViewState {
 }
 export function lcView(winId: string): LcView {
   const v = vs(winId);
-  return { scale: scaleOf.get(winId) ?? null, rot: v.rot, gap: v.gap, tilt: v.tilt, layers: { ...v.layers } };
+  return { scale: scaleOf.get(winId) ?? null, rot: v.rot, gap: v.gap, tilt: v.tilt, layers: { ...v.layers },
+           fs: fsOf.get(winId) ?? "all", focus: focusOf.get(winId) ?? null, hz: hzOf.get(winId) ?? null, sync: syncOn.has(winId) };
+}
+
+// ── MICRO-MF08 · scale, focus, horizon, and the windows in sync ─────────────
+
+const fsOf = new Map<string, LcFScale | "all">();
+const focusOf = new Map<string, string>();
+const hzOf = new Map<string, LcHorizon>();
+const syncOn = new Set<string>();
+const isFs = (x: unknown): x is LcFScale => typeof x === "string" && (LC_FSCALES as readonly string[]).includes(x);
+
+/** the other windows in sync with this one (none when its lock is off) */
+function peers(winId: string): string[] {
+  if (!syncOn.has(winId)) return [];
+  return [...syncOn].filter((w) => w !== winId);
+}
+
+/** the turn, tilt and distance of a window, given to its peers — their live
+ *  cubes move on the same frame (transforms only, no redraw) */
+function shareTurn(winId: string): void {
+  const v = vs(winId);
+  for (const w of peers(winId)) {
+    const o = vs(w);
+    o.rot = v.rot; o.tilt = v.tilt; o.gap = v.gap;
+    const live = lives.get(w);
+    if (live && live.svg.isConnected) live.apply();
+  }
+}
+
+/** The lane of `lanes` that is the horizon `hz`: the same id, else the same
+ *  name, else the widest overlap of their intervals (exported for the checks). */
+export function lcMatchLane(hz: LcHorizon | null | undefined, lanes: ReadonlyArray<{ id: string; name: string; start: number | null; end: number | null }>): string | null {
+  if (!hz) return null;
+  const byId = lanes.find((l) => l.id === hz.id);
+  if (byId) return byId.id;
+  const byName = lanes.find((l) => l.name === hz.name);
+  if (byName) return byName.id;
+  if (hz.start == null && hz.end == null) return null;
+  const a0 = hz.start ?? -Infinity, a1 = hz.end ?? Infinity;
+  let best: string | null = null, bestW = -1;
+  for (const l of lanes) {
+    const b0 = l.start ?? -Infinity, b1 = l.end ?? Infinity;
+    const lo = Math.max(a0, b0), hi = Math.min(a1, b1);
+    if (hi < lo) continue;
+    const w = Number.isFinite(hi - lo) ? hi - lo : 1e9;
+    if (w > bestW) { bestW = w; best = l.id; }
+  }
+  return best;
+}
+
+/** the next scale down (entering) or up; null past the ends */
+export function lcStep(fs: LcFScale | "all", dir: 1 | -1): LcFScale | null {
+  if (fs === "all") return dir > 0 ? "territory" : null;
+  const i = LC_FSCALES.indexOf(fs) + dir;
+  return i >= 0 && i < LC_FSCALES.length ? LC_FSCALES[i] : null;
 }
 const normRot = (r: number): number => ((r % 360) + 360) % 360;
 export function setLcView(winId: string, v: Partial<Omit<LcView, "layers">> & { layers?: Partial<Record<LcLayer, boolean>> }): void {
@@ -263,13 +384,42 @@ export function setLcView(winId: string, v: Partial<Omit<LcView, "layers">> & { 
   if (v.layers) for (const k of LC_LAYERS) if (typeof v.layers[k] === "boolean") cur.layers[k] = v.layers[k]!;
   if (v.scale === "building" || v.scale === "landscape") scaleOf.set(winId, v.scale);
   else if (v.scale === null) scaleOf.delete(winId);
+  // MICRO-MF08 · the scale, the focus, the horizon, the lock
+  if (v.fs === "all" || isFs(v.fs)) fsOf.set(winId, v.fs);
+  if (v.focus === null) focusOf.delete(winId);
+  else if (typeof v.focus === "string" && v.focus) focusOf.set(winId, v.focus);
+  if (v.hz === null) hzOf.delete(winId);
+  else if (v.hz && typeof v.hz.id === "string") hzOf.set(winId, { id: v.hz.id, name: v.hz.name ?? v.hz.id, start: v.hz.start ?? null, end: v.hz.end ?? null });
+  if (v.sync === true && !syncOn.has(winId)) {
+    // joining: the window takes the view of the group it joins
+    const first = [...syncOn][0];
+    syncOn.add(winId);
+    if (first) {
+      const o = vs(first), me = vs(winId);
+      me.rot = o.rot; me.tilt = o.tilt; me.gap = o.gap;
+      const hz = hzOf.get(first); if (hz) hzOf.set(winId, hz); else hzOf.delete(winId);
+      const fo = focusOf.get(first); if (fo) focusOf.set(winId, fo);
+    }
+  } else if (v.sync === false) syncOn.delete(winId);
+  // what a synced window changes, its peers change (the scale and the layers stay each window's own)
+  for (const w of peers(winId)) {
+    if (v.rot != null || v.tilt != null || v.gap !== undefined) { const o = vs(w), me = vs(winId); o.rot = me.rot; o.tilt = me.tilt; o.gap = me.gap; }
+    if (v.hz !== undefined) { const hz = hzOf.get(winId); if (hz) hzOf.set(w, hz); else hzOf.delete(w); }
+    if (v.focus !== undefined) { const fo = focusOf.get(winId); if (fo) focusOf.set(w, fo); else focusOf.delete(w); }
+  }
   const live = lives.get(winId);
-  if (live && (v.rot != null || v.tilt != null || v.gap !== undefined) && !v.layers && v.scale === undefined) live.apply();
+  const turnOnly = (v.rot != null || v.tilt != null || v.gap !== undefined) && !v.layers && v.scale === undefined &&
+    v.fs === undefined && v.focus === undefined && v.hz === undefined && v.sync === undefined;
+  if (live && turnOnly) { live.apply(); for (const w of peers(winId)) { const l = lives.get(w); if (l && l.svg.isConnected) l.apply(); } }
   lcAsk();
 }
 /** the scale a window shows: its choice, else the landscape's when the active
  *  graph IS the landscape, else the building's */
 export function lcScaleOf(winId: string): LcScale {
+  // MICRO-MF08 · a functional scale: the territory is the landscape's when one
+  // is open; every other scale reads the graph of the building
+  const fs = fsOf.get(winId);
+  if (fs && fs !== "all") return fs === "territory" && host?.landscape() ? "landscape" : "building";
   const chosen = scaleOf.get(winId);
   if (chosen === "landscape" && host?.landscape()) return "landscape";
   if (chosen === "building" && host?.active()) return "building";
@@ -285,7 +435,7 @@ type P2 = [number, number];
 /** a polygon of a plane, in metres RELATIVE TO THE CENTRE (y north) */
 interface GPoly { ring: P2[]; attrs: string; layer: LcLayer | "face" | "land"; mask?: boolean }
 /** an extruded footprint (the layer «Proxy») */
-interface GTop { ring: P2[]; h: number; colour: string; attrs: string; edges: P2[] }
+interface GTop { ring: P2[]; h: number; colour: string; attrs: string; edges: P2[]; layer?: LcLayer }
 /** a label anchored to a point of a plane */
 interface GLabel { at: P2; text: string; cls: string; attrs: string; layer: LcLayer | "always"; dy?: number }
 interface GPlane { lane: string; name: string; polys: GPoly[]; tops: GTop[]; labels: GLabel[]; buried: P2[][]; symbols: GLabel[] }
@@ -293,6 +443,8 @@ interface GLink { a: { i: number; at: P2 }; b: { i: number; at: P2 }; cls: strin
 export interface LcGeometry {
   centre: P2; radius: number; half: P2; planes: GPlane[]; links: GLink[]; outliers: string[];
   rmUnread: number; rmRead: number;
+  /** MICRO-MF08 · at a functional scale: what is shown (null: every unit) */
+  shown?: null | { fs: LcFScale; fus: string[]; units: number; absent: number };
 }
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
@@ -339,9 +491,35 @@ const BIG_M2 = 250;   // a footprint this large is drawn in line only (it would 
 
 function seenOf(it: LcItem): LcSeen { return it.visibility ?? "undetermined"; }
 
-/** The geometry of a building's cube (exported for the checks). */
-export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"]): LcGeometry {
-  const fr = lcFrame(Object.entries(a.units).map(([id, u]) => ({ id, rings: u.rings as P2[][] })));
+/** MICRO-MF08 · what a window shows at a functional scale: the scale and the
+ *  unit(s) entered (the focus and its equivalents in the other graph) */
+export interface LcScope { fs: LcFScale; focus: ReadonlySet<string> }
+
+/** The functional units a window shows at scale `sc.fs`: those of that scale;
+ *  when the focus is a unit of a WIDER scale, only those inside it (entering).
+ *  Exported for the checks. */
+export function lcScopeUnits(a: LcBuilding, sc: LcScope): Set<string> {
+  const at = Object.entries(a.functional_units).filter(([, f]) => f.scale === sc.fs).map(([id]) => id);
+  const wider = [...sc.focus].filter((id) => { const f = a.functional_units[id]; return !!f && isFs(f.scale) && RANK[f.scale] < RANK[sc.fs]; });
+  if (!wider.length) return new Set(at);
+  return new Set(at.filter((id) => (a.functional_units[id].ancestors ?? (a.functional_units[id].parent ? [a.functional_units[id].parent!] : []))
+    .some((x) => wider.includes(x))));
+}
+
+/** The geometry of a building's cube (exported for the checks); with a scope
+ *  (MF08) only the units of that scale, as volumes, their rooms, the elements
+ *  they read, and the symbols of the ones with no outline. */
+export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"], sc?: LcScope | null): LcGeometry {
+  const keep = sc ? lcScopeUnits(a, sc) : null;
+  const shownUnits = new Set<string>();
+  const shownAt = new Map<string, Set<string>>();
+  const shownFus = new Set<string>();
+  let absentN = 0;
+  // the frame: at a scale, the footprints shown (the temple, not the whole city)
+  const inScope = new Set<string>();
+  if (keep) for (const p of a.planes) for (const it of p.items) if (keep.has(it.by_scale?.[sc!.fs] ?? "")) inScope.add(it.id);
+  const framed = Object.entries(a.units).filter(([id]) => !keep || inScope.has(id)).map(([id, u]) => ({ id, rings: u.rings as P2[][] }));
+  const fr = lcFrame(framed.length ? framed : Object.entries(a.units).map(([id, u]) => ({ id, rings: u.rings as P2[][] })));
   const c = fr.centre;
   const hx = fr.half[0] * (1 + PAD), hy = fr.half[1] * (1 + PAD);
   const face: P2[] = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map((p) => [r2(p[0]), r2(p[1])] as P2);
@@ -351,16 +529,27 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"]): LcGeometry {
     const tops: GTop[] = [];
     const labels: GLabel[] = [];
     const buried: P2[][] = [];
+    const symbolsM: GLabel[] = [];
+    const symBy = new Map((pl.symbols ?? []).map((s) => [s.fu, s]));
+    // MF08 · the volumes go UNDER the footprints (a click on an element reaches it)
+    const under: GPoly[] = [];
     for (const it of pl.items) {
       const u = a.units[it.id];
       if (!u) continue;
+      // MF08 · at a scale: the unit of that scale reads it, or it is not shown
+      const reader = keep ? (it.by_scale?.[sc!.fs] ?? null) : it.reader;
+      if (keep && (!reader || !keep.has(reader))) continue;
+      const ev = keep ? (symBy.get(reader!)?.evidence ?? it.evidence) : it.evidence;
+      shownUnits.add(it.id);
+      if (!shownAt.has(it.id)) shownAt.set(it.id, new Set());
+      shownAt.get(it.id)!.add(pl.lane);
       const seen = seenOf(it);
-      const col = evidenceColour(it.reader ? it.evidence : null);
-      const name = u.name + (it.reader ? ` · ${a.functional_units[it.reader]?.name ?? ""}` : "") +
+      const col = evidenceColour(reader ? ev : null);
+      const name = u.name + (reader ? ` · ${a.functional_units[reader]?.name ?? ""}` : "") +
         (it.instance && it.from_lane ? ` · ${t("lc.from", { lane: a.lanes.find((l) => l.id === it.from_lane)?.name ?? it.from_lane })}` : "") +
         ` · ${t(`lc.seen.${seen}`)}`;
-      const data = `data-lc-unit="${esc(it.id)}" data-lc-lane="${esc(pl.lane)}" data-lc-evidence="${esc(it.reader ? it.evidence ?? "symbol" : "none")}"` +
-        ` data-lc-reader="${esc(it.reader ?? "")}" data-lc-seen="${seen}"${it.instance ? ` data-lc-instance="${esc(it.from_lane ?? "")}"` : ""}`;
+      const data = `data-lc-unit="${esc(it.id)}" data-lc-lane="${esc(pl.lane)}" data-lc-evidence="${esc(reader ? ev ?? "symbol" : "none")}"` +
+        ` data-lc-reader="${esc(reader ?? "")}" data-lc-seen="${seen}"${it.instance ? ` data-lc-instance="${esc(it.from_lane ?? "")}"` : ""}`;
       for (const ring of u.rings) {
         const rr = rel(ring, c);
         if (seen === "buried") buried.push(rr);
@@ -374,24 +563,61 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"]): LcGeometry {
         const n = rr.length;
         const step = Math.max(1, Math.ceil(n / 8));
         tops.push({ ring: rr, h: hgt, colour: col, edges: rr.filter((_p, j) => j % step === 0),
-                    attrs: `${data} fill="${col}" fill-opacity="${areaOf(rr) > BIG_M2 ? 0.04 : it.reader ? 0.3 : 0.12}" stroke="${col}"` +
+                    attrs: `${data} fill="${col}" fill-opacity="${areaOf(rr) > BIG_M2 ? 0.04 : reader ? 0.3 : 0.12}" stroke="${col}"` +
                       `${seen === "buried" ? ' stroke-dasharray="2 2"' : ""}` });
       }
     }
     // SYMBOLIC · the hull of the members per functional unit
     for (const s of pl.symbols ?? []) {
+      if (keep && !keep.has(s.fu)) continue;
       const rr = rel(s.ring, c);
       if (rr.length < 3) continue;
       const col = evidenceColour(s.evidence);
-      polys.push({ ring: rr, layer: "sym", attrs: `class="lc-sym-hull" data-lc-fu="${esc(s.fu)}" data-lc-lane="${esc(pl.lane)}"` +
-        ` data-lc-evidence="${esc(s.evidence ?? "symbol")}"${s.container ? ' data-lc-container=""' : ""} fill="${col}"` +
-        ` fill-opacity="${s.container ? 0.05 : 0.14}" stroke="${col}" stroke-width="1.5"${s.container ? ' stroke-dasharray="6 3"' : ""}` +
-        `><title>${esc(`${s.name} · ${s.members.length}`)}</title` });
+      if (keep) {
+        // MF08 · a VOLUME: the hull raised by its members' heights, and the
+        // units directly in it (the rooms of the temple) as thin outlines
+        shownFus.add(s.fu);
+        under.push({ ring: rr, layer: "sym", attrs: `class="lc-sym-hull lc-vol" data-lc-fu="${esc(s.fu)}" data-lc-lane="${esc(pl.lane)}" data-lc-scale="${esc(s.scale ?? "")}"` +
+          ` data-lc-evidence="${esc(s.evidence ?? "symbol")}" fill="${col}" fill-opacity="0.16" stroke="${col}" stroke-width="1.6"` +
+          `><title>${esc(`${s.name} · ${t(`fm.scale.${s.scale ?? "building"}`)} · ${s.members.length}`)}</title` });
+        const z = s.z_range;
+        const hgt = z ? Math.max(0.5, Math.min(60, z[1] - z[0])) : 0;
+        if (hgt > 0) {
+          const step = Math.max(1, Math.ceil(rr.length / 12));
+          tops.push({ ring: rr, h: hgt, colour: col, layer: "sym", edges: rr.filter((_p, j) => j % step === 0),
+                      attrs: `class="lc-vol-top" data-lc-fu="${esc(s.fu)}" fill="${col}" fill-opacity="0.07" stroke="${col}" stroke-dasharray="4 2"` });
+        }
+        for (const ch of s.children ?? []) {
+          const cs = symBy.get(ch);
+          if (!cs || cs.ring.length < 3) continue;
+          const cr = rel(cs.ring, c);
+          polys.push({ ring: cr, layer: "sym", attrs: `class="lc-sym-hull lc-sub" data-lc-fu="${esc(ch)}" data-lc-sub-of="${esc(s.fu)}" data-lc-lane="${esc(pl.lane)}"` +
+            ` fill="none" stroke="${evidenceColour(cs.evidence)}" stroke-width="0.9" stroke-dasharray="2 2"><title>${esc(`${cs.name} · ${t(`fm.scale.${cs.scale ?? "room"}`)}`)}</title` });
+          labels.push({ at: centroidOf(cr), text: fit(cs.name.split(" (")[0], 110, 5), cls: "lc-sub-name", layer: "sym", attrs: `data-lc-fu="${esc(ch)}"` });
+        }
+      } else {
+        polys.push({ ring: rr, layer: "sym", attrs: `class="lc-sym-hull" data-lc-fu="${esc(s.fu)}" data-lc-lane="${esc(pl.lane)}"` +
+          ` data-lc-evidence="${esc(s.evidence ?? "symbol")}"${s.container ? ' data-lc-container=""' : ""} fill="${col}"` +
+          ` fill-opacity="${s.container ? 0.05 : 0.14}" stroke="${col}" stroke-width="1.5"${s.container ? ' stroke-dasharray="6 3"' : ""}` +
+          `><title>${esc(`${s.name} · ${s.members.length}`)}</title` });
+      }
       const at = centroidOf(rr);
       symAt.set(`${s.fu}@${i}`, { i, at });
       if (!symAt.has(s.fu)) symAt.set(s.fu, { i, at });
       labels.push({ at, text: `{ ${fit(s.name.split(" (")[0], 150, 5.4)} }`, cls: "lc-sym-name", layer: "sym",
-                    attrs: `data-lc-fu="${esc(s.fu)}"`, dy: s.container ? -10 : 0 });
+                    attrs: `data-lc-fu="${esc(s.fu)}"`, dy: keep ? -12 : s.container ? -10 : 0 });
+    }
+    // MF08 · the units of the scale alive here with no outline: a symbol
+    if (keep) {
+      for (const ab of pl.absent ?? []) {
+        if (!keep.has(ab.fu)) continue;
+        absentN++;
+        shownFus.add(ab.fu);
+        symbolsM.push({ at: [-hx, -hy], text: "fu", cls: "lc-sym", layer: "always",
+                        attrs: `data-lc-fu="${esc(ab.fu)}" data-lc-lane="${esc(pl.lane)}" data-lc-kind="absent" data-lc-why="${esc(ab.why)}"` +
+                          ` data-lc-evidence="${esc(ab.evidence ?? "symbol")}" data-col="${evidenceColour(ab.evidence)}"` +
+                          ` data-title="${esc(`${ab.name} · ${t(ab.why === "no_outline" ? "lc.why.noOutline" : "lc.why.noMembers")}`)}"` });
+      }
     }
     // MODELS · the representation models of the epoch, masked by the buried
     for (const m of pl.rm ?? []) {
@@ -400,14 +626,17 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"]): LcGeometry {
           ` fill="url(#lc-rm-m)" stroke="currentColor" stroke-width="0.6"><title>${esc(`${m.name} · ${t("lc.rmTitle")}`)}</title` });
       }
     }
-    return { lane: pl.lane, name: pl.name, polys, tops, labels, buried, symbols: [] };
+    if (under.length) polys.splice(1, 0, ...under);
+    return { lane: pl.lane, name: pl.name, polys, tops, labels, buried, symbols: symbolsM };
   });
   const links: GLink[] = [];
   const idx = new Map(a.planes.map((p, i) => [p.lane, i]));
   for (const v of a.verticals) {
     const u = a.units[v.id];
     if (!u) continue;
-    const is = v.lanes.map((l) => idx.get(l)).filter((x): x is number => x != null);
+    // at a scale: only between the planes where the unit is shown
+    const lanesOf = keep ? v.lanes.filter((l) => shownAt.get(v.id)?.has(l)) : v.lanes;
+    const is = lanesOf.map((l) => idx.get(l)).filter((x): x is number => x != null);
     if (is.length < 2) continue;
     const at = rel([u.centroid], c)[0];
     links.push({ a: { i: Math.min(...is), at }, b: { i: Math.max(...is), at }, cls: "lc-vertical", layer: "always",
@@ -424,11 +653,12 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"]): LcGeometry {
   }
   const unread = a.planes.reduce((m, p) => m + (p.rm_unread?.length ?? 0), 0);
   const read = a.planes.reduce((m, p) => m + (p.rm?.length ?? 0), 0);
-  return { centre: c, radius: Math.hypot(hx, hy), half: [hx, hy], planes, links, outliers: fr.outliers, rmUnread: unread, rmRead: read };
+  return { centre: c, radius: Math.hypot(hx, hy), half: [hx, hy], planes, links, outliers: fr.outliers, rmUnread: unread, rmRead: read,
+           shown: keep ? { fs: sc!.fs, fus: [...shownFus], units: shownUnits.size, absent: absentN } : null };
 }
 
 /** The geometry of a landscape's cube (exported for the checks). */
-export function lcLandscapeGeometry(a: LcLandscape, t: LcHost["t"]): LcGeometry {
+export function lcLandscapeGeometry(a: LcLandscape, t: LcHost["t"], sc?: LcScope | null): LcGeometry {
   const items = Object.entries(a.shapes).map(([id, s]) => ({ id, rings: Object.values(s.rings_by_lane).flat() as P2[][] }));
   const fr = lcFrame(items);
   const c = fr.centre;
@@ -437,15 +667,25 @@ export function lcLandscapeGeometry(a: LcLandscape, t: LcHost["t"]): LcGeometry 
   const planes: GPlane[] = a.planes.map((pl) => {
     const polys: GPoly[] = [{ ring: face, attrs: `class="lc-plane-face"`, layer: "face" }];
     const symbols: GLabel[] = [];
+    const labels: GLabel[] = [];
     for (const it of pl.items) {
       const r = a.rows[it.id];
       if (!r) continue;
       const col = evidenceColour(it.evidence);
       if (it.kind === "footprint") {
         for (const rg of a.shapes[it.id]?.rings_by_lane[pl.lane] ?? []) {
-          polys.push({ ring: rel(rg, c), layer: "land", attrs: `class="lc-fp" data-lc-unit="${esc(it.id)}" data-lc-lane="${esc(pl.lane)}"` +
+          polys.push({ ring: rel(rg, c), layer: sc ? "plan" : "land", attrs: `class="lc-fp" data-lc-unit="${esc(it.id)}" data-lc-lane="${esc(pl.lane)}"` +
             ` data-lc-evidence="${esc(it.evidence ?? "symbol")}" data-lc-kind="footprint" fill="${col}" fill-opacity="0.16" stroke="${col}"` +
             ` stroke-width="1"><title>${esc(r.name)}</title` });
+        }
+        // MF08 · at the scale of the territory: the presence's hull, its name
+        const hull = sc ? a.shapes[it.id]?.hull_by_lane?.[pl.lane] : null;
+        if (hull && hull.length >= 3) {
+          const rr = rel(hull, c);
+          polys.push({ ring: rr, layer: "sym", attrs: `class="lc-sym-hull lc-vol" data-lc-unit="${esc(it.id)}" data-lc-lane="${esc(pl.lane)}" data-lc-kind="presence"` +
+            ` data-lc-evidence="${esc(it.evidence ?? "symbol")}" fill="${col}" fill-opacity="0.08" stroke="${col}" stroke-width="1.6" stroke-dasharray="6 3"><title>${esc(r.name)}</title` });
+          labels.push({ at: centroidOf(rr), text: `{ ${fit(r.name.split(" (")[0].split(":")[0], 150, 5.4)} }`, cls: "lc-sym-name", layer: "sym",
+                        attrs: `data-lc-unit="${esc(it.id)}"`, dy: -10 });
         }
       } else {
         symbols.push({ at: [-hx, -hy], text: r.kind, cls: "lc-sym", layer: "always",
@@ -453,7 +693,7 @@ export function lcLandscapeGeometry(a: LcLandscape, t: LcHost["t"]): LcGeometry 
                          ` data-lc-evidence="${esc(it.evidence ?? "symbol")}" data-col="${col}" data-title="${esc(`${r.name} · ${t(it.why === "no_outline" ? "lc.why.noOutline" : "lc.why.noMembers")}`)}"` });
       }
     }
-    return { lane: pl.lane, name: pl.name, polys, tops: [], labels: [], buried: [], symbols };
+    return { lane: pl.lane, name: pl.name, polys, tops: [], labels, buried: [], symbols };
   });
   const idx = new Map(a.planes.map((p, i) => [p.lane, i]));
   const links: GLink[] = [];
@@ -466,15 +706,20 @@ export function lcLandscapeGeometry(a: LcLandscape, t: LcHost["t"]): LcGeometry 
     links.push({ a: { i: Math.min(...is), at }, b: { i: Math.max(...is), at }, cls: "lc-vertical", layer: "always",
                  attrs: `data-lc-vertical="${esc(v.id)}" data-lc-unit="${esc(v.id)}"` });
   }
-  return { centre: c, radius: Math.hypot(hx, hy), half: [hx, hy], planes, links, outliers: fr.outliers, rmUnread: 0, rmRead: 0 };
+  const rowsShown = Object.keys(a.rows).filter((id) => a.planes.some((p) => p.items.some((it) => it.id === id)));
+  return { centre: c, radius: Math.hypot(hx, hy), half: [hx, hy], planes, links, outliers: fr.outliers, rmUnread: 0, rmRead: 0,
+           shown: sc ? { fs: "territory", fus: rowsShown, units: Object.keys(a.shapes).length,
+                         absent: a.planes.reduce((m, p) => m + p.items.filter((it) => it.kind === "symbol").length, 0) } : null };
 }
 
 // ── the projection: one affine transform per plane ──────────────────────────
 
 const RAIL = 130;          // the planes' names, on the left
+/** MICRO-MF08 · a narrow area (two Cubes side by side) gives the names less */
+const railOf = (width: number): number => (width < 560 ? Math.max(64, Math.round(width * 0.22)) : RAIL);
 const TOP = 26;
 
-export interface LcFit { k: number; gap: number; ox: number; oy: number; planeH: number; width: number; height: number }
+export interface LcFit { k: number; gap: number; ox: number; oy: number; planeH: number; width: number; height: number; rail?: number }
 
 /** The scale and the distance between the planes for an area `width` ×
  *  `height`: the rotated plane fits the width, the stack fits the height, the
@@ -483,7 +728,8 @@ export interface LcFit { k: number; gap: number; ox: number; oy: number; planeH:
 export function lcFit(g: Pick<LcGeometry, "radius" | "planes">, width: number, height: number, v: Pick<LcView, "tilt" | "gap">): LcFit {
   const n = Math.max(1, g.planes.length);
   const r = Math.max(1, g.radius);
-  const kw = Math.max(0.02, (width - RAIL - 24) / (2 * r));
+  const rail = railOf(width);
+  const kw = Math.max(0.02, (width - rail - 24) / (2 * r));
   const avail = Math.max(120, height - TOP - 34);
   let k: number;
   if (v.gap == null) k = Math.min(kw, avail / (2 * r * v.tilt * (1 + GAP_AUTO * (n - 1))));
@@ -492,7 +738,7 @@ export function lcFit(g: Pick<LcGeometry, "radius" | "planes">, width: number, h
   const planeH = 2 * r * k * v.tilt;
   const gap = v.gap ?? Math.max(GAP_MIN, planeH * GAP_AUTO);
   const h = TOP + planeH + (n - 1) * gap + 34;
-  return { k, gap, ox: RAIL + 12 + (width - RAIL - 24) / 2, oy: TOP + planeH / 2, planeH, width, height: Math.max(h, 120) };
+  return { k, gap, ox: rail + 12 + (width - rail - 24) / 2, oy: TOP + planeH / 2, planeH, width, height: Math.max(h, 120), rail };
 }
 
 /** the affine transform of plane `i`: metres relative to the centre → pixels */
@@ -509,6 +755,8 @@ const mat = (m: ReturnType<typeof lcMatrix>): string => `matrix(${m.map((x) => x
 export interface LcDrawOpts {
   width: number; height?: number; rot: number; gap: number | null; tilt?: number; sel: string | null;
   t: LcHost["t"]; layers?: Record<LcLayer, boolean>; lit?: ReadonlySet<string>; win?: string;
+  /** MICRO-MF08 · the plane of the window's horizon, the units entered */
+  hz?: string | null; focus?: ReadonlySet<string>;
 }
 
 const DEFS = (win: string): string =>
@@ -535,7 +783,7 @@ export function lcSvg(g: LcGeometry, o: LcDrawOpts): { svg: string; fit: LcFit }
     const m = /data-lc-(?:unit|fu)="([^"]+)"/.exec(attrs);
     if (!m) return "";
     const id = m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&");
-    return o.sel === id ? " lc-sel" : lit.has(id) ? " lc-lit" : "";
+    return (o.sel === id ? " lc-sel" : lit.has(id) ? " lc-lit" : "") + (o.focus?.has(id) ? " lc-focus" : "");
   };
   const cls = (attrs: string, extra: string): string => attrs.includes('class="')
     ? attrs.replace(/class="([^"]*)"/, (_m, c) => `class="${c}${extra}"`) : `class="${extra.trim()}" ${attrs}`;
@@ -560,12 +808,14 @@ export function lcSvg(g: LcGeometry, o: LcDrawOpts): { svg: string; fit: LcFit }
       ? `<mask id="lc-mask-${esc(win)}-${i}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-100000" y="-100000" width="200000" height="200000">` +
         `<rect x="-100000" y="-100000" width="200000" height="200000" fill="#fff"/>${p.buried.map((r) => `<polygon points="${ptsOf(r)}" fill="#000"/>`).join("")}</mask>`
       : L.rm ? `<mask id="lc-mask-${esc(win)}-${i}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-100000" y="-100000" width="200000" height="200000"><rect x="-100000" y="-100000" width="200000" height="200000" fill="#fff"/></mask>` : "";
-    planes += `<g class="lc-plane" data-lc-plane="${esc(p.lane)}" data-lc-plane-index="${i}" transform="${mat(m)}">${mask}${inner}</g>`;
-    if (L.prx) {
+    const cur = o.hz ? (p.lane === o.hz ? " lc-plane-cur" : " lc-plane-dim") : "";
+    planes += `<g class="lc-plane${cur}" data-lc-plane="${esc(p.lane)}" data-lc-plane-index="${i}" transform="${mat(m)}">${mask}${inner}</g>`;
+    {
       for (const tp of p.tops) {
+        if (!on(tp.layer ?? "prx")) continue;
         const lift = tp.h * f.k * Math.sqrt(1 - tilt * tilt);
-        tops += `<g class="lc-top" data-lc-plane-index="${i}" data-lc-h="${tp.h.toFixed(2)}" transform="${mat(lcMatrix(f, o.rot, tilt, i, lift))}">` +
-          `<polygon points="${ptsOf(tp.ring)}" vector-effect="non-scaling-stroke" ${cls(`class="lc-prx" ${tp.attrs}`, isSel(tp.attrs))}></polygon></g>`;
+        tops += `<g class="lc-top${cur}" data-lc-plane-index="${i}" data-lc-h="${tp.h.toFixed(2)}" transform="${mat(lcMatrix(f, o.rot, tilt, i, lift))}">` +
+          `<polygon points="${ptsOf(tp.ring)}" vector-effect="non-scaling-stroke" ${cls(tp.attrs.includes('class="') ? tp.attrs : `class="lc-prx" ${tp.attrs}`, isSel(tp.attrs))}></polygon></g>`;
       }
     }
   }
@@ -578,14 +828,15 @@ export function lcSvg(g: LcGeometry, o: LcDrawOpts): { svg: string; fit: LcFit }
 /** The screen layer for a view: the extrusions' edges, the verticals, the
  *  chains, the names of the planes and of the functional units — arithmetic
  *  on cached geometry, the only thing a turn recomputes besides the transforms. */
-function screenLayer(g: LcGeometry, f: LcFit, rot: number, tilt: number, L: Record<LcLayer, boolean>, sel: string | null): string {
+function screenLayer(g: LcGeometry, f: LcFit, rot: number, tilt: number, L: Record<LcLayer, boolean>, sel: string | null, hz: string | null = null): string {
   const on = (l: LcLayer | "always"): boolean => l === "always" || !!L[l];
   let s = "";
   const vk = f.k * Math.sqrt(1 - tilt * tilt);
-  if (L.prx) {
+  {
     g.planes.forEach((p, i) => {
       const m = lcMatrix(f, rot, tilt, i);
       for (const tp of p.tops) {
+        if (!on(tp.layer ?? "prx")) continue;
         const lift = tp.h * vk;
         for (const e of tp.edges) {
           const a = apply(m, e);
@@ -608,7 +859,7 @@ function screenLayer(g: LcGeometry, f: LcFit, rot: number, tilt: number, L: Reco
     // the name at the plane's leftmost corner (it follows the turn)
     const cs = [[-g.half[0], -g.half[1]], [g.half[0], -g.half[1]], [g.half[0], g.half[1]], [-g.half[0], g.half[1]]].map((q) => apply(m, q as P2));
     const left = cs.reduce((mm, q) => (q[0] < mm[0] ? q : mm));
-    s += `<text class="lc-plane-name" data-lc-plane-name="${esc(p.lane)}" x="${(left[0] - 8).toFixed(1)}" y="${(left[1] + 4).toFixed(1)}" text-anchor="end">${esc(fit(p.name, RAIL - 12, 6.2))}</text>`;
+    s += `<text class="lc-plane-name${hz ? (p.lane === hz ? " lc-plane-cur" : " lc-plane-dim") : ""}" data-lc-plane-name="${esc(p.lane)}" x="${(left[0] - 8).toFixed(1)}" y="${(left[1] + 4).toFixed(1)}" text-anchor="end">${esc(fit(p.name, (f.rail ?? RAIL) - 12, 6.2))}</text>`;
     for (const lb of p.labels) {
       if (!on(lb.layer)) continue;
       const a = apply(m, lb.at);
@@ -618,8 +869,11 @@ function screenLayer(g: LcGeometry, f: LcFit, rot: number, tilt: number, L: Reco
     if (p.symbols.length) {
       const corners = [[-g.half[0], -g.half[1]], [g.half[0], -g.half[1]], [g.half[0], g.half[1]], [-g.half[0], g.half[1]]].map((q) => apply(m, q as P2));
       const front = corners.reduce((mm, q) => (q[1] > mm[1] ? q : mm));
+      // as many in a row as the area holds (MF08: narrow areas side by side)
+      const perRow = Math.max(4, Math.min(12, Math.floor((f.width - 24) / 28)));
+      const x0 = Math.max(12, Math.min(front[0] - (perRow * 28) / 2, f.width - perRow * 28 - 6));
       p.symbols.forEach((sy, j) => {
-        const x = front[0] - 160 + (j % 12) * 28, yy = front[1] + 14 + Math.floor(j / 12) * 22;
+        const x = x0 + (j % perRow) * 28, yy = front[1] + 14 + Math.floor(j / perRow) * 22;
         const col = /data-col="([^"]+)"/.exec(sy.attrs)?.[1] ?? "#8c8c8c";
         const title = /data-title="([^"]*)"/.exec(sy.attrs)?.[1] ?? "";
         const shape = sy.text === "ut" ? `<path d="M${x - 6},${yy} l3,-5 h6 l3,5 l-3,5 h-6z" fill="#fff" stroke="${col}"/>`
@@ -638,7 +892,7 @@ export function lcBuildingSvg(a: LcBuilding, o: LcDrawOpts): string {
   const g = lcBuildingGeometry(a, o.t);
   const L = o.layers ?? view0().layers;
   const { svg, fit: f } = lcSvg(g, o);
-  return svg.replace('<g class="lc-screen"></g>', `<g class="lc-screen">${screenLayer(g, f, o.rot, o.tilt ?? TILT0, L, o.sel)}</g>`);
+  return svg.replace('<g class="lc-screen"></g>', `<g class="lc-screen">${screenLayer(g, f, o.rot, o.tilt ?? TILT0, L, o.sel, o.hz ?? null)}</g>`);
 }
 export function lcLandscapeSvg(a: LcLandscape, o: LcDrawOpts): string {
   const g = lcLandscapeGeometry(a, o.t);
@@ -660,20 +914,23 @@ function note(key: string, vars: Record<string, string | number> | undefined, st
 interface Live {
   win: string; svg: SVGSVGElement; g: LcGeometry; fit: LcFit; screen: SVGGElement;
   apply(): void; renders: number; frames: number; turning: boolean;
+  /** MICRO-MF08 · the plane of its horizon (its own lanes), the scope drawn */
+  hz: string | null; shown: LcGeometry["shown"];
   /** the cost of a frame of the turn (ms): the last, the worst */
   ms: number; maxMs: number;
 }
 const lives = new Map<string, Live>();
 /** geometry cache: per window, the answer it was built from */
-const geomOf = new Map<string, { answer: LcAnswer; lang: string; g: LcGeometry }>();
+const geomOf = new Map<string, { answer: LcAnswer; lang: string; key: string; g: LcGeometry }>();
 const reduceMotion = (): boolean => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function geometryFor(winId: string, a: LcAnswer, t: LcHost["t"]): LcGeometry {
+function geometryFor(winId: string, a: LcAnswer, t: LcHost["t"], sc: LcScope | null = null): LcGeometry {
   const L = lang();
+  const key = sc ? `${sc.fs}|${[...sc.focus].sort().join(",")}` : "";
   const hit = geomOf.get(winId);
-  if (hit && hit.answer === a && hit.lang === L) return hit.g;
-  const g = a.scale === "building" ? lcBuildingGeometry(a, t) : lcLandscapeGeometry(a, t);
-  geomOf.set(winId, { answer: a, lang: L, g });
+  if (hit && hit.answer === a && hit.lang === L && hit.key === key) return hit.g;
+  const g = a.scale === "building" ? lcBuildingGeometry(a, t, sc) : lcLandscapeGeometry(a, t, sc);
+  geomOf.set(winId, { answer: a, lang: L, key, g });
   return g;
 }
 
@@ -693,7 +950,7 @@ function applyView(live: Live): void {
     const i = Number(el.dataset.lcPlaneIndex);
     el.setAttribute("transform", mat(lcMatrix(f, v.rot, v.tilt, i, Number(el.dataset.lcH) * vk)));
   });
-  live.screen.innerHTML = screenLayer(live.g, f, v.rot, v.tilt, v.layers, host?.selected() ?? null);
+  live.screen.innerHTML = screenLayer(live.g, f, v.rot, v.tilt, v.layers, host?.selected() ?? null, live.hz);
   const hh = Math.max(120, TOP + 2 * live.g.radius * f.k * v.tilt + (live.g.planes.length - 1) * f.gap + 34);
   live.svg.setAttribute("height", hh.toFixed(0));
   live.svg.setAttribute("viewBox", `0 0 ${f.width} ${hh.toFixed(0)}`);
@@ -701,19 +958,21 @@ function applyView(live: Live): void {
   if (live.frames > 1) live.maxMs = Math.max(live.maxMs, live.ms);
 }
 
-function wireTurntable(live: Live, onClick: (target: Element) => void): void {
+function wireTurntable(live: Live, onClick: (target: Element, at: P2) => void): void {
   const el = live.svg;
   el.style.touchAction = "none";
   let st: { x: number; y: number; rot: number; tilt: number; lx: number; lt: number; moved: boolean; id: number } | null = null;
   let vel = 0;
   let raf = 0;
-  const frame = () => { raf = 0; live.apply(); };
+  // MICRO-MF08 · every frame moves the windows in sync too
+  const frame = () => { raf = 0; live.apply(); shareTurn(live.win); };
   const ask = () => { if (!raf) raf = requestAnimationFrame(frame); };
   el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     cancelAnimationFrame(raf); raf = 0;
     const v = vs(live.win);
     st = { x: e.clientX, y: e.clientY, rot: v.rot, tilt: v.tilt, lx: e.clientX, lt: performance.now(), moved: false, id: e.pointerId };
+    downOf.set(live.win, { x: e.clientX, y: e.clientY, id: e.pointerId });
     vel = 0;
   });
   el.addEventListener("pointermove", (e) => {
@@ -730,11 +989,19 @@ function wireTurntable(live: Live, onClick: (target: Element) => void): void {
     ask();
   });
   const end = (e: PointerEvent) => {
+    // MICRO-MF08 · a click whose press fell on the drawing before a redraw
+    // (the selection repaints the cube) still is a click
+    const d = downOf.get(live.win);
+    downOf.delete(live.win);
+    if (!st && e.type === "pointerup" && d && d.id === e.pointerId && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) {
+      onClick(e.target as Element, [e.clientX, e.clientY]);
+      return;
+    }
     if (!st || e.pointerId !== st.id) return;
     const was = st;
     st = null;
     el.classList.remove("lc-grabbing");
-    if (!was.moved) { live.turning = false; onClick(e.target as Element); return; }
+    if (!was.moved) { live.turning = false; onClick(e.target as Element, [e.clientX, e.clientY]); return; }
     if (reduceMotion() || Math.abs(vel) < 0.02) { live.turning = false; return; }
     // inertia: the turn glides and slows down
     const glide = () => {
@@ -743,6 +1010,7 @@ function wireTurntable(live: Live, onClick: (target: Element) => void): void {
       const v = vs(live.win);
       v.rot = normRot(v.rot + vel * 16 * 0.45);
       live.apply();
+      shareTurn(live.win);
       raf = requestAnimationFrame(glide);
     };
     raf = requestAnimationFrame(glide);
@@ -757,6 +1025,9 @@ function wireTurntable(live: Live, onClick: (target: Element) => void): void {
     ask();
   }, { passive: false });
 }
+
+/** MICRO-MF08 · the last press on a window's drawing (it may be redrawn before the release) */
+const downOf = new Map<string, { x: number; y: number; id: number }>();
 
 /** An area resized (a splitter, ⛶): drawn again to fit, once it settles. */
 const sized = new WeakMap<HTMLElement, { w: number; h: number; ro: ResizeObserver | null; timer: ReturnType<typeof setTimeout> | null }>();
@@ -788,16 +1059,22 @@ export function renderLandscapeCubeInto(body: HTMLElement, winId: string): void 
   const h = host;
   const t = h.t;
   const scale = lcScaleOf(winId);
-  if (!scaleOf.has(winId)) scaleOf.set(winId, scale);
+  const fs = fsOf.get(winId) ?? "all";
+  if (!scaleOf.has(winId) && fs === "all") scaleOf.set(winId, scale);
   lcAsk();
   refitOnResize(body, () => { if (!lives.get(winId)?.turning) host?.changed(); });
   body.textContent = "";
   body.classList.add("fm-body", "lc-body");
   body.dataset.lcScale = scale;
+  body.dataset.lcFs = fs;
+  body.dataset.lcWin = winId;
+  if (syncOn.has(winId)) body.dataset.lcSync = ""; else delete body.dataset.lcSync;
   const v = vs(winId);
   const head = document.createElement("div");
   head.className = "fm-head lc-head";
-  if (h.landscape() && h.active()) {
+  // MICRO-MF08 · the functional scale, up and down, the unit entered, the lock, a cube beside
+  head.appendChild(scaleBar(winId, fs, scale));
+  if (fs === "all" && h.landscape() && h.active()) {
     const sel = document.createElement("select");
     sel.dataset.lcScaleSelect = "";
     for (const k of ["building", "landscape"] as const) {
@@ -810,11 +1087,12 @@ export function renderLandscapeCubeInto(body: HTMLElement, winId: string): void 
     sel.addEventListener("change", () => { setLcView(winId, { scale: sel.value as LcScale }); h.changed(); });
     head.appendChild(sel);
   }
-  // the four layers, independent switches (the building's)
-  if (scale === "building") {
+  // the four layers, independent switches (the building's; at the scale of
+  // the territory the landscape has two: its presences' hulls and outlines)
+  if (scale === "building" || fs !== "all") {
     const grp = document.createElement("span");
     grp.className = "lc-layers";
-    for (const k of LC_LAYERS) {
+    for (const k of scale === "building" ? LC_LAYERS : (["sym", "plan"] as const)) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "lc-layer-btn";
@@ -852,6 +1130,7 @@ export function renderLandscapeCubeInto(body: HTMLElement, winId: string): void 
     .map((ev) => `<span class="fm-legend-item" data-fm-legend="${ev}">${sw(ev)}${esc(t(ev === "symbol" && scale === "building" ? "lc.legend.unread" : `fm.ev.${ev}`))}</span>`).join("") +
     `<span class="fm-legend-item"><span class="fm-sw lc-sw-inst"></span>${esc(t("lc.legend.instance"))}</span>` +
     (scale === "building" ? `<span class="fm-legend-item"><span class="fm-sw lc-sw-buried"></span>${esc(t("lc.legend.buried"))}</span>` : "") +
+    (fs !== "all" ? `<span class="fm-legend-item"><span class="fm-sw lc-sw-vol"></span>${esc(t("lc.legend.volume"))}</span>` : "") +
     `<span class="fm-legend-item"><span class="lc-sw-vert"></span>${esc(t("lc.legend.vertical"))}</span>`;
   const count = document.createElement("span");
   count.className = "fm-count-line";
@@ -870,6 +1149,18 @@ export function renderLandscapeCubeInto(body: HTMLElement, winId: string): void 
     return;
   }
   if (a.scale === "landscape" && !a.planes.length) { body.appendChild(note("lc.noLanes", undefined, "empty")); return; }
+  // MICRO-MF08 · the scope of the window: its scale and the unit entered
+  const sc: LcScope | null = fs === "all" ? null : { fs, focus: focusSet(winId) };
+  const g = geometryFor(winId, a, t, sc);
+  if (g.shown && !g.shown.fus.length) {
+    const fo = focusOf.get(winId);
+    body.appendChild(note(fo ? "lc.fs.noneIn" : "lc.fs.none", { s: t(`fm.scale.${fs}`), name: fo ? focusName(fo) : "" }, "empty-scale"));
+    return;
+  }
+  if (g.shown) {
+    count.dataset.lcShown = String(g.shown.fus.length);
+    count.textContent = t("lc.fs.count", { n: g.shown.fus.length, s: t(`fm.scale.${g.shown.fs}`), e: g.shown.units, a: g.shown.absent, p: a.planes.length });
+  }
   const wrap = document.createElement("div");
   wrap.className = "fm-scroll lc-scroll";
   body.appendChild(wrap);
@@ -880,12 +1171,14 @@ export function renderLandscapeCubeInto(body: HTMLElement, winId: string): void 
   notes.textContent = "·";
   foot.append(count, legend, notes);
   body.appendChild(foot);
-  const width = Math.max(320, (wrap.clientWidth || body.clientWidth || 760) - 4);
+  // MICRO-MF08 · a narrow area (two Cubes side by side): drawn to its width
+  const width = Math.max(200, (wrap.clientWidth || body.clientWidth || 760) - 4);
   const height = Math.max(160, (wrap.clientHeight > 60 ? wrap.clientHeight : (body.clientHeight || 520) - head.offsetHeight - foot.offsetHeight - 30) - 4);
-  const g = geometryFor(winId, a, t);
   const sel = h.selected();
   const lit = h.lit?.() ?? new Set<string>();
-  const { svg, fit: f } = lcSvg(g, { width, height, rot: v.rot, gap: v.gap, tilt: v.tilt, sel, t, layers: v.layers, lit, win: winId });
+  const hzLane = lcMatchLane(hzOf.get(winId), a.planes.map((p) => ({ id: p.lane, name: p.name, start: p.start, end: p.end })));
+  const { svg, fit: f } = lcSvg(g, { width, height, rot: v.rot, gap: v.gap, tilt: v.tilt, sel, t, layers: v.layers, lit, win: winId,
+                                     hz: hzLane, focus: focusSet(winId) });
   wrap.innerHTML = svg;
   const el = wrap.querySelector<SVGSVGElement>("svg.lc-svg")!;
   el.dataset.lcWin = winId;
@@ -893,15 +1186,39 @@ export function renderLandscapeCubeInto(body: HTMLElement, winId: string): void 
   const screen = el.querySelector<SVGGElement>(".lc-screen")!;
   const prev = lives.get(winId);
   const live: Live = { win: winId, svg: el, g, fit: f, screen, renders: (prev?.renders ?? renderCount.get(winId) ?? 0) + 1, frames: 0, turning: false,
-                       ms: 0, maxMs: 0, apply: () => applyView(live) };
+                       ms: 0, maxMs: 0, apply: () => applyView(live), hz: hzLane, shown: g.shown ?? null };
   renderCount.set(winId, live.renders);
   lives.set(winId, live);
   live.apply();
   live.frames = 0;
-  wireTurntable(live, (target) => {
-    const it = target.closest<SVGElement>("[data-lc-unit],[data-lc-fu]");
-    if (!it) return;
-    const id = it.getAttribute("data-lc-unit") ?? it.getAttribute("data-lc-fu")!;
+  wireTurntable(live, (target, at) => {
+    // MICRO-MF08 · a plane's name: the horizon of the window (and of its peers)
+    const pn = target.closest<SVGElement>("[data-lc-plane-name]");
+    if (pn) {
+      const lane = a.planes.find((p) => p.lane === pn.getAttribute("data-lc-plane-name"));
+      if (lane) setLcView(winId, { hz: hzLane === lane.lane ? null : { id: lane.lane, name: lane.name, start: lane.start, end: lane.end } });
+      h.changed();
+      return;
+    }
+    const it = target.closest<SVGElement>("[data-lc-fu],[data-lc-unit]");
+    // MICRO-MF08 · a double click on a volume ENTERS it: one scale down. Told
+    // by the time and the place of two clicks (a click redraws the cube — the
+    // selection, the chip of the focus — so the browser's dblclick never
+    // comes, and the second click may fall beside the redrawn volume)
+    const now = performance.now();
+    const prev = lastClick.get(winId);
+    const again = !!prev && now - prev.t < DOUBLE_MS && Math.hypot(at[0] - prev.at[0], at[1] - prev.at[1]) < 6;
+    if (!it && !again) return;
+    const id = again && prev ? prev.id : it!.getAttribute("data-lc-fu") ?? it!.getAttribute("data-lc-unit")!;
+    lastClick.set(winId, { id, t: now, at });
+    if (again && isUnitOfScale(a, id)) {
+      lastClick.delete(winId);
+      lcEnter(winId, id);
+      return;
+    }
+    // a functional unit (or an identity of the landscape) is the focus the
+    // window enters when it goes down a scale
+    if (isUnitOfScale(a, id)) { setLcView(winId, { focus: id }); if (!h.active()?.has(id)) h.changed(); }
     if (h.active()?.has(id)) h.select(id);
   });
   notes.textContent = a.scale === "building"
@@ -913,14 +1230,194 @@ export function renderLandscapeCubeInto(body: HTMLElement, winId: string): void 
   notes.title = notes.textContent;
 }
 const renderCount = new Map<string, number>();
+/** MICRO-MF08 · the last click of a window (a double click enters a volume) */
+const lastClick = new Map<string, { id: string; t: number; at: P2 }>();
+const DOUBLE_MS = 450;
+
+/** a scale with something to show: the territory with a landscape open, the
+ *  others when the graph has functional units of that scale */
+function scaleHas(k: LcFScale): boolean {
+  const counts = (asks.building.answer?.scale === "building" ? asks.building.answer.scales : null) ?? {};
+  return (k === "territory" && !!host?.landscape()) || ((counts as Record<string, number>)[k] ?? 0) > 0;
+}
+
+/** is `id` a functional unit of the building's answer, or an identity of the landscape's */
+function isUnitOfScale(a: LcAnswer, id: string): boolean {
+  return a.scale === "building" ? !!a.functional_units[id] : a.rows[id]?.kind === "identity";
+}
+
+/** the scale of a unit, in the answers at hand */
+function scaleOfUnit(id: string): LcFScale | null {
+  const b = asks.building.answer, l = asks.landscape.answer;
+  const s = (b && b.scale === "building" ? b.functional_units[id]?.scale : null) ?? (l && l.scale === "landscape" ? l.rows[id]?.scale : null);
+  return isFs(s) ? s : null;
+}
+
+/** The focus of a window and its equivalents: an identity of the landscape is
+ *  the same as its bound handle in the cited graph, and back (MF08, «legame S15»). */
+function focusSet(winId: string): Set<string> {
+  const base = focusOf.get(winId);
+  const out = new Set<string>();
+  if (!base) return out;
+  out.add(base);
+  const l = asks.landscape.answer;
+  if (l && l.scale === "landscape") {
+    for (const hd of l.rows[base]?.handles ?? []) out.add(hd.handle);
+    for (const [rid, r] of Object.entries(l.rows)) if ((r.handles ?? []).some((hd) => hd.handle === base)) out.add(rid);
+  }
+  return out;
+}
+function focusName(id: string): string {
+  const b = asks.building.answer, l = asks.landscape.answer;
+  return (b && b.scale === "building" ? b.functional_units[id]?.name : null) ?? (l && l.scale === "landscape" ? l.rows[id]?.name : null) ?? id;
+}
+
+/** ENTER a unit: it becomes the focus and the window goes one scale below
+ *  its own (the city → the site → the building → the room → the component).
+ *  The selection is not touched: it stays. */
+export function lcEnter(winId: string, id: string): void {
+  const own = scaleOfUnit(id);
+  const fs = fsOf.get(winId) ?? "all";
+  const from: LcFScale | "all" = own ?? fs;
+  const base: LcFScale = from === "all" ? "territory" : from;
+  let next = lcStep(base, 1) ?? base;
+  for (let k = lcStep(base, 1); k; k = lcStep(k, 1)) if (scaleHas(k)) { next = k; break; }
+  setLcView(winId, { focus: id, fs: next });
+  host?.changed();
+}
+
+/** One scale up or down, the focus kept; going down with no focus takes the
+ *  selection when it is a functional unit (or an identity). */
+export function lcScaleStep(winId: string, dir: 1 | -1): void {
+  const fs = fsOf.get(winId) ?? "all";
+  // the next scale with something to show (the graph has no «complex»: from
+  // the territory straight to its buildings), else the next one
+  let next = lcStep(fs, dir);
+  for (let k = next; k; k = lcStep(k, dir)) if (scaleHas(k)) { next = k; break; }
+  if (!next) return;
+  const sel = host?.selected() ?? null;
+  const focus = dir > 0 && !focusOf.get(winId) && sel && scaleOfUnit(sel) ? sel : undefined;
+  setLcView(winId, { fs: next, ...(focus ? { focus } : {}) });
+  host?.changed();
+}
+
+/** MICRO-MF08 · the bar of the scale: the six choices, ↑ ↓, the unit
+ *  entered, the lock «sync the view», a cube beside */
+function scaleBar(winId: string, fs: LcFScale | "all", scale: LcScale): HTMLElement {
+  const h = host!;
+  const t = h.t;
+  const bar = document.createElement("span");
+  bar.className = "lc-fs";
+  bar.dataset.lcFsBar = "";
+  const lab = document.createElement("span");
+  lab.className = "fm-note";
+  lab.textContent = t("lc.fs.label");
+  bar.appendChild(lab);
+  const counts = asks.building.answer?.scale === "building" ? asks.building.answer.scales ?? {} : {};
+  // a select: one line, so that two Cubes side by side keep their room for the drawing
+  const pick = document.createElement("select");
+  pick.dataset.lcFsSelect = "";
+  pick.title = t("lc.fs.label");
+  for (const k of ["all", ...LC_FSCALES] as const) {
+    const op = document.createElement("option");
+    op.value = k;
+    op.dataset.lcFs = k;
+    const n = (counts as Record<string, number>)[k];
+    op.textContent = k === "all" ? t("lc.fs.all") : `${t(`fm.scale.${k}`)}${k === "territory" && h.landscape() ? " ⌂" : n != null ? ` · ${n}` : ""}`;
+    op.title = k === "all" ? t("lc.fs.allTitle") : k === "territory" && h.landscape()
+      ? t("lc.fs.territoryTitle") : t("lc.fs.title", { s: t(`fm.scale.${k}`), n: n ?? 0 });
+    op.selected = k === fs;
+    pick.appendChild(op);
+  }
+  pick.addEventListener("change", () => { setLcView(winId, { fs: pick.value as LcFScale | "all" }); h.changed(); });
+  bar.appendChild(pick);
+  const step = (dir: 1 | -1, glyph: string, key: string) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "lc-layer-btn";
+    b.dataset.lcFsStep = dir > 0 ? "down" : "up";
+    b.textContent = glyph;
+    b.title = t(key);
+    b.disabled = !lcStep(fs, dir);
+    b.addEventListener("click", () => lcScaleStep(winId, dir));
+    bar.appendChild(b);
+  };
+  step(-1, "↑", "lc.fs.up");
+  step(1, "↓", "lc.fs.down");
+  const fo = focusOf.get(winId);
+  if (fo) {
+    const chip = document.createElement("span");
+    chip.className = "lc-focus-chip";
+    chip.dataset.lcFocus = fo;
+    chip.textContent = t("lc.fs.in", { name: fit(focusName(fo), 140, 6) });
+    chip.title = focusName(fo);
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "lc-focus-x";
+    x.dataset.lcFocusClear = "";
+    x.textContent = "✕";
+    x.title = t("lc.fs.leave");
+    x.addEventListener("click", () => { setLcView(winId, { focus: null }); h.changed(); });
+    chip.appendChild(x);
+    bar.appendChild(chip);
+  }
+  const lock = document.createElement("button");
+  lock.type = "button";
+  lock.className = "lc-layer-btn lc-sync";
+  lock.dataset.lcSync = "";
+  const on = syncOn.has(winId);
+  lock.textContent = on ? "🔒" : "🔓";
+  lock.title = `${t("lc.sync")} — ${t("lc.syncTitle")}`;
+  lock.setAttribute("aria-label", t("lc.sync"));
+  lock.setAttribute("aria-pressed", String(on));
+  lock.addEventListener("click", () => { setLcView(winId, { sync: !syncOn.has(winId) }); h.changed(); });
+  bar.appendChild(lock);
+  if (h.besides) {
+    const bes = document.createElement("button");
+    bes.type = "button";
+    bes.className = "lc-layer-btn";
+    bes.dataset.lcBesides = "";
+    bes.textContent = "⧉";
+    bes.title = t("lc.besidesTitle");
+    bes.addEventListener("click", () => { lcBesides(winId); });
+    bar.appendChild(bes);
+  }
+  void scale;
+  return bar;
+}
+
+/** MICRO-MF08 · a second Cube beside this one, one scale down, both locked:
+ *  the same landscape at two scales, one point of view. Its window id. */
+export function lcBesides(winId: string): string | null {
+  if (!host?.besides) return null;
+  const fs = fsOf.get(winId) ?? "all";
+  const nw = host.besides(winId);
+  if (!nw) return null;
+  // the scales that have something to show: the territory with a landscape
+  // open, the others when the graph has units of that scale
+  const has = scaleHas;
+  const start: LcFScale = fs === "all" ? LC_FSCALES.find(has) ?? "building" : fs;
+  // the building's answer not there yet: from the territory to the building
+  const known = asks.building.answer?.scale === "building";
+  const next: LcFScale = LC_FSCALES.slice(RANK[start] + 1).find(has) ??
+    (!known && start === "territory" ? "building" : lcStep(start, 1) ?? start);
+  if (fs === "all") setLcView(winId, { fs: start });
+  setLcView(winId, { sync: true });
+  setLcView(nw, { sync: true, fs: next });
+  const own = vs(nw);
+  own.layers = { ...vs(winId).layers };
+  host.changed();
+  return nw;
+}
 
 /** The answer a window shows, for a test or a script. */
-export function lcAnswerOf(winId: string): { scale: LcScale; state: Readonly<Ask>; view: LcView; live: null | { renders: number; frames: number; turning: boolean; k: number; gap: number; planeH: number; outliers: string[]; ms: number; maxMs: number } } {
+export function lcAnswerOf(winId: string): { scale: LcScale; state: Readonly<Ask>; view: LcView; live: null | { renders: number; frames: number; turning: boolean; k: number; gap: number; planeH: number; outliers: string[]; ms: number; maxMs: number; hz: string | null; shown: LcGeometry["shown"]; focus: string[]; peers: string[] } } {
   const scale = lcScaleOf(winId);
   const live = lives.get(winId);
   return { scale, state: asks[scale], view: lcView(winId),
            live: live ? { renders: live.renders, frames: live.frames, turning: live.turning, k: live.fit.k, gap: live.fit.gap,
-                          planeH: live.fit.planeH, outliers: live.g.outliers, ms: live.ms, maxMs: live.maxMs } : null };
+                          planeH: live.fit.planeH, outliers: live.g.outliers, ms: live.ms, maxMs: live.maxMs,
+                          hz: live.hz, shown: live.shown ?? null, focus: [...focusSet(winId)], peers: peers(winId) } : null };
 }
 
 // ── MICRO-MF07 · the plan by horizon: the «Space» of the workspace ─────────
