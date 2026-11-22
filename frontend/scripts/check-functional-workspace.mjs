@@ -9,14 +9,14 @@
 //   2. the pure drawing: the frame of the footprints (the far outliers out),
 //      the fit (planes close, short verticals), the four layers (symbolic with
 //      containers and chains, plan, proxy extruded, models masked by the
-//      buried), the plan by horizon (buried hatched, in view full);
+//      obliterated — MICRO-LG6), the plan by horizon (obliterated hatched, the rest as usual);
 //   3. the page on Templu Mare v11 (no functional unit → the proposals) and
 //      fu-prova: the desk's areas and their places, the row «No functional
 //      unit…» with its actions, the proposals (show, rename, discard, accept —
 //      its container too —, the AI unconfigured says so, the AI (echo)
 //      proposes and an accepted proposal carries its paradata: author_ai,
 //      validated_by/at), a real drag from the Matrix into a brace, the lasso
-//      on the plan, the horizon of the plan (buried, instances), the four
+//      on the plan, the horizon of the plan (obliterated, instances), the four
 //      layers of the Cube, the turntable (only transforms, inertia, wheel),
 //      the switch off.
 //
@@ -70,7 +70,7 @@ const fpSrc = read("frontend/src/functional-proposals.ts");
 const lcSrc = read("frontend/src/landscape-cube.ts");
 const used = new Set([...fpSrc.matchAll(/"((?:fwp|fw|lc|fm)\.[\w.]+)"/g), ...lcSrc.matchAll(/"((?:fw|lc)\.[\w.]+)"/g),
                       ...main.matchAll(/"((?:fwp|fw)\.[\w.]+)"/g)].map((m) => m[1]));
-for (const k of ["lc.seen.exposed", "lc.seen.buried", "lc.seen.partially_exposed", "lc.seen.undetermined", "lc.layer.symTitle", "lc.layer.planTitle",
+for (const k of ["lc.ob.obliterated", "lc.ob.partially_obliterated", "lc.layer.symTitle", "lc.layer.planTitle",
   "lc.layer.prxTitle", "lc.layer.rmTitle", "fwp.src.ai", "fwp.src.activity", "ws.functionalDesk"]) used.add(k);
 ok(used.size > 70, `the texts of the desk read (${used.size})`);
 eq(labBlocks.length, 2, "two LAB_TEXTS blocks (EN, IT)");
@@ -128,15 +128,15 @@ const answer = {
   lanes: [{ id: "E4", name: "Oggi", start: 1801, end: 2026 }, { id: "E3", name: "Post", start: 200, end: 1800 }, { id: "E2", name: "II", start: 100, end: 199 }],
   planes: [
     { lane: "E4", name: "Oggi", start: 1801, end: 2026, without: [], rm: [], rm_unread: [{ id: "S", name: "Survey", url: "x.3tz", why: "tileset" }],
-      items: [{ id: "F1", reader: "RE", readers: ["RE"], evidence: "stratigraphic", instance: true, from_lane: "E2", visibility: "exposed" }],
+      items: [{ id: "F1", reader: "RE", readers: ["RE"], evidence: "stratigraphic", instance: true, from_lane: "E2", obliteration: null }],
       symbols: [{ fu: "RE", name: "restauro", ring: sq(0, 0, 4), evidence: "stratigraphic", container: false, parent: null, members: ["F1"] }] },
     { lane: "E3", name: "Post", start: 200, end: 1800, without: [], rm: [],
-      items: [{ id: "F1", reader: "RU", readers: ["RU"], evidence: "stratigraphic", instance: true, from_lane: "E2", visibility: "buried" }],
+      items: [{ id: "F1", reader: "RU", readers: ["RU"], evidence: "stratigraphic", instance: true, from_lane: "E2", obliteration: "obliterated" }],
       symbols: [{ fu: "RU", name: "rudere", ring: sq(0, 0, 4), evidence: "stratigraphic", container: false, parent: null, members: ["F1"] }] },
     { lane: "E2", name: "II", start: 100, end: 199, without: ["X"],
       rm: [{ id: "RM1", name: "ricostruzione", epoch: "E2", rings: [sq(-1, -1, 26)], z_range: [0, 6], url: "m.gltf" }],
-      items: [{ id: "F1", reader: "A", readers: ["A"], evidence: "stratigraphic", instance: false, from_lane: null, visibility: "exposed" },
-              { id: "D1", reader: null, readers: [], evidence: null, instance: false, from_lane: null, visibility: "buried" }],
+      items: [{ id: "F1", reader: "A", readers: ["A"], evidence: "stratigraphic", instance: false, from_lane: null, obliteration: null },
+              { id: "D1", reader: null, readers: [], evidence: null, instance: false, from_lane: null, obliteration: "obliterated" }],
       symbols: [{ fu: "T", name: "tempio", ring: [[0, 0], [24, 0], [24, 4], [0, 4]], evidence: "stratigraphic", container: true, parent: null, members: ["F1", "D1"] },
                 { fu: "A", name: "aedes (podio)", ring: sq(0, 0, 4), evidence: "stratigraphic", container: false, parent: "T", members: ["F1"] }] }],
   units: { F1: { name: "F1", type: "US", rings: [sq(0, 0, 4)], centroid: [2, 2], lane: "E2", lanes: ["E4", "E3", "E2"], source: "proxy", stale: false, z_range: [10, 12.5] },
@@ -155,12 +155,12 @@ const answer = {
   ok(/>\{ aedes \}</.test(svg) && />\{ tempio \}</.test(svg), "…the name between braces");
   eq([...svg.matchAll(/data-lc-chain="([^"]+)"/g)].map((x) => x[1]).sort(), ["RE>RU", "RU>T"], "…the chains of transformation between the planes");
   eq(svg.match(/class="lc-fp"/g)?.length, 4, "PLAN · the footprints in line, one per unit per plane");
-  ok(/class="lc-fp" data-lc-unit="D1"[^>]*data-lc-seen="buried"[^>]*fill="url\(#lc-hatch-m\)" stroke-width="0.5"/.test(svg), "…a buried one thin and hatched");
+  ok(/class="lc-fp" data-lc-unit="D1"[^>]*data-lc-ob="obliterated"[^>]*fill="url\(#lc-hatch-m\)" stroke-width="0.5"/.test(svg), "…an obliterated one thin and hatched (MICRO-LG6)");
   eq(svg.match(/class="lc-top"/g)?.length, 4, "PROXY · each footprint extruded");
   const hs = [...svg.matchAll(/class="lc-top" data-lc-plane-index="2" data-lc-h="([\d.]+)"/g)].map((x) => Number(x[1])).sort();
   eq(hs, [1, 2.5], "…by the true height of its glb (z_range)");
   ok(/class="lc-layer-rm" mask="url\(#lc-mask-w-2\)"><polygon[^>]*class="lc-rm" data-lc-rm="RM1"/.test(svg), "MODELS · the model of the epoch on its plane…");
-  ok(/<mask id="lc-mask-w-2"[^]*?<polygon points="[^"]+" fill="#000"\/><\/mask>/.test(svg), "…masked by the buried units (cut to what was visible)");
+  ok(/<mask id="lc-mask-w-2"[^]*?<polygon points="[^"]+" fill="#000"\/><\/mask>/.test(svg), "…masked by the obliterated units (cut to what was perceivable)");
   const only = (L) => LC.lcBuildingSvg(answer, { ...o, layers: { sym: false, plan: false, prx: false, rm: false, ...L } });
   eq([/lc-sym-hull/.test(only({ sym: true })), /class="lc-fp"/.test(only({ sym: true })), /class="lc-top"/.test(only({ plan: true })), /lc-rm"/.test(only({ prx: true }))],
      [true, false, false, false], "the four layers: independent switches");
@@ -169,9 +169,16 @@ const answer = {
   // the plan by horizon
   const plane = answer.planes[2];
   const d = LC.lcPlanSvg(answer, plane, { width: 600, height: 300, sel: null, t: tt });
-  eq([d.items, d.buried, d.lane], [2, 1, "E2"], "the PLAN of a horizon: its footprints, one buried");
-  ok(/data-lc-unit="D1" data-lc-seen="buried"[^>]*><polygon[^>]*fill="url\(#lc-hatch-px\)"[^>]*stroke-width="0.6"/.test(d.svg), "…buried: thin outline, hatched");
-  ok(/data-lc-unit="F1" data-lc-seen="exposed"[^>]*><polygon[^>]*fill="#9B3333" fill-opacity="0.3"/.test(d.svg), "…in view: full, the colour of its reader");
+  eq([d.items, d.obliterated, d.lane], [2, 1, "E2"], "the PLAN of a horizon: its footprints, one obliterated");
+  ok(/data-lc-unit="D1" data-lc-ob="obliterated"[^>]*><polygon[^>]*fill="url\(#lc-hatch-px\)"[^>]*stroke-width="0.6"/.test(d.svg), "…obliterated: thin outline, hatched");
+  ok(/data-lc-unit="F1" data-lc-ob="none"[^>]*><polygon[^>]*fill="#9B3333" fill-opacity="0.3"/.test(d.svg), "…nothing said: as usual, the colour of its reader");
+  {
+    // an s3Dgraphy before LG6 (only the deprecated key): «buried» read as obliterated
+    const old = JSON.parse(JSON.stringify(answer));
+    for (const p of old.planes) for (const i of p.items) { i.visibility = i.obliteration === "obliterated" ? "buried" : "exposed"; delete i.obliteration; }
+    const od = LC.lcPlanSvg(old, old.planes[2], { width: 600, height: 300, sel: null, t: tt });
+    eq([od.obliterated, /data-lc-unit="F1" data-lc-ob="none"/.test(od.svg)], [1, true], "…an older s3Dgraphy: its buried read as obliterated, the rest as nothing said");
+  }
   const p3 = LC.lcPlanSvg(answer, answer.planes[1], { width: 600, height: 300, sel: null, t: tt });
   ok(/data-lc-instance="E2"[^>]*><polygon[^>]*stroke-dasharray="3 2"/.test(p3.svg), "…an instance from before dashed");
   ok(/10 m/.test(d.svg), "…with its scale");
@@ -393,7 +400,7 @@ try {
   // C · the plan by horizon: the lasso
   await page.waitForFunction(() => window.__EM_DRAG__.functionalPlan()?.items > 0, null, { timeout: 180000 });
   let pl = await H(page, () => window.__EM_DRAG__.functionalPlan());
-  eq([pl.items, typeof pl.buried], [64, "number"], "C · the plan of the II century: its 64 footprints (the horizon with most), buried counted (LG4)");
+  eq([pl.items, typeof pl.obliterated], [64, "number"], "C · the plan of the II century: its 64 footprints (the horizon with most), obliterated counted (LG6)");
   await page.click("[data-lc-lasso]");
   await page.waitForSelector(".lc-plan-svg.lc-armed", { timeout: 10000 });
   const sb = await page.locator(".lc-plan-svg").boundingBox();
@@ -469,7 +476,7 @@ try {
     const win = await H(o.page, () => window.__EM_DRAG__.landscapeCube().win);
     const a = await H(o.page, () => window.__EM_DRAG__.landscapeCube().answer);
     eq(a.planes.map((p) => p.name), ["XX sec", "Post antiquity", "II A.D."], "fu-prova: three planes");
-    ok(a.planes.every((p) => p.items.every((i) => ["exposed", "buried", "partially_exposed", "undetermined"].includes(i.visibility))), "…every footprint with its visibility (LG4)");
+    ok(a.planes.every((p) => p.items.every((i) => [null, "obliterated", "partially_obliterated"].includes(i.obliteration))), "…every footprint with its obliteration (LG6: null, nothing said)");
     eq(a.models?.read, 87, "…the models of the II century read in plan (87 .gltf of the reconstruction)");
     const post = a.planes.find((p) => p.name === "Post antiquity").lane;
     await o.page.click(`[data-lc-hz="${post}"]`);
@@ -488,7 +495,7 @@ try {
     ok(true, "Proxy: the footprints extruded");
     await layer("rm");
     await o.page.waitForFunction(() => document.querySelectorAll("svg.lc-svg polygon.lc-rm").length === 87, null, { timeout: 10000 });
-    ok(await H(o.page, () => !!document.querySelector("svg.lc-svg .lc-layer-rm[mask]")), "Models (RM): the 87 models of the II century, masked by the buried");
+    ok(await H(o.page, () => !!document.querySelector("svg.lc-svg .lc-layer-rm[mask]")), "Models (RM): the 87 models of the II century, masked by the obliterated");
     await layer("sym");
     await o.page.waitForFunction(() => !document.querySelector("svg.lc-svg .lc-sym-hull"), null, { timeout: 10000 });
     eq(await H(o.page, () => document.querySelector("svg.lc-svg")?.dataset.lcLayers), "plan prx rm", "…each switch on its own (Symbolic off, the others on)");

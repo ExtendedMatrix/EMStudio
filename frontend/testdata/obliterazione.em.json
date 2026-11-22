@@ -1,6 +1,6 @@
 {
  "header": {
-  "title": "Visibilità: dichiara, eredita, sovrascrivi (sintetico, MICRO-LG5)",
+  "title": "Obliterazione: annota, eredita, sovrascrivi, togli (sintetico, MICRO-LG6)",
   "format": "em.json",
   "version": "1.1",
   "schema_version": 2,
@@ -9,9 +9,9 @@
    "version": "1.6.0.dev137"
   },
   "datamodel_versions": {
-   "nodes": "1.6.53",
+   "nodes": "1.6.54",
    "connections": "1.6.59",
-   "qualia": "1.6.16"
+   "qualia": "1.6.17"
   }
  },
  "graphs": {
@@ -205,6 +205,12 @@
      "source": "F1",
      "target": "ACT",
      "edge_type": "is_in_activity"
+    },
+    {
+     "id": "FILL_is_in_functional_unit_RUIN",
+     "source": "FILL",
+     "target": "RUIN",
+     "edge_type": "is_in_functional_unit"
     }
    ]
   }

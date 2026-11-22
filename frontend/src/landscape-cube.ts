@@ -27,7 +27,7 @@
  * the name between braces, the chains of transformation between the planes) ·
  * PLAN (the footprints in line) · PROXY (the footprints extruded by the true
  * height of the glb) · MODELS (the representation model of the epoch, cut to
- * what was VISIBLE then — MICRO-LG4: a mask of the buried units). The TURNTABLE:
+ * what was PERCEIVABLE then — MICRO-LG6: a mask of the obliterated units). The TURNTABLE:
  * the geometry is built once per answer, RELATIVE TO THE CENTRE of the
  * horizons' footprints (no big coordinates in the transforms), and a drag
  * changes nothing but the affine transform of each plane (requestAnimationFrame,
@@ -83,13 +83,18 @@ import { esc, evidenceColour, fit, type Evidence } from "./functional-matrix";
 
 type Ring = Array<[number, number]>;
 interface Lane { id: string; name: string; start: number | null; end: number | null }
-/** MICRO-LG4 · how a unit is seen in a plane */
-export type LcSeen = "exposed" | "buried" | "partially_exposed" | "undetermined";
+/** MICRO-LG6 · the obliteration of a unit in a plane: obliterated,
+ *  partially obliterated, or NOTHING SAID ("none", drawn as usual — never
+ *  «in view»; MICRO-LG4's visibility is gone) */
+export type LcSeen = "obliterated" | "partially_obliterated" | "none";
 export interface LcItem {
   id: string; reader: string | null; readers: string[]; evidence: Evidence | null;
   instance: boolean; from_lane: string | null;
-  /** MICRO-MF07 · its visibility in the plane (s3Dgraphy before MF07: absent) */
-  visibility?: LcSeen;
+  /** MICRO-LG6 · its obliteration in the plane (null: nothing said) */
+  obliteration?: "obliterated" | "partially_obliterated" | null;
+  obliteration_uncertain?: boolean;
+  /** MICRO-MF07 · deprecated (s3Dgraphy before LG6): buried · partially_exposed · exposed · undetermined */
+  visibility?: string;
   /** MICRO-MF08 · the functional unit of each scale reading it in the plane */
   by_scale?: Partial<Record<LcFScale, string>>;
 }
@@ -438,7 +443,7 @@ interface GPoly { ring: P2[]; attrs: string; layer: LcLayer | "face" | "land"; m
 interface GTop { ring: P2[]; h: number; colour: string; attrs: string; edges: P2[]; layer?: LcLayer }
 /** a label anchored to a point of a plane */
 interface GLabel { at: P2; text: string; cls: string; attrs: string; layer: LcLayer | "always"; dy?: number }
-interface GPlane { lane: string; name: string; polys: GPoly[]; tops: GTop[]; labels: GLabel[]; buried: P2[][]; symbols: GLabel[] }
+interface GPlane { lane: string; name: string; polys: GPoly[]; tops: GTop[]; labels: GLabel[]; obliterated: P2[][]; symbols: GLabel[] }
 interface GLink { a: { i: number; at: P2 }; b: { i: number; at: P2 }; cls: string; attrs: string; layer: LcLayer | "always"; label?: string; title?: string }
 export interface LcGeometry {
   centre: P2; radius: number; half: P2; planes: GPlane[]; links: GLink[]; outliers: string[];
@@ -489,7 +494,11 @@ const ptsOf = (ring: ReadonlyArray<P2>): string => ring.map((p) => `${p[0]},${p[
 const PAD = 0.08;
 const BIG_M2 = 250;   // a footprint this large is drawn in line only (it would hide the small ones)
 
-function seenOf(it: LcItem): LcSeen { return it.visibility ?? "undetermined"; }
+function seenOf(it: LcItem): LcSeen {
+  if (it.obliteration !== undefined) return it.obliteration ?? "none";
+  // an s3Dgraphy before LG6: its «buried» read as obliterated, the rest as nothing said
+  return it.visibility === "buried" ? "obliterated" : it.visibility === "partially_exposed" ? "partially_obliterated" : "none";
+}
 
 /** MICRO-MF08 · what a window shows at a functional scale: the scale and the
  *  unit(s) entered (the focus and its equivalents in the other graph) */
@@ -528,7 +537,7 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"], sc?: LcScope |
     const polys: GPoly[] = [{ ring: face, attrs: `class="lc-plane-face"`, layer: "face" }];
     const tops: GTop[] = [];
     const labels: GLabel[] = [];
-    const buried: P2[][] = [];
+    const obliterated: P2[][] = [];
     const symbolsM: GLabel[] = [];
     const symBy = new Map((pl.symbols ?? []).map((s) => [s.fu, s]));
     // MF08 · the volumes go UNDER the footprints (a click on an element reaches it)
@@ -547,15 +556,15 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"], sc?: LcScope |
       const col = evidenceColour(reader ? ev : null);
       const name = u.name + (reader ? ` · ${a.functional_units[reader]?.name ?? ""}` : "") +
         (it.instance && it.from_lane ? ` · ${t("lc.from", { lane: a.lanes.find((l) => l.id === it.from_lane)?.name ?? it.from_lane })}` : "") +
-        ` · ${t(`lc.seen.${seen}`)}`;
+        (seen !== "none" ? ` · ${t(`lc.ob.${seen}`)}${it.obliteration_uncertain ? ` (${t("lc.ob.uncertain")})` : ""}` : "");
       const data = `data-lc-unit="${esc(it.id)}" data-lc-lane="${esc(pl.lane)}" data-lc-evidence="${esc(reader ? ev ?? "symbol" : "none")}"` +
-        ` data-lc-reader="${esc(reader ?? "")}" data-lc-seen="${seen}"${it.instance ? ` data-lc-instance="${esc(it.from_lane ?? "")}"` : ""}`;
+        ` data-lc-reader="${esc(reader ?? "")}" data-lc-ob="${seen}"${it.instance ? ` data-lc-instance="${esc(it.from_lane ?? "")}"` : ""}`;
       for (const ring of u.rings) {
         const rr = rel(ring, c);
-        if (seen === "buried") buried.push(rr);
-        // PLAN · the footprints in line (ink); buried thin and hatched
+        if (seen === "obliterated") obliterated.push(rr);
+        // PLAN · the footprints in line (ink); obliterated thin and hatched
         polys.push({ ring: rr, layer: "plan", attrs: `class="lc-fp" ${data} stroke="${col}"` +
-          ` fill="${seen === "buried" ? "url(#lc-hatch-m)" : "none"}" stroke-width="${seen === "buried" ? 0.5 : it.instance ? 0.7 : 1}"` +
+          ` fill="${seen === "obliterated" ? "url(#lc-hatch-m)" : "none"}" stroke-width="${seen === "obliterated" ? 0.5 : it.instance ? 0.7 : 1}"` +
           `${it.instance ? ' stroke-dasharray="3 2"' : ""}><title>${esc(name)}</title` });
         // PROXY · extruded by the true height of the glb
         const z = u.z_range;
@@ -564,7 +573,7 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"], sc?: LcScope |
         const step = Math.max(1, Math.ceil(n / 8));
         tops.push({ ring: rr, h: hgt, colour: col, edges: rr.filter((_p, j) => j % step === 0),
                     attrs: `${data} fill="${col}" fill-opacity="${areaOf(rr) > BIG_M2 ? 0.04 : reader ? 0.3 : 0.12}" stroke="${col}"` +
-                      `${seen === "buried" ? ' stroke-dasharray="2 2"' : ""}` });
+                      `${seen === "obliterated" ? ' stroke-dasharray="2 2"' : ""}` });
       }
     }
     // SYMBOLIC · the hull of the members per functional unit
@@ -619,7 +628,7 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"], sc?: LcScope |
                           ` data-title="${esc(`${ab.name} · ${t(ab.why === "no_outline" ? "lc.why.noOutline" : "lc.why.noMembers")}`)}"` });
       }
     }
-    // MODELS · the representation models of the epoch, masked by the buried
+    // MODELS · the representation models of the epoch, masked by the obliterated
     for (const m of pl.rm ?? []) {
       for (const ring of m.rings) {
         polys.push({ ring: rel(ring, c), layer: "rm", mask: true, attrs: `class="lc-rm" data-lc-rm="${esc(m.id)}" data-lc-lane="${esc(pl.lane)}"` +
@@ -627,7 +636,7 @@ export function lcBuildingGeometry(a: LcBuilding, t: LcHost["t"], sc?: LcScope |
       }
     }
     if (under.length) polys.splice(1, 0, ...under);
-    return { lane: pl.lane, name: pl.name, polys, tops, labels, buried, symbols: symbolsM };
+    return { lane: pl.lane, name: pl.name, polys, tops, labels, obliterated, symbols: symbolsM };
   });
   const links: GLink[] = [];
   const idx = new Map(a.planes.map((p, i) => [p.lane, i]));
@@ -693,7 +702,7 @@ export function lcLandscapeGeometry(a: LcLandscape, t: LcHost["t"], sc?: LcScope
                          ` data-lc-evidence="${esc(it.evidence ?? "symbol")}" data-col="${col}" data-title="${esc(`${r.name} · ${t(it.why === "no_outline" ? "lc.why.noOutline" : "lc.why.noMembers")}`)}"` });
       }
     }
-    return { lane: pl.lane, name: pl.name, polys, tops: [], labels, buried: [], symbols };
+    return { lane: pl.lane, name: pl.name, polys, tops: [], labels, obliterated: [], symbols };
   });
   const idx = new Map(a.planes.map((p, i) => [p.lane, i]));
   const links: GLink[] = [];
@@ -804,9 +813,9 @@ export function lcSvg(g: LcGeometry, o: LcDrawOpts): { svg: string; fit: LcFit }
     if (masked) {
       inner = inner.replace(/^(<polygon[^>]*lc-plane-face[^>]*><\/polygon>)/, `$1<g class="lc-layer-rm" mask="url(#lc-mask-${esc(win)}-${i})">${masked}</g>`);
     }
-    const mask = L.rm && p.buried.length
+    const mask = L.rm && p.obliterated.length
       ? `<mask id="lc-mask-${esc(win)}-${i}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-100000" y="-100000" width="200000" height="200000">` +
-        `<rect x="-100000" y="-100000" width="200000" height="200000" fill="#fff"/>${p.buried.map((r) => `<polygon points="${ptsOf(r)}" fill="#000"/>`).join("")}</mask>`
+        `<rect x="-100000" y="-100000" width="200000" height="200000" fill="#fff"/>${p.obliterated.map((r) => `<polygon points="${ptsOf(r)}" fill="#000"/>`).join("")}</mask>`
       : L.rm ? `<mask id="lc-mask-${esc(win)}-${i}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-100000" y="-100000" width="200000" height="200000"><rect x="-100000" y="-100000" width="200000" height="200000" fill="#fff"/></mask>` : "";
     const cur = o.hz ? (p.lane === o.hz ? " lc-plane-cur" : " lc-plane-dim") : "";
     planes += `<g class="lc-plane${cur}" data-lc-plane="${esc(p.lane)}" data-lc-plane-index="${i}" transform="${mat(m)}">${mask}${inner}</g>`;
@@ -1129,7 +1138,7 @@ export function renderLandscapeCubeInto(body: HTMLElement, winId: string): void 
   legend.innerHTML = (["stratigraphic", "documentary", "reconstructive", "symbol"] as Evidence[])
     .map((ev) => `<span class="fm-legend-item" data-fm-legend="${ev}">${sw(ev)}${esc(t(ev === "symbol" && scale === "building" ? "lc.legend.unread" : `fm.ev.${ev}`))}</span>`).join("") +
     `<span class="fm-legend-item"><span class="fm-sw lc-sw-inst"></span>${esc(t("lc.legend.instance"))}</span>` +
-    (scale === "building" ? `<span class="fm-legend-item"><span class="fm-sw lc-sw-buried"></span>${esc(t("lc.legend.buried"))}</span>` : "") +
+    (scale === "building" ? `<span class="fm-legend-item"><span class="fm-sw lc-sw-buried"></span>${esc(t("lc.legend.obliterated"))}</span>` : "") +
     (fs !== "all" ? `<span class="fm-legend-item"><span class="fm-sw lc-sw-vol"></span>${esc(t("lc.legend.volume"))}</span>` : "") +
     `<span class="fm-legend-item"><span class="lc-sw-vert"></span>${esc(t("lc.legend.vertical"))}</span>`;
   const count = document.createElement("span");
@@ -1438,7 +1447,7 @@ function laneOfPlan(winId: string, a: LcBuilding): LcPlane | null {
   return [...a.planes].sort((x, y) => y.items.length - x.items.length)[0] ?? null;
 }
 
-export interface LcPlanDraw { svg: string; items: number; buried: number; partial: number; lane: string | null; scale: number }
+export interface LcPlanDraw { svg: string; items: number; obliterated: number; partial: number; lane: string | null; scale: number }
 
 /** The plan of one horizon from above (orthographic), fitted to `width` ×
  *  `height` (exported for the checks). Colour = the functional unit that
@@ -1454,27 +1463,29 @@ export function lcPlanSvg(a: LcBuilding, plane: LcPlane, o: { width: number; hei
   const sx = (p: ReadonlyArray<number>): string => `${(W / 2 + (p[0] - fr.centre[0]) * k).toFixed(1)},${(pad + fr.half[1] * 1.04 * k - (p[1] - fr.centre[1]) * k).toFixed(1)}`;
   const lit = o.lit ?? new Set<string>();
   let s = `<rect class="lc-plan-ground" x="0" y="0" width="${W}" height="${H}"/>`;
-  let buried = 0, partial = 0;
+  let obliterated = 0, partial = 0;
   for (const it of plane.items) {
     const u = a.units[it.id];
     if (!u) continue;
     const seen = seenOf(it);
-    if (seen === "buried") buried++;
-    if (seen === "partially_exposed") partial++;
+    if (seen === "obliterated") obliterated++;
+    if (seen === "partially_obliterated") partial++;
     const col = evidenceColour(it.reader ? it.evidence : null);
     const big = u.rings.reduce((m, r) => m + areaOf(r as P2[]), 0) > BIG_M2;
     const sel = o.sel === it.id || (!!o.sel && (it.reader === o.sel || it.readers.includes(o.sel)));
     const isLit = lit.has(it.id);
-    const fill = seen === "buried" ? "url(#lc-hatch-px)" : big ? "none" : col;
-    const fop = seen === "buried" ? 1 : seen === "partially_exposed" ? 0.1 : seen === "undetermined" ? (it.reader ? 0.16 : 0.06) : (it.reader ? 0.3 : 0.1);
-    const sw = sel ? 2.6 : isLit ? 2.2 : seen === "buried" ? 0.6 : big ? 1.4 : 1;
-    const name = `${u.name}${it.reader ? ` · ${a.functional_units[it.reader]?.name ?? ""}` : ""} · ${t(`lc.seen.${seen}`)}` +
+    const fill = seen === "obliterated" ? "url(#lc-hatch-px)" : big ? "none" : col;
+    // nothing said: drawn as usual (MICRO-LG6)
+    const fop = seen === "obliterated" ? 1 : seen === "partially_obliterated" ? 0.1 : (it.reader ? 0.3 : 0.1);
+    const sw = sel ? 2.6 : isLit ? 2.2 : seen === "obliterated" ? 0.6 : big ? 1.4 : 1;
+    const name = `${u.name}${it.reader ? ` · ${a.functional_units[it.reader]?.name ?? ""}` : ""}` +
+      (seen !== "none" ? ` · ${t(`lc.ob.${seen}`)}${it.obliteration_uncertain ? ` (${t("lc.ob.uncertain")})` : ""}` : "") +
       (it.instance && it.from_lane ? ` · ${t("lc.from", { lane: a.lanes.find((l) => l.id === it.from_lane)?.name ?? it.from_lane })}` : "");
-    s += `<g class="lc-plan-fp${sel ? " lc-sel" : ""}${isLit ? " lc-lit" : ""}" data-lc-unit="${esc(it.id)}" data-lc-seen="${seen}"` +
+    s += `<g class="lc-plan-fp${sel ? " lc-sel" : ""}${isLit ? " lc-lit" : ""}" data-lc-unit="${esc(it.id)}" data-lc-ob="${seen}"` +
       ` data-lc-evidence="${esc(it.reader ? it.evidence ?? "symbol" : "none")}" data-lc-reader="${esc(it.reader ?? "")}"${it.instance ? ` data-lc-instance="${esc(it.from_lane ?? "")}"` : ""}>` +
       u.rings.map((r) => `<polygon points="${r.map(sx).join(" ")}" fill="${fill}" fill-opacity="${fop}" stroke="${col}" stroke-width="${sw}"` +
-        `${it.instance ? ' stroke-dasharray="3 2"' : ""}${seen === "partially_exposed" ? ' stroke-dasharray="5 2"' : ""}/>` +
-        (seen === "partially_exposed" ? `<polygon points="${r.map(sx).join(" ")}" fill="url(#lc-hatch-px)" fill-opacity="0.5" stroke="none"/>` : "")).join("") +
+        `${it.instance ? ' stroke-dasharray="3 2"' : ""}${seen === "partially_obliterated" ? ' stroke-dasharray="5 2"' : ""}/>` +
+        (seen === "partially_obliterated" ? `<polygon points="${r.map(sx).join(" ")}" fill="url(#lc-hatch-px)" fill-opacity="0.5" stroke="none"/>` : "")).join("") +
       `<title>${esc(name)}</title></g>`;
   }
   // the scale: 10 m
@@ -1483,7 +1494,7 @@ export function lcPlanSvg(a: LcBuilding, plane: LcPlane, o: { width: number; hei
   s += `<polyline class="lc-lasso-line" points="" data-lc-lasso-line=""/>`;
   const svg = `<svg class="lc-plan-svg" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(t("fw.plan.title"))}">` +
     `<defs><pattern id="lc-hatch-px" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" class="lc-hatch-line" stroke-width="1"/></pattern></defs>${s}</svg>`;
-  return { svg, items: plane.items.length, buried, partial, lane: plane.lane, scale: k };
+  return { svg, items: plane.items.length, obliterated, partial, lane: plane.lane, scale: k };
 }
 
 /** the units whose footprint's centre falls inside a polygon of the plan (px) */
@@ -1505,7 +1516,7 @@ function unitsInPlanPolygon(svg: SVGSVGElement, poly: ReadonlyArray<P2>): string
   return [...new Set(out)];
 }
 
-const planState = new Map<string, { lane: string | null; items: number; buried: number; partial: number; scale: number; lasso: boolean; lastLasso: string[] | null }>();
+const planState = new Map<string, { lane: string | null; items: number; obliterated: number; partial: number; scale: number; lasso: boolean; lastLasso: string[] | null }>();
 
 /** Close the lasso of a plan window on a polygon in the plan's pixels (the
  *  checks; the pointer does the same). Returns the units taken. */
@@ -1574,8 +1585,8 @@ export function renderFunctionalPlanInto(body: HTMLElement, winId: string): void
   head.append(hz, lasso);
   const legend = document.createElement("span");
   legend.className = "fm-legend";
-  legend.innerHTML = `<span class="fm-legend-item"><span class="fm-sw lc-sw-exposed"></span>${esc(t("lc.legend.exposed"))}</span>` +
-    `<span class="fm-legend-item"><span class="fm-sw lc-sw-buried"></span>${esc(t("lc.legend.buried"))}</span>` +
+  legend.innerHTML = `<span class="fm-legend-item"><span class="fm-sw lc-sw-exposed"></span>${esc(t("lc.legend.notSaid"))}</span>` +
+    `<span class="fm-legend-item"><span class="fm-sw lc-sw-buried"></span>${esc(t("lc.legend.obliterated"))}</span>` +
     `<span class="fm-legend-item"><span class="fm-sw lc-sw-inst"></span>${esc(t("lc.legend.instance"))}</span>` +
     `<span class="fm-legend-item"><span class="fm-sw" style="border-color:${evidenceColour(null)};border-style:dotted"></span>${esc(t("lc.legend.unread"))}</span>`;
   legend.className = "fm-legend";
@@ -1598,7 +1609,7 @@ export function renderFunctionalPlanInto(body: HTMLElement, winId: string): void
   const d = lcPlanSvg(a, plane, { width, height, sel: h.selected(), lit: h.lit?.(), t });
   wrap.innerHTML = d.svg;
   const prev = planState.get(winId);
-  planState.set(winId, { lane: d.lane, items: d.items, buried: d.buried, partial: d.partial, scale: d.scale, lasso: armed, lastLasso: prev?.lastLasso ?? null });
+  planState.set(winId, { lane: d.lane, items: d.items, obliterated: d.obliterated, partial: d.partial, scale: d.scale, lasso: armed, lastLasso: prev?.lastLasso ?? null });
   const svg = wrap.querySelector<SVGSVGElement>("svg.lc-plan-svg")!;
   if (armed) svg.classList.add("lc-armed");
   const line = svg.querySelector<SVGPolylineElement>("[data-lc-lasso-line]")!;
@@ -1634,11 +1645,11 @@ export function renderFunctionalPlanInto(body: HTMLElement, winId: string): void
     if (h.active()?.has(id)) h.select(id);
   });
   foot.dataset.lcPlanCount = String(d.items);
-  foot.textContent = t("fw.plan.foot", { n: d.items, b: d.buried, p: d.partial, w: plane.without.length });
+  foot.textContent = t("fw.plan.foot", { n: d.items, b: d.obliterated, p: d.partial, w: plane.without.length });
   foot.title = foot.textContent;
 }
 
 /** What a plan window shows, for a test or a script. */
-export function lcPlanOf(winId: string): null | { lane: string | null; items: number; buried: number; partial: number; scale: number; lasso: boolean; lastLasso: string[] | null } {
+export function lcPlanOf(winId: string): null | { lane: string | null; items: number; obliterated: number; partial: number; scale: number; lasso: boolean; lastLasso: string[] | null } {
   return planState.get(winId) ?? null;
 }

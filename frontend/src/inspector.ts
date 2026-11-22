@@ -9,7 +9,7 @@ import { dataGlyphLabel, glyphFor, glyphSvg } from "./glyphs";
 import { activeTheme, canvasTheme } from "./theme";
 import { classOf, conceptParts, edgeLabel, isGroupType, isStratigraphicType, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf, typeDescription, typeLabel } from "./rules";
 import { renderProvenance } from "./provenance-ui";
-import { renderVisibility } from "./visibility-ui";
+import { renderObliteration } from "./obliteration-ui";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
 import { qualiaList } from "./vocab";
 import { getSettings } from "./settings";
@@ -1536,11 +1536,12 @@ export function renderInspector(
     }
   }
 
-  // MICRO-LG5 (E.D., 22 Nov 2026) · «Visibilità»: the diary of a unit (own,
-  // inherited from a container, derived from the stratigraphy — s3Dgraphy's,
-  // through the bridge) and the declaration of a window; on a container the
-  // windows declared there, which its members inherit. EM core: not embargoed.
-  if (nodeId) renderVisibility(root, store, nodeId, cb.onJump);
+  // MICRO-LG6 (E.D., 22 Nov 2026) · «Obliterazione» (was «Visibilità», LG5):
+  // normally ONE quiet line «+ Annota un'obliterazione…»; the diary of a unit
+  // (own, inherited from a container — s3Dgraphy's, through the bridge) only
+  // when something is said; on a container the windows declared there, which
+  // its members inherit. EM core: not embargoed.
+  if (nodeId) renderObliteration(root, store, nodeId, cb.onJump);
 
   // MICRO-P-GEOREF-PER-GRAFO p.4 · a GeoPositionNode: its data are the card's fields, edited here
   const geoEdited = node.node_type === "geo_position" && !!nodeId && !!cb.geoNodeEditor?.(root, nodeId);
