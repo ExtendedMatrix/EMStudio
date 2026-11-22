@@ -1,20 +1,20 @@
 {
-  "digest": "sha256:3e46d59f98ab7b09fdad3264c0b09ed1bc448fc336a3998eef33bd4ae849594f",
+  "digest": "sha256:5a6202c23f1ea92b5cdc2c0e07798f759245dad2c254d2d969742c3f54b809cc",
   "versions": {
     "nodes": "1.6.54",
     "node_registry": "1.6.54",
-    "connections": "1.6.59",
+    "connections": "1.6.60",
     "visual_rules": "1.6.48",
-    "qualia": "1.6.17",
-    "translations": "1.22"
+    "qualia": "1.6.18",
+    "translations": "1.23"
   },
   "digests": {
     "nodes": "sha256:b7e05cabff695750cd767758c2a29ad7706c2d544520256ab2328e0a06cf2c85",
     "node_registry": "sha256:ec4741a839620485f7d9b2a068e9146b3610ddb9de5137f640cdd9c5af311491",
-    "connections": "sha256:88f41a23fe336a815a70cf4e4aee08bbbbf04f15922a7911a57618b5574fd8ef",
+    "connections": "sha256:04be362b6640cb584a40da6dcc8b2b6f2d78cd8ef1ead1dd7eeb4c5f96a7a7fc",
     "visual_rules": "sha256:61361d6882958305486fe914f9635e9f0dd31d3f0aca285e3dc80294857710f3",
-    "qualia": "sha256:cf351582316847198ee4f09e995e8089a0575cf8c786bf1f87cf159073029ac3",
-    "translations": "sha256:65cb3fa102729e55f653a1e6590447a2c2d36cbf94c8cf11c3cc079d287a5c48"
+    "qualia": "sha256:65f14ab0dfbe271e1591e3350b4aeb5f6fb4deed4b4deae7ac39d2df94e29a54",
+    "translations": "sha256:6b36cc9c443f83968fd6a20cb9bddc259835ee64241495f8d083d011fe816a2c"
   },
   "files": {
     "nodes": "s3Dgraphy_node_datamodel.json",
