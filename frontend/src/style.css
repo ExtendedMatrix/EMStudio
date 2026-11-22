@@ -12976,8 +12976,11 @@ td.plg-col { color: var(--muted, #888); }
 }
 /* MICRO-SEG29 · Window ▸ Area headers: hidden for this session */
 body.em-no-area-headers .tile-area > .tile-bar { display: none; }
-/* MICRO-SEG29 · the Matrix's «Check the chronology» in words; its ▲ when there are warnings */
-.win-act.win-chr { white-space: nowrap; }
+/* MICRO-SEG29 · the Matrix's «Add ▾» and «Check the chronology» are WORDS: not the
+   30 px square of the icon actions (`.win-header .win-act`), else «Add» wraps and
+   «Chronology» runs under its neighbours; its ▲ when there are warnings */
+.win-header .win-act.win-chr,
+.win-header .win-act.win-add[data-act="add-menu"] { width: auto; padding: 0 8px; white-space: nowrap; flex: 0 0 auto; }
 .win-act.win-chr:not([data-chr-warn="0"]) { color: var(--warn-ink); }
 /* the chronology's ▲ in the status pill: its own click */
 .warn-pill .sv-chr { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
