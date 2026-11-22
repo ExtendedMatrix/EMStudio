@@ -174,7 +174,8 @@ export class VocabState {
 /** «◆ calcare · iccd-ra-materia» — or «◇ non controllato» with its gesture */
 export function valueTermEl(doc: Document, host: VocabHost, state: VocabState,
                             node: Parameters<typeof valueLabel>[0] & { id: string },
-                            controlled: boolean, openLink: (id: string) => void): HTMLElement | null {
+                            controlled: boolean, openLink: (id: string) => void,
+                            openVocabularies?: () => void): HTMLElement | null {
   const t = host.t;
   const term = termOf(node);
   if (!term && !controlled) return null;
@@ -216,6 +217,18 @@ export function valueTermEl(doc: Document, host: VocabHost, state: VocabState,
     b.textContent = t("vt.link");
     b.addEventListener("click", () => openLink(node.id));
     row.append(sign, words, b);
+  }
+  // MICRO-SEG29 · from the Inspector's picker to the vocabularies themselves
+  // (Preferences ▸ Vocabularies; it was the window of Tools ▸ Vocabularies…)
+  if (openVocabularies) {
+    const e = doc.createElement("button");
+    e.type = "button";
+    e.className = "tv-act vt-edit";
+    e.dataset.vtEdit = node.id;
+    e.textContent = t("vt.editVocab");
+    e.title = t("vt.editVocabTitle");
+    e.addEventListener("click", (ev) => { ev.stopPropagation(); openVocabularies(); });
+    row.appendChild(e);
   }
   return row;
 }

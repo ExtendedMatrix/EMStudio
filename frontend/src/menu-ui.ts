@@ -24,6 +24,8 @@ import {
 export interface DynamicItem { id: string; label: string; detail?: string; disabled?: boolean; run(): void }
 export interface MenuHooks {
   recent?(): DynamicItem[];
+  /** MICRO-SEG29 · Window ▸ Workspaces: one item per workspace, the active ticked */
+  workspaces?(): DynamicItem[];
   /** MICRO-PL17 · a run row (a plugin's command) chosen: the page invokes it */
   invoke?(id: string): void;
 }
@@ -56,9 +58,12 @@ function commandButton(row: CommandRow, platform: Platform): HTMLButtonElement {
 }
 
 /** Draw a dynamic sub-menu's items into its flyout, every time it opens. */
-function fillDynamic(host: HTMLElement, which: "recent"): void {
+function dynamicItems(which: "recent" | "workspaces"): DynamicItem[] {
+  return which === "recent" ? hooks.recent?.() ?? [] : hooks.workspaces?.() ?? [];
+}
+function fillDynamic(host: HTMLElement, which: "recent" | "workspaces"): void {
   host.textContent = "";
-  const items = which === "recent" ? hooks.recent?.() ?? [] : [];
+  const items = dynamicItems(which);
   if (!items.length) {
     const none = el("div", "dd-empty");
     none.textContent = t("menu.recentNone");
@@ -341,7 +346,7 @@ async function nativeRows(api: TauriMenu, rows: Row[], platform: Platform): Prom
     const sub = await api.Submenu.new({
       id: `sub-${row.id}`,
       text: t(row.label),
-      items: row.dynamic ? await dynamicNative(api) as never : await nativeRows(api, row.rows, platform) as never,
+      items: row.dynamic ? await dynamicNative(api, row.dynamic) as never : await nativeRows(api, row.rows, platform) as never,
     });
     if (row.dynamic === "recent") nativeRecent = sub;
     out.push(sub);
@@ -349,14 +354,14 @@ async function nativeRows(api: TauriMenu, rows: Row[], platform: Platform): Prom
   return out;
 }
 
-async function dynamicNative(api: TauriMenu): Promise<unknown[]> {
-  const items = hooks.recent?.() ?? [];
-  if (!items.length) return [await api.MenuItem.new({ id: "recent-none", text: t("menu.recentNone"), enabled: false })];
+async function dynamicNative(api: TauriMenu, which: "recent" | "workspaces" = "recent"): Promise<unknown[]> {
+  const items = dynamicItems(which);
+  if (!items.length) return [await api.MenuItem.new({ id: `${which}-none`, text: which === "recent" ? t("menu.recentNone") : "—", enabled: false })];
   const out: unknown[] = [];
   for (const it of items) {
     if (it.id === "—") { out.push(await api.PredefinedMenuItem.new({ item: "Separator" })); continue; }
     out.push(await api.MenuItem.new({
-      id: `recent-${it.id}`,
+      id: `${which === "recent" ? "recent" : "ws"}-${it.id}`,
       text: it.detail ? `${it.label} — ${it.detail}` : it.label,
       enabled: !it.disabled,
       action: () => it.run(),

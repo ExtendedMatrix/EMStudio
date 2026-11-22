@@ -1,6 +1,6 @@
 /**
  * MICRO-TIL003 (E.D., 20 Nov 2026) · File ▸ «Bring in…»: ONE window, three
- * choices. Before, the File menu had three doors in a row — «Porta dentro…»
+ * choices (four since MICRO-SEG29: StratiMiner, from the menu Tools that went). Before, the File menu had three doors in a row — «Porta dentro…»
  * (files), «Porta dentro una cartella…» (a folder, read by a plugin's reader of
  * folders) and «Read as DosCo…» (a DosCo folder). The three roads stay as they
  * were (`doorFromMenu`, `doorFolderFromMenu`, `doorDoscoFromMenu` in main.ts,
@@ -12,18 +12,21 @@
 import { openDialog } from "./app-dialog";
 import { t } from "./i18n";
 
-export type BringInChoice = "files" | "folder" | "dosco";
+export type BringInChoice = "files" | "folder" | "dosco" | "stratiminer";
 export const BRING_IN_CHOICES: { key: BringInChoice; label: string; hint: string }[] = [
   { key: "files", label: "door.choiceFiles", hint: "door.menuHint" },
   { key: "folder", label: "door.choiceFolder", hint: "door.folderMenuHint" },
   { key: "dosco", label: "door.choiceDosco", hint: "door.doscoMenuHint" },
+  // MICRO-SEG29 · it was Tools ▸ StratiMiner: a folder of unstructured sources
+  // becomes a graph (through the reviewable em_data.xlsx)
+  { key: "stratiminer", label: "door.choiceStratiminer", hint: "menu.stratiminerTitle" },
 ];
 
 const LAST = "em.bringIn.last";
 function lastChoice(): BringInChoice {
   try {
     const v = localStorage.getItem(LAST);
-    if (v === "files" || v === "folder" || v === "dosco") return v;
+    if (v === "files" || v === "folder" || v === "dosco" || v === "stratiminer") return v;
   } catch { /* no storage: the first */ }
   return "files";
 }

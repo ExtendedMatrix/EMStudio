@@ -1105,7 +1105,8 @@ test("10.header", "l'intestazione del grafo: tipo, modo a segmenti, nessun «⋯
         // (MICRO-TIL001 · a head too narrow puts its verbs in the «⋯» too, `[data-folded-verb]`: not the menu's own)
         const items = [...tg.parentElement.querySelectorAll(".dd-menu button:not([data-folded-verb])")].map((b) => b.textContent.trim()); tg.click(); return items; })(),
       graphWords: (bar.innerText.match(/\bGrafo\b|\bGraph\b/g) ?? []).length,
-      tools: [...document.querySelectorAll("#dd-tools .dd-menu button")].map((b) => b.textContent.trim()),
+      // MICRO-SEG29 · Normalise spellings… left Tools (gone) for Edit ▸ Clean up
+      tools: [...document.querySelectorAll('#dd-edit [data-sub="graphCleanUp"] button')].map((b) => b.textContent.trim()),
     };
   });
   await ctx.close();
@@ -4757,7 +4758,7 @@ test("V6.resources", "MICRO-COR06 · «Leggi come DosCo»: due file con lo stess
   const jpg = Buffer.from("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=", "base64");
   for (const f of ["D.02.jpg", "D.33.jpg", "D.04_Frammento.JPG", "D.04_Pilastrino.JPG", "photo_2022-02-07_11-47-54.jpg"]) writeFileSync(`${dir}/${f}`, jpg);
   const { p, ctx, errors } = await openLate("dev29-segni-lite", { locale: "en" });
-  const gone = await p.evaluate(() => !document.getElementById("resources-modal") && !document.getElementById("btn-resources") && !!document.getElementById("btn-door-dosco-tools"));
+  const gone = await p.evaluate(() => !document.getElementById("resources-modal") && !document.getElementById("btn-resources") && !!document.getElementById("btn-door-dosco"));   // MICRO-SEG29 · one button (Tools went)
   await p.evaluate((d) => { void window.__EM_DRAG__.doorDosco(d); }, dir);
   await p.waitForSelector('[data-app-dialog="door-dosco"]', { timeout: 15000 }).catch(() => {});
   const door = await doscoDoor(p);
@@ -7229,7 +7230,8 @@ test("TIL3.file", "TIL003 · File: «Porta dentro…» apre UNA finestra con tre
       [id, { label: document.querySelector(`#dd-file [data-sub="${id}"] > .dd-sub-toggle span`)?.textContent,
              cmds: [...document.querySelectorAll(`#dd-file [data-sub="${id}"] > .dd-sub-menu > button`)].map((b) => b.dataset.cmd) }])));
     const blend = await p.evaluate(() => document.querySelector('#dd-file button[data-cmd="composeFromGraph"] .dd-label-text')?.textContent);
-    const tools = await p.evaluate(() => [...document.querySelectorAll("#dd-tools .dd-menu > *")].map((n) => n.id));
+    // MICRO-SEG29 · Tools is gone: Georeferencing… is in File again (with the room)
+    const tools = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > *")].map((n) => n.id || n.dataset.sub));
     const geoInFile = await p.evaluate(() => !!document.querySelector("#dd-file #btn-georef"));
     await p.click('#dd-file button[data-cmd="bringIn"]');
     await p.waitForSelector('[data-app-dialog="bring-in"]', { timeout: 5000 }).catch(() => null);
@@ -7245,7 +7247,7 @@ test("TIL3.file", "TIL003 · File: «Porta dentro…» apre UNA finestra con tre
     out[locale] = { boxText, afterBox, roadTicked, roadUnticked, subs, blend, tools, geoInFile, dlg, gone, errors };
   }
   const it = out.it, en = out.en;
-  const ix = it.tools.indexOf("btn-tool-chronology");
+  const ix = it.tools.indexOf("btn-georef");
   const pass = it.boxText === "Sostituisci i file aperti" && en.boxText === "Replace the open files"
     && it.afterBox.menuOpen && it.afterBox.ticked && it.roadTicked === "replace" && it.roadUnticked === "open"
     && it.subs.externalData.label === "File esterni" && en.subs.externalData.label === "External data"
@@ -7255,9 +7257,9 @@ test("TIL3.file", "TIL003 · File: «Porta dentro…» apre UNA finestra con tre
     && JSON.stringify(it.subs.room.cmds) === JSON.stringify(["createRoom", "bringIntoRoom"])
     && JSON.stringify(it.subs.export.cmds) === JSON.stringify(["exportSvg", "exportTtl", "composeFromGraph", "consolidate", "printSheets"])
     && it.blend === "Scena Blender (.blend)…" && en.blend === "Blender scene (.blend)…"
-    && it.tools[ix + 1] === "btn-georef" && !it.geoInFile
+    && it.tools[ix + 1] === "room" && it.geoInFile
     && it.dlg?.title === "Porta dentro" && en.dlg?.title === "Bring in"
-    && JSON.stringify(it.dlg.choices.map((c) => c[0])) === JSON.stringify(["files", "folder", "dosco"])
+    && JSON.stringify(it.dlg.choices.map((c) => c[0])) === JSON.stringify(["files", "folder", "dosco", "stratiminer"])
     && it.dlg.checked === "files" && it.gone && en.gone && !it.errors.length && !en.errors.length;
   return { pass, detail: out };
 });
@@ -7607,7 +7609,7 @@ test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'ico
   const zoomed = await vpNow();
   await p.keyboard.press("Shift+C"); await p.waitForTimeout(200);
   const fitC = await vpNow();
-  const tools = await p.evaluate(() => [...document.querySelectorAll("#dd-tools .dd-menu button")].map((b) => b.id));
+  const tools = await p.evaluate(() => [...document.querySelectorAll('#dd-edit [data-sub="graphCleanUp"] button')].map((b) => b.id));   // MICRO-SEG29
   await ctx.close();
   const lay = matrix.acts.find((a) => a.act === "layout"), comp = matrix.acts.find((a) => a.act === "compact-all");
   const pass = !!lay && lay.svg && !lay.text && /Ricalcola layout/.test(lay.aria) && !!comp && comp.svg && /Compatta le proprietà/.test(comp.aria)

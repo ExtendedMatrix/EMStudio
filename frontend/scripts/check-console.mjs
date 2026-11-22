@@ -110,7 +110,9 @@ const main = read("frontend/src/main.ts"), html = read("frontend/index.html"), i
 const bridge = read("tools/em_bridge.py"), emPy = read("tools/em_py.py"), css = read("frontend/src/style.css");
 ok(!/btn-tool-console|Console Python|Python console/i.test(html), "index.html has no word of the console (off: nothing)");
 // MICRO-COR11 · out of «Funzioni sperimentali»: the button for everyone, marked «beta»
-ok(/\{\s*\/\/ Strumenti ▸ Console Python… · beta[\s\S]{0,300}b\.id = "btn-tool-console"/.test(main), "the button made for everyone (MICRO-COR11)");
+// MICRO-SEG29 · Tools went: the console is the row `console` of Window (menu-table.ts), for everyone
+ok(/cmd\("console", "tools\.console", "btn-tool-console"/.test(read("frontend/src/menu-table.ts"))
+   && /getElementById\("btn-tool-console"\)\?\.addEventListener\("click", \(\) => \{ openConsoleWindow\(\); \}\)/.test(main), "the button made for everyone (MICRO-COR11), in Window (MICRO-SEG29)");
 ok(/function openConsoleWindow\(opts[^)]*\): Win \| null \{/.test(main) && !/pyc\.off/.test(main), "…and the window opens with no switch");
 ok(/"tools\.console": "Python console… · beta"/.test(i18n) && /"tools\.console": "Console Python… · beta"/.test(i18n), "the entry says «beta» (EN + IT)");
 ok(/t\("ui\.beta"\)/.test(read("frontend/src/console-window.ts")), "the window's head says «beta»");

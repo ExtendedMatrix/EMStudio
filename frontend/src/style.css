@@ -12910,3 +12910,89 @@ td.plg-col { color: var(--muted, #888); }
 .shelf-docfile[data-sign="missing"] .uo-note { color: var(--danger, #c0392b); }
 .shelf-docfile[data-sign="changed"] .uo-note { color: var(--warn, #b7791f); }
 .shelf-docfile[data-sign="unstamped"] .uo-note { color: var(--muted, #8a8f98); }
+
+/* ── MICRO-SEG29 · the command search (F3 / ⌘K), Blender's Menu Search ─────── */
+.cmd-search-back {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: transparent;
+}
+.cmd-search {
+  width: min(640px, calc(100vw - 32px));
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  font-size: 13px;
+}
+.cmd-search-q {
+  margin: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+.cmd-search-q:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.cmd-search-list { overflow-y: auto; padding: 0 6px 6px; }
+.cmd-search-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.cmd-search-row.on { background: var(--bg-accent-soft); }
+.cmd-search-row[aria-disabled="true"] .cmd-search-label { color: var(--text-faint); }
+.cmd-search-label { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmd-search-where {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmd-search-keys { flex: 0 0 auto; margin-left: auto; }
+.cmd-search-none { padding: 10px; color: var(--text-muted); }
+.cmd-search-foot {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+/* MICRO-SEG29 · Window ▸ Area headers: hidden for this session */
+body.em-no-area-headers .tile-area > .tile-bar { display: none; }
+/* MICRO-SEG29 · the Matrix's «Check the chronology» in words; its ▲ when there are warnings */
+.win-act.win-chr { white-space: nowrap; }
+.win-act.win-chr:not([data-chr-warn="0"]) { color: var(--warn-ink); }
+/* the chronology's ▲ in the status pill: its own click */
+.warn-pill .sv-chr { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+/* MICRO-SEG29 · Preferences ▸ Extensions: the plugins' commands (Tools ▸ Plugins before) */
+.ext-plugin-cmds { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--border); }
+.ext-plugin-cmds-list { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.ext-plugin-cmds-list .dd-head { margin-top: 6px; font-weight: 600; }
+.ext-plugin-cmds-list .dd-run {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  color: var(--text);
+  cursor: pointer;
+}
+.ext-plugin-cmds-list .dd-empty { color: var(--text-muted); font-size: 12px; }
+/* MICRO-SEG29 · the Inspector's «Edit vocabulary…» beside a value's term */
+.vt-row .vt-edit { margin-left: 6px; }

@@ -39,7 +39,7 @@
         <!-- NIGHT-SPAZIO · the version left the bar: it is in the tooltip of
              this mark, in the status bar and in Aiuto ▸ Informazioni -->
       </span>
-      <!-- MENU1 · leader bar: File · Modifica · Strumenti · Aiuto (Mode left it, p.3). The generic
+      <!-- MENU1 · leader bar: File · Modifica · Finestra · Aiuto (Mode left it, p.3; Strumenti left it, MICRO-SEG29). The generic
            .dropdown/.dd-toggle/.dd-menu wiring (main.ts) auto-attaches; items
            keep their IDs so existing handlers (open/save/import/export/undo/
            redo/settings/sync) are reused, not reimplemented. -->
@@ -64,42 +64,18 @@
         <button id="btn-open-other" class="hidden" data-i18n-title="roundtrip.title"><span data-i18n="roundtrip.item">Open this room in…</span></button>
         <button id="btn-share-room" class="hidden" data-i18n-title="share.openTitle"><span data-i18n="share.open">Share this room…</span></button>
       </div>
-      <!-- WIN7 · Tools: the one-shot instruments. They are not editors and never
-           were — StratiMiner exists to MAKE a graph and then get out of the way,
-           which is why it never fitted as a tab of the Inspector (a panel that
-           describes the graph you already have). A menu of them at app level,
-           each opening a floating panel that closes when its job is done. -->
-      <div class="dropdown" id="dd-tools">
-        <button class="dd-toggle" data-i18n-title="menu.toolsTitle" title="Tools — one-shot instruments"><span data-i18n="toolbar.tools">Tools</span> ▾</button>
+      <!-- MICRO-SEG29 (E.D., 22 Nov 2026) · the menu Tools is gone: a drawer of
+           commands with no home. As in Blender, few menus at the top (File, Edit,
+           Window, Help), the instruments in the header of the area where they
+           serve, F3 (⌘K / Ctrl+K) to find everything. Add node… and Check the
+           chronology… are in the Matrix's header, StratiMiner and Read as DosCo…
+           in File ▸ Bring in…, Normalise spellings… in Edit ▸ Clean up, Colours…,
+           Vocabularies… and Extensions… (Plugins merged in) in the Preferences,
+           Georeferencing… in File and in the Space, the console in Window. -->
+      <div class="dropdown" id="dd-window">
+        <button class="dd-toggle" data-i18n-title="menu.windowTitle" title="Window: the workspaces, the console, the detached windows, the areas"><span data-i18n="menu.window">Window</span> ▾</button>
         <div class="dd-menu hidden">
-          <!-- SHIFT-A · the node palette left (1 ott 2026): a node is added at
-               the cursor. This is the menu's way into the same «Aggiungi». -->
-          <button id="btn-tool-add" data-i18n-title="add.headerBtn" title="Add a node (⇧A)">
-            <span data-i18n="tools.addNode">Add node…</span> <span class="dd-key">⇧A</span>
-          </button>
-          <div class="dd-sep"></div>
-          <button id="btn-tool-stratiminer" data-i18n-title="menu.stratiminerTitle" title="StratiMiner: build a graph from a folder of unstructured sources, via the reviewable em_data.xlsx table">
-            <span data-i18n="tab.stratiminer">StratiMiner</span>
-          </button>
-          <!-- MENU-AUDIT · Risorse was a bare button loose in the leader bar,
-               between the menus and the workspace chips. It is an instrument
-               that reaches the bridge for the shared Resource layer — the same
-               kind of thing as StratiMiner, and this is where that kind lives.
-               The button keeps its id, so its handler is untouched. -->
-          <!-- MICRO-UN-POSTO · the mapping editor is reached from its one door,
-               File ▸ Importa ▸ Tabella con mappatura… (and filled by the EMtree
-               and by StratiMiner): a second entry here was a second door. -->
-          <!-- MICRO-PULIZIA p.4 · from the graph window's «⋯»: a fix-up of the document -->
-          <button id="btn-tool-uniform" data-i18n="menu.uniformSpellings" data-i18n-title="menu.uniformSpellingsTitle" title="Bring the edges to the canonical spelling (one undo step)">Normalise spellings…</button>
-          <!-- MICRO-S · the window «Colori» of the active Space (also from its «Colori ▾») -->
-          <button id="btn-tool-colours" data-i18n="tools.colours" data-i18n-title="tools.coloursTitle" title="The Colours window of the active Space: colour the proxies by type, epoch or a property">Colours…</button>
-          <!-- MICRO-U · the vocabularies of this computer and of the file -->
-          <button id="btn-tool-vocabularies" data-i18n="tools.vocabularies" data-i18n-title="tools.vocabulariesTitle" title="The vocabularies installed on this computer, those this file uses, and the copy of their terms in the file">Vocabularies…</button>
-          <!-- MICRO-PL09 (W6) · the extensions of this computer: community packages, plugins -->
-          <button id="btn-tool-extensions" data-i18n="tools.extensions" data-i18n-title="tools.extensionsTitle" title="Settings ▸ Extensions">Extensions…</button>
-          <button id="btn-tool-chronology" data-i18n="chr.checkEllipsis" data-i18n-title="chr.checkTitle" title="Check the chronology: the epochs on a time axis, the overlaps with their delta and their remedies">Check the chronology…</button>
-          <!-- MICRO-COR06 · it was «Resources»: a DosCo folder now comes in through «Porta dentro…» -->
-          <button id="btn-door-dosco-tools" data-i18n-title="door.doscoMenuHint" title="Bring in a DosCo folder: each file with an EM id becomes the document of that id — its date, its licence, its role asked in one block" data-i18n="door.doscoMenu">Read as DosCo…</button>
+          <!-- MICRO-SEG29 · filled from src/menu-table.ts by menu-ui.ts (one table, the page and the system menu) -->
         </div>
       </div>
       <div class="dropdown" id="dd-help">
@@ -111,7 +87,6 @@
       <!-- sync stays in the DOM (hidden) so its existing handler is reused;
            the Mode menu drives connect/disconnect. -->
       <button id="btn-sync" class="hidden" title="Connect to Blender/EMtools for live selection sync" data-i18n="toolbar.sync">Sync</button>
-      <!-- MENU-AUDIT · Risorse moved into the Strumenti menu (see above). -->
       <!-- MICRO-PULIZIA p.1 · the unsaved-changes dot moved beside the name, in the name strip -->
       <span class="tb-sep"></span>
       <!-- HDR1 · WORKSPACE TABS — the master header's only switcher, and the one
@@ -827,8 +802,27 @@
           <!-- MICRO-SEG08 · Preferences ▸ Extensions (it was the window Tools ▸ Extensions…):
                the page is drawn by extensions-window.ts into #set-extensions while the tab
                is shown; with «Third-party tools» it makes a group of its own in the strip -->
+          <!-- MICRO-SEG29 · Preferences ▸ Colours and ▸ Vocabularies (they were Tools ▸
+               Colours… / Vocabularies…). The vocabularies' page is drawn by
+               vocab-ui.ts into #set-vocabularies while the tab is shown; the
+               Colours belong to a Space (and travel with the file): the page says
+               so and opens the window of the active Space. -->
+          <section data-settings-tab="colours" data-settings-group="look" class="settings-sect settings-sect-page" id="settings-sect-colours">
+            <h3 class="settings-page-title" data-i18n="settings.colours">Colours</h3>
+            <p class="settings-hint" data-i18n="settings.coloursHint">The colours of the proxies in a Space: by type, by epoch or by a property. They are kept in the file, with the Space they belong to.</p>
+            <p class="settings-hint" id="set-colours-space"></p>
+            <button type="button" id="set-colours-open" class="tv-act" data-i18n="settings.coloursOpen">Open the Colours of the active Space…</button>
+          </section>
+          <section data-settings-tab="vocabularies" data-settings-group="look" class="settings-sect settings-sect-page" id="settings-sect-vocabularies">
+            <h3 class="settings-page-title" data-i18n="vw.title">Vocabularies</h3>
+            <div id="set-vocabularies"></div>
+          </section>
           <section data-settings-tab="extensions" data-settings-group="ext" class="settings-sect settings-sect-page" id="settings-sect-extensions">
             <div id="set-extensions"></div>
+            <!-- MICRO-SEG29 · it was Tools ▸ Plugins ▸: each loaded plugin with its
+                 commands and panels, and the plugins that did not load with why
+                 (renderPluginCommands in main.ts) — the same things, one place -->
+            <div id="set-ext-plugins" data-ext-plugins></div>
           </section>
           <!-- MICRO-OTTIMIZZA-1 · the external tools EMStudio calls and does not
                ship: downloaded on request (pinned version, sha256 checked),

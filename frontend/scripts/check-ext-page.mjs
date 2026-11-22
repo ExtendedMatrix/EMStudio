@@ -280,7 +280,9 @@ ok(/\.ext-scroll > \* \{ flex-shrink: 0; \}/.test(css), "the rows of the scroll 
   eq(plan("section", { inspectorHere: false }), { workspace: "canvas", target: "inspector-section" }, "…else Stratigraphy, which has one");
   eq(plan("vocab", { inspectorHere: false }), { workspace: "canvas", target: "vocab-picker" }, "Vocabularies: the Inspector's picker that uses them");
   eq(plan("python"), { workspace: "scripting", target: "console" }, "Python: the Scripting workspace's console (written, not run)");
-  eq(plan("menu").target, "said", "a place with nothing to open is said in words");
+  // MICRO-SEG29 · the menu Tools is gone: a plugin's commands of menu.tools@1 → the command search
+  eq(plan("menu"), { workspace: null, target: "command-search" }, "Tools ▸ Plugins before: the command search (F3), filtered on the extension");
+  eq(plan("statusbar").target, "said", "a place with nothing to open is said in words");
   eq(X.SHOWME_MS, 1500, "the ring stays ~1.5 s");
   // the node an Inspector section is shown on
   const nodes = [{ id: "U1", node_type: "US" }, { id: "D1", node_type: "document" }, { id: "D2", node_type: "document", data: { by: "geofisica" } }];

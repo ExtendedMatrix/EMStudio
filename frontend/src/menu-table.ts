@@ -46,6 +46,10 @@ export interface CommandRow {
   accelNotOnWeb?: boolean;
   /** the platforms the command exists on; absent = all */
   only?: Platform[];
+  /** MICRO-SEG29 · i18n key of WHERE the command lives when no menu draws it
+   *  (the Matrix's header, the Preferences, a window's choice): what the
+   *  command search shows beside it. A row drawn by a menu has its path. */
+  home?: string;
 }
 export interface PredefinedRow { kind: "os"; id: string; os: Predefined; label?: string }
 /** MICRO-PL17 (W14) · an INVOCATION, not a button: a plugin's command
@@ -72,7 +76,7 @@ export interface SubRow {
   label: string;
   title?: string;
   /** filled when it opens (the recent files) rather than from rows */
-  dynamic?: "recent";
+  dynamic?: "recent" | "workspaces";
   /** MICRO-PL17 · the plugin slot this sub-menu offers (`menu.file.import@1`):
    *  the commands registered there follow its rows, after a separator */
   slot?: string;
@@ -103,7 +107,7 @@ export function findRun(id: string): RunRow | null {
 }
 
 export interface MenuDef {
-  id: "app" | "file" | "edit" | "tools" | "window" | "help";
+  id: "app" | "file" | "edit" | "window" | "help";
   /** i18n key; the app menu is named by the system after the app */
   label: string;
   /** which surfaces draw this menu, per platform */
@@ -167,7 +171,7 @@ export const MENUS: MenuDef[] = [
       // MICRO-TIL003 · «Open in place of the open files…» is a box of Open now
       // (Blender's options of File ▸ Open): ticked, Open closes the open files first
       { kind: "opt", id: "openReplaceBox", label: "menu.openReplaceBox", title: "menu.openReplaceBoxTitle" },
-      cmd("openReplace", "toolbar.openReplace", "btn-open-replace", { title: "menu.openReplaceTitle", only: NOWHERE }),
+      cmd("openReplace", "toolbar.openReplace", "btn-open-replace", { title: "menu.openReplaceTitle", only: NOWHERE, home: "cmds.home.openBox" }),
       // MICRO-ARCHIVIO-2 · the project is the folder
       cmd("openProject", "fs.openProject", "btn-open-project", { title: "fs.openProjectTitle" }),
       { kind: "sub", id: "openRecent", label: "menu.openRecent", title: "menu.openRecentTitle", dynamic: "recent", rows: [] },
@@ -181,11 +185,16 @@ export const MENUS: MenuDef[] = [
       // a folder read as DosCo) — the three doors of before, behind one entry
       cmd("bringIn", "door.menu", "btn-bring-in", { title: "door.bringInHint" }),
       // MICRO-E p.1 · the files (the system's selector, several files)
-      cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint", only: NOWHERE }),
+      cmd("door", "door.menu", "btn-porta-dentro", { title: "door.menuHint", only: NOWHERE, home: "cmds.home.bringIn" }),
       // MICRO-GEO09 · a folder (a stack of slices): read by a plugin's reader of folders (door.reader@2)
-      cmd("doorFolder", "door.folderMenu", "btn-porta-dentro-cartella", { title: "door.folderMenuHint", only: NOWHERE }),  // ALLOW-IT: an element id (as btn-porta-dentro), not words on screen
+      cmd("doorFolder", "door.folderMenu", "btn-porta-dentro-cartella", { title: "door.folderMenuHint", only: NOWHERE, home: "cmds.home.bringIn" }),  // ALLOW-IT: an element id (as btn-porta-dentro), not words on screen
       // MICRO-COR06 · a DosCo folder: each file with an EM id the document of that id
-      cmd("doorDosco", "door.doscoMenu", "btn-door-dosco", { title: "door.doscoMenuHint", only: NOWHERE }),
+      // MICRO-SEG29 · it was also Tools ▸ «Read as DosCo…» (a second button,
+      // btn-door-dosco-tools): one command, in «Bring in…», the Shelf and F3
+      cmd("doorDosco", "door.doscoMenu", "btn-door-dosco", { title: "door.doscoMenuHint", only: NOWHERE, home: "cmds.home.bringIn" }),
+      // MICRO-SEG29 · it was Tools ▸ StratiMiner: a fourth choice of «Bring in…»
+      // (a folder of unstructured sources becomes a graph)
+      cmd("stratiminer", "tab.stratiminer", "btn-tool-stratiminer", { title: "menu.stratiminerTitle", only: NOWHERE, home: "cmds.home.bringIn" }),
       // Blender's Append
       cmd("integrate", "container.addToProject", "btn-add-project", { title: "container.addToProjectTitle" }),
       { kind: "sub", id: "import", label: "toolbar.import", slot: "menu.file.import@1", rows: [
@@ -219,6 +228,9 @@ export const MENUS: MenuDef[] = [
         cmd("reorderProject", "fs.reorderItem", "btn-reorder-project", { title: "fs.reorderItemTitle" }),
       ] },
       sep,
+      // MICRO-SEG29 · the card «Georeferencing» (it was in Tools): with the
+      // project and the room — the study's own frame, as Blender's Scene
+      cmd("georef", "gr.menu", "btn-georef", { title: "gr.menuTitle" }),
       { kind: "sub", id: "room", label: "menu.room", title: "menu.roomTitle", rows: [
         cmd("createRoom", "room.createItem", "btn-create-room", { title: "room.createItemTitle" }),
         cmd("bringIntoRoom", "room.bringItem", "btn-bring-into-room", { title: "room.bringItemTitle" }),
@@ -226,25 +238,10 @@ export const MENUS: MenuDef[] = [
       sep,
       cmd("close", "toolbar.close", "btn-close-doc", { title: "menu.closeTitle", accel: "CmdOrCtrl+W", accelNotOnWeb: true }),
       cmd("closeProject", "fs.closeProject", "btn-close-project", { title: "fs.closeProjectTitle" }),
-      // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione» moved to Tools
-      // (MICRO-TIL003): its row is in the menu «tools» below
       // Windows and Linux: Quit at the bottom of File, as is the custom there
       // (the Mac has it in the EMStudio menu; the web closes its tab)
       { ...sep, only: ["win", "linux"] } as SepRow,
       cmd("quitFile", "menu.quit", "btn-quit", { accel: "CmdOrCtrl+Q", only: ["win", "linux"] }),
-    ],
-  },
-  {
-    // MICRO-TIL003 · Tools: the menu is the page's own (index.html: the
-    // instruments, the console, the plugins); the table adds its rows AFTER
-    // `anchor`, keeping the items already there. The system's bar has no Tools.
-    id: "tools",
-    label: "toolbar.tools",
-    surfaces: { web: ["internal"], mac: ["internal"], win: ["internal"], linux: ["internal"] },
-    anchor: "btn-tool-chronology",
-    rows: [
-      // MICRO-P-GEOREF-PER-GRAFO · the card «Georeferenziazione»: each graph its system
-      cmd("georef", "gr.menu", "btn-georef", { title: "gr.menuTitle" }),
     ],
   },
   {
@@ -258,14 +255,46 @@ export const MENUS: MenuDef[] = [
       cmd("redo", "toolbar.redoItem", "btn-redo", { title: "toolbar.redo" }),
       os("osUndo", "undo"), os("osRedo", "redo"),
       sep,
+      // MICRO-SEG29 · Blender's Edit ▸ Menu Search (F3; ⌘K / Ctrl+K as well)
+      cmd("commandSearch", "cmds.menu", "btn-command-search", { title: "cmds.menuTitle", accel: "CmdOrCtrl+K" }),
+      sep,
+      // MICRO-SEG29 · «Clean up»: the graph's tidy-ups, one undo step each
+      // (Normalise spellings… was in Tools; «Sort the lanes by date» was only
+      // the fix of a warning)
+      { kind: "sub", id: "graphCleanUp", label: "menu.graphCleanUp", title: "menu.graphCleanUpTitle", rows: [
+        cmd("uniformSpellings", "menu.uniformSpellings", "btn-tool-uniform", { title: "menu.uniformSpellingsTitle" }),
+        cmd("sortLanes", "issues.sortLanes", "btn-sort-lanes", { title: "menu.sortLanesTitle" }),
+      ] },
+      // MICRO-SEG29 · the instruments that live in a window's header now
+      // (Blender's Add menu and the Matrix's own verbs): no menu draws them,
+      // F3 finds them and says where they are
+      cmd("addMenu", "tools.addNode", "btn-tool-add", { title: "add.headerBtn", only: NOWHERE, home: "cmds.home.matrixAdd" }),
+      cmd("chronology", "chr.checkEllipsis", "btn-tool-chronology", { title: "chr.checkTitle", only: NOWHERE, home: "cmds.home.matrixChronology" }),
+      sep,
       os("cut", "cut"), os("copy", "copy"), os("paste", "paste"), os("selectAll", "selectAll"),
     ],
   },
   {
+    // MICRO-SEG29 (E.D., 22 Nov 2026) · Window, as Blender's: the workspaces,
+    // the console, the detached windows, the areas. The page draws it on every
+    // platform; the Mac's system bar adds its own three items (minimize…).
     id: "window",
     label: "menu.window",
-    surfaces: { mac: ["native"] },
-    rows: [os("minimize", "minimize"), os("maximize", "maximize"), os("fullscreen", "fullscreen")],
+    surfaces: { web: ["internal"], mac: ["internal", "native"], win: ["internal"], linux: ["internal"] },
+    rows: [
+      { kind: "sub", id: "workspaces", label: "menu.workspaces", title: "menu.workspacesTitle", dynamic: "workspaces", rows: [] },
+      cmd("scripting", "menu.scripting", "btn-ws-scripting", { title: "menu.scriptingTitle" }),
+      // it was Tools ▸ «Python console… · beta»
+      cmd("console", "tools.console", "btn-tool-console", { title: "tools.consoleTitle" }),
+      sep,
+      cmd("detachWindow", "menu.detachWindow", "btn-detach-window", { title: "menu.detachWindowTitle" }),
+      cmd("returnWindows", "menu.returnWindows", "btn-return-windows", { title: "menu.returnWindowsTitle" }),
+      sep,
+      cmd("maximizeArea", "menu.maximizeArea", "btn-maximize-area", { title: "menu.maximizeAreaTitle" }),
+      cmd("areaHeaders", "menu.areaHeaders", "btn-area-headers", { title: "menu.areaHeadersTitle" }),
+      sep,
+      os("minimize", "minimize"), os("maximize", "maximize"), os("fullscreen", "fullscreen"),
+    ],
   },
   {
     id: "help",
@@ -280,6 +309,11 @@ export const MENUS: MenuDef[] = [
       { ...sep, only: NOT_MAC_DESKTOP } as SepRow,
       cmd("aboutHelp", "toolbar.about", "btn-help-about", { only: NOT_MAC_DESKTOP }),
       cmd("settingsHelp", "toolbar.settingsItem", "btn-settings", { accel: "CmdOrCtrl+,", only: NOT_MAC_DESKTOP }),
+      // MICRO-SEG29 · it was Tools ▸ Colours… / Vocabularies… / Extensions…:
+      // pages of the Preferences now (Colours and Vocabularies beside Extensions)
+      cmd("colours", "tools.colours", "btn-tool-colours", { title: "tools.coloursTitle", only: NOWHERE, home: "cmds.home.prefsColours" }),
+      cmd("vocabularies", "tools.vocabularies", "btn-tool-vocabularies", { title: "tools.vocabulariesTitle", only: NOWHERE, home: "cmds.home.prefsVocab" }),
+      cmd("extensions", "tools.extensions", "btn-tool-extensions", { title: "tools.extensionsTitle", only: NOWHERE, home: "cmds.home.prefsExt" }),
       cmd("updatesHelp", "toolbar.updates", "btn-help-updates", { only: ["win", "linux"] }),
     ],
   },

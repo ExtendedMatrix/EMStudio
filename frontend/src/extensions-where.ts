@@ -146,7 +146,7 @@ export const SHOWME_MS = 1500;
  *  the workspace to go to (null: the one in front), and what is opened and lit there.
  *  The Preferences close first (a modal over the place it shows: see the report). */
 export type ShowTarget = "file-menu" | "sidebar-panel" | "panel-window" | "layer" | "toolbar"
-  | "inspector-section" | "vocab-picker" | "console" | "said";
+  | "inspector-section" | "vocab-picker" | "console" | "command-search" | "said";
 export interface ShowPlan { workspace: string | null; target: ShowTarget }
 export function showPlan(p: Pick<WherePlace, "kind" | "place">, here: { inspectorHere: boolean }): ShowPlan {
   const insp = here.inspectorHere ? null : "canvas";
@@ -158,6 +158,9 @@ export function showPlan(p: Pick<WherePlace, "kind" | "place">, here: { inspecto
     case "section": return { workspace: insp, target: "inspector-section" };
     case "vocab": return { workspace: insp, target: "vocab-picker" };
     case "python": return { workspace: "scripting", target: "console" };
+    // MICRO-SEG29 · the menu Tools is gone: a plugin's commands of `menu.tools@1`
+    // are found by the command search (F3) and in Preferences ▸ Extensions
+    case "menu": return { workspace: null, target: "command-search" };
     default: return { workspace: null, target: "said" };
   }
 }

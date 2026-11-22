@@ -540,7 +540,8 @@ import {
   setValidated,
   t,
 } from "./i18n";
-import { setRuntimeStrings, tAll, tn } from "./i18n";
+import { dictionaryOf, setRuntimeStrings, tAll, tn } from "./i18n";
+import { type CommandEntry, commandEntries, isSearchKey, searchCommands } from "./command-search";
 import type { Locale } from "./i18n";
 import type {
   ExtractResult,
@@ -903,7 +904,10 @@ import type { ContainerLike, LinksAction, RemovalReport, ShelfAction } from "./g
 // MICRO-DOVE-CHI-MENU p.1 · the menus come from ONE table (`menu-table.ts`):
 // drawn here, before any handler below looks its button up by id
 const PLATFORM = currentPlatform(isTauri());
-buildPageMenus(PLATFORM, { recent: () => recentMenuItems(), invoke: (id) => invokePluginRow(id) });
+buildPageMenus(PLATFORM, { recent: () => recentMenuItems(), invoke: (id) => invokePluginRow(id),
+  // MICRO-SEG29 · Window ▸ Workspaces: the tabs of the bar, the active one said
+  workspaces: () => WORKSPACES.map((w) => ({ id: w.id, label: workspaceLabel(w, t),
+    detail: w.id === activeWorkspace() ? t("menu.wsActive") : undefined, run: () => setWorkspace(w.id) })) });
 
 declare global {
   interface Window {
@@ -4495,7 +4499,7 @@ function renderInspectorInto(host: HTMLElement): void {
       // MICRO-U · the term of a controlled value, or «non controllato»
       valueTerm: (root, id) => {
         const n = owning.node(id);
-        const el = n ? valueTermEl(document, vocabHost, vocabState, n, isControlled(n), (x) => void openVocabLink(x)) : null;
+        const el = n ? valueTermEl(document, vocabHost, vocabState, n, isControlled(n), (x) => void openVocabLink(x), () => openVocabWindow()) : null;
         if (el) root.appendChild(el);
       },
       onSetSitePosition: () => openSitePickerOnGraph(),
@@ -13115,6 +13119,7 @@ function renderResourcePanels(): void {
 
 // SHIFT-A · Tools ▸ «Aggiungi nodo… ⇧A» took the place of «Palette nodi»: the
 // same menu as the key, over the active graph window (or the first one).
+// MICRO-SEG29 · Tools is gone: the command `addMenu` (F3) and the Matrix's «Add ▾».
 document.getElementById("btn-tool-add")?.addEventListener("click", () => {
   const win = activeWin().type === "graph" ? activeWin() : windowsOf().find((w) => w.type === "graph");
   const cv = win && graphWindows.get(win.id)?.cv;
@@ -18438,6 +18443,7 @@ document.getElementById("btn-bring-in")?.addEventListener("click", () => {
     if (c === "files") void doorFromMenu();
     else if (c === "folder") void doorFolderFromMenu();
     else if (c === "dosco") void doorDoscoFromMenu();
+    else if (c === "stratiminer") openStratiMiner();   // MICRO-SEG29 · it was Tools ▸ StratiMiner
   });
 });
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
@@ -21590,8 +21596,11 @@ function showSettingsTab(wanted: string | null): void {
   // half-way down the previous one's scroll is disorienting.
   settingsModal.querySelector(".modal-body")?.scrollTo({ top: 0 });
   // MICRO-SEG08 · the extensions are a page that reads this machine: asked when shown
-  settingsModal.classList.toggle("settings-wide", active === "extensions" || active === "addons");
+  settingsModal.classList.toggle("settings-wide", active === "extensions" || active === "addons" || active === "vocabularies");
   if (active === "extensions") onExtensionsTab();
+  // MICRO-SEG29 · the pages that were windows of Tools
+  if (active === "vocabularies") { paintVocabSettings(true); void vocabState.refresh(); }
+  if (active === "colours") paintColoursSettings();
   try {
     localStorage.setItem(SETTINGS_TAB_KEY, active);
   } catch {
@@ -22134,8 +22143,8 @@ document.getElementById("btn-tool-uniform")?.addEventListener("click", () => {
   if (why) { toast(why); return; }
   promptUniformSpellings();
 });
-// MICRO-COR06 · Tools ▸ «Read as DosCo…» (it was «Resources»): the door
-document.getElementById("btn-door-dosco-tools")?.addEventListener("click", () => { void doorDoscoFromMenu(); });
+// MICRO-COR06 · Tools ▸ «Read as DosCo…» (it was «Resources») → MICRO-SEG29: the
+// one command `doorDosco` (File ▸ Bring in…, the Shelf, F3); its second button went
 
 // "Circles of detail" panel — progressive disclosure, per view. Each ring
 // bundles node/edge types (filters.ts); toggling a ring re-derives the hidden
@@ -25233,6 +25242,7 @@ document
 document.getElementById("btn-tool-chronology")?.addEventListener("click", () => openChronology());
 // MICRO-S · Tools ▸ Colori…: the window «Colori» on the active Space
 document.getElementById("btn-tool-colours")?.addEventListener("click", () => openColoursWindow());
+// MICRO-SEG29 · Preferences ▸ Vocabularies (it was the window of Tools ▸ Vocabularies…)
 document.getElementById("btn-tool-vocabularies")?.addEventListener("click", () => openVocabWindow());
 document.getElementById("btn-tool-extensions")?.addEventListener("click", () => openExtensionsWindow());
 document.getElementById("btn-clean-file")?.addEventListener("click", () => void cleanFilePresentation());
@@ -26072,11 +26082,20 @@ function renderWarningsPill(): void {
   const all = allIssues();
   const nw = all.filter((i) => i.sev === "warn").length;
   const ni = all.length - nw;
+  // MICRO-SEG29 · the chronology's warnings counted apart: their ▲ opens «Check
+  // the chronology…» with one click (the rest of the pill opens the table)
+  const nc = all.filter((i) => i.sev === "warn" && i.rule === "chronology").length;
   el.innerHTML = all.length
-    ? [nw ? `<span class="sv warn">▲ ${nw}</span>` : "",
+    ? [nc ? `<span class="sv warn sv-chr" data-chr-open="1" title="${escapeHtml(t("chr.pillTip"))}">${escapeHtml(t("chr.pillCount", { n: String(nc) }))}</span>` : "",
+       nw - nc ? `<span class="sv warn">▲ ${nw - nc}</span>` : "",
        ni ? `<span class="sv info">● ${ni}</span>` : ""].filter(Boolean).join(" · ")
     : escapeHtml(t("issues.none"));
-  el.title = t("issues.pillTip");
+  el.title = nc ? `${t("issues.pillTip")}\n${t("chr.pillTip")}` : t("issues.pillTip");
+  // the Matrix's «Check the chronology» says the same count
+  document.querySelectorAll<HTMLElement>('.win-chr[data-act="chronology"]').forEach((b) => {
+    b.dataset.chrWarn = String(nc);
+    b.textContent = nc ? `${t("hdr.chronology")} ▲ ${nc}` : t("hdr.chronology");
+  });
   el.classList.toggle("ok", all.length === 0);
   if (issuesPopOpen) renderWarningsPopover();
 }
@@ -26170,6 +26189,8 @@ function renderWarningsPopover(): void {
 // forward and flashes it — and nothing floats over the work.
 document.getElementById("footer-warnings")?.addEventListener("click", (e) => {
   e.stopPropagation();
+  // MICRO-SEG29 · the chronology's ▲: «Check the chronology…» in one click
+  if ((e.target as HTMLElement).closest?.("[data-chr-open]")) { openChronology(); return; }
   openIssuesTable();
 });
 document.addEventListener("pointerdown", (e) => {
@@ -37498,12 +37519,44 @@ const vocabWindow = new ColoursWindow(coloursWindowHostForVocab(), document, {
   sig: () => JSON.stringify([vocabState.rev, vocabState.installed?.length ?? -1, store?.rev ?? "",
     JSON.stringify(emtree.activeFile()?.vocabularies?.embed ?? null), emtree.activeFile()?.id ?? ""]),
 });
+{
+  // MICRO-SEG29 · every repaint the state asks of the window reaches the page too
+  const own = vocabWindow.repaint.bind(vocabWindow);
+  (vocabWindow as { repaint: (force?: boolean) => void }).repaint = (force?: boolean) => { own(force); paintVocabSettings(!!force); };
+}
 function coloursWindowHostForVocab(): ConstructorParameters<typeof ColoursWindow>[0] {
   return { ...(coloursWindowHost as object), t: (k: string, v?: Record<string, string>) => t(k, v) } as ConstructorParameters<typeof ColoursWindow>[0];
 }
+/** MICRO-SEG29 · the vocabularies are a page of the Preferences (it was a window
+ *  of Tools): drawn into `#set-vocabularies` while that tab is shown, again on
+ *  every change the state reports (`vocabWindow.repaint`, below) */
 function openVocabWindow(): void {
-  vocabWindow.open();
-  void vocabState.refresh();
+  openSettings("settings-sect-vocabularies");
+  void vocabState.refresh().then(() => paintVocabSettings(true));
+}
+let vocabPaintSig = "";
+function paintVocabSettings(force = false): void {
+  const mount = document.getElementById("set-vocabularies");
+  const sect = document.getElementById("settings-sect-vocabularies");
+  if (!mount || !sect || settingsModal.classList.contains("hidden") || sect.classList.contains("hidden")) { vocabPaintSig = ""; return; }
+  const sig = JSON.stringify([vocabState.rev, vocabState.installed?.length ?? -1, store?.rev ?? "",
+    JSON.stringify(emtree.activeFile()?.vocabularies?.embed ?? null), emtree.activeFile()?.id ?? "", getLocale()]);
+  if (!force && sig === vocabPaintSig) return;
+  vocabPaintSig = sig;
+  const body = settingsModal.querySelector(".modal-body");
+  const scrollTop = body?.scrollTop ?? 0;
+  mount.replaceChildren(vocabContent(document, vocabHost, vocabState));
+  body?.scrollTo({ top: scrollTop });
+}
+/** MICRO-SEG29 · Preferences ▸ Colours: which Space the window would colour */
+function paintColoursSettings(): void {
+  const line = document.getElementById("set-colours-space");
+  const b = document.getElementById("set-colours-open") as HTMLButtonElement | null;
+  const sp = activeWin().type === "scene" ? activeWin() : windowsOf().find((w) => w.type === "scene" && w.id.split(":")[0] === activeWorkspace())
+    ?? windowsOf().find((w) => w.type === "scene");
+  const wsOf = sp ? WORKSPACES.find((w) => w.id === sp.id.split(":")[0]) : undefined;
+  if (line) line.textContent = sp ? t("settings.coloursOf", { space: wsOf ? workspaceLabel(wsOf, t) : winTypeLabel(sp) }) : t("cw.noSpace");
+  if (b) { b.disabled = !sp; b.onclick = () => { closeSettings(); openColoursWindow(sp?.id); }; }
 }
 // ── MICRO-PL09-ESTENSIONI-IN-EMSTUDIO (W6) · the extensions of this machine,
 // the window «Estensioni», and what the packages the document reads ADD to the
@@ -37752,6 +37805,11 @@ function showExtPlace(p: WherePlace, extId: string): void {
       ?? tabs.find((x) => x.kind === "extension" && x.extensions?.includes(pid))?.id ?? null;
   };
   switch (plan.target) {
+    case "command-search":
+      // MICRO-SEG29 · a command of the plugins' menu (menu.tools@1, Tools ▸ Plugins
+      // before): the command search, filtered on the extension's name
+      then(() => { openCommandSearch(plugin?.name ?? p.names[0] ?? extId); showMeLast.lit = document.getElementById("cmd-search") ? 1 : 0; });
+      break;
     case "file-menu": {
       // after the click that pressed «Show me» has reached the document (which closes every menu)
       setTimeout(() => {
@@ -63685,6 +63743,39 @@ function buildAreaHeader(win: Win): DocumentFragment {
   if (type === "graph") {
     // MICRO-PULIZIA p.4 · the «+» left the bar: «Aggiungi» is ⇧A and Tools ▸
     // Add node… (the same menu, at the cursor)
+    // MICRO-SEG29 (E.D., 22 Nov 2026) · Tools is gone: the Matrix's header has
+    // Blender's «Add ▾» (the same menu as ⇧A, the node born in the middle of the
+    // view) beside the type of view, and «Check the chronology…», in words
+    if (winMode(win) === "matrix") {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "win-act win-add";
+      add.dataset.hdr = "add";
+      add.dataset.act = "add-menu";
+      add.textContent = `${t("hdr.addMenu")} ▾`;
+      add.title = t("add.headerBtn");
+      add.setAttribute("aria-haspopup", "menu");
+      add.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const cv = graphWindows.get(win.id)?.cv;
+        if (!store || !cv) { toast(t(store ? "add.noGraphWindow" : "toast.openADocument")); return; }
+        const c = cv.getBoundingClientRect();
+        const r = add.getBoundingClientRect();
+        openAddMenu(win, r.left, r.bottom + 2, { at: worldAtClient(win, c.left + c.width / 2, c.top + c.height / 2) ?? undefined });
+      });
+      frag.appendChild(add);
+      const chr = document.createElement("button");
+      chr.type = "button";
+      chr.className = "win-act win-chr";
+      chr.dataset.act = "chronology";
+      const nChr = currentIssues.filter((i) => i.rule === "chronology" && i.sev === "warn").length;
+      chr.textContent = nChr ? `${t("hdr.chronology")} ▲ ${nChr}` : t("hdr.chronology");
+      chr.dataset.chrWarn = String(nChr);
+      chr.title = t("chr.checkTitle");
+      chr.setAttribute("aria-label", t("chr.checkEllipsis"));
+      chr.addEventListener("click", (e) => { e.stopPropagation(); focusThen(win, () => openChronology()); });
+      frag.appendChild(chr);
+    }
     // FONTE · «Indietro»: always on the bar, off while the stack is empty
     act("←", t("fonte.backEmpty"), false, () => {
       focusThen(win, () => goBack());
@@ -68427,6 +68518,13 @@ window.addEventListener("keydown", (e) => {
   // MICRO-DOVE-CHI-MENU p.1 · the menus' shortcuts (⌘N ⌘O ⌘W ⌘S ⇧⌘S ⌥⌘S ⌘,
   // …) are read from the table of commands, the same rows that draw the items:
   // a key shown beside an item is the key that runs it, wherever the focus is
+  // MICRO-SEG29 · F3, Blender's search of every command (⌘K / Ctrl+K is the
+  // row `commandSearch` of the table, read just below): wherever the focus is
+  if (isSearchKey(e)) {
+    e.preventDefault();
+    openCommandSearch();
+    return;
+  }
   const command = commandForKey(e);
   if (command) {
     e.preventDefault();
@@ -68780,19 +68878,203 @@ function openConsoleWindow(opts: { focus?: boolean } = {}): Win | null {
   consoleFocusNext = false;
   return made;
 }
-{
-  // Strumenti ▸ Console Python… · beta, right after «Estensioni…»
-  const ext = document.getElementById("btn-tool-extensions");
-  if (ext && !document.getElementById("btn-tool-console")) {
-    const b = document.createElement("button");
-    b.id = "btn-tool-console";
-    b.dataset.i18n = "tools.console";
-    b.dataset.i18nTitle = "tools.consoleTitle";
-    b.textContent = t("tools.console");
-    b.title = t("tools.consoleTitle");
-    b.addEventListener("click", () => { openConsoleWindow(); });
-    ext.after(b);
+// MICRO-SEG29 · Window ▸ «Python console… · beta» (it was Tools ▸): the button
+// is the table's row `console` (menu-table.ts), made for everyone (MICRO-COR11)
+document.getElementById("btn-tool-console")?.addEventListener("click", () => { openConsoleWindow(); });
+
+// ── MICRO-SEG29 (E.D., 22 Nov 2026) · THE MENU «TOOLS» IS GONE ───────────────
+//
+// Each of its commands lives where it serves (menu-table.ts says where), and
+// what is not in a menu any more is found by name: F3 / ⌘K, «Search commands…».
+// Here: the new rows of Edit and Window, and the search itself.
+
+/** Edit ▸ Clean up ▸ «Sort the lanes by date» (it was only the fix of a warning) */
+document.getElementById("btn-sort-lanes")?.addEventListener("click", () => {
+  if (!store) { toast(t("menu.noGraph")); return; }
+  if (store.lanesMatchDateOrder()) { toast(t("menu.lanesInOrder")); return; }
+  sortLanesByDateNow();
+});
+/** Window ▸ «Scripting»: the workspace of the console and the Script Editor */
+document.getElementById("btn-ws-scripting")?.addEventListener("click", () => {
+  if (WORKSPACES.some((w) => w.id === "scripting")) setWorkspace("scripting");
+});
+/** Window ▸ «Detach the active window» (a system window of its own: shell/detach.ts) */
+document.getElementById("btn-detach-window")?.addEventListener("click", () => { detachWindow(activeWin(), null); });
+/** Window ▸ «Bring back the detached windows» */
+document.getElementById("btn-return-windows")?.addEventListener("click", () => {
+  const ids = [...popouts.keys()];
+  if (!ids.length) { toast(t("menu.noDetached")); return; }
+  for (const id of ids) returnDetached(id);
+});
+/** Window ▸ «Maximise the area» (⌃Space, Blender's) */
+document.getElementById("btn-maximize-area")?.addEventListener("click", () => { magnifyWindow(activeWin().id); });
+/** Window ▸ «Area headers»: shown or hidden, for this session (a head hidden
+ *  for good would hide the way back: the menu and F3 bring them back) */
+document.getElementById("btn-area-headers")?.addEventListener("click", () => {
+  const off = document.body.classList.toggle("em-no-area-headers");
+  document.getElementById("btn-area-headers")?.setAttribute("aria-pressed", String(!off));
+  renderTiles();
+  toast(t(off ? "menu.areaHeadersOff" : "menu.areaHeadersOn"));
+});
+document.getElementById("btn-area-headers")?.setAttribute("aria-pressed", "true");
+/** Edit ▸ «Search commands…» (⌘K) — F3 is read in the keydown above */
+document.getElementById("btn-command-search")?.addEventListener("click", () => openCommandSearch());
+
+/** what a chosen entry of the search does, when it is not a command of the table */
+const commandSearchRuns = new Map<string, () => void>();
+/** The entries: the table's commands, the plugins' rows of the menus' slots,
+ *  and what the plugins give with no menu (Tools ▸ Plugins before): their
+ *  commands of `menu.tools` and their panels. Labels in English AND Italian
+ *  (and the interface's language), synonyms from `cmds.syn.<id>`. */
+function commandSearchEntries(): CommandEntry[] {
+  const loc = getLocale();
+  const codes = [...new Set<Locale>([loc, "en", "it"])];
+  const dicts = codes.map((c) => { const d = dictionaryOf(c); return (k: string) => d[k]; });
+  commandSearchRuns.clear();
+  const extra: Array<{ id: string; label: string; where: string; title?: string; syn?: string[] }> = [];
+  if (pluginState) {
+    const ps = plugins();
+    for (const { plugin, commands } of byPlugin(ps, "menu.tools")) {
+      for (const c of commands) {
+        extra.push({ id: runId(c), label: labelOf(c, loc), where: t("cmds.home.plugin", { plugin: plugin.name }),
+          title: provenance(plugin, t), syn: [plugin.name, plugin.id, ...tAll("cmds.syn.plugins")] });
+      }
+    }
+    for (const plugin of ps.plugins) {
+      if (plugin.state !== "loaded") continue;
+      for (const panel of plugin.panels ?? []) {
+        const id = `panel:${plugin.id}/${panel.name}`;
+        extra.push({ id, label: t("plg.openPanel", { panel: labelOf({ label: panel.label, id: panel.id }, loc) }),
+          where: t("cmds.home.plugin", { plugin: plugin.name }), title: provenance(plugin, t),
+          syn: [plugin.name, plugin.id, ...tAll("cmds.syn.plugins")] });
+        commandSearchRuns.set(id, () => openPluginPanel(panel));
+      }
+    }
   }
+  return commandEntries({ platform: PLATFORM, dicts, t: (k, v) => t(k, v), extra });
+}
+function closeCommandSearch(): boolean {
+  const back = document.getElementById("cmd-search-back");
+  if (!back) return false;
+  back.remove();
+  return true;
+}
+/** Run an entry: the table's command presses its button (`runCommand`); a plugin's
+ *  row invokes it; a panel opens. A command that cannot run now says so. */
+function runCommandEntry(e: CommandEntry): void {
+  closeCommandSearch();
+  const own = commandSearchRuns.get(e.id);
+  if (own) { own(); return; }
+  const b = e.kind === "cmd" ? document.getElementById(findRow(e.id)?.button ?? "") as HTMLButtonElement | null : null;
+  if (b?.disabled) { toast(t("cmds.notNow", { cmd: e.label })); return; }
+  if (!runCommand(e.id, { script: true })) toast(t("cmds.notNow", { cmd: e.label }));
+}
+/** MICRO-SEG29 · F3 / ⌘K: one field, the commands by name, where each lives and
+ *  its keys; ↑ ↓ choose, Enter runs, Esc closes. A second F3 closes it. */
+function openCommandSearch(initial = ""): void {
+  if (closeCommandSearch() && !initial) return;
+  const entries = commandSearchEntries();
+  const back = document.createElement("div");
+  back.id = "cmd-search-back";
+  back.className = "cmd-search-back";
+  const box = document.createElement("div");
+  box.id = "cmd-search";
+  box.className = "cmd-search";
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", t("cmds.title"));
+  const inp = document.createElement("input");
+  inp.type = "search";
+  inp.className = "cmd-search-q";
+  inp.placeholder = t("cmds.placeholder");
+  inp.setAttribute("aria-label", t("cmds.title"));
+  inp.setAttribute("aria-controls", "cmd-search-list");
+  inp.autocomplete = "off";
+  inp.spellcheck = false;
+  inp.value = initial;
+  const list = document.createElement("div");
+  list.id = "cmd-search-list";
+  list.className = "cmd-search-list";
+  list.setAttribute("role", "listbox");
+  const foot = document.createElement("div");
+  foot.className = "cmd-search-foot";
+  foot.textContent = t("cmds.foot");
+  box.append(inp, list, foot);
+  back.appendChild(box);
+  let shown: CommandEntry[] = [];
+  let sel = 0;
+  const mark = (): void => {
+    [...list.children].forEach((n, i) => {
+      const on = i === sel;
+      n.setAttribute("aria-selected", String(on));
+      n.classList.toggle("on", on);
+      if (on) { inp.setAttribute("aria-activedescendant", (n as HTMLElement).id); (n as HTMLElement).scrollIntoView?.({ block: "nearest" }); }
+    });
+  };
+  const draw = (): void => {
+    shown = searchCommands(entries, inp.value, 60);
+    sel = 0;
+    list.textContent = "";
+    box.dataset.count = String(shown.length);
+    if (!shown.length) {
+      const none = document.createElement("div");
+      none.className = "cmd-search-none";
+      none.textContent = t("cmds.none", { q: inp.value.trim() });
+      list.appendChild(none);
+      return;
+    }
+    shown.forEach((e, i) => {
+      const row = document.createElement("div");
+      row.className = "cmd-search-row";
+      row.id = `cmd-search-o${i}`;
+      row.setAttribute("role", "option");
+      row.dataset.cmdSearch = e.id;
+      row.title = e.title;
+      const b = e.kind === "cmd" ? document.getElementById(findRow(e.id)?.button ?? "") as HTMLButtonElement | null : null;
+      if (b?.disabled) row.setAttribute("aria-disabled", "true");
+      const lab = document.createElement("span");
+      lab.className = "cmd-search-label";
+      lab.textContent = e.label;
+      const where = document.createElement("span");
+      where.className = "cmd-search-where";
+      where.dataset.cmdWhere = "1";
+      where.textContent = e.where;
+      row.append(lab, where);
+      if (e.keys) {
+        const k = document.createElement("span");
+        k.className = "dd-key cmd-search-keys";
+        k.textContent = e.keys;
+        row.appendChild(k);
+      }
+      row.addEventListener("mousemove", () => { if (sel !== i) { sel = i; mark(); } });
+      row.addEventListener("click", () => runCommandEntry(e));
+      list.appendChild(row);
+    });
+    mark();
+  };
+  inp.addEventListener("input", draw);
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (shown.length) { sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length; mark(); }
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const it = shown[sel];
+      if (it) runCommandEntry(it);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCommandSearch();
+    } else if (isSearchKey(e) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k")) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCommandSearch();
+    }
+  });
+  back.addEventListener("pointerdown", (e) => { if (e.target === back) closeCommandSearch(); });
+  document.body.appendChild(back);
+  draw();
+  inp.focus();
+  inp.select();
 }
 
 // ── MICRO-TIL002 · the Script Editor ────────────────────────────────────────
@@ -69785,43 +70067,30 @@ function registerPluginRows(): void {
 }
 onLocaleChange(() => { if (pluginState) registerPluginRows(); });
 
-/** Strumenti ▸ Plugin ▸ — a section per plugin with its commands (menu.tools@1),
- *  and the plugins that did not load, with why. Absent with no plugin. */
+/** MICRO-SEG29 · it was Strumenti ▸ Plugin ▸ — now in Preferences ▸ Extensions
+ *  (two places for the same thing became one): a section per plugin with its
+ *  commands (menu.tools@1) and its panels, and the plugins that did not load,
+ *  with why. Absent with no plugin. The commands are found by F3 as well. */
 function renderToolsPlugins(): void {
   const ps = plugins();
-  const ext = document.getElementById("btn-tool-console") ?? document.getElementById("btn-tool-extensions");
+  const host = document.getElementById("set-ext-plugins");
   let sub = document.getElementById("dd-sub-plugins");
   if (!ps.plugins.length) { sub?.remove(); return; }
-  if (!sub && ext) {
-    sub = document.createElement("div");
-    sub.className = "dd-sub";
+  if (!sub && host) {
+    sub = document.createElement("section");
+    sub.className = "ext-plugin-cmds";
     sub.id = "dd-sub-plugins";
     sub.dataset.sub = "plugins";
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "dd-sub-toggle";
-    const flyout = document.createElement("div");
-    flyout.className = "dd-sub-menu hidden";
-    toggle.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const willOpen = flyout.classList.contains("hidden");
-      closeAllSubmenus();
-      if (!willOpen) return;
-      flyout.classList.remove("hidden");
-      floating(flyout, { close: () => flyout.classList.add("hidden"), opener: toggle, name: "dd-sub" });
-    });
-    sub.append(toggle, flyout);
-    ext.after(sub);
+    const head = document.createElement("h4");
+    head.className = "dd-sub-toggle ext-plugin-cmds-h";
+    const list = document.createElement("div");
+    list.className = "dd-sub-menu ext-plugin-cmds-list";
+    sub.append(head, list);
+    host.appendChild(sub);
   }
   if (!sub) return;
-  const toggle = sub.querySelector<HTMLButtonElement>(".dd-sub-toggle")!;
-  toggle.textContent = "";
-  const lab = document.createElement("span");
-  lab.textContent = t("plg.menu");
-  const caret = document.createElement("span");
-  caret.className = "dd-sub-caret";
-  caret.textContent = "▸";
-  toggle.append(lab, caret);
+  const toggle = sub.querySelector<HTMLElement>(".dd-sub-toggle")!;
+  toggle.textContent = t("plg.menu");
   toggle.title = t("plg.menuTitle");
   const flyout = sub.querySelector<HTMLElement>(".dd-sub-menu")!;
   flyout.textContent = "";
@@ -69850,7 +70119,7 @@ function renderToolsPlugins(): void {
       b.dataset.panel = panel.name;
       b.textContent = t("plg.openPanel", { panel: labelOf({ label: panel.label, id: panel.id }, lang) });
       b.title = provenance(plugin, t);
-      b.addEventListener("click", () => { closeAllSubmenus(); openPluginPanel(panel); });
+      b.addEventListener("click", () => { closeSettings(); openPluginPanel(panel); });
       flyout.appendChild(b);
     }
     for (const c of commands) {
@@ -69860,7 +70129,7 @@ function renderToolsPlugins(): void {
       b.dataset.run = runId(c);
       b.textContent = labelOf(c, lang);
       b.title = provenance(plugin, t);
-      b.addEventListener("click", () => void runPluginCommand(c));
+      b.addEventListener("click", () => { closeSettings(); void runPluginCommand(c); });
       flyout.appendChild(b);
     }
   }

@@ -28,6 +28,8 @@ export const KEYMAP: KeyRow[] = [
   { id: "redo", keys: "⇧⌘Z", scope: "app" },
   { id: "add", keys: "⇧A", scope: "app" },
   { id: "search", keys: "/", scope: "app" },
+  // MICRO-SEG29 · Blender's F3: every command by its name (⌘ is Ctrl off the Mac)
+  { id: "commandSearch", keys: "F3 · ⌘K", scope: "app" },
   { id: "magnify", keys: "⌃Space", scope: "app" },
   { id: "esc", keys: "Esc", scope: "app" },
   // the graph (canvas, Outliner rows, the page)

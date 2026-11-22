@@ -79,7 +79,7 @@ function nativeOutline(items, prefix = "") {
     else if (it.kind === "sub") {
       const id = it.o.id.replace(/^sub-/, "");
       out.push(`${prefix}${id}▸`);
-      if (id !== "openRecent") out.push(...nativeOutline(it.o.items, `${prefix}${id}/`));
+      if (id !== "openRecent" && id !== "workspaces") out.push(...nativeOutline(it.o.items, `${prefix}${id}/`));
     } else out.push(`${prefix}${it.o.id}`);   // an item, or a check item (an option)
   }
   return out;
@@ -97,11 +97,12 @@ const FILE_ORDER = ["new", "newProject", "open", "openReplaceBox", "openProject"
   "export▸", "export/exportSvg", "export/exportTtl", "export/composeFromGraph", "export/consolidate", "export/printSheets", "—",
   "externalData▸", "externalData/relocate", "externalData/collect", "externalData/revealDoc",
   "cleanUp▸", "cleanUp/cleanFile", "cleanUp/reorderProject", "—",
-  "room▸", "room/createRoom", "room/bringIntoRoom", "—",
+  // MICRO-SEG29 · Georeferencing… back in File (Tools went), with the room
+  "georef", "room▸", "room/createRoom", "room/bringIntoRoom", "—",
   "close", "closeProject"];
 /** the 18 entries of File's first level (Quit aside), counted as E.D. counted them */
 const FIRST_LEVEL = FILE_ORDER.filter((x) => x !== "—" && !x.includes("/") && x !== "openReplaceBox");
-eq(FIRST_LEVEL.length, 18, "File: 18 entries on the first level (were 28)");
+eq(FIRST_LEVEL.length, 19, "File: 19 entries on the first level (were 28; 18 + Georeferencing…, MICRO-SEG29)");
 
 /** MICRO-TIL003 · every command of the table BEFORE the reorder (HEAD 8b211e8):
  *  menu/id → button. None may be lost: each is still a row, its button exists,
@@ -125,7 +126,6 @@ const BEFORE = {
 };
 /** where each moved command is now (menu/…/id), the rest stayed */
 const MOVED = {
-  "file/georef": "tools/georef",
   "file/reorderProject": "file/cleanUp/reorderProject", "file/revealDoc": "file/externalData/revealDoc",
   "file/printSheets": "file/export/printSheets", "file/relocate": "file/externalData/relocate",
   "file/collect": "file/externalData/collect", "file/cleanFile": "file/cleanUp/cleanFile",
@@ -153,7 +153,7 @@ for (const platform of ["web", "mac", "win", "linux"]) {
   doc.body.innerHTML = parseHTML(html).document.body.innerHTML;
   M.buildPageMenus(platform, { recent: () => [] });
   const page = {};
-  for (const id of ["file", "edit", "help"]) {
+  for (const id of ["file", "edit", "window", "help"]) {
     const dd = doc.getElementById(`dd-${id}`);
     page[id] = dd && !dd.classList.contains("hidden") ? pageOutline(dd.querySelector(".dd-menu")) : [];
   }
@@ -164,19 +164,35 @@ for (const platform of ["web", "mac", "win", "linux"]) {
   for (const sub of M.built.bar?.o.items ?? []) native[sub.o.id.replace(/^menu-/, "")] = nativeOutline(sub.o.items);
 
   // the table and the page agree (the page draws what the table says)
-  for (const id of ["file", "edit", "help"]) {
+  for (const id of ["file", "edit", "window", "help"]) {
     const menu = M.MENUS.find((m) => m.id === id);
     eq(page[id], M.outline(M.menuRows(menu, platform, "internal")), `${platform}: page ${id} = the table's rows`);
   }
   const fileWant = platform === "win" || platform === "linux" ? [...FILE_ORDER, "—", "quitFile"] : FILE_ORDER;
   eq(page.file, fileWant, `${platform}: File in the MICRO's order`);
-  // MICRO-TIL003 · Georeferencing in Tools, after «Check the chronology…»; Tools keeps its own items
-  const tools = [...doc.querySelectorAll("#dd-tools .dd-menu > *")].map((n) => n.id || n.className);
-  const ix = tools.indexOf("btn-tool-chronology");
-  eq(tools[ix + 1], "btn-georef", `${platform}: Tools ▸ Georeferencing… after Check the chronology…`);
-  ok(["btn-tool-add", "btn-tool-stratiminer", "btn-tool-extensions", "btn-door-dosco-tools"].every((id) => tools.includes(id)),
-     `${platform}: Tools keeps the items of index.html`);
-  ok(!doc.querySelector("#dd-file #btn-georef"), `${platform}: Georeferencing left File`);
+  // MICRO-SEG29 · the menu Tools is gone: File, Edit, Window, Help on every platform
+  ok(!doc.getElementById("dd-tools"), `${platform}: no menu Tools`);
+  eq([...doc.querySelectorAll("#toolbar > .dropdown")].filter((d) => !d.classList.contains("hidden")).map((d) => d.id),
+     ["dd-file", "dd-edit", "dd-window", "dd-help"], `${platform}: the page's menus are File, Edit, Window, Help`);
+  ok(doc.querySelector("#dd-file #btn-georef"), `${platform}: Georeferencing… in File`);
+  eq(page.window, ["workspaces▸", "scripting", "console", "—", "detachWindow", "returnWindows", "—", "maximizeArea", "areaHeaders"],
+     `${platform}: Window — the workspaces, the console, the detached windows, the areas`);
+  eq(page.edit, ["undo", "redo", "—", "commandSearch", "—", "graphCleanUp▸", "graphCleanUp/uniformSpellings", "graphCleanUp/sortLanes"],
+     `${platform}: Edit — undo, Search commands…, Clean up ▸ (Normalise spellings…)`);
+  // every item Tools had is still a command, pressing the same button (the console's
+  // and DosCo's second button aside: one command each now)
+  const TOOLS_BEFORE = { addMenu: "btn-tool-add", stratiminer: "btn-tool-stratiminer", uniformSpellings: "btn-tool-uniform",
+    colours: "btn-tool-colours", vocabularies: "btn-tool-vocabularies", extensions: "btn-tool-extensions",
+    chronology: "btn-tool-chronology", doorDosco: "btn-door-dosco", console: "btn-tool-console", georef: "btn-georef" };
+  for (const [id, button] of Object.entries(TOOLS_BEFORE)) {
+    const b = doc.getElementById(button);
+    let n = 0; const h = () => { n++; };
+    b?.addEventListener("click", h);
+    M.runCommand(id, { script: true });
+    b?.removeEventListener("click", h);
+    eq(n, 1, `${platform}: Tools' ${id} is the command ${id}, pressing ${button}`);
+  }
+  ok(!doc.getElementById("btn-door-dosco-tools"), `${platform}: Read as DosCo… has one button`);
   // every command of before has its button in the page (drawn, or in the hidden holder)
   for (const button of new Set(Object.values(BEFORE))) {
     if (button === "btn-quit" && !["win", "linux"].includes(platform)) continue;
@@ -221,7 +237,7 @@ for (const platform of ["web", "mac", "win", "linux"]) {
   }
   // the system's Edit is the OS's text editing; the page's undo stays in the page
   eq(native.edit, ["os:Undo", "os:Redo", "—", "os:Cut", "os:Copy", "os:Paste", "os:SelectAll"], "mac: system Edit = text editing");
-  eq(page.edit, ["undo", "redo"], "mac: page Edit = the document's undo");
+  eq(native.window, [...page.window, "—", "os:Minimize", "os:Maximize", "os:Fullscreen"], "mac: system Window = page Window + the OS's three");
   // the hidden holder keeps the buttons the page does not draw
   for (const b of ["btn-settings", "btn-help-about", "btn-help-updates"]) {
     ok(doc.getElementById(b), `mac: ${b} exists (hidden holder) for the system item`);
@@ -249,6 +265,10 @@ eq(M.commandForKey(key(","), "mac"), "settings", "⌘, → settings (Mac: the sy
 eq(M.commandForKey(key(","), "web"), "settingsHelp", "⌘, → settings (web: Help)");
 eq(M.commandForKey(key("w"), "web"), null, "⌘W is the browser's on the web");
 eq(M.commandForKey(key("w"), "mac"), "close", "⌘W → close on the desktop");
+// MICRO-SEG29 · ⌘K / Ctrl+K: the command search, on every platform
+eq(M.commandForKey(key("k"), "mac"), "commandSearch", "⌘K → the command search (Mac)");
+eq(M.commandForKey(key("k"), "web"), "commandSearch", "⌘K → the command search (web)");
+eq(M.commandForKey({ ...key("k"), metaKey: false, ctrlKey: true }, "win"), "commandSearch", "Ctrl+K → the command search (Windows)");
 
 // every command has an English label and a handler in main.ts
 const all = [];
