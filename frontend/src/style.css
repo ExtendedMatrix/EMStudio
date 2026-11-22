@@ -13237,3 +13237,19 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .lm-svg .lm-id, .lm-svg .lm-ut { cursor: pointer; }
 .lm-sw-hex { display: inline-block; width: 14px; height: 9px; margin-right: 4px; vertical-align: middle; border: 2px solid; border-radius: 3px; box-sizing: border-box; }
 .lm-card { margin-top: 8px; max-width: 70ch; }
+
+/* MICRO-LG5 · the section «Visibilità» of the Inspector: a window per row —
+   the state and its span on the first line, whose it is (own · inherited ·
+   derived) and its paradata each on a line of its own, the gestures after */
+.insp-vis-row { border-top: 1px solid var(--border, rgba(0,0,0,.08)); padding: 4px 0; }
+.insp-vis-row:first-child { border-top: 0; }
+.insp-vis-row .insp-vis-src, .insp-vis-row .insp-vis-pd { flex: 1 1 100%; display: block; font-size: 10.5px; line-height: 1.6; }
+.insp-vis-row .insp-vis-pd .insp-link { display: inline; padding: 0 4px; }
+.insp-vis-row .insp-vis-src .insp-prov-from { display: inline; padding: 0 4px; }
+.insp-vis-derived .insp-vis-state { opacity: .85; font-style: italic; }
+.insp-vis-form { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.insp-vis-field { display: flex; align-items: baseline; gap: 6px; font-size: 11px; }
+.insp-vis-label { flex: 0 0 64px; color: var(--muted, #666); }
+.insp-vis-side { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto; }
+.insp-vis-side .insp-input { min-width: 0; flex: 1 1 70px; }
+.insp-vis-form .insp-input[data-vis-f="note"] { flex: 1 1 auto; }

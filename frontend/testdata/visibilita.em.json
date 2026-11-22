@@ -1,0 +1,213 @@
+{
+ "header": {
+  "title": "Visibilità: dichiara, eredita, sovrascrivi (sintetico, MICRO-LG5)",
+  "format": "em.json",
+  "version": "1.1",
+  "schema_version": 2,
+  "generator": {
+   "tool": "s3dgraphy",
+   "version": "1.6.0.dev137"
+  },
+  "datamodel_versions": {
+   "nodes": "1.6.53",
+   "connections": "1.6.59",
+   "qualia": "1.6.16"
+  }
+ },
+ "graphs": {
+  "VIS": {
+   "graph_id": "VIS",
+   "name": "Visibilità",
+   "nodes": [
+    {
+     "id": "EP_ROM",
+     "node_type": "EpochNode",
+     "name": "II A.D.",
+     "data": {
+      "start_time": 100,
+      "end_time": 199,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "EP_POST",
+     "node_type": "EpochNode",
+     "name": "Post antiquity",
+     "data": {
+      "start_time": 200,
+      "end_time": 1800,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "EP_XX",
+     "node_type": "EpochNode",
+     "name": "XX sec",
+     "data": {
+      "start_time": 1801,
+      "end_time": 2026,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "F1",
+     "node_type": "US",
+     "name": "SU001"
+    },
+    {
+     "id": "EF1",
+     "node_type": "USVs",
+     "name": "USV001"
+    },
+    {
+     "id": "F3",
+     "node_type": "US",
+     "name": "SU003"
+    },
+    {
+     "id": "EF3",
+     "node_type": "USVs",
+     "name": "USV003"
+    },
+    {
+     "id": "F4",
+     "node_type": "US",
+     "name": "SU004"
+    },
+    {
+     "id": "EF4",
+     "node_type": "USVs",
+     "name": "USV004"
+    },
+    {
+     "id": "FILL",
+     "node_type": "US",
+     "name": "SU019"
+    },
+    {
+     "id": "RUIN",
+     "node_type": "FunctionalUnitNodeGroup",
+     "name": "rudere",
+     "data": {
+      "scale": "building"
+     }
+    },
+    {
+     "id": "ACT",
+     "node_type": "ActivityNodeGroup",
+     "name": "VAct.04 Temple"
+    },
+    {
+     "id": "D1",
+     "node_type": "document",
+     "name": "D.01"
+    }
+   ],
+   "edges": [
+    {
+     "id": "F1_has_first_epoch_EP_ROM",
+     "source": "F1",
+     "target": "EP_ROM",
+     "edge_type": "has_first_epoch"
+    },
+    {
+     "id": "EF1_has_first_epoch_EP_ROM",
+     "source": "EF1",
+     "target": "EP_ROM",
+     "edge_type": "has_first_epoch"
+    },
+    {
+     "id": "EF1_is_after_F1",
+     "source": "EF1",
+     "target": "F1",
+     "edge_type": "is_after"
+    },
+    {
+     "id": "F3_has_first_epoch_EP_ROM",
+     "source": "F3",
+     "target": "EP_ROM",
+     "edge_type": "has_first_epoch"
+    },
+    {
+     "id": "EF3_has_first_epoch_EP_ROM",
+     "source": "EF3",
+     "target": "EP_ROM",
+     "edge_type": "has_first_epoch"
+    },
+    {
+     "id": "EF3_is_after_F3",
+     "source": "EF3",
+     "target": "F3",
+     "edge_type": "is_after"
+    },
+    {
+     "id": "F4_has_first_epoch_EP_ROM",
+     "source": "F4",
+     "target": "EP_ROM",
+     "edge_type": "has_first_epoch"
+    },
+    {
+     "id": "EF4_has_first_epoch_EP_ROM",
+     "source": "EF4",
+     "target": "EP_ROM",
+     "edge_type": "has_first_epoch"
+    },
+    {
+     "id": "EF4_is_after_F4",
+     "source": "EF4",
+     "target": "F4",
+     "edge_type": "is_after"
+    },
+    {
+     "id": "FILL_has_first_epoch_EP_POST",
+     "source": "FILL",
+     "target": "EP_POST",
+     "edge_type": "has_first_epoch"
+    },
+    {
+     "id": "FILL_overlies_F1",
+     "source": "FILL",
+     "target": "F1",
+     "edge_type": "overlies"
+    },
+    {
+     "id": "RUIN_has_first_epoch_EP_POST",
+     "source": "RUIN",
+     "target": "EP_POST",
+     "edge_type": "has_first_epoch"
+    },
+    {
+     "id": "RUIN_survive_in_epoch_EP_XX",
+     "source": "RUIN",
+     "target": "EP_XX",
+     "edge_type": "survive_in_epoch"
+    },
+    {
+     "id": "F1_is_in_functional_unit_RUIN",
+     "source": "F1",
+     "target": "RUIN",
+     "edge_type": "is_in_functional_unit"
+    },
+    {
+     "id": "F3_is_in_functional_unit_RUIN",
+     "source": "F3",
+     "target": "RUIN",
+     "edge_type": "is_in_functional_unit"
+    },
+    {
+     "id": "F4_is_in_functional_unit_RUIN",
+     "source": "F4",
+     "target": "RUIN",
+     "edge_type": "is_in_functional_unit"
+    },
+    {
+     "id": "F1_is_in_activity_ACT",
+     "source": "F1",
+     "target": "ACT",
+     "edge_type": "is_in_activity"
+    }
+   ]
+  }
+ },
+ "active_graph_id": "VIS"
+}
