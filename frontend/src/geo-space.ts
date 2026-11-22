@@ -41,6 +41,8 @@ export interface GeoSpaceDeps {
   redrawBar: () => void;
   /** a line in the Log (a source failing online: said once per reason) */
   log?: (s: string) => void;
+  /** MICRO-SEG27 · «Georeferencing…» (the globe's button when the georeference is missing) */
+  openGeoref?: () => void;
 }
 
 interface Saved { on: boolean; mode: GeoMode; layers: GeoLayer[]; panel: boolean; half: number; zmax: number; source: string; height: HeightMode;
@@ -184,9 +186,13 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     return { line, missing };
   };
 
+  // MICRO-SEG27 · the «Territory» row of «Visibility ▾», drawn again where it is
+  // (the menu open) when the globe's button switches it
+  const resect = () => { if (sect.isConnected) api.section(); };
   const start = async () => {
     if (busy) return;
     busy = true;
+    d.redrawBar();   // the button says the wait
     try {
       bridge = await d.bridge().catch(() => null);
       // the bridge answers? (its tiles: the cache, the packages); else the sources online
@@ -211,6 +217,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       busy = false;
       d.redrawBar();
       draw();
+      resect();
     }
   };
   const stop = () => {
@@ -219,6 +226,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     globe = null;
     d.redrawBar();
     draw();
+    resect();
   };
 
   const pollFailures = async () => {
@@ -607,7 +615,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       const geo = georefState();
       const chip = document.createElement("span");
       chip.className = "scn-seg geo-chip";
-      chip.dataset.geoChip = geo.missing.length ? "missing" : s.on ? "on" : "off";
+      chip.dataset.geoChip = geo.missing.length ? "missing" : busy && s.on ? "loading" : s.on ? "on" : "off";
       const tb = document.createElement("button");
       tb.type = "button";
       tb.dataset.geo = geo.missing.length ? "why" : "toggle";
@@ -646,16 +654,26 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       const out: HTMLElement[] = [];
       const tb = chip?.querySelector<HTMLButtonElement>("button[data-geo]");
       if (tb) {
+        // MICRO-SEG27 (E.D., 22 Nov 2026: the globe opened the scene's menu) · ONE
+        // click = the territory on / off (globe, basemap, terrain); the georeference
+        // missing → «Georeferencing…»; loading → the wait, the click does nothing.
+        // Two lines of tooltip: what the click does, then the georeference (or the
+        // right click, which opens «Visibility ▸ Territory»)
+        const state = chip.dataset.geoChip ?? "off";
         const g = document.createElement("button");
         g.type = "button";
         g.className = "scn-nav-btn scn-geo-btn";
-        g.dataset.geo = tb.dataset.geo ?? "why";
-        g.dataset.geoChip = chip.dataset.geoChip ?? "";
-        g.setAttribute("aria-pressed", tb.getAttribute("aria-pressed") ?? "false");
+        g.dataset.geo = state === "missing" ? "georef" : state === "loading" ? "wait" : "toggle";
+        g.dataset.geoChip = state;
+        g.setAttribute("aria-pressed", String(s.on));
+        if (state === "loading") g.setAttribute("aria-busy", "true");
         g.textContent = "🌐";
-        const help = chip.querySelector<HTMLElement>(".geo-chip-help")?.title ?? "";
-        g.title = [tb.title, help].filter(Boolean).join("\n");
-        g.setAttribute("aria-label", `${tb.textContent?.replace(/^🌐\s*/, "") ?? ""} — ${tb.title}`);
+        const geo = georefState();
+        const l1 = state === "missing" ? t("geo.btnMissing", { what: geo.missing.join(", ") })
+          : state === "loading" ? t("geo.btnLoading") : t(s.on ? "geo.btnOff" : "geo.btnOn");
+        const l2 = state === "missing" ? t("geo.btnRight") : `${geo.line} · ${t("geo.btnRight")}`;
+        g.title = `${l1}\n${l2}`;
+        g.setAttribute("aria-label", `${t("geo.territory")} — ${l1}`);
         out.push(g);
       }
       for (const m of modes?.querySelectorAll<HTMLButtonElement>("button[data-geo-mode]") ?? []) {
@@ -722,9 +740,17 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       if (b.dataset.geoMode) { const m = b.dataset.geoMode as GeoMode; s.mode = m; save(); globe?.setMode(m); d.redrawBar(); return true; }
       switch (b.dataset.geo) {
         case "toggle":
+          if (busy) return true;   // loading: the wait is on the button
           s.on = !s.on; save();
           if (s.on) void start(); else stop();
           return true;
+        case "wait": return true;
+        case "georef": {
+          const g = georefState();
+          d.toast(t("geo.georefWhy", { what: g.missing.join(", ") }));
+          d.openGeoref?.();
+          return true;
+        }
         case "site": globe?.goToSite(); return true;
         case "why": {
           const g = georefState();
@@ -750,6 +776,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
   sect.addEventListener("change", (e) => {
     const el = e.target as HTMLInputElement;
     if (!el.dataset.geoOn) return;
+    if (busy) { el.checked = s.on; return; }
     s.on = el.checked; save();
     if (s.on) void start(); else stop();
   });

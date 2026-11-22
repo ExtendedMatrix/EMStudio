@@ -9,8 +9,9 @@
 // · every window that has a list to search has its 🔍, and «/» with the pointer
 //   on it opens it;
 // · no category of 3D objects can be switched from two places: the Overlays menu
-//   of the 3D lists none, the old «Livelli della scena» is gone, the globe's chip
-//   does not switch the territory (it opens «Visibilità ▾»);
+//   of the 3D lists none, the old «Livelli della scena» is gone; the globe's button
+//   (MICRO-SEG27) switches the territory and opens no menu, its right click opens
+//   «Visibilità ▾» on the «Territory» row;
 // · proxies off → the button says it («Visibilità · 1 spenta») → one click on the
 //   mark of the Outliner turns them back on.
 import { existsSync, readFileSync } from "node:fs";
@@ -92,18 +93,38 @@ for (const [W, H] of SIZES) {
   });
   ok(Array.isArray(ov.inOverlays) && ov.both.length === 0, `${tag} the Overlays of the 3D list no category (${JSON.stringify(ov.both)})`);
   ok(ov.oldLayers === 0, `${tag} the old «Livelli della scena» are gone (${ov.oldLayers})`);
+  // MICRO-SEG27 · the globe's button: one click switches the territory (or, the
+  // georeference missing, opens «Georeferencing…»), never «Visibilità ▾»
   const globe = await page.evaluate(async () => {
-    const b = document.querySelector("[data-geo='toggle']");
+    const b = document.querySelector(".scn-geo-btn");
     if (!b) return { none: true };
-    const before = b.getAttribute("aria-pressed");
+    const kind = b.dataset.geo, before = b.getAttribute("aria-pressed");
     b.click();
     await new Promise((r) => setTimeout(r, 300));
     const menu = !!document.querySelector("[data-vis-menu]");
-    const after = document.querySelector("[data-geo='toggle']")?.getAttribute("aria-pressed");
+    const nb = document.querySelector(".scn-geo-btn");
+    const after = { pressed: nb?.getAttribute("aria-pressed"), chip: nb?.dataset.geoChip };
+    const card = !!document.querySelector("[data-gr-card]");
+    // back as it was (off), the card closed
+    if (kind === "toggle") { for (let i = 0; i < 100 && document.querySelector(".scn-geo-btn")?.dataset.geo === "wait"; i++) await new Promise((r) => setTimeout(r, 100));
+      if (document.querySelector(".scn-geo-btn")?.getAttribute("aria-pressed") === "true") document.querySelector(".scn-geo-btn").click(); }
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    return { before, after, menu };
+    await new Promise((r) => setTimeout(r, 200));
+    // the right click: «Visibilità ▾», the Territory row lit
+    const g2 = document.querySelector(".scn-geo-btn");
+    g2.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+    await new Promise((r) => setTimeout(r, 300));
+    const rmenu = !!document.querySelector("[data-vis-menu]");
+    const lit = !!document.querySelector('[data-vis-menu] [data-vis-row="territory"].vis-flash');
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.querySelector("[data-vis-menu]") && document.querySelector("[data-vis]")?.click();
+    await new Promise((r) => setTimeout(r, 200));
+    return { kind, before, after, menu, card, rmenu, lit, two: (b.title.match(/\n/g) ?? []).length === 1 };
   });
-  ok(globe.none || (globe.menu && globe.before === globe.after), `${tag} the globe's chip opens «Visibilità ▾» and does not switch the territory (${JSON.stringify(globe)})`);
+  ok(globe.none || (!globe.menu && (globe.kind === "toggle" ? (globe.after.pressed !== globe.before || globe.after.chip === "loading") : globe.kind === "georef" ? globe.card : false)),
+    `${tag} the globe's button switches the territory (or opens «Georeferencing…»), no «Visibilità ▾» (${JSON.stringify(globe)})`);
+  ok(globe.none || (globe.rmenu && globe.lit), `${tag} a right click on the globe opens «Visibilità ▾» on «Territory» (${JSON.stringify(globe)})`);
+  ok(globe.none || globe.two, `${tag} the globe's tooltip is two lines`);
   // proxies off → said → back on in one click
   await page.evaluate(() => { const b = document.querySelector("[data-vis]"); b?.click(); });
   await page.waitForTimeout(300);

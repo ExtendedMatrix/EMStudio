@@ -38510,6 +38510,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     openInViewer: (path) => openFileInViewer(path, win),
     redrawBar: () => refresh(),
     log: (m) => logWarn(m),
+    openGeoref: () => openGeorefCard(),
   });
   // MICRO-GIS-BASE · the graph's GIS layers in this Space: drawn, shown/hidden, brought in
   const gisSpace: GisSpace = mountGisSpace({
@@ -39140,10 +39141,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const cb = (e.target as HTMLElement).closest<HTMLElement>("[data-colours]");
     if (cb) { e.stopPropagation(); closeColours(); closeVis(); openColoursWindow(win.id); return; }
     if ((e.target as HTMLElement).closest("[data-door-plus]")) { e.stopPropagation(); void doorFromMenu({ epoch: doorEpochHere() }); return; }
-    // the globe's chip turns the territory on and off no more: that is a category,
-    // switched in «Visibilità ▾» (it opens there, on «Territorio / GIS»)
-    const gt = (e.target as HTMLElement).closest<HTMLElement>("[data-geo='toggle']");
-    if (gt) { e.stopPropagation(); const v2 = lead.querySelector<HTMLElement>("[data-vis]"); if (v2) { closeVis(); openVis(v2, true); } return; }
+    // MICRO-SEG27 (E.D., 22 Nov 2026) · the globe's button switches the territory
+    // again (geoSpace.onBar): «Visibility ▾» opens from its own button, or with a
+    // right click on the globe (below, the column's `contextmenu`)
     if (geoSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     if (gisSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     const hwb = (e.target as HTMLElement).closest<HTMLElement>("[data-hw]");
@@ -39207,6 +39207,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   tail.addEventListener("click", onBar);
   lead.addEventListener("click", onBar);
   geoCol.addEventListener("click", onBar);
+  // MICRO-SEG27 · a right click on the globe: «Visibility ▾», its «Territory» row lit
+  geoCol.addEventListener("contextmenu", (e) => {
+    if (!(e.target as HTMLElement).closest(".scn-geo-btn")) return;
+    e.preventDefault();
+    const v2 = lead.querySelector<HTMLElement>("[data-vis]");
+    if (v2) { closeVis(); openVis(v2, true); }
+  });
   // MICRO-PL09 p.0 · a right click on «Colori» opens the quick menu
   lead.addEventListener("contextmenu", (e) => {
     const cb = (e.target as HTMLElement).closest<HTMLElement>("[data-colours]");
