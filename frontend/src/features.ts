@@ -76,6 +76,9 @@ const EMBARGO: readonly Feature[] = LAB ? [
   { id: "functional-overlay", state: "embargo", title: "feat.functionalOverlay.title", desc: "feat.functionalOverlay.desc", sentinel: "em-embargo:functional-overlay" },
   { id: "landscape-matrix", state: "embargo", title: "feat.landscapeMatrix.title", desc: "feat.landscapeMatrix.desc", sentinel: "em-embargo:landscape-matrix" },
   { id: "landscape-cube", state: "embargo", title: "feat.landscapeCube.title", desc: "feat.landscapeCube.desc", sentinel: "em-embargo:landscape-cube" },
+  // MICRO-MF05 · the workspace «Functional» (the scrivania: Matrix | Functional
+  // Matrix | Landscape/Cube, the Inspector and the coherence under them)
+  { id: "functional-workspace", state: "embargo", title: "feat.functionalWorkspace.title", desc: "feat.functionalWorkspace.desc", sentinel: "em-embargo:functional-workspace" },
 ] : [];
 
 /** The register as THIS build has it (the community: no embargo entry). */

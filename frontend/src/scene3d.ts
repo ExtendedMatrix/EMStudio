@@ -274,6 +274,13 @@ export interface SpaceSceneHandle {
   frameCursor(): void;
   /** Shift+B, armed from outside (a menu) */
   armBoxZoom(): void;
+  /** MICRO-MF05 · the LASSO, armed from outside (the lab's «Lasso · new
+   *  functional unit»): the next left drag draws a free polygon; at the release
+   *  `done` gets the keys of what is drawn whose centre falls inside it
+   *  (proxies, models, sketches — as the box), Shift held or not. Esc disarms. */
+  armLasso?(done: (keys: string[], shift: boolean) => void): void;
+  /** …the same, with a polygon of page pixels given (a check) */
+  lassoKeys?(poly: Array<{ x: number; y: number }>): string[];
   /** the sketches: draw again from `shapes3d`'s list; select one */
   syncSketches(): void;
   selectSketch(id: string | null): void;
@@ -3320,6 +3327,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       /** MICRO-SPAZIO-3D-3 · Shift+B zooms to the box, B selects in it (Blender) */
       let boxMode: "zoom" | "select" = "zoom";
       let boxStart: { x: number; y: number } | null = null;
+      /** MICRO-MF05 · the lasso: armed (its answer), the polygon being drawn */
+      let lassoDone: ((keys: string[], shift: boolean) => void) | null = null;
+      let lassoPts: Array<{ x: number; y: number }> | null = null;
+      const lassoEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      lassoEl.setAttribute("class", "scn-lasso");
+      lassoEl.style.display = "none";
+      const lassoPoly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      lassoEl.appendChild(lassoPoly);
+      const disarmLasso = () => { lassoDone = null; lassoPts = null; lassoEl.style.display = "none"; host.classList.remove("scn-armed"); controls.enabled = true; };
       /** MICRO-SPAZIO-3D-3 · G / R / S on every selected object: each one's
        *  pose at the start, the pivot (its own origin when alone, else the
        *  median point of their boxes' centres, `medianPoint`) */
@@ -3798,6 +3814,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           controls.enabled = false;
           return;
         }
+        if (lassoDone && e.button === 0) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          lassoPts = [{ x: e.clientX, y: e.clientY }];
+          controls.enabled = false;
+          try { renderer.domElement.setPointerCapture(e.pointerId); } catch { /* a synthetic pointer */ }
+          return;
+        }
         down = { x: e.clientX, y: e.clientY, button: e.button };
         // MICRO-SPAZIO-3D-2 · the mouse as Blender's; a touch is the controls'
         if (e.pointerType === "touch") return;
@@ -3842,6 +3866,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           drag.x = e.clientX;
           drag.y = e.clientY;
         }
+        if (lassoPts) {
+          const last = lassoPts[lassoPts.length - 1];
+          if (Math.hypot(e.clientX - last.x, e.clientY - last.y) >= 3) lassoPts.push({ x: e.clientX, y: e.clientY });
+          const r = host.getBoundingClientRect();
+          lassoPoly.setAttribute("points", lassoPts.map((p) => `${p.x - r.left},${p.y - r.top}`).join(" "));
+          lassoEl.style.display = "";
+        }
         if (boxStart) {
           const r = host.getBoundingClientRect();
           const x0 = Math.min(boxStart.x, e.clientX) - r.left, y0 = Math.min(boxStart.y, e.clientY) - r.top;
@@ -3873,10 +3904,24 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       /** MICRO-SPAZIO-3D-3 · the keys of what is drawn whose centre falls in a
        *  page rectangle: proxies, models (a tileset by its volume), sketches */
-      const keysInRect = (x0: number, y0: number, x1: number, y1: number): string[] => {
+      const keysInRect = (x0: number, y0: number, x1: number, y1: number): string[] =>
+        keysWhere((q) => q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1);
+      /** MICRO-MF05 · the keys whose centre falls in a free polygon (the lasso) */
+      const keysInPolygon = (poly: ReadonlyArray<{ x: number; y: number }>): string[] => {
+        if (poly.length < 3) return [];
+        return keysWhere((q) => {
+          let inside = false;
+          for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const a = poly[i], b = poly[j];
+            if ((a.y > q.y) !== (b.y > q.y) && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+          }
+          return inside;
+        });
+      };
+      const keysWhere = (test: (q: { x: number; y: number }) => boolean): string[] => {
         const lk = locked();
         const out: string[] = [];
-        const inside = (c: any) => { const q = toScreen(c); return !!q && q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1; };
+        const inside = (c: any) => { const q = toScreen(c); return !!q && test(q); };
         content.updateMatrixWorld(true);
         for (const [k, o] of roots) {
           if (!o.parent || o.visible === false || lk.has(k)) continue;
@@ -3910,6 +3955,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const dropPendingPick = () => { if (pendingPick) { clearTimeout(pendingPick); pendingPick = null; } };
       const onUp = (e: PointerEvent) => {
         if (geo?.ownsPointer()) return;   // MICRO-GEOGLOBO · the globe's hands
+        if (lassoPts) {
+          const poly = lassoPts;
+          const done = lassoDone;
+          try { renderer.domElement.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+          disarmLasso();
+          down = null;
+          drag = null;
+          done?.(poly.length >= 3 ? keysInPolygon(poly) : [], e.shiftKey);
+          return;
+        }
         const d = drag;
         drag = null;
         if (d?.started) {
@@ -4129,6 +4184,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             return;
           case "cancel":
             if (boxArmed) { boxArmed = false; host.classList.remove("scn-armed"); stop(); }
+            else if (lassoDone) { disarmLasso(); stop(); }
             // MICRO-SEG19 · else a tool of the toolbar other than «Select»: back to «Select»
             else if (opts.onKeyAction?.(a, e)) stop();
             return;
@@ -4193,7 +4249,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       host.append(marksEl, markLabels);
       host.appendChild(strips);
       host.append(tchip);
-      host.append(cursorEl, modalEl, boxEl, viewEl, statsEl, guides, vptr, navEl);
+      host.append(cursorEl, modalEl, boxEl, lassoEl, viewEl, statsEl, guides, vptr, navEl);
       strips.appendChild(flowStrip);
       strips.appendChild(altStrip);
       showView();
@@ -4250,6 +4306,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           flyCam(frameSphere(camState(), cursorAt, r, FOV, persp.aspect), "frame-cursor");
         },
         armBoxZoom: () => { boxArmed = true; boxMode = "zoom"; host.classList.add("scn-armed"); },
+        armLasso: (done: (keys: string[], shift: boolean) => void) => { boxArmed = false; lassoDone = done; host.classList.add("scn-armed"); },
+        lassoKeys: (poly: Array<{ x: number; y: number }>) => keysInPolygon(poly),
         syncSketches,
         selectSketch: (id: string | null) => { sketchSel = id; sketchSet = new Set(id ? [id] : []); syncSketches(); },
         setSketchSelection: (ids: string[], active: string | null) => { sketchSet = new Set(ids); sketchSel = active; syncSketches(); },
@@ -4390,6 +4448,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     setCursor: (p) => { cursorAt = [...p] as V3; cursorSet = true; },
     frameCursor: () => api.frameCursor?.(),
     armBoxZoom: () => api.armBoxZoom?.(),
+    armLasso: (done) => api.armLasso?.(done),
+    lassoKeys: (poly) => api.lassoKeys?.(poly) ?? [],
     syncSketches: () => api.syncSketches?.(),
     selectSketch: (id) => { sketchSel = id; sketchSet = new Set(id ? [id] : []); api.selectSketch?.(id); },
     setSketchSelection: (ids, active) => { sketchSet = new Set(ids); sketchSel = active; api.setSketchSelection?.(ids, active); },

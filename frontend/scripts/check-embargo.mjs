@@ -28,7 +28,7 @@
 //   6 · the PAGE (Chromium, the two builds over file://): the community's
 //       Preferences ▸ Advanced have no embargo section and say what the
 //       experimental functions hold; the lab's have «Functions under
-//       embargo» with the four, its switch writes the key, the title says lab.
+//       embargo» with the five, its switch writes the key, the title says lab.
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -51,8 +51,9 @@ const { embargoEntries, markers } = await import("./embargo-guard.mjs");
 // ── 1 · the register ─────────────────────────────────────────────────────────
 const featSrc = read("frontend/src/features.ts");
 const { block, start, end, entries } = embargoEntries(featSrc);
-const EMBARGO_IDS = ["functional-matrix", "functional-overlay", "landscape-matrix", "landscape-cube"];
-eq(entries.map((e) => e.id), EMBARGO_IDS, "the four functions under embargo are in the register's EMBARGO block");
+// MICRO-MF05 · the fifth: the workspace «Functional» (functional-workspace)
+const EMBARGO_IDS = ["functional-matrix", "functional-overlay", "landscape-matrix", "landscape-cube", "functional-workspace"];
+eq(entries.map((e) => e.id), EMBARGO_IDS, "the five functions under embargo are in the register's EMBARGO block");
 ok(entries.every((e) => e.state === "embargo"), "the EMBARGO block holds only `embargo` entries");
 eq(entries.map((e) => e.sentinel), EMBARGO_IDS.map((id) => `em-embargo:${id}`), "each has its sentinel em-embargo:<id>");
 eq((block.match(/\{\s*id:/g) ?? []).length, entries.length, "every entry of the block is read by the guard (id · state · title · sentinel)");
@@ -115,7 +116,7 @@ for (const profile of ["community", "none"]) {
   const c = probe(await load(profile, { embargo: true, experimental: true }));
   const what = profile === "none" ? "a bundle without the define (node checks, an old dev server)" : "the community";
   eq([c.ids, c.lab, c.name], [["site"], false, "EMStudio"], `${what}: the register has no embargo entry, not lab, «EMStudio»`);
-  eq(Object.values(c.on).slice(1), [false, false, false, false], `${what}: every embargo function off, even with window.__EM_EMBARGO__ set`);
+  eq(Object.values(c.on).slice(1), EMBARGO_IDS.map(() => false), `${what}: every embargo function off, even with window.__EM_EMBARGO__ set`);
   ok(c.wire.every((w) => !w.includes("embargo")), `${what}: em.app.features() carries no embargo entry`);
   eq([c.drawn.embargo, c.searched.embargo], [false, false], `${what}: a command of an embargo function is neither drawn nor searched`);
   eq([c.drawn.site, c.searched.site], [true, true], `${what}: an experimental function's command with «Experimental functions» on is`);
@@ -125,12 +126,12 @@ for (const profile of ["community", "none"]) {
   const off = probe(await load("community"));
   eq([off.on.site, off.drawn.site, off.searched.site], [false, false, false], "community, «Experimental functions» off: the site off, its command absent");
   const lab = probe(await load("lab"));
-  eq([lab.ids, lab.lab, lab.name], [["site", ...EMBARGO_IDS], true, "EMStudio lab"], "the lab: the four in the register, «EMStudio lab»");
-  eq([Object.values(lab.on).slice(1), lab.drawn.embargo, lab.searched.embargo], [[false, false, false, false], false, false],
+  eq([lab.ids, lab.lab, lab.name], [["site", ...EMBARGO_IDS], true, "EMStudio lab"], "the lab: the five in the register, «EMStudio lab»");
+  eq([Object.values(lab.on).slice(1), lab.drawn.embargo, lab.searched.embargo], [EMBARGO_IDS.map(() => false), false, false],
     "the lab with its switch off: the embargo functions off, their commands absent");
   eq(lab.words, { en: "Functional Matrix", it: "Matrix funzionale", section: "Functions under embargo" }, "the lab: their words EN + IT");
   const labOn = probe(await load("lab", { embargo: true }));
-  eq([Object.values(labOn.on).slice(1), labOn.drawn.embargo, labOn.searched.embargo], [[true, true, true, true], true, true],
+  eq([Object.values(labOn.on).slice(1), labOn.drawn.embargo, labOn.searched.embargo], [EMBARGO_IDS.map(() => true), true, true],
     "the lab with «Functions under embargo» on: on, drawn, searched");
   ok(labOn.wire.includes("functional-matrix:embargo:true"), "…and em.app.features() lists them as embargo, on");
 }
@@ -229,7 +230,7 @@ ok(/"build:lab": "tsc --noEmit && EM_PROFILE=lab vite build"/.test(read("fronten
   }
   const words = [...new Set([...names, ...EMBARGO_IDS, ...EMBARGO_IDS.map((id) => id.replace("-", " "))])];
   const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
-  ok(names.length === entries.length * 2, `the names of the four, EN + IT, read from i18n.ts (${names.length})`);
+  ok(names.length === entries.length * 2, `the names of the five, EN + IT, read from i18n.ts (${names.length})`);
   ok(!re.test(read("docs/DEVELOPMENT.md")), "the developer guide explains the mechanism without naming them");
   const DOC = path.resolve(ROOT, "../EMStudio-doc/docs");
   if (fs.existsSync(DOC)) {
@@ -339,7 +340,7 @@ else {
       await c.page.close();
       const l = await open(lab);
       const lp = await prefs(l.page);
-      eq([lp.section, lp.box, lp.items], [true, true, EMBARGO_IDS], "lab: Preferences ▸ Advanced ▸ «Functions under embargo», the four listed");
+      eq([lp.section, lp.box, lp.items], [true, true, EMBARGO_IDS], "lab: Preferences ▸ Advanced ▸ «Functions under embargo», the five listed");
       ok(/Functions under embargo/.test(lp.text) && /Functional Matrix/.test(lp.text), "lab: in words (EN)");
       eq(lp.title, "EMStudio lab", "lab: the title says lab");
       await l.page.evaluate(() => { document.getElementById("set-embargo").checked = true; document.getElementById("settings-save").click(); });

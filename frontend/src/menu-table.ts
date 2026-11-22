@@ -12,7 +12,7 @@
  * Pure: no DOM, no Tauri. `menu-ui.ts` draws the rows; `check-menu-table.mjs`
  * compares what the two surfaces get, per platform.
  */
-import { featureOn } from "./features";
+import { LAB, featureOn } from "./features";
 
 /** Where the app runs. The web is one platform whatever the OS under it: the
  *  browser owns its own menu bar. */
@@ -271,6 +271,9 @@ export const MENUS: MenuDef[] = [
         cmd("uniformSpellings", "menu.uniformSpellings", "btn-tool-uniform", { title: "menu.uniformSpellingsTitle" }),
         cmd("sortLanes", "issues.sortLanes", "btn-sort-lanes", { title: "menu.sortLanesTitle" }),
       ] },
+      // MICRO-MF05 · EMBARGO (functional-matrix) · the jar's «Read as…»: the
+      // selection read as a functional unit (lab build only, its switch on)
+      ...(LAB ? [cmd("jarReadAs", "jar.readAs", "btn-jar-read-as", { title: "jar.readAsTitle", feature: "functional-matrix" })] : []),
       // MICRO-SEG29 · the instruments that live in a window's header now
       // (Blender's Add menu and the Matrix's own verbs): no menu draws them,
       // F3 finds them and says where they are

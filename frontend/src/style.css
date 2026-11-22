@@ -13037,6 +13037,29 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .fm-insp .fm-kv { display: grid; grid-template-columns: minmax(7em, auto) 1fr; gap: 2px 10px; font-size: 12px; margin: 2px 0; }
 .fm-insp .fm-k { color: var(--text-muted); }
 .fm-insp .fm-v { overflow-wrap: anywhere; }
+/* MICRO-MF05 · the jar (embargo: functional-matrix): drop, drag, «Read as…» */
+.fm-svg [data-fm-drop="1"] > .fm-area { fill: var(--accent); fill-opacity: .14; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 3; }
+.fm-svg .fm-dragging { opacity: .35; }
+.fm-ghost { position: fixed; z-index: 10000; pointer-events: none; font: 600 11px var(--font-mono, ui-monospace, monospace); padding: 2px 7px;
+  border: 1.5px dashed var(--accent); border-radius: 3px; background: var(--bg); color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+.fm-ghost[data-fm-copy="1"]::after { content: " +"; color: var(--accent); }
+.fm-readas { font: inherit; font-size: 12px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); cursor: pointer; }
+.fm-readas:hover { background: var(--bg-hover); }
+.jar-form { display: grid; gap: 6px; font-size: 13px; min-width: 420px; }
+.jar-form .jar-who, .jar-form .jar-note { margin: 0; color: var(--text-muted); }
+.jar-form .jar-refused { margin: 0; color: var(--warning, #b4471f); font-size: 12px; }
+.jar-form .jar-mode { font-weight: 600; margin-top: 4px; }
+.jar-form .jar-grid { display: grid; gap: 5px; padding-left: 20px; }
+.jar-form .jar-field { display: grid; grid-template-columns: 9em 1fr; gap: 8px; align-items: center; }
+.jar-form .jar-k { color: var(--text-muted); }
+.jar-form .jar-fn { display: flex; gap: 6px; }
+.jar-form .jar-fn input { flex: 1; }
+.jar-form .jar-cands { display: grid; gap: 2px; padding-left: 9.5em; font-size: 12px; }
+.jar-form .jar-cands-none { color: var(--text-muted); }
+.jar-form select, .jar-form input[type=text] { font: inherit; }
+.lc-switch, .lm-switch { font: inherit; font-size: 12px; padding: 1px 8px; margin: 0 0 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); cursor: pointer; }
+.scn-lasso { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+.scn-lasso polygon { fill: var(--accent); fill-opacity: .1; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
 /* MICRO-MF04 · the Cube (embargo: landscape-cube) */
 .lc-head { flex-wrap: wrap; gap: 6px 14px; }
 .lc-head select { font: inherit; font-size: 12px; }

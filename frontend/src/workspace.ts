@@ -20,7 +20,7 @@
 
 import type { ViewKind } from "./types";
 import { windowIcon } from "./window-icons";
-import { LAB } from "./features";
+import { LAB, featureOn } from "./features";
 
 /** The kinds of editor a window can host. DTC is a MODE of the graph window
  *  (WIN2), not a type of its own. */
@@ -250,6 +250,60 @@ const SCRIPTING: WorkspacePreset = {
 };
 
 /**
+ * MICRO-MF05 · EMBARGO (functional-workspace) · «FUNZIONALE» — «A che cosa
+ * servivano, epoca per epoca?» The scrivania approved by E.D. («voglio tutta la
+ * scrivania come me l'hai implementata, cubo incluso»), as two arrangements:
+ *
+ *   A · three views — the Matrix | the Functional Matrix | the Landscape
+ *       Matrix (its area turns into the Cube and back), the Inspector and the
+ *       coherence (the Table on «Issues») under them;
+ *   B · zoom and cube — the Matrix | the Functional Matrix (its zoom from the
+ *       room to the city), the Cube under them across, the Inspector and the
+ *       coherence at the bottom.
+ *
+ * A is the tab; A and B are both models of the «+» (`WORKSPACE_TEMPLATES`):
+ * the two layouts saved. Lab build only, with its switch: the types it places
+ * (functional-matrix, landscape-matrix, landscape-cube) exist only there.
+ */
+const FUNCTIONAL_A: Arrangement = {
+  // the Functional Matrix first: the ANCHOR (`windowType`) of the tab
+  wins: [
+    { name: "fm", type: "functional-matrix" },
+    { name: "canvas", type: "graph", state: { mode: "matrix" } },
+    { name: "land", type: "landscape-matrix" },
+    { name: "inspector", type: "inspector" },
+    { name: "coherence", type: "table", state: { "current.table.sheet": "Issues" } },
+  ],
+  active: "fm",
+  layout: { dir: "col", ratio: 0.7,
+            a: { dir: "row", ratio: 0.34, a: { win: "canvas" },
+                 b: { dir: "row", ratio: 0.48, a: { win: "fm" }, b: { win: "land" } } },
+            b: { dir: "row", ratio: 0.56, a: { win: "inspector" }, b: { win: "coherence" } } },
+};
+const FUNCTIONAL_B: Arrangement = {
+  // the Functional Matrix first: the ANCHOR (`windowType`) of the tab
+  wins: [
+    { name: "fm", type: "functional-matrix" },
+    { name: "canvas", type: "graph", state: { mode: "matrix" } },
+    { name: "cube", type: "landscape-cube" },
+    { name: "inspector", type: "inspector" },
+    { name: "coherence", type: "table", state: { "current.table.sheet": "Issues" } },
+  ],
+  active: "fm",
+  layout: { dir: "col", ratio: 0.76,
+            a: { dir: "col", ratio: 0.55,
+                 a: { dir: "row", ratio: 0.45, a: { win: "canvas" }, b: { win: "fm" } },
+                 b: { win: "cube" } },
+            b: { dir: "row", ratio: 0.56, a: { win: "inspector" }, b: { win: "coherence" } } },
+};
+const FUNCTIONAL_ON: boolean = LAB && featureOn("functional-workspace");
+const FUNCTIONAL: WorkspacePreset | null = FUNCTIONAL_ON ? {
+  id: "functional", labelKey: "ws.functional", hintKey: "ws.qFunctional",
+  icon: "{}", windowType: "functional-matrix", builtin: true,
+  arrangement: FUNCTIONAL_A,
+} : null;
+
+/**
  * THE TABS ARE ARRANGEMENTS. All seven of them, one species (Scripting, the
  * seventh, since MICRO-SEG02).
  *
@@ -448,6 +502,8 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
   // knew it gets it seeded (`loadRegistry` seeds every built-in it lacks), so
   // the person's own arrangements and workspaces stay as they were.
   SCRIPTING,
+  // MICRO-MF05 · EMBARGO · «Funzionale», the lab build only (its switch on)
+  ...(FUNCTIONAL ? [FUNCTIONAL] : []),
 ];
 
 /**
@@ -515,6 +571,13 @@ export const PARKED_WORKSPACES: WorkspacePreset[] = [
  */
 export const WORKSPACE_TEMPLATES: WorkspacePreset[] = [
   (({ builtin: _b, ...model }) => ({ ...model, arrangement: JSON.parse(JSON.stringify(SCRIPTING.arrangement)) as Arrangement }))(SCRIPTING),
+  // MICRO-MF05 · EMBARGO · the two layouts of «Funzionale» (lab, its switch on)
+  ...(FUNCTIONAL_ON ? [
+    { id: "functional-a", labelKey: "ws.functionalA", hintKey: "ws.qFunctional", icon: "{}", windowType: "functional-matrix" as WindowType,
+      arrangement: JSON.parse(JSON.stringify(FUNCTIONAL_A)) as Arrangement },
+    { id: "functional-b", labelKey: "ws.functionalB", hintKey: "ws.qFunctional", icon: "{}", windowType: "functional-matrix" as WindowType,
+      arrangement: JSON.parse(JSON.stringify(FUNCTIONAL_B)) as Arrangement },
+  ] : []),
 ];
 
 /**

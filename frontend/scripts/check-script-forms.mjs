@@ -43,7 +43,10 @@ const table = JSON.parse(fs.readFileSync(path.join(SRC, "script-commands.json"),
 const menuTable = fs.readFileSync(path.join(SRC, "menu-table.ts"), "utf8");
 const keymap = fs.readFileSync(path.join(SRC, "keymap.ts"), "utf8");
 const main = fs.readFileSync(path.join(SRC, "main.ts"), "utf8");
-const menuIds = [...menuTable.matchAll(/cmd\("([A-Za-z]+)"/g)].map((m) => m[1]);
+// MICRO-MF05 · a command of a function under EMBARGO is a row only under LAB
+// (`...(LAB ? [cmd(…)] : [])`): absent from the community build, it is not
+// declared in script-commands.json either (a public table, in every build)
+const menuIds = [...menuTable.replace(/\.\.\.\(LAB \? \[[^\n]*\] : \[\]\)/g, "").matchAll(/cmd\("([A-Za-z]+)"/g)].map((m) => m[1]);
 ok(menuIds.length >= 40, `the menu table's commands read (${menuIds.length})`);
 eq(menuIds.filter((id) => !table.commands[id]), [], "every menu command is declared in script-commands.json");
 eq(Object.keys(table.commands).filter((id) => !menuIds.includes(id)), [], "…and nothing else is declared as a menu command");

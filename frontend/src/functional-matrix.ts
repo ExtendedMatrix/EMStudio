@@ -90,6 +90,14 @@ export interface FmHost {
   t(key: string, vars?: Record<string, string | number>): string;
   /** an answer landed: repaint the windows, the issues, the Inspector */
   changed(): void;
+  /** MICRO-MF05 · the jar (functional-jar.ts): the gestures that WRITE the
+   *  memberships — main.ts applies them as one step of the store */
+  jar?: {
+    /** an instance dragged from the brace `from` to the brace `to`; `copy`: Alt held */
+    move(member: string, from: string, to: string, copy: boolean): void;
+    /** «Read as…» on the selection */
+    readAs(): void;
+  };
 }
 
 let host: FmHost | null = null;
@@ -113,11 +121,21 @@ let lastSig: string | null = null;
 let lastOwner: object | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let seq = 0;
+/** MICRO-MF05 · the request whose answer is in `state` (the jar's check of
+ *  coherence waits for an answer asked AFTER its gesture) */
+let landed = 0;
 let lastAttempt = 0;
 const DEBOUNCE_MS = 400;
 const RETRY_MS = 5000;
 
 export function fmState(): FmState { return state; }
+
+/** MICRO-MF05 · the counters of the asker: `asked` the last request made (or
+ *  about to be: a debounce pending counts as one more), `landed` the one whose
+ *  answer is drawn. An answer with `landed > n` was asked after `asked` was n. */
+export function fmSeq(): { asked: number; landed: number; pending: boolean } {
+  return { asked: seq, landed, pending: timer != null };
+}
 
 /** What the drawing depends on: every node's id, type and name, every
  *  property's value, every epoch's bounds, every edge; the lanes; the
@@ -189,6 +207,7 @@ async function ask(body: string): Promise<void> {
   }
   if (mine !== seq) return;
   state = next;
+  landed = mine;
   host.changed();
 }
 
@@ -416,6 +435,9 @@ function unitBox(c: DrawCtx, id: string, w: number, path: Set<string>): Box {
         `${closed ? ' data-fm-collapsed="1"' : ""}${selected ? ' data-fm-selected="1"' : ""}>`;
       s += `<title>${esc(title)}</title>`;
       if (selected) s += `<rect class="fm-hl" x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/>`;
+      // MICRO-MF05 · the whole inside of the braces is where a unit is dropped
+      // (the jar), drawn under everything else of the unit
+      s += `<rect class="fm-area" x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="transparent"/>`;
       s += `<rect class="fm-hit" x="${x}" y="${y}" width="${w}" height="${HEAD}" fill="transparent"/>`;
       const sw = 1.6;
       s += `<path d="${bracePath(x + 1, y, h, 1)}" fill="none" stroke="${col}" stroke-width="${sw}"${dash}/>`;
@@ -579,6 +601,17 @@ export function renderFunctionalMatrixInto(body: HTMLElement, winId: string): vo
   count.dataset.fmUnits = String(a.units.length);
   count.textContent = t("fm.count", { n: a.units.length });
   head.append(count, legend);
+  // MICRO-MF05 · «Read as…»: the selection read as a functional unit
+  if (h.jar) {
+    const ra = document.createElement("button");
+    ra.type = "button";
+    ra.className = "fm-readas";
+    ra.dataset.fmReadas = "1";
+    ra.textContent = t("jar.readAs");
+    ra.title = t("jar.readAsTitle");
+    ra.addEventListener("click", () => h.jar?.readAs());
+    head.appendChild(ra);
+  }
   if (state.stale) head.classList.add("fm-stale");
   body.appendChild(head);
   if (!a.units.length) { body.appendChild(note("fm.none")); return; }
@@ -587,7 +620,11 @@ export function renderFunctionalMatrixInto(body: HTMLElement, winId: string): vo
   const width = Math.max(420, (body.clientWidth || 640) - 8);
   wrap.innerHTML = fmSvg(a, width, h.selected(), t, foldsOf(winId));
   body.appendChild(wrap);
+  // MICRO-MF05 · the jar: an instance dragged from its brace to another one
+  // moves the membership, Alt (⌥) held at the release copies it
+  if (h.jar) armInstanceDrag(wrap, h);
   wrap.addEventListener("click", (ev) => {
+    if (dragJustEnded) { dragJustEnded = false; return; }
     const el = ev.target as Element;
     const fold = el.closest<SVGElement>("[data-fm-fold]");
     if (fold) {
@@ -605,6 +642,89 @@ export function renderFunctionalMatrixInto(body: HTMLElement, winId: string): vo
     if (!unit || (ev.target as Element).closest("[data-fm-member]")) return;
     fmToggleFold(winId, unit.getAttribute("data-fm-unit")!);
     h.changed();
+  });
+}
+
+// ── MICRO-MF05 · the jar: the braces as drop targets ─────────────────────────
+
+/** The functional unit whose braces are under a point of the page (the
+ *  innermost), in any Functional Matrix area; null: none. The Matrix's drag
+ *  asks it at every move and at the release. */
+export function fmDropTargetAt(clientX: number, clientY: number): string | null {
+  const el = document.elementFromPoint(clientX, clientY);
+  const u = el?.closest?.(".tile-fmbody [data-fm-unit]");
+  return u ? u.getAttribute("data-fm-unit") : null;
+}
+
+/** Light the braces a drop would land in (null: none), in every area. */
+export function fmDropHover(unit: string | null, ok = true): void {
+  for (const e of document.querySelectorAll(".tile-fmbody [data-fm-drop]")) e.removeAttribute("data-fm-drop");
+  if (!unit) return;
+  for (const e of document.querySelectorAll(`.tile-fmbody [data-fm-unit="${CSS.escape(unit)}"]`))
+    e.setAttribute("data-fm-drop", ok ? "1" : "no");
+}
+
+let dragJustEnded = false;
+const DRAG_PX = 5;
+
+/** The drag of an instance inside the Functional Matrix (pointer events: the
+ *  SVG is drawn again on every answer, so the listeners live on the wrap). */
+function armInstanceDrag(wrap: HTMLElement, h: FmHost): void {
+  wrap.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0) return;
+    const inst = (ev.target as Element).closest<SVGElement>("[data-fm-inst]");
+    if (!inst) return;
+    const [from, member] = (() => {
+      const v = inst.getAttribute("data-fm-inst") ?? "";
+      const i = v.indexOf(":");
+      return [v.slice(0, i), v.slice(i + 1)];
+    })();
+    if (!from || !member) return;
+    const x0 = ev.clientX, y0 = ev.clientY;
+    let ghost: HTMLElement | null = null;
+    let target: string | null = null;
+    const move = (e: PointerEvent): void => {
+      if (!ghost && Math.hypot(e.clientX - x0, e.clientY - y0) < DRAG_PX) return;
+      if (!ghost) {
+        ghost = document.createElement("div");
+        ghost.className = "fm-ghost";
+        ghost.dataset.fmGhost = member;
+        ghost.textContent = inst.querySelector(".fm-inst-name")?.textContent ?? member;
+        document.body.appendChild(ghost);
+        inst.classList.add("fm-dragging");
+      }
+      ghost.style.left = `${e.clientX + 10}px`;
+      ghost.style.top = `${e.clientY + 8}px`;
+      ghost.dataset.fmCopy = e.altKey ? "1" : "";
+      target = fmDropTargetAt(e.clientX, e.clientY);
+      fmDropHover(target && target !== from ? target : null);
+    };
+    const up = (e: PointerEvent): void => {
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("keydown", esc, true);
+      if (!ghost) return;
+      ghost.remove();
+      inst.classList.remove("fm-dragging");
+      fmDropHover(null);
+      dragJustEnded = true;
+      setTimeout(() => { dragJustEnded = false; }, 0);
+      const to = fmDropTargetAt(e.clientX, e.clientY);
+      if (to && to !== from) h.jar?.move(member, from, to, e.altKey);
+    };
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("keydown", esc, true);
+      (ghost as HTMLElement | null)?.remove();
+      inst.classList.remove("fm-dragging");
+      fmDropHover(null);
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("keydown", esc, true);
   });
 }
 

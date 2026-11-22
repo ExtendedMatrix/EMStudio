@@ -522,6 +522,14 @@ import { bindSite, composition as lmComposition, lmAsk, lmColumnsOf, lmFocus, lm
          zoomControl } from "./landscape-matrix";
 import { setFmZoom } from "./functional-matrix";
 const LM_ON = LAB && featureOn("landscape-matrix");
+// MICRO-MF05 · EMBARGO (functional-matrix) · the jar: the gestures that write the
+// memberships (a unit dropped in a brace, an instance moved or copied, «Read
+// as…», the lasso in the Space): behind FM_ON
+import { fmDropHover, fmDropTargetAt, fmSeq } from "./functional-matrix";
+import { FU_TYPE as JAR_FU_TYPE, MEMBER_EDGE as JAR_MEMBER_EDGE, defaultEpoch as jarDefaultEpoch, defaultName as jarDefaultName,
+         functionProperty as jarFunctionProperty, functionalUnits as jarUnits, functionsInUse as jarFunctionsInUse,
+         jarCandidates, planJar, readAsForm as jarReadAsForm, readingOfToday as jarReadingOfToday, today as jarToday,
+         unitsOfSpaceKeys as jarUnitsOfSpaceKeys, type JarRefusal } from "./functional-jar";
 // MICRO-MF04 · EMBARGO · the Cube: the real footprints of the proxies stacked by
 // horizon (an area), at the scale of the building or of the landscape: behind LC_ON
 import { lcAnswerOf, lcAsk, lcScaleOf, renderLandscapeCubeInto, setLandscapeCubeHost, setLcView } from "./landscape-cube";
@@ -2792,6 +2800,38 @@ window.__EM_SCENE__ = () => {
              answer: st.answer, lit: lit ? { units: [...lit.units], fus: [...lit.fus] } : null,
              matrixLit: [...(fmMatrixLit(selectedId) ?? [])] };
   } } : {}),
+  // MICRO-MF05 · EMBARGO · the jar: its gestures by hand (the drags call the same)
+  ...(FM_ON ? {
+    jar: () => ({ last: jarLast, pending: !!jarPending, seq: fmSeq() }),
+    jarAdd: (ids: string[], unit: string) => jarGesture(ids, unit, { kind: "add" }),
+    jarMove: (member: string, from: string, to: string, copy = false) => jarGesture([member], to, { kind: copy ? "copy" : "move", from }),
+    jarReadAs: (ids?: string[], preferNew = false) => { void jarReadAs(ids, { preferNew }); return true; },
+    jarLasso: (winId: string, poly: Array<{ x: number; y: number }>) => {
+      const h = sceneHandles.get(winId);
+      const keys = h?.lassoKeys?.(poly) ?? [];
+      setSpaceSel(boxSelect(spaceSel(), keys, false));
+      jarLassoDone(jarUnitsOfSpaceKeys(spaceSel().keys));
+      return keys;
+    },
+    jarDropAt: (x: number, y: number) => fmDropTargetAt(x, y),
+    hasEdge: (src: string, tgt: string, et: string) => !!store?.hasEdge(src, tgt, et),
+    /** frame a unit in the Matrix (the jump of «go to»), for a real drag */
+    jarShow: (nodeId: string) => jumpTo(nodeId),
+    allEdges: () => (store?.doc.graph.edges ?? []).map((e) => ({ source: e.source, target: e.target, edge_type: e.edge_type })),
+    allNodes: () => (store?.doc.graph.nodes ?? []).map((n) => ({ id: n.id, node_type: n.node_type, name: n.name ?? null })),
+    /** the keys a lasso would take in a Space window, without selecting */
+    jarLassoKeys: (winId: string, poly: Array<{ x: number; y: number }>) => sceneHandles.get(winId)?.lassoKeys?.(poly) ?? [],
+    /** where a unit is drawn on the page in a Matrix window (its centre), for a real drag */
+    jarNodeScreen: (nodeId: string, winId?: string) => {
+      const id = winId ?? windowsOf().find((w) => w.type === "graph" && winMode(w) === "matrix")?.id ?? null;
+      const sc = id ? sceneOfWin(id, "matrix") : null;
+      const n = sc?.byId.get(nodeId);
+      const cv = id ? graphWindows.get(id)?.cv.getBoundingClientRect() : null;
+      if (!id || !n || !cv) return null;
+      const vp = viewportFor(id, "matrix");
+      return { x: cv.left + (n.x + n.w / 2) * vp.scale + vp.x, y: cv.top + (n.y + n.h / 2) * vp.scale + vp.y, win: id };
+    },
+  } : {}),
   /** MICRO-SEG13 · the floating panels open now, bottom first (their `data-floating`) */
   floatingOpen: () => floatingOpen().map((el) => el.dataset.floating ?? ""),
   selected: () => [...selectedIds],
@@ -7536,6 +7576,23 @@ function sceneOfWin(winId: string | null | undefined, mode: ViewKind): Scene | n
   // (a Matrix reading by horizons has no switch: its bands are laid out by themselves)
   if (FO_ON && mode === "matrix" && sc && foOn(winId) && !hzWin(winId)) return foSceneOf(sc) ?? sc;
   return sc;
+}
+
+/** MICRO-MF05 (C, MF02's open point) · why a Matrix with the overlay on shows
+ *  it or not: «applied», or waiting for the bridge, no bridge that computes it,
+ *  a bridge whose s3Dgraphy has no plan, lanes that are not this Matrix's */
+function foWhy(winId: string): "applied" | "waiting" | "bridge" | "plan" | "lanes" {
+  if (!FO_ON) return "bridge";
+  const base = sceneOfWinBase(winId, "matrix");
+  const st = fmState();
+  if (st.status === "missing" || st.status === "off" || st.status === "error") return "bridge";
+  const answer = st.answer as FoAnswer | null;
+  if (!answer) return "waiting";
+  if (!answer.overlay) return "plan";
+  if (!base) return "waiting";
+  // the same test as `foSceneOf`, without building (or memoising) the copy
+  const ids = new Set(base.lanes.map((l) => l.id));
+  return answer.overlay.lanes.some((l) => ids.has(l.lane)) ? "applied" : "lanes";
 }
 
 /** MICRO-MF02 · EMBARGO · the overlay's scene of a Matrix scene: built once per
@@ -18799,8 +18856,215 @@ if (FM_ON || FO_ON) setFunctionalMatrixHost({
     refreshIssues();
     refreshInspector();
     draw();
+    if (FM_ON) jarCheckPending();
+    // MICRO-MF05 (C) · the overlay's note follows the answer (applied / why not)
+    if (FO_ON && foWins.size) renderAreaHeaders();
   },
+  // MICRO-MF05 · the jar's gestures inside the Functional Matrix
+  ...(FM_ON ? { jar: {
+    move: (member: string, from: string, to: string, copy: boolean) => jarGesture([member], to, { kind: copy ? "copy" : "move", from }),
+    readAs: () => { void jarReadAs(); },
+  } } : {}),
 });
+// ── MICRO-MF05 · EMBARGO · THE JAR (functional-jar.ts) ─────────────────────
+//
+// A2 of the decisions (E.D., «le caramelle nel barattolo»): the memberships
+// `is_in_functional_unit` are WRITTEN by gestures — a unit dropped from the
+// Matrix in a brace, an instance moved (Alt: copied) between braces, «Read
+// as…» on a selection, the lasso on the proxies of the Space. Each gesture is
+// ONE step of the store (undo / redo), signed: the reading is an extractor
+// under the unit's `primary_function` (`has_author` the person, `act_start`
+// the day; the same person's reading of the same day is not doubled; no
+// `extracted_from` the members — that closes a cycle the Matrix warns about,
+// functional-jar.ts). At the release the check of coherence: the bridge's next
+// answer, said in the same toast as «Annulla».
+const jarCanBeMember = (type: string | undefined): boolean =>
+  !!type && allowedEdgeTypes(type, JAR_FU_TYPE).includes(JAR_MEMBER_EDGE);
+/** the gesture waiting for its check: the pairs (member, unit), the request
+ *  counter at the gesture, the toast's words and the store to undo */
+let jarPending: { pairs: Array<[string, string]>; after: number; msg: string; st: DocumentStore } | null = null;
+/** the last gesture and its check (the checks read them) */
+let jarLast: { kind: string; unit: string; added: string[]; removed: Array<{ member: string; from: string }>;
+               refused: Array<{ id: string; why: JarRefusal }>; reading: string | null;
+               check: null | { ok: boolean; notAlive: string[]; status: string } } | null = null;
+const jarName = (id: string): string => String(store?.node(id)?.name ?? id);
+
+/** the reading of the gesture: an extractor under the unit's function, signed
+ *  and dated (inside the store's batch). Null: the unit has no
+ *  `primary_function` to hang it under (said in the Log). */
+function jarSign(st: DocumentStore, unit: string, members: string[]): string | null {
+  if (!FM_ON || !members.length) return null;
+  const prop = jarFunctionProperty(st.doc.graph, unit);
+  if (!prop) return null;
+  const me = identityForSigning();
+  const author = me ? nauth.authorForIdentity(st, me) : null;
+  const day = jarToday();
+  let x = jarReadingOfToday(st.doc.graph, prop, author, day);
+  if (!x) {
+    x = st.newId();
+    st.addNode({ id: x, node_type: "extractor", name: initialName(st.doc, "extractor") ?? "Temp1",
+                 description: t("jar.readingDesc", { unit: jarName(unit), day }), data: { act_start: day } } as EmNode);
+    if (author) st.addEdge(x, author, "has_author");
+    chain.linkExtraction(st, prop, x);
+  }
+  return x;
+}
+
+/** A gesture of the jar: `members` toward the unit, added («add»), moved from
+ *  `from` («move») or copied («copy»). One step, a toast with «Annulla», then
+ *  the check of coherence in the same toast. */
+function jarGesture(members: string[], unit: string, g: { kind: "add" | "move" | "copy"; from?: string | null }): boolean {
+  const st = store;
+  if (!FM_ON || !st) return false;
+  const plan = planJar(st.doc.graph, members, unit, jarCanBeMember, g);
+  const uname = jarName(unit);
+  const refusedWords = plan.refused.length
+    ? ` · ${t("jar.refusedN", { n: plan.refused.length, list: plan.refused.slice(0, 4).map((r) => `${jarName(r.id)} (${t(`jar.why.${r.why}`)})`).join(", ") })}`
+    : "";
+  jarLast = { kind: g.kind, unit, added: [], removed: [], refused: plan.refused, reading: null, check: null };
+  if (!plan.add.length && !plan.remove.length) {
+    toast(plan.already.length ? t("jar.already", { names: plan.already.map(jarName).join(", "), unit: uname }) + refusedWords
+      : t("jar.nothing", { unit: uname }) + refusedWords);
+    return false;
+  }
+  let reading: string | null = null;
+  st.batch(() => {
+    for (const r of plan.remove) {
+      const e = st.doc.graph.edges.find((ed) => ed.edge_type === JAR_MEMBER_EDGE && ed.source === r.member && ed.target === r.from);
+      if (e) st.deleteEdge(e);
+    }
+    for (const m of plan.add) st.addEdge(m, unit, JAR_MEMBER_EDGE);
+    reading = jarSign(st, unit, plan.add.length ? plan.add : plan.remove.map((r) => r.member));
+  });
+  const names = (ids: string[]) => ids.slice(0, 6).map(jarName).join(", ") + (ids.length > 6 ? ` +${ids.length - 6}` : "");
+  const moved = plan.remove.map((r) => r.member);
+  const msg = g.kind === "move" && g.from
+    ? t("jar.moved", { names: names(moved.length ? moved : plan.add), from: jarName(g.from), unit: uname })
+    : g.kind === "copy"
+      ? t("jar.copied", { names: names(plan.add), unit: uname })
+      : t("jar.added", { names: names(plan.add), unit: uname });
+  jarLast = { kind: g.kind, unit, added: plan.add, removed: plan.remove, refused: plan.refused, reading, check: null };
+  toastUndo(msg + refusedWords, st);
+  logInfo(`${t("log.edit.prefix")}: ${msg}${reading ? "" : ` · ${t("jar.unsigned")}`}`, [unit, ...plan.add]);
+  jarPending = plan.add.length ? { pairs: plan.add.map((m) => [m, unit] as [string, string]), after: fmSeq().asked, msg: msg + refusedWords, st } : null;
+  if (FM_ON) fmAsk();
+  return true;
+}
+
+/** the check of coherence of the last gesture, when the bridge's answer to a
+ *  request made AFTER it lands: «alive in its life» or the warning, in the toast */
+function jarCheckPending(): void {
+  const p = jarPending;
+  if (!FM_ON || !p) return;
+  const fs = fmState();
+  const q = fmSeq();
+  if (fs.status === "missing" || fs.status === "off" || fs.status === "error") {
+    jarPending = null;
+    if (jarLast) jarLast.check = { ok: false, notAlive: [], status: fs.status };
+    toastUndo(`${p.msg} · ${t("jar.check.noBridge")}`, p.st);
+    return;
+  }
+  if (q.landed <= p.after || fs.status !== "ok" || !fs.answer || fs.stale) return;
+  jarPending = null;
+  const bad = fs.answer.coherence.members_not_alive.filter((x) => p.pairs.some(([m, u]) => m === x.member && u === x.unit));
+  if (jarLast) jarLast.check = { ok: !bad.length, notAlive: bad.map((b) => b.member), status: "ok" };
+  if (bad.length) {
+    const b = bad[0];
+    toastUndo(`${p.msg} · ⚠ ${t("jar.check.notAlive", { n: bad.length, names: bad.slice(0, 4).map((x) => jarName(x.member)).join(", "),
+      unit: jarName(b.unit), u: fmSpanOf(b.unit_life), m: fmSpanOf(b.member_life) })}`, p.st);
+  } else {
+    toastUndo(`${p.msg} · ✓ ${t("jar.check.ok")}`, p.st);
+  }
+}
+const fmSpanOf = (s: [number | null, number | null] | null | undefined): string => {
+  if (!s) return "—";
+  const y = (v: number | null) => (v == null ? "…" : String(Math.round(v)));
+  return `${y(s[0])}–${y(s[1])}`;
+};
+
+/** the epochs of the graph, the most recent first (the Matrix's lanes) */
+function jarEpochs(st: DocumentStore): Array<{ id: string; name: string }> {
+  const eps = st.doc.graph.nodes.filter((n) => n.node_type === "EpochNode");
+  const start = (n: EmNode) => { const v = Number((n.data as Record<string, unknown> | undefined)?.start_time); return Number.isFinite(v) ? v : -Infinity; };
+  return eps.sort((a, b) => start(b) - start(a)).map((n) => ({ id: n.id, name: String(n.name ?? n.id) }));
+}
+
+/** «Read as…»: the selection (or `ids`) read as a functional unit — an existing
+ *  one, or a new one made here (name, scale, function from the vocabulary,
+ *  first epoch, inside). One step. */
+async function jarReadAs(ids?: string[], o: { preferNew?: boolean } = {}): Promise<boolean> {
+  const st = store;
+  if (!FM_ON || !st) return false;
+  const pick = ids ?? (selectedIds.size ? [...selectedIds] : selectedId ? [selectedId] : []);
+  const members = jarCandidates(st.doc.graph, pick, jarCanBeMember);
+  const refused = pick.filter((id) => !members.includes(id))
+    .map((id) => ({ id, name: jarName(id), why: (st.node(id) ? "type" : "missing") as JarRefusal }));
+  if (!members.length) { toast(t("jar.noneSelected")); return false; }
+  const epochs = jarEpochs(st);
+  const form = jarReadAsForm({
+    doc: document, t: (k, v) => t(k, v as Record<string, string>),
+    members: members.map((id) => ({ id, name: jarName(id) })), refused,
+    units: jarUnits(st.doc.graph).filter((u) => !members.includes(u.id)),
+    functions: jarFunctionsInUse(st.doc.graph),
+    epochs,
+    epoch: jarDefaultEpoch(members, (id) => st.firstEpochOf(id), epochs.map((e) => e.id)),
+    preferNew: !!o.preferNew,
+    search: (text) => vocabState.search(text, getLocale().slice(0, 2), "primary_function"),
+  });
+  const ans = await openDialog({ title: t("jar.dlgTitle", { n: members.length }), body: form.body, ok: t("jar.form.ok"), kind: "jar-read-as" });
+  if (!ans.ok) return false;
+  const c = form.choice();
+  if (c.mode === "existing") return c.unit ? jarGesture(members, c.unit, { kind: "add" }) : false;
+  const name = c.name || jarDefaultName(c.fn, st.doc.graph);
+  let fu = "";
+  let reading: string | null = null;
+  st.batch(() => {
+    fu = st.newId();
+    st.addNode({ id: fu, node_type: JAR_FU_TYPE, name, description: "", data: { scale: c.scale } } as EmNode);
+    if (c.epoch) st.addEdge(fu, c.epoch, "has_first_epoch");
+    if (c.parent) st.addEdge(fu, c.parent, JAR_MEMBER_EDGE);
+    if (c.fn) {
+      const pid = st.newId();
+      st.addNode({ id: pid, node_type: "property", name: "primary_function", description: c.fn,
+                   data: { property_type: "primary_function", value: c.fn, ...(c.term ? { concept: { ...c.term } } : {}) } } as EmNode);
+      st.addEdge(fu, pid, "has_property");
+    }
+    for (const m of members) st.addEdge(m, fu, JAR_MEMBER_EDGE);
+    reading = jarSign(st, fu, members);
+  });
+  const msg = t("jar.created", { unit: name, n: members.length });
+  jarLast = { kind: "new", unit: fu, added: members, removed: [], refused: plan0(refused), reading, check: null };
+  toastUndo(msg, st);
+  logInfo(`${t("log.edit.prefix")}: ${msg}${reading ? "" : ` · ${t("jar.unsigned")}`}`, [fu, ...members]);
+  jarPending = { pairs: members.map((m) => [m, fu] as [string, string]), after: fmSeq().asked, msg, st };
+  select(fu);
+  if (FM_ON) fmAsk();
+  return true;
+}
+const plan0 = (r: Array<{ id: string; why: JarRefusal }>) => r.map((x) => ({ id: x.id, why: x.why }));
+
+/** The lasso of the Space: armed from its menu; at the release the proxies
+ *  inside are selected and the person is asked «New functional unit» / «Read
+ *  as…» (the room is drawn where it is seen). */
+function jarArmLasso(h: SpaceSceneHandle): void {
+  if (!FM_ON || !h.armLasso) return;
+  toast(t("jar.lassoArmed"));
+  h.armLasso((keys, shift) => {
+    setSpaceSel(boxSelect(spaceSel(), keys, shift));
+    const units = jarUnitsOfSpaceKeys(spaceSel().keys);
+    jarLassoDone(units);
+  });
+}
+function jarLassoDone(units: string[]): void {
+  if (!units.length) { toast(t("jar.lassoNone")); return; }
+  toastAsk(t("jar.lassoGot", { n: units.length }), [
+    { label: t("jar.newUnit"), run: () => { void jarReadAs(units, { preferNew: true }); } },
+    { label: t("jar.readAs"), run: () => { void jarReadAs(units); } },
+  ]);
+}
+// the command of the menus and of F3 (menu-table.ts, `feature: functional-matrix`):
+// its button is the menus' (menu-ui.ts makes one per row); the jar answers it
+if (FM_ON) document.getElementById("btn-jar-read-as")?.addEventListener("click", () => { void jarReadAs(); });
 // ── MICRO-MF03 · EMBARGO · the Landscape Matrix and the semantic zoom ──────
 //
 // The landscape is an OPEN graph whose header says it (kind landscape, or a
@@ -34756,6 +35020,11 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
       { label: t("s3.isolate"), act: "isolate", run: () => isolate(`proxy:${id}`) },
       { label: t("s3.showInGraph"), act: "graph", run: () => jumpTo(id) },
       { label: t("s3.selectUnit"), act: "select", run: () => { select(id); refreshInspector(); } },
+      // MICRO-MF05 · EMBARGO · the jar: the proxies selected → a new functional unit
+      ...(FM_ON ? [{ label: t("jar.newUnit"), act: "jar-new-unit", run: () => {
+        const sel = jarUnitsOfSpaceKeys(spaceSel(sp).keys);
+        void jarReadAs(sel.includes(id) ? sel : [id], { preferNew: true });
+      } }] : []),
       "sep",
       // MICRO-PROVA-DEV47 p.5 · as Blender's object menu: the deletion, asked
       { label: t("px.delete"), act: "delete-proxy", run: () => {
@@ -34800,6 +35069,8 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
     { label: t("s3.frameAll"), act: "frame-all", run: () => h.frame() },
     { label: t("s3.frameCursor"), act: "frame-cursor", run: () => h.frameCursor() },
     { label: t("s3.boxZoom"), act: "box", run: () => h.armBoxZoom() },
+    // MICRO-MF05 · EMBARGO · the jar: the lasso on the proxies, then «New functional unit»
+    ...(FM_ON ? [{ label: t("jar.lasso"), act: "jar-lasso", run: () => jarArmLasso(h) }] : []),
     ...(spaceIsolated ? [{ label: t("s3.showAll"), act: "unisolate", run: () => { spaceIsolated = null; refreshSurfaces("scene"); } }] : []),
   ]);
 }
@@ -64200,20 +64471,25 @@ function buildAreaHeader(win: Win): DocumentFragment {
           setFoOn(win.id, now);
           if (FO_ON && now) {
             fmAsk();
-            const st = fmState();
-            toast(st.status === "missing" ? t("fo.noBridge") : t("fo.onToast"));
+            const why = foWhy(win.id);
+            toast(why === "bridge" || why === "plan" ? t("fo.noBridge") : t("fo.onToast"));
           }
           renderAreaHeaders();
           draw();
         });
         frag.appendChild(fo);
         if (on) {
+          // MICRO-MF05 (C) · the note says what the Matrix shows NOW: the view by
+          // activity is off only once the plan is applied; before that, why not
+          const why = foWhy(win.id);
           const note = document.createElement("span");
           note.className = "win-fo-note";
-          note.dataset.foNote = "activities-off";
+          note.dataset.foNote = why === "applied" ? "activities-off" : why;
           // a head too tight keeps it, shorter: the interface always says it
-          note.innerHTML = `<span class="hdr-long">${escapeHtml(t("fo.activitiesOff"))}</span><span class="hdr-short">${escapeHtml(t("fo.activitiesOffShort"))}</span>`;
-          note.title = t("fo.activitiesOffTitle");
+          const long = why === "applied" ? t("fo.activitiesOff") : t(`fo.why.${why}`);
+          const short = why === "applied" ? t("fo.activitiesOffShort") : t(`fo.why.${why}Short`);
+          note.innerHTML = `<span class="hdr-long">${escapeHtml(long)}</span><span class="hdr-short">${escapeHtml(short)}</span>`;
+          note.title = why === "applied" ? t("fo.activitiesOffTitle") : t(`fo.why.${why}Title`);
           note.dataset.hdrCompact = "1";
           frag.appendChild(note);
         }
@@ -66780,6 +67056,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const d = dragGate?.move(e.clientX, e.clientY);
       if (!d) return;
       moved = true;
+      // MICRO-MF05 · EMBARGO · the jar: a brace of the Functional Matrix under
+      // the pointer lights up (the release there writes the membership)
+      if (FM_ON) fmDropHover(fmDropTargetAt(e.clientX, e.clientY));
       // Shift+drag detach (D2): drop the membership edge, free the node at its
       // current canvas position, then let subsequent frames move it normally.
       if (dragDetachPending && store && dragDetachSet.length) {
@@ -67283,7 +67562,18 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       else if (hit && (e.shiftKey || e.metaKey || e.ctrlKey))
         toggleSelect(hit.instanceOf ?? hit.id);
       else { if (hit) pickedInstance = hit.id; select(hit ? (hit.instanceOf ?? hit.id) : null); }
+    } else if (mode === "node" && dragNodeId && dragMoving && FM_ON && fmDropTargetAt(e.clientX, e.clientY)) {
+      // MICRO-MF05 · EMBARGO · the jar: released over a brace of the Functional
+      // Matrix → the unit (the selection) becomes a member; the master stays
+      // where it was (the drag is put back, nothing moves)
+      const to = fmDropTargetAt(e.clientX, e.clientY)!;
+      const ids = dropIds(dragNodeId);
+      fmDropHover(null);
+      cancelDrag();
+      jarGesture(ids, to, { kind: "add" });
+      return;
     } else if (mode === "node" && dragNodeId && dragMoving) {
+      if (FM_ON) fmDropHover(null);
       // drag ended → ONE commit: the reassignment, if the target changed, and
       // the position the node was dropped at, in a single undo step
       // (MICRO-STANZA-POSIZIONI · and these places are newer than any frame
@@ -68868,6 +69158,9 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
     const ca = continuityAction(units[0]);
     if (ca) item(ca.label, () => openContinuityForm(units[0], clientX, clientY)).dataset.cmd = ca.cmd;
   }
+  // MICRO-MF05 · EMBARGO · the jar: «Read as…» on the selection
+  if (FM_ON && ids.some((id) => jarCanBeMember(store!.node(id)?.node_type)))
+    item(t("jar.readAs"), () => { void jarReadAs(ids); }).dataset.cmd = "jar-read-as";
   if (units.length) {
     if (compactableUnits(store.doc).some((u) => units.includes(u)))
       item(t("compact.cmd"), () => runCompact(units)).dataset.cmd = "compact";
@@ -69698,6 +69991,21 @@ function mountScriptEditorInto(body: HTMLElement, win: Win): { refresh(): void; 
   };
 }
 
+/** MICRO-MF05 · EMBARGO · «Funzionale»: the Landscape Matrix and the Cube are
+ *  one place of the scrivania — a button in the area turns one into the other
+ *  (the area's type, as its header's menu does) */
+function lmCubeSwitch(body: HTMLElement, win: Win, to: WindowType): void {
+  if (!LAB || !LM_ON || !LC_ON) return;
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = to === "landscape-cube" ? "lm-switch" : "lc-switch";
+  b.dataset.switchTo = to;
+  b.textContent = t(to === "landscape-cube" ? "fw.toCube" : "fw.toLandscape");
+  b.title = t("fw.switchTitle");
+  b.addEventListener("click", () => transformWindowOf(win, to));
+  body.prepend(b);
+}
+
 registerBuiltinSurfaces({
   addEmDataHost, removeEmDataHost, renderEmData,
   addStorageHost, removeStorageHost, renderStorage,
@@ -69718,12 +70026,12 @@ registerBuiltinSurfaces({
   } } : {}),
   // MICRO-MF03 · EMBARGO · the Landscape Matrix: the lab build only
   ...(LAB ? { renderLandscapeMatrixInto: (body: HTMLElement, win: Win) => {
-    if (LM_ON) renderLandscapeMatrixInto(body, win.id);
+    if (LM_ON) { renderLandscapeMatrixInto(body, win.id); if (LC_ON) lmCubeSwitch(body, win, "landscape-cube"); }
     else { body.textContent = ""; body.appendChild(emptyState("lm.offSwitch")); }
   } } : {}),
   // MICRO-MF04 · EMBARGO · the Cube: the lab build only
   ...(LAB ? { renderLandscapeCubeInto: (body: HTMLElement, win: Win) => {
-    if (LC_ON) renderLandscapeCubeInto(body, win.id);
+    if (LC_ON) { renderLandscapeCubeInto(body, win.id); if (LM_ON) lmCubeSwitch(body, win, "landscape-matrix"); }
     else { body.textContent = ""; body.appendChild(emptyState("lc.offSwitch")); }
   } } : {}),
   // …and the two the hosted panels need: which tab this window shows, and how a
