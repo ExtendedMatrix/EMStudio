@@ -1,9 +1,9 @@
 {
-  "digest": "sha256:0f3b0131721438ed6d24b5b11e9269c19d15cf135369316fc311c8fcbb89e945",
+  "digest": "sha256:ca020639d68ba09c98d856a3fe67bf89a6728f55d6e264df502da73546c6e8ae",
   "versions": {
     "nodes": "1.6.52",
     "node_registry": "1.6.52",
-    "connections": "1.6.57",
+    "connections": "1.6.58",
     "visual_rules": "1.6.48",
     "qualia": "1.6.14",
     "translations": "1.19"
@@ -11,7 +11,7 @@
   "digests": {
     "nodes": "sha256:19c0c1621576bffdb09964560e3c4497060cc96676e9174626b4d210d1d7bc4f",
     "node_registry": "sha256:f65037c4883e168b347e7ba07ee9006ccecea6815fa2954dfc820045806847e5",
-    "connections": "sha256:7037d5fb8065edd1da36ff9c2f620b4ed867ccf86c9dce203929a607d2457766",
+    "connections": "sha256:84d206e9abcb005c7c03da9ca683a0fa35f3197ffe31c70c721236cc02968dca",
     "visual_rules": "sha256:61361d6882958305486fe914f9635e9f0dd31d3f0aca285e3dc80294857710f3",
     "qualia": "sha256:7cd2895ab4c325d96ee7424f69bb162b76eb2f625ca52ef1cd700bb4f64d44d6",
     "translations": "sha256:969627e0dd526afbee6663e9497b542b450c21c12c73816808525f7a128d2ab1"
