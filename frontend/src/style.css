@@ -10228,6 +10228,24 @@ tr.tt-hidden { display: none; }
 .vw-versions-l { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .vw-versions { font-size: 11px; max-width: 260px; }
 .vw-np-tab { top: 40%; }
+/* MICRO-SEG25 · «Sto preparando il rilievo…»: the phases over the scene until
+   the first tile or model is drawn (never the empty state while loading) */
+.vw-prep { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 4; pointer-events: none;
+  min-width: 220px; max-width: min(360px, 80%); padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-panel) 92%, transparent); color: var(--text); font-size: 0.78rem; box-shadow: 0 2px 10px rgba(0,0,0,0.12); }
+.vw-prep-title { font-weight: 600; margin-bottom: 6px; }
+.vw-prep ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.vw-prep li { display: flex; gap: 6px; align-items: baseline; color: var(--text-muted); }
+.vw-prep li::before { content: "○"; width: 1em; flex: none; text-align: center; }
+.vw-prep li[data-state="doing"] { color: var(--text); }
+.vw-prep li[data-state="doing"]::before { content: "◌"; animation: vw-prep-spin 1.2s linear infinite; display: inline-block; }
+.vw-prep li[data-state="done"]::before { content: "✓"; color: var(--ok, #2f7d32); }
+.vw-prep li[data-state="retry"] { color: var(--warn, #9a6a00); }
+.vw-prep li[data-state="retry"]::before { content: "↻"; }
+.vw-prep li[data-state="fail"] { color: var(--danger, #b3261e); }
+.vw-prep li[data-state="fail"]::before { content: "✕"; }
+@keyframes vw-prep-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .vw-prep li[data-state="doing"]::before { animation: none; } }
 .vw-np { position: absolute; top: 0; right: 0; bottom: 0; width: min(260px, 70%); z-index: 5; display: flex; flex-direction: column;
   border-left: 1px solid var(--border); background: var(--bg-panel); font-size: 0.76rem; overflow: auto; }
 .vw-np .np-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); }

@@ -109,8 +109,79 @@ export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilin
                    BASIS_FILES: { "basis_transcoder.js": bj.default, "basis_transcoder.wasm": bw.default } };
         })();
     tilesPromise.catch(() => { tilesPromise = null; });
+    tilesPromise.then(() => { tilesLoaded = true; }, () => { /* asked again next time */ });
   }
   return tilesPromise;
+}
+let tilesLoaded = false;
+/** MICRO-SEG25 · whether the tiles engine is already in hand (the Viewer's
+ *  «preparing» says its phase without waiting for it). */
+export function tilesEngineReady(): boolean { return tilesLoaded; }
+
+/** MICRO-SEG25 · ONE opening per archive for the page: a `.3tz` over HTTP is
+ *  opened once (its tail, its central directory) and its `tileset.json` read
+ *  once, whoever asks first — the read-ahead after a file opens, the Space, the
+ *  Viewer. Measured on Templu Mare v11 (Survey2015, TempluMare.3tz, 190 MB):
+ *  three sequential round trips before the first tile, each behind the bridge
+ *  while it answers the geometry summary. A failed opening is forgotten (the
+ *  next layer asks again: the desktop's bridge may still be starting). */
+const sharedArchives = new Map<string, { p: Promise<{ src: any; archive: any }>; at: number; tag: string | null }>();
+const SHARED_FRESH_MS = 30_000;
+/** what says an archive is still the same file: its ETag, else its size and date */
+const tagOf = (h: Headers): string | null => h.get("etag") ?? ((h.get("content-length") || h.get("last-modified")) ? `${h.get("content-length") ?? ""}|${h.get("last-modified") ?? ""}` : null);
+export async function openArchiveShared(T: any, url: string, fetchFn: typeof fetch = roadFetch as typeof fetch): Promise<{ src: any; archive: any }> {
+  // a blob (a file dropped) is the caller's, and a room's signed road may change its token: not kept
+  const keep = /^https?:/i.test(url) && fetchFn === (roadFetch as typeof fetch);
+  const had = keep ? sharedArchives.get(url) : undefined;
+  if (had) {
+    // opened a moment ago (the read-ahead, the other scene): the same; older: still the same file?
+    // (a .3tz packed again at the same address must not be read by its old directory)
+    if (performance.now() - had.at < SHARED_FRESH_MS) return had.p;
+    const now = await fetch(url, { method: "HEAD", cache: "no-store" }).then((r) => (r.ok ? tagOf(r.headers) : null), () => null);
+    if (now && had.tag && now === had.tag) { had.at = performance.now(); return had.p; }
+    if (sharedArchives.get(url) === had) sharedArchives.delete(url);
+  }
+  const entry = { p: null as unknown as Promise<{ src: any; archive: any }>, at: performance.now(), tag: null as string | null };
+  entry.p = T.sourceFor(url, fetchFn).then(async (src: any) => {
+    const archive = await T.Archive3tz.open(src);
+    const d = src.describe?.() ?? {};
+    entry.tag = d.etag ?? null;
+    // no ETag from the tail's answer: the HEAD's tag, asked once now, is the reference
+    if (!entry.tag && keep) entry.tag = await fetch(url, { method: "HEAD", cache: "no-store" }).then((r) => (r.ok ? tagOf(r.headers) : null), () => null);
+    // the root, read once: the read-ahead's and the layer's are the same bytes
+    const read = archive.readEntry.bind(archive);
+    let root: Promise<Uint8Array | null> | null = null;
+    archive.readEntry = (path: string) => {
+      if (path !== "tileset.json") return read(path);
+      if (!root) { const r: Promise<Uint8Array | null> = read(path); root = r; r.catch(() => { if (root === r) root = null; }); }
+      return root as Promise<Uint8Array | null>;
+    };
+    return { src, archive };
+  });
+  if (keep) {
+    sharedArchives.set(url, entry);
+    entry.p.catch(() => { if (sharedArchives.get(url) === entry) sharedArchives.delete(url); });
+  }
+  return entry.p;
+}
+/** MICRO-SEG25 · the root of a tileset read ahead, never its tiles: a `.3tz`
+ *  opened and its tileset.json read (kept for the layer, `openArchiveShared`);
+ *  a folder's tileset.json asked once (the browser's cache keeps it). */
+export async function prefetchTilesetRoot(url: string): Promise<{ ok: boolean; bytes: number; ms: number; why?: string }> {
+  const t0 = performance.now();
+  try {
+    const T = await tilesEngine();
+    if (isArchive3tzUrl(url)) {
+      const { archive } = await openArchiveShared(T, url);
+      const b: Uint8Array | null = await archive.readEntry("tileset.json");
+      return { ok: !!b, bytes: b?.byteLength ?? 0, ms: Math.round(performance.now() - t0), ...(b ? {} : { why: "no tileset.json" }) };
+    }
+    const r = await fetch(url);
+    const n = r.ok ? (await r.arrayBuffer()).byteLength : 0;
+    return { ok: r.ok, bytes: n, ms: Math.round(performance.now() - t0), ...(r.ok ? {} : { why: String(r.status) }) };
+  } catch (e) {
+    return { ok: false, bytes: 0, ms: Math.round(performance.now() - t0), why: String((e as Error)?.message ?? e).slice(0, 200) };
+  }
 }
 
 /** A locator of a tileset: its entry point, `tileset.json` (the `_link`
@@ -399,7 +470,8 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   } else if ((opts.archive || isArchive3tzUrl(url)) && T.Tiles3tzPlugin) {
     const base = T.archiveBase();
     // MICRO-SPAZIO-FIRMATO · a .3tz of the room's store is read signed
-    const archive = T.sourceFor(url, roadFetch as typeof fetch).then((src: any) => T.Archive3tz.open(archiveSrc = src));
+    // MICRO-SEG25 · opened once for the page (the read-ahead may have done it)
+    const archive = openArchiveShared(T, url).then(({ src, archive: a }) => { archiveSrc = src; return a; });
     // MICRO-OTTIMIZZA-3 · its tiles kept on disk under the archive's identity
     archivePlugin = new T.Tiles3tzPlugin(archive, base, tileCache());
     url = `${base}tileset.json`;

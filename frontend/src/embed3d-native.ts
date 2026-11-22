@@ -66,9 +66,14 @@ export async function engine(): Promise<any> {
                    OBJLoader: objMod.OBJLoader, MTLLoader: mtlMod.MTLLoader,
                    TransformControls: gizmoMod.TransformControls, GLTFExporter: exportMod.GLTFExporter };
         })();
+    enginePromise.then(() => { engineLoaded = true; }, () => { /* said by the caller */ });
   }
   return enginePromise;
 }
+let engineLoaded = false;
+/** MICRO-SEG25 · whether the 3D engine is already in hand (one for the page:
+ *  the Space, the Viewer, the embeds) — the Viewer's «preparing» says it. */
+export function engineReady(): boolean { return engineLoaded; }
 
 export interface ViewerHandle {
   dispose(): void;

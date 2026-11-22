@@ -305,6 +305,10 @@ export interface SpaceSceneHandle {
   /** MICRO-ANTEPRIMA-AGGANCIATA · a tileset's loading now (`rm:<id>`): its mode
    *  and the errors' multiplier; null when the scene has no layer for it */
   tilesState(key: string): { mode: "auto" | "manual"; errorScale: number | "auto"; errorChoice: ErrorChoice } | null;
+  /** MICRO-SEG25 · how each item is drawn now (pending, mesh, tiles, gated, label…) */
+  drawnAs(): Array<{ kind: string; id: string; as: string; url?: string }>;
+  /** MICRO-SEG25 · each tileset of the scene: its root, its files, a root asked again */
+  tilesProgress(): Array<{ id: string; rootReady: boolean; failed: string | null; files: number; bytes: number; busy: boolean; tries: number; retrying: boolean }>;
   /** …and the popover of the chip, opened or closed */
   tilesPopover(open?: boolean): boolean;
   /** MICRO-SPAZIO-3D-2 · the view (aligned, orthographic) and the lens */
@@ -1079,10 +1083,45 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       (probe as Record<string, unknown>).__spaceTilesError = () => ({ governor: gov?.state() ?? null,
         layers: liveLayers().map((l) => ({ id: l.itemId, ...l.layer.status().error, calls: l.layer.drawCalls(), merge: l.layer.status().merge })),
         calls: renderer.info.render.calls });
+      // MICRO-SEG25 · a root that did not come is asked again: after 1, 2, 4,
+      // 8, 16, 32 s (the scene rebuilt, `ensureLayer` opens the layer anew),
+      // then the failure stands and is said as before
+      const rootTries = new Map<string, number>();
+      const rootTimers = new Map<string, ReturnType<typeof setTimeout>>();
+      const ROOT_TRIES = 6;
+      const rootFailed = (l: Live): boolean => !!l.layer.status().failed && !l.layer.rootReady();
+      const watchRoot = (url: string, l: Live): void => {
+        l.layer.onChange(() => {
+          if (disposed || layers.get(url) !== l) return;
+          if (l.layer.rootReady()) { rootTries.delete(url); return; }
+          if (!rootFailed(l) || rootTimers.has(url)) return;
+          const n = (rootTries.get(url) ?? 0) + 1;
+          if (n > ROOT_TRIES) return;
+          rootTries.set(url, n);
+          rootTimers.set(url, setTimeout(() => {
+            rootTimers.delete(url);
+            if (disposed || layers.get(url) !== l || !rootFailed(l) || l.layer.object.parent !== content) return;
+            rebuild?.();
+          }, 1000 * 2 ** (n - 1)));
+        });
+      };
+      /** MICRO-SEG25 · where each tileset of the scene is: its root, its files, a
+       *  root asked again (the Viewer's «preparing» reads it) */
+      const tilesProgress = () => liveLayers().map((l) => {
+        const st = l.layer.status();
+        const u = [...layers.entries()].find(([, x]) => x === l)?.[0] ?? "";
+        return { id: l.itemId, rootReady: l.layer.rootReady(), failed: st.failed ?? null, files: l.layer.loadedFiles().length,
+                 bytes: Number(st.bytes ?? 0), busy: !!st.busy, tries: rootTries.get(u) ?? 0, retrying: rootTimers.has(u) };
+      });
       const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual",
                                  source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"], memoryMB?: number,
                                  errorScale?: number | "auto", errorChoice?: ErrorChoice): Promise<Live | null> => {
         let live = layers.get(url);
+        // MICRO-SEG25 · a layer whose root never came (the bridge not answering
+        // yet: the desktop's sidecar starting, or busy) is opened again, never
+        // kept failed for the session (measured: D.01's tileset «non risponde:
+        // tileset.json» until something else redrew the Viewer, 40 s later)
+        if (live && rootFailed(live)) { dropLayer(url, live); live = undefined; }
         if (live) { resting.delete(url); live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
         // (a rebuild meanwhile may have opened it)
@@ -1105,6 +1144,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         });
         live = { layer, bar, ready, itemId, extra: new Set() };
         layers.set(url, live);
+        watchRoot(url, live);
         return live;
       };
       // (box and points: what the Doc's reader said of its tileset, read by the
@@ -4195,6 +4235,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         navEl.remove();
       };
       api = {
+        tilesProgress,
         camera: camState,
         setCamera: (c: CamState) => applyCam(c),
         frameKeys: (keys: string[], smooth = false) => {
@@ -4364,6 +4405,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     tilesControls: (k) => api.tilesControls?.(k) ?? null,
     tilesPopover: (o) => api.tilesPopover?.(o) ?? false,
     tilesState: (k) => api.tilesState?.(k) ?? null,
+    tilesProgress: () => api.tilesProgress?.() ?? [],
+    drawnAs: () => [...drawn.values()].map((d) => ({ kind: d.item.kind, id: d.item.id, as: d.as, ...(d.url ? { url: d.url } : {}) })),
     view: () => api.view?.() ?? { view: null, ortho: false, fov: 40, lensMm: 33 },
     setView: (v) => api.setView?.(v),
     toggleOrtho: () => api.toggleOrtho?.(),

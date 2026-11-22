@@ -368,8 +368,9 @@ import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE, tilesKindOf } from "./space";
 import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame, type Relocation } from "./file-frame";
 import { trackpadClassifier } from "./wheel-kind";
-import { formatBytes as tilesBytes, isTilesetUrl, onEarth } from "./tiles3d";
-import { mount3dViewer } from "./embed3d-native";
+import { formatBytes as tilesBytes, isTilesetUrl, onEarth, prefetchTilesetRoot, tilesEngine, tilesEngineReady } from "./tiles3d";
+import { engine as engine3d, engineReady, mount3dViewer } from "./embed3d-native";
+import { prefetchPlan, type PrefetchItem, type PrefetchTarget } from "./sources-prefetch";
 import {
   emptyQuery, findOnShelf, folderOf, pillCounts, queryActive, rangeOf, shelfTypeOf, whereOf,
   SHELF_GROUPS, type EntryFacts, type ShelfGroupBy, type ShelfQuery, type ShelfWhere,
@@ -3417,6 +3418,8 @@ window.__EM_SCENE__ = () => {
     renderTiles();
     return true;
   },
+  /** MICRO-SEG25 · the read-ahead after the file opened: started or not, why, what was read */
+  sourcesPrefetch: () => JSON.parse(JSON.stringify(prefetchRun)),
   /** MICRO-VIEWER-UNICO · what a Viewer window shows: the node, its target, the
    *  scene's step and what it asked for, timed; the bar's words */
   viewerState: (winId: string) => {
@@ -9787,6 +9790,8 @@ function loadDocument(
   void storageFollowDocument(path);
   // MICRO-PL17 (G19) · event@1: document-opened, once the store is seated
   setTimeout(() => pyNudge("document-opened", { name: sourceName }), 0);
+  // MICRO-SEG25 · the roots of the documents' tilesets read ahead, in the background
+  setTimeout(() => scheduleSourcesPrefetch(), 0);
   // MICRO-PERCORSI-WINDOWS · the bridge serves the em.json's folders (the
   // store is seated by the end of this call: asked right after it)
   if (path) void Promise.resolve().then(() => serveDocumentFolders(paths.toPosix(path)));
@@ -59647,12 +59652,15 @@ interface VwScene {
   frameTimer?: ReturnType<typeof setTimeout> | null;
   /** Parte 3 · a 3D FILE shown that is no representation model (a resource selected) */
   preview?: { id: string; url: string; label: string } | null;
+  /** MICRO-SEG25 · «Sto preparando il rilievo…» until the first thing is drawn */
+  prepTimer?: ReturnType<typeof setInterval> | null;
 }
 const viewerScenes = new Map<string, VwScene>();
 
 function disposeViewerScene(winId: string): void {
   const s = viewerScenes.get(winId);
   if (!s) return;
+  if (s.prepTimer) { clearInterval(s.prepTimer); s.prepTimer = null; }
   s.handle.dispose();
   s.host.remove();
   viewerScenes.delete(winId);
@@ -60059,7 +60067,184 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
   slot.sig = vwItemsSig(items0);
   slot.handle.update(items0);
   slot.events.push({ t: 0, what: `choice:${slot.choice ?? "none"}` });
+  vwPrep(win, slot);
   return slot;
+}
+
+/** MICRO-SEG25 · THE SCENE BEING PREPARED (E.D., 22 Nov 2026: «la prima volta
+ *  che seleziono D.01 ci vogliono molti secondi, e all'inizio dice che non c'è
+ *  nulla da far vedere»). Until the first tile or model is drawn the scene says
+ *  what it is doing, phase by phase — the files and versions of the document
+ *  (s3Dgraphy's geometry summary), the 3D engine, the tileset's root
+ *  (tileset.json, asked again when it does not answer), the tiles with their
+ *  MB, or the models n of m — never «nothing to show». The card (the
+ *  Inspector's) does not wait for any of it. Pure: `vwPrepPhases`. */
+type VwPrepState = "wait" | "doing" | "done" | "retry" | "fail";
+interface VwPrepPhase { key: "files" | "engine" | "root" | "tiles" | "models"; state: VwPrepState; words: string }
+function vwPrepPhases(s: VwScene): { phases: VwPrepPhase[]; drawn: boolean; failed: boolean; waiting: boolean } {
+  const items = vwSceneItems(s);
+  // a tileset with no address yet (the bridge not answering) is still being prepared
+  const tilesItems = items.filter((i) => i.tiles && (i.url || i.state === "resident"));
+  const modelUrls = items.filter((i) => !i.tiles && i.url).map((i) => i.url!);
+  const got = new Set(s.events.filter((e) => e.what === "drawn").map((e) => e.url));
+  const prog = s.handle.tilesProgress();
+  const files = prog.reduce((n, p) => n + p.files, 0);
+  const bytes = prog.reduce((n, p) => n + p.bytes, 0);
+  const drawnModels = modelUrls.filter((u) => got.has(u)).length;
+  const drawn = files > 0 || drawnModels > 0;
+  // what the scene settled without drawing: a model held at the threshold (it asks
+  // the person), a file missing or refused (its label says so) — not waited for
+  const drawnAs = s.handle.drawnAs();
+  const settled = new Set(drawnAs.filter((d) => d.as !== "pending").map((d) => d.id));
+  // …and a tileset given up as a label (missing, refused) is not waited for either
+  const tilesWaiting = tilesItems.filter((i) => { const d = drawnAs.find((x) => x.id === i.id); return !d || d.as === "pending" || d.as === "tiles"; }).length;
+  const modelsWaiting = items.filter((i) => !i.tiles && i.url && !got.has(i.url) && !settled.has(i.id)).length;
+  const phases: VwPrepPhase[] = [];
+  // the files and their versions: s3Dgraphy's answer on what is on the disk (offline: the recorded state)
+  const filesState: VwPrepState = residentNow() ? "done" : spaceAsking ? "doing" : "done";
+  phases.push({ key: "files", state: filesState, words: t("vw.prep.files") });
+  const engineOk = engineReady() && (!tilesItems.length || tilesEngineReady());
+  phases.push({ key: "engine", state: engineOk ? "done" : "doing", words: t("vw.prep.engine") });
+  let failed = false;
+  if (tilesItems.length) {
+    const p = prog[0];
+    const root: VwPrepState = !p ? (engineOk ? "doing" : "wait") : p.rootReady ? "done"
+      : p.retrying ? "retry" : p.failed && p.tries >= 6 ? "fail" : "doing";
+    if (root === "fail") failed = true;
+    phases.push({ key: "root", state: root, words: root === "retry" ? t("vw.prep.rootRetry", { n: String(p!.tries) })
+      : root === "fail" ? t("vw.prep.rootFail") : t("vw.prep.root") });
+    const mb = bytes > 0 ? mbOf(bytes) : "";
+    phases.push({ key: "tiles", state: files > 0 ? "done" : root === "done" ? "doing" : "wait",
+      words: files > 0 ? t("vw.prep.tilesN", { n: String(files), mb }) : mb ? t("vw.prep.tilesMb", { mb }) : t("vw.prep.tiles") });
+  }
+  if (modelUrls.length && (!tilesItems.length || !drawn)) {
+    phases.push({ key: "models", state: drawnModels === modelUrls.length ? "done" : drawnModels || filesState === "done" ? "doing" : "wait",
+      words: t("vw.prep.models", { n: String(drawnModels), m: String(modelUrls.length) }) });
+  }
+  // still resolving: s3Dgraphy asked, or a file on the disk whose bridge has not answered yet
+  const resolving = filesState === "doing" || (!!currentFilePath && !bridgeBaseNow && !assetStoreBase());
+  const waiting = !drawn && !failed && (resolving || tilesWaiting > 0 || modelsWaiting > 0);
+  return { phases, drawn, failed, waiting };
+}
+function vwPrep(win: Win, s: VwScene): void {
+  const paint = (): void => {
+    if (viewerScenes.get(win.id) !== s) { if (s.prepTimer) clearInterval(s.prepTimer); s.prepTimer = null; return; }
+    const { phases, drawn, failed, waiting } = vwPrepPhases(s);
+    let box = s.host.querySelector<HTMLElement>(":scope > .vw-prep");
+    // the first thing drawn, or nothing left to wait for (the scene's own line
+    // says the failure, or that a file is missing); a minute and a half at most
+    if (drawn || failed || !waiting || performance.now() - s.t0 > 90000) {
+      box?.remove();
+      if (s.prepTimer) clearInterval(s.prepTimer);
+      s.prepTimer = null;
+      if (drawn) s.events.push({ t: Math.round(performance.now() - s.t0), what: "prep:done" });
+      return;
+    }
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "vw-prep";
+      box.dataset.vwPrep = "1";
+      box.setAttribute("role", "status");
+      box.setAttribute("aria-live", "polite");
+      const h = document.createElement("div");
+      h.className = "vw-prep-title";
+      h.textContent = t("vw.prep.title");
+      box.append(h, document.createElement("ol"));
+      s.host.appendChild(box);
+    }
+    const ol = box.querySelector("ol")!;
+    const sig = phases.map((p) => `${p.key}:${p.state}:${p.words}`).join("|");
+    if (ol.dataset.sig === sig) return;
+    ol.dataset.sig = sig;
+    ol.textContent = "";
+    for (const p of phases) {
+      const li = document.createElement("li");
+      li.dataset.vwPrepPhase = p.key;
+      li.dataset.state = p.state;
+      li.textContent = p.words;
+      ol.appendChild(li);
+    }
+  };
+  if (s.prepTimer) clearInterval(s.prepTimer);
+  s.prepTimer = setInterval(paint, 200);
+  paint();
+}
+
+/** MICRO-SEG25 · THE READ-AHEAD after a file opens (`sources-prefetch.ts`):
+ *  once the page is idle and the opening done, s3Dgraphy's answer on the files
+ *  (the question the Viewer and the Space ask anyway), the 3D engine, then —
+ *  one at a time — the ROOT of each tileset a document shows: the archive's
+ *  directory and its tileset.json, never a tile (`prefetchTilesetRoot`, kept
+ *  for the layer by `openArchiveShared`). A file with no tileset starts
+ *  nothing. Measured in the report (cold D.01, before/after). */
+const PREFETCH_DELAY_MS = 1500;
+interface PrefetchRun { gen: number; started: boolean; reason: string; at: number;
+  items: Array<{ rmId: string; url: string; docs: string[]; ok?: boolean; ms?: number; bytes?: number; why?: string }> }
+let prefetchRun: PrefetchRun = { gen: 0, started: false, reason: "idle", at: 0, items: [] };
+function scheduleSourcesPrefetch(): void {
+  const gen = prefetchRun.gen + 1;
+  const st0 = store;
+  prefetchRun = { gen, started: false, reason: "waiting", at: performance.now(), items: [] };
+  const live = (): boolean => prefetchRun.gen === gen && store === st0 && !!store;
+  const idle = (fn: () => void): void => {
+    const ric = (window as unknown as { requestIdleCallback?: (f: () => void, o: { timeout: number }) => number }).requestIdleCallback;
+    if (ric) ric(fn, { timeout: 4000 }); else setTimeout(fn, 200);
+  };
+  const until = async (ok: () => boolean, ms: number): Promise<boolean> => {
+    const t0 = performance.now();
+    while (!ok()) { if (performance.now() - t0 > ms || !live()) return false; await new Promise((r) => setTimeout(r, 250)); }
+    return true;
+  };
+  setTimeout(() => idle(() => void (async () => {
+    if (!live()) return;
+    // (whether the file HAS tilesets: their addresses may wait for the bridge)
+    const plan0 = sourcesPrefetchPlan(false);
+    if (!plan0.length) { prefetchRun.reason = "no-tileset"; return; }
+    prefetchRun.started = true;
+    // a file on the disk: its bridge answering first (the desktop's sidecar may still be starting)
+    if (currentFilePath && !assetStoreBase()) {
+      prefetchRun.reason = "bridge";
+      const base = await bridgeUrl().catch(() => "");
+      let up = false;
+      void (async () => { while (!up && live()) { up = !!base && await fetch(`${base}/health`).then((r) => r.ok, () => false); if (!up) await new Promise((r) => setTimeout(r, 1000)); } })();
+      await until(() => up, 60000);
+      if (!up || !live()) { if (live()) prefetchRun.reason = "no-bridge"; return; }
+      if (!bridgeBaseNow) bridgeBaseNow = base;
+    }
+    // the files and their versions: the bridge answers one question at a time
+    prefetchRun.reason = "files";
+    askResident();
+    await until(() => !spaceAsking, 60000);
+    if (!live()) return;
+    prefetchRun.reason = "engine";
+    try { await engine3d(); await tilesEngine(); } catch { /* the scene says it when it opens */ }
+    const plan = sourcesPrefetchPlan();
+    prefetchRun.items = plan.map((x) => ({ ...x }));
+    prefetchRun.reason = "roots";
+    for (const it of prefetchRun.items) {
+      if (!live()) return;
+      await new Promise<void>((r) => idle(r));
+      const got = await prefetchTilesetRoot(it.url);
+      Object.assign(it, got);
+    }
+    if (live()) prefetchRun.reason = "done";
+  })()), PREFETCH_DELAY_MS);
+}
+/** the tilesets the documents of the graph in front would draw (pure plan: `prefetchPlan`) */
+function sourcesPrefetchPlan(needUrl = true): PrefetchItem[] {
+  const st = store;
+  const sp = st ? currentSpace() : null;
+  if (!st || !sp) return [];
+  const g = { nodes: st.doc.graph.nodes, edges: st.doc.graph.edges };
+  const targets: PrefetchTarget[] = [];
+  for (const n of st.doc.graph.nodes) {
+    if (n.node_type !== "document") continue;
+    const tg = viewerTargetOf(g, n.id);
+    if (tg && (tg.models.length || tg.groups.length)) targets.push({ id: n.id, models: tg.models, groups: tg.groups });
+  }
+  if (!targets.length) return [];
+  const rms = sp.rms.map((r) => ({ id: r.id, tiles: !!r.resource?.tiles, url: r.resource?.tiles ? (spaceFileUrl(r.resource) ?? (needUrl ? null : r.resource.url)) : null, state: r.resource?.state ?? null }));
+  return prefetchPlan(targets, spaceAlternatives(sp).map((a) => ({ group: a.group, tileset: a.tileset })), rms);
 }
 
 /** Every model file of the version shown has been drawn (it arrived and was
