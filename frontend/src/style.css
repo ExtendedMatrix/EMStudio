@@ -12884,6 +12884,57 @@ td.plg-col { color: var(--muted, #888); }
 .scn-follow-btn[data-nvf="toggle"].on { box-shadow: inset 0 -2px 0 var(--accent); }
 .scn-follow-what { flex: 1 1 auto; max-width: 100%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 1px 6px; border-radius: var(--radius-sm, 4px); background: color-mix(in srgb, var(--bg-elevated) 82%, transparent); color: var(--fg-muted, inherit); }
 .scn-follow[data-nvf-idle="true"] .scn-follow-what { font-style: italic; }
+/* MICRO-SEG31 · a 3D area takes the form of its room (compact-viewport.ts): small = the gizmo,
+   «ⓘ» (the scene's state in a popover), «⋯» (the columns of buttons); mid = one line; full = as before */
+.scn-vp-btns { position: absolute; left: 8px; top: 5px; z-index: 5; display: none; gap: 4px; }
+.scn-host[data-vp="small"] > .scn-vp-btns, .scn-host[data-vp="mid"] > .scn-vp-btns { display: flex; }
+.scn-host[data-vp="mid"] > .scn-vp-btns > .scn-vp-more { display: none; }
+.scn-vp-btns > button { position: relative; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid var(--scene-ov-border); background: var(--scene-ov-bg); color: var(--scene-ov-ink); font: inherit; font-size: 0.86rem; line-height: 1; cursor: pointer; }
+.scn-vp-btns > button:hover, .scn-vp-btns > button.on { border-color: var(--border-strong); }
+.scn-vp-btns > button.on { box-shadow: inset 0 -2px 0 var(--accent); }
+.scn-vp-info.warn::after { content: "!"; position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--danger); color: #fff; font-size: 9px; font-weight: 700; line-height: 12px; text-align: center; }
+.scn-vp-pop { position: absolute; left: 8px; top: 34px; z-index: 6; width: min(340px, calc(100% - 16px)); max-height: calc(100% - 42px); overflow: auto;
+  background: var(--scene-ov-bg); color: var(--scene-ov-ink); border: 1px solid var(--scene-ov-border); border-radius: 8px; padding: 7px 10px;
+  font-size: 0.74rem; line-height: 1.4; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); }
+.scn-vp-pop.hidden { display: none; }
+.scn-vp-h { font-weight: 600; margin-bottom: 4px; }
+.scn-vp-rows { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+.scn-vp-rows dt { opacity: 0.75; }
+.scn-vp-rows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.scn-vp-rows dd.miss { color: var(--danger); }
+.scn-vp-why { color: var(--scene-ov-ink); opacity: 0.9; margin: 2px 0; }
+.scn-vp-pop .link { border: 0; background: none; padding: 0; color: var(--info-ink); border-bottom: 1px dotted currentColor; cursor: pointer; font: inherit; }
+.scn-vp-check { display: flex; align-items: center; gap: 4px; margin-top: 6px; cursor: pointer; }
+.scn-vp-note { margin: 6px 0 0; opacity: 0.75; font-size: 0.7rem; }
+.scn-ov .miss[data-sum="trouble"] { font-weight: 600; }
+/* small: no line of text over the scene, no column of buttons (they come back with «⋯»), the labels off */
+.scn-host[data-vp="small"] > .scn-topline,
+.scn-host[data-vp="small"]:not(.vp-cols) .scn-follow > :not([data-nvf="toggle"]),
+.scn-host[data-vp="small"] .scn-follow > [data-nvf="what"],
+.scn-host[data-vp="small"]:not(.vp-cols) > .scn-toolbar,
+.scn-host[data-vp="small"]:not(.vp-cols) > .scn-ttab,
+.scn-host[data-vp="small"]:not(.vp-cols) > .scn-tab,
+.scn-host[data-vp="small"]:not(.vp-cols) > .scn-ntab,
+.scn-host[data-vp="small"]:not(.vp-cols) > .scn-ovbtn,
+.scn-host[data-vp="small"]:not(.vp-cols) > .scn-legend,
+.scn-host[data-vp="small"]:not(.vp-cols) > .tsp-scene,
+.scn-host[data-vp="small"]:not(.vp-cols) > .scn-strips,
+.scn-host[data-vp="small"]:not(.vp-cols) .scn-tchip,
+.scn-host[data-vp="small"]:not(.vp-cols) .scn-nav-col,
+.scn-host[data-vp="small"]:not(.vp-labels) .scn-labels { display: none !important; }
+.scn-host[data-vp="small"] .scn-follow { top: 5px !important; left: 66px; right: auto; }
+.scn-host[data-vp="small"] .scn-follow .scn-follow-words { display: none; }
+.scn-host[data-vp="small"] .scn-follow .scn-follow-btn { padding: 1px 5px; }
+.scn-host[data-vp="small"]:not(.vp-cols) .scn-nav { top: 5px; }
+.scn-host[data-vp="small"]:not(.vp-cols) .scn-nav-box { transform: scale(0.72); transform-origin: top right; }
+/* mid: ONE line of essential information (the epoch's), after «ⓘ» */
+.scn-host[data-vp="mid"] > .scn-topline { left: 40px; flex-wrap: nowrap; overflow: hidden; }
+.scn-host[data-vp="mid"] > .scn-topline > .scn-view,
+.scn-host[data-vp="mid"] > .scn-topline > .scn-stats,
+.scn-host[data-vp="mid"] > .scn-topline > .scn-hw-info { display: none; }
+.scn-host[data-vp="mid"] > .scn-topline > .scn-ov.folded { max-width: 100%; }
 .nv-about { box-shadow: inset 3px 0 0 #2f7fd0 !important; background: rgba(47, 127, 208, 0.08); }
 .nv-about.nv-about-now { background: rgba(47, 127, 208, 0.18); }
 .nv-about-bar { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 6px; padding: 4px 8px; font-size: 0.78rem; border: 1px solid rgba(47, 127, 208, 0.45); border-radius: var(--radius-sm, 4px); background: var(--bg-elevated); }

@@ -28,6 +28,17 @@
 #                                dist-lab/, a lab sidecar, and
 #                                EMStudio_lab.app (own identifier, data, icon),
 #                                beside the community app. Never released.
+#                                At the end it is INSTALLED: copied (ditto)
+#                                to /Applications/EMStudio_lab.app over the
+#                                previous one, quarantine removed, the Dock's
+#                                icon left where it is (same path). If the lab
+#                                is open it asks you to save and quit it (⌘Q)
+#                                and waits; it never closes it for you. Without
+#                                a terminal it does not wait: the build stays in
+#                                target/, install it later with install-lab.
+#   ./em.sh install-lab [app]    Only the installation above, of the lab built
+#                                last (or of [app]). EM_LAB_INSTALL_DIR=<dir>
+#                                installs elsewhere (the checks use it).
 #   ./em.sh embargo-guard [path…] Refuse a build that holds a function under
 #                                embargo (default: a fresh community build);
 #                                devrel, ghrelease and release.yml run it.
@@ -196,6 +207,53 @@ do_build_lab() {
   #: the lab must HAVE what the community must not: the same markers, expected
   node "$FE/scripts/embargo-guard.mjs" --expect --bundle "$FE/dist-lab"
   log "EMStudio lab: $app"
+  do_install_lab "$app"
+}
+
+# ── the lab into /Applications (MICRO-SEG31, E.D. 22 Nov 2026: «la prossima
+# volta creala in Applicazioni») ──
+#
+# ditto (keeps the bundle's signature, extended attributes and symlinks) into a
+# hidden folder beside the target, then a swap: the old app moved out, the new
+# one moved in, so a failed copy never leaves half an app in /Applications. The
+# quarantine is removed (a local build has none, but a copy from a download
+# would), LaunchServices told of the new bundle (icon and name). The Dock keeps
+# its icon: it points at /Applications/EMStudio_lab.app, the same path.
+#
+# An OPEN lab is never closed from here: EMStudio has no save-on-quit (a quit
+# Apple event would drop unsaved changes), so the person saves and quits it;
+# em.sh waits for that (a terminal), or refuses and says how to finish later.
+lab_running() { pgrep -f "^$1/Contents/MacOS/emstudio-desktop" >/dev/null 2>&1; }
+do_install_lab() {
+  [[ "$(uname -s)" == "Darwin" ]] || die "install-lab is macOS only"
+  local src="${1:-$ROOT/apps/desktop/src-tauri/target/release/bundle/macos/EMStudio_lab.app}"
+  local dir="${EM_LAB_INSTALL_DIR:-/Applications}"
+  local dest="$dir/EMStudio_lab.app"
+  [[ -d "$src" ]] || die "no lab to install at $src (./em.sh build --lab first)"
+  [[ -d "$dir" && -w "$dir" ]] || die "cannot write in $dir: the lab stays in $src"
+  if lab_running "$dest"; then
+    if [[ ! -t 0 ]]; then
+      die "EMStudio_lab is open: save and quit it, then ./em.sh install-lab (the new build is in $src)"
+    fi
+    warn "EMStudio_lab is open. Save your work and quit it (⌘Q): the new lab replaces it as soon as it is closed. (Ctrl-C to stop; then ./em.sh install-lab)"
+    while lab_running "$dest"; do sleep 2; done
+    sleep 1
+  fi
+  local stamp; stamp="$(date +%Y%m%d-%H%M%S)"
+  local tmp="$dir/.EMStudio_lab.app.installing-$stamp"
+  log "lab · installing into $dest"
+  ditto "$src" "$tmp" || die "copy failed: $dest left as it was"
+  xattr -dr com.apple.quarantine "$tmp" 2>/dev/null || true
+  local old=""
+  if [[ -e "$dest" ]]; then
+    old="${TMPDIR:-/tmp}/EMStudio_lab.app.replaced-$stamp"
+    mv "$dest" "$old" || die "cannot move the previous lab away: the new one is in $tmp"
+  fi
+  mv "$tmp" "$dest" || { [[ -n "$old" ]] && mv "$old" "$dest"; die "cannot put the new lab in place: the previous one restored"; }
+  [[ -n "$old" ]] && { rm -rf "$old" 2>/dev/null || warn "the previous lab is left in $old (remove it by hand)"; }
+  local lsr=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  [[ -x "$lsr" ]] && "$lsr" -f "$dest" >/dev/null 2>&1 || true
+  log "EMStudio lab installed: $dest"
 }
 
 #: `embargo-guard [path…]`: the community build holds no function under
@@ -1032,6 +1090,7 @@ case "$cmd" in
   bridge-check) PYTHON="${PYTHON:-$ROOT/../s3Dgraphy/.venv/bin/python}" "$ROOT/apps/desktop/check-bridge.sh" "$@" ;;
   apertura) do_apertura ;;
   embargo-guard) do_embargo_guard "$@" ;;
+  install-lab) do_install_lab "$@" ;;
   devrel) do_devrel "$@" ;;
   ghrelease) do_ghrelease "$@" ;;
   release-branch) do_release_branch "$@" ;;

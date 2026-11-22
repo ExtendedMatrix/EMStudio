@@ -336,6 +336,7 @@ import { closeIngress, ingressIsOpen, openIngress } from "./ingress-ui";
 import { proposalNow, proposeConversion, renderGeorefSection, renderSitePinProposal, type GeorefDeps } from "./georef-panel";
 import { cardModelsOf, chooseGraph, geoObjectOf, modelStateWords, renderGeorefCard, renderGeorefInspector, renderGeorefProvRow, renderObjectGeoref,
   type CardModel, type GeorefCardDeps, type GeorefGraph } from "./georef-card";
+import { hasTrouble, loadTrouble, viewportSize, type LoadTrouble, type ViewportSize } from "./compact-viewport";
 import { LEGEND_ROWS, boxesMeet, legendForm, legendRowsShown, loadLegendPref, nearestCorner, saveLegendPref, type LegendForm, type LegendPref } from "./space-legend";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
@@ -27439,6 +27440,8 @@ document.addEventListener("scroll", (e) => {
 /** The strip of a companion 3D: «Follow the text», «Frame this block»,
  *  «Insert this view as a figure», and what it follows now. */
 const followStrips = new Map<string, HTMLElement>();
+/** MICRO-SEG31 · the proxies' labels turned on by hand in a small 3D view, per window */
+const vpLabels = new Map<string, boolean>();
 function paintFollowStrips(): void {
   for (const [winId, strip] of followStrips) {
     if (!strip.isConnected) { followStrips.delete(winId); continue; }
@@ -39239,6 +39242,201 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     hwInfo.setAttribute("aria-label", `${t("hw.infoLabel", { hw: hardwareWord(hw) })} — ${why}`);
   };
   topline.insertBefore(hwInfo, overlay);
+  // MICRO-SEG31 (E.D., 22 Nov 2026: «troppi menu dentro lo spazio 3D: a quella
+  // dimensione non si dovrebbero vedere») · the area takes the form of its room
+  // (`compact-viewport.ts`): small, the gizmo and ONE «ⓘ» (the scene's state in a
+  // popover) with «⋯» (the columns of buttons); mid, one line; full, as before
+  let vpSum: { epochId: string; epochName: string; counts: string; trouble: LoadTrouble } | null = null;
+  let vpNow: ViewportSize | "" = "";
+  const vpBtns = document.createElement("div");
+  vpBtns.className = "scn-vp-btns";
+  const vpInfo = document.createElement("button");
+  vpInfo.type = "button";
+  vpInfo.className = "scn-vp-info";
+  vpInfo.dataset.vp = "info";
+  vpInfo.textContent = "ⓘ";
+  const vpMore = document.createElement("button");
+  vpMore.type = "button";
+  vpMore.className = "scn-vp-more";
+  vpMore.dataset.vp = "more";
+  vpMore.textContent = "⋯";
+  vpBtns.append(vpInfo, vpMore);
+  const vpPop = document.createElement("div");
+  vpPop.className = "scn-vp-pop hidden";
+  vpPop.dataset.vp = "pop";
+  vpPop.setAttribute("role", "dialog");
+  for (const el of [vpBtns, vpPop]) for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) el.addEventListener(ev, (e) => e.stopPropagation());
+  host.append(vpBtns, vpPop);
+  const vpLabelsOn = (): boolean => vpLabels.get(win.id) === true;
+  // the models held back (over a threshold: «Load anyway») ask a decision: in a small view «ⓘ» says it
+  const gatesHeld = (): string => {
+    const g = host.querySelector<HTMLElement>(".scn-gates:not(.hidden)");
+    return g && g.querySelector(".scn-gates-rows")?.childElementCount ? (g.querySelector(".scn-gates-head")?.textContent?.trim() ?? "") : "";
+  };
+  let gatesWatch: MutationObserver | null = null;
+  const paintVpButtons = (): void => {
+    const cols = host.classList.contains("vp-cols");
+    const strips = host.querySelector<HTMLElement>(".scn-strips");
+    if (strips && !gatesWatch && typeof MutationObserver !== "undefined") {
+      gatesWatch = new MutationObserver(() => { const w = !!gatesHeld() || (!!vpSum && hasTrouble(vpSum.trouble)); if (w !== vpInfo.classList.contains("warn")) paintVpButtons(); });
+      gatesWatch.observe(strips, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+    }
+    const held = gatesHeld();
+    const warn = (!!vpSum && hasTrouble(vpSum.trouble)) || !!held;
+    vpInfo.classList.toggle("warn", warn);
+    const warnWords = [vpSum && hasTrouble(vpSum.trouble) ? troubleWords(vpSum.trouble) : "", held].filter(Boolean).join(" · ");
+    vpInfo.title = warn ? `${t("vp.info")}\n⚠ ${warnWords}` : t("vp.info");
+    vpInfo.setAttribute("aria-label", vpInfo.title);
+    vpInfo.setAttribute("aria-expanded", String(!vpPop.classList.contains("hidden")));
+    vpMore.title = t(cols ? "vp.moreOn" : "vp.more");
+    vpMore.setAttribute("aria-label", vpMore.title);
+    vpMore.setAttribute("aria-pressed", String(cols));
+    vpMore.classList.toggle("on", cols);
+    host.classList.toggle("vp-labels", vpLabelsOn());
+  };
+  const troubleWords = (x: LoadTrouble): string => [
+    ...(x.models.length ? [tn("vp.troubleModels", x.models.length, { n: String(x.models.length) })] : []),
+    ...(x.proxies ? [tn("vp.troubleProxies", x.proxies, { n: String(x.proxies) })] : []),
+  ].join(" · ");
+  const vpOutside = (e: PointerEvent): void => {
+    const el = e.target as Node | null;
+    if (el && (vpPop.contains(el) || vpBtns.contains(el))) return;
+    closeVpPop();
+  };
+  const vpKey = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.stopPropagation(); closeVpPop(); } };
+  function closeVpPop(): void {
+    if (vpPop.classList.contains("hidden")) return;
+    vpPop.classList.add("hidden");
+    document.removeEventListener("pointerdown", vpOutside, true);
+    document.removeEventListener("keydown", vpKey, true);
+    paintVpButtons();
+  }
+  const paintVpPop = (): void => {
+    vpPop.textContent = "";
+    const h = document.createElement("div");
+    h.className = "scn-vp-h";
+    h.textContent = t("vp.title");
+    vpPop.appendChild(h);
+    const dl = document.createElement("dl");
+    dl.className = "scn-vp-rows";
+    const row = (key: string, probe: string, value: string | Node): HTMLElement => {
+      const dt = document.createElement("dt");
+      dt.textContent = t(key);
+      const dd = document.createElement("dd");
+      dd.dataset.vpRow = probe;
+      dd.append(value);
+      dl.append(dt, dd);
+      return dd;
+    };
+    const viewName = host.querySelector<HTMLElement>(".scn-view")?.textContent?.trim();
+    if (viewName) row("vp.row.view", "view", viewName);
+    if (vpSum) {
+      row("vp.row.epoch", "epoch", vpSum.epochName);
+      row("vp.row.content", "content", vpSum.counts);
+      if (hasTrouble(vpSum.trouble)) {
+        const dd = row("vp.row.notes", "trouble", "");
+        dd.className = "miss";
+        const b = document.createElement("b");
+        b.textContent = `⚠ ${troubleWords(vpSum.trouble)}`;
+        const why = document.createElement("div");
+        why.className = "scn-vp-why";
+        why.textContent = [
+          ...(vpSum.trouble.models.length ? [t("vp.whyModels", { list: vpSum.trouble.models.join(", ") })] : []),
+          ...(vpSum.trouble.proxies ? [tn("vp.whyProxies", vpSum.trouble.proxies, { n: String(vpSum.trouble.proxies) })] : []),
+        ].join(" ");
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = "link";
+        go.dataset.vp = "outliner";
+        go.textContent = t("vp.showInOutliner");
+        const ep = vpSum.epochId;
+        go.addEventListener("click", (e) => { e.stopPropagation(); closeVpPop(); revealEpochInOutliner(ep); });
+        dd.append(b, why, go);
+      }
+    }
+    // what the scene's line says beyond the counts (an empty scene's why, out of view…)
+    const notes = [...overlay.querySelectorAll<HTMLElement>(".scn-why-empty")].map((x) => x.textContent?.trim() ?? "").filter(Boolean);
+    if (notes.length) row("vp.row.notes", "notes", notes.join(" · ")).classList.add("miss");
+    const held = gatesHeld();
+    if (held) {
+      const dd = row("vp.row.notes", "gates", "");
+      dd.className = "miss";
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "link";
+      b.dataset.vp = "show-gates";
+      b.textContent = `⚠ ${held}`;
+      b.title = t("vp.more");
+      b.addEventListener("click", (e) => { e.stopPropagation(); host.classList.add("vp-cols"); closeVpPop(); });
+      dd.appendChild(b);
+    }
+    const chip = host.querySelector<HTMLElement>(".scn-tchip:not(.hidden)")?.textContent?.trim();
+    if (chip) row("vp.row.tileset", "tileset", chip);
+    const statsEl = host.querySelector<HTMLElement>(".scn-stats");
+    row("vp.row.stats", "stats", statsEl && !statsEl.classList.contains("hidden") ? (statsEl.title || statsEl.textContent || "…") : t("vp.statsOff"));
+    const hw = document.createElement("button");
+    hw.type = "button";
+    hw.className = "link";
+    hw.dataset.vp = "hw";
+    hw.textContent = hwInfo.textContent ?? "";
+    hw.title = hwInfo.title;
+    hw.addEventListener("click", (e) => { e.stopPropagation(); const r = hw.getBoundingClientRect(); openHardwareMenu(r.left, r.bottom + 4); });
+    row("vp.row.hw", "hw", hw);
+    const follows = host.querySelector<HTMLElement>("[data-nvf=what]")?.textContent?.trim();
+    if (follows) row("vp.row.follow", "follow", follows);
+    vpPop.appendChild(dl);
+    if (vpNow === "small") {
+      const lab = document.createElement("label");
+      lab.className = "scn-vp-check";
+      lab.title = t("vp.labelsHint");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.dataset.vp = "labels";
+      cb.checked = vpLabelsOn();
+      cb.addEventListener("change", () => { vpLabels.set(win.id, cb.checked); paintVpButtons(); });
+      lab.append(cb, ` ${t("vp.labels")}`);
+      vpPop.appendChild(lab);
+      const note = document.createElement("p");
+      note.className = "scn-vp-note";
+      note.textContent = t("vp.compactNote");
+      vpPop.appendChild(note);
+    }
+  };
+  const openVpPop = (): void => {
+    paintVpPop();
+    vpPop.classList.remove("hidden");
+    document.addEventListener("pointerdown", vpOutside, true);
+    document.addEventListener("keydown", vpKey, true);
+    paintVpButtons();
+  };
+  vpInfo.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (vpPop.classList.contains("hidden")) openVpPop(); else closeVpPop();
+  });
+  vpMore.addEventListener("click", (e) => {
+    e.stopPropagation();
+    host.classList.toggle("vp-cols");
+    closeVpPop();
+    paintVpButtons();
+  });
+  const setVp = (size: ViewportSize): void => {
+    if (size === vpNow) return;
+    vpNow = size;
+    host.dataset.vp = size;
+    // the columns brought back by «⋯» belong to the small form: they go when it goes
+    if (size !== "small") host.classList.remove("vp-cols");
+    if (size === "full") closeVpPop();
+    else if (!vpPop.classList.contains("hidden")) paintVpPop();
+    paintVpButtons();
+  };
+  const vpRO = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => setVp(viewportSize(host.clientWidth, host.clientHeight))) : null;
+  vpRO?.observe(host);
+  queueMicrotask(() => setVp(viewportSize(host.clientWidth, host.clientHeight)));
+  (host as unknown as Record<string, unknown>).__spaceViewport = () => ({
+    size: vpNow, w: host.clientWidth, h: host.clientHeight, cols: host.classList.contains("vp-cols"), labels: vpLabelsOn(),
+    pop: !vpPop.classList.contains("hidden"), warn: vpInfo.classList.contains("warn"),
+    rows: Object.fromEntries([...vpPop.querySelectorAll<HTMLElement>("[data-vp-row]")].map((d) => [d.dataset.vpRow!, d.textContent ?? ""])),
+  });
   // MICRO-SEG15 · Globe / Plan / Site out of the bar: round buttons in the
   // column under the axes' gizmo (with zoom, hand, frame, grid), the active one
   // pressed; refilled at each refresh of the bar
@@ -40315,7 +40513,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     overlay.classList.add("folded");
     overlay.dataset.sumEpoch = sum.epoch.id;
     const counts = t("s3.foldedSummary", { rm: String(sum.rms.length), px: String(sum.withProxy.length), n: String(sum.units.length) });
+    // MICRO-SEG31 B · the counts are neutral; a warning only when something does not load (why and an action in «ⓘ»)
+    const trouble = loadTrouble(sum, [...modelFailed.keys()].filter((k) => k.startsWith("rm:")).map((k) => k.slice(3)));
+    vpSum = { epochId: sum.epoch.id, epochName: String(sum.epoch.name), counts, trouble };
     overlay.innerHTML = !sumOn ? "" : `<b>${escapeHtml(sum.epoch.name)}</b> · <span data-sum="counts">${escapeHtml(counts)}</span>`
+      + (hasTrouble(trouble) ? ` · <span class="miss" data-sum="trouble">⚠ ${escapeHtml(troubleWords(trouble))}</span> <button type="button" class="link" data-sum="why">${escapeHtml(t("vp.why"))}</button>` : "")
       + (spaceIsolated ? ` · <button type="button" class="link" data-unisolate="1">${escapeHtml(t("s3.showAll"))}</button>` : "")
       // MICRO-SPAZIO-3D-3 p.6 · the free sketches, a light warning that opens their list
       + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "")
@@ -40337,6 +40539,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       x3dMarksMemo = null;
       redrawVis();
     });
+    overlay.querySelector<HTMLButtonElement>("[data-sum=why]")?.addEventListener("click", (e) => { e.stopPropagation(); openVpPop(); });
+    paintVpButtons();
+    if (!vpPop.classList.contains("hidden")) paintVpPop();
     overlay.querySelector<HTMLButtonElement>("[data-unisolate]")?.addEventListener("click", (e) => {
       e.stopPropagation(); spaceIsolated = null; refreshSurfaces("scene");
     });
@@ -40562,7 +40767,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     }, 12000);
   };
   refresh();
-  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); lead.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); if (sceneLeads.get(win.id) === lead) sceneLeads.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); layerSpace.destroy(); if (layerSpaces.get(win.id) === layerSpace) layerSpaces.delete(win.id); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); spaceToolbarRenderers.delete(win.id); rowRO?.disconnect(); } };
+  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); tail.remove(); lead.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); if (sceneTails.get(win.id) === tail) sceneTails.delete(win.id); if (sceneLeads.get(win.id) === lead) sceneLeads.delete(win.id); geoSpace.destroy(); gisSpace.destroy(); layerSpace.destroy(); if (layerSpaces.get(win.id) === layerSpace) layerSpaces.delete(win.id); spaceLayerSections.delete(win.id); visOpeners.delete(win.id); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); spaceToolbarRenderers.delete(win.id); rowRO?.disconnect(); vpRO?.disconnect(); gatesWatch?.disconnect(); closeVpPop(); } };
 }
 
 /** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
