@@ -4728,6 +4728,10 @@ const EN: Dict = {
     "fm.count": "{n} functional units",
     "fm.noLane": "no lane",
     "fm.notAlive": "not alive in the life of the unit",
+    // MICRO-MF09 · a unit in every horizon its life touches
+    "fm.appearance": "also here: its life touches this horizon (first drawn in {lane})",
+    "fm.share": "{pct}% of the horizon",
+    "fm.legend.appearance": "dashed braces: the same unit in another horizon its life touches",
     "fm.legend.instance": "dashed = instance · ↑ from an earlier lane · { n } closed",
     "fm.ev.stratigraphic": "stratigraphic",
     "fm.ev.documentary": "documentary",
@@ -14654,6 +14658,10 @@ const IT: Dict = {
     "fm.count": "{n} unità funzionali",
     "fm.noLane": "senza corsia",
     "fm.notAlive": "non viva nella vita dell'unità",
+    // MICRO-MF09 · un'unità in tutti gli orizzonti che la sua vita tocca
+    "fm.appearance": "anche qui: la sua vita tocca questo orizzonte (disegnata prima in {lane})",
+    "fm.share": "{pct}% dell'orizzonte",
+    "fm.legend.appearance": "graffe tratteggiate: la stessa unità in un altro orizzonte che la sua vita tocca",
     "fm.legend.instance": "tratteggio = istanza · ↑ da una corsia prima · { n } chiusa",
     "fm.ev.stratigraphic": "stratigrafico",
     "fm.ev.documentary": "documentario",

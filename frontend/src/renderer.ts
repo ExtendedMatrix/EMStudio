@@ -2652,7 +2652,9 @@ function drawFunctionalBraces(ctx: CanvasRenderingContext2D, scene: Scene, scale
     ctx.globalAlpha = selIsBrace && b.unit !== sel ? 0.35 : 1;
     ctx.strokeStyle = b.colour;
     ctx.lineWidth = (b.unit === sel ? 2.6 : 1.6) / Math.sqrt(scale);
-    ctx.setLineDash(b.evidence === "symbol" ? [1.5, 3] : []);
+    // MICRO-MF09 · a later appearance of the unit (another horizon its life
+    // touches) is an INSTANCE: dashed, as the instances of the units
+    ctx.setLineDash(b.instance ? (b.evidence === "symbol" ? [3.5, 2, 1, 2] : [3.5, 2]) : b.evidence === "symbol" ? [1.5, 3] : []);
     ctx.beginPath();
     bracePathCanvas(ctx, b.x + 1, b.y, b.h, 1);
     bracePathCanvas(ctx, b.x + b.w - 1, b.y, b.h, -1);

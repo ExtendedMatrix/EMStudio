@@ -13090,6 +13090,9 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .fm-svg .fm-unit, .fm-svg .fm-inst { cursor: pointer; }
 .fm-svg .fm-dim { opacity: .18; transition: opacity .15s; }
 .fm-svg .fm-dead > :is(rect, polygon, ellipse, path) { stroke-dasharray: 1 2.5; }
+/* MICRO-MF09 · the same unit in another horizon its life touches: an instance
+   (dashed braces, drawn in the SVG), its name in italics */
+.fm-svg .fm-appearance > .fm-label { font-style: italic; }
 .fm-svg .fm-hl { fill: var(--accent); opacity: .28; }
 .fm-svg .fm-chainline { stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 0.1 5; }
 .fm-svg .fm-chaintxt { font-size: 9.5px; fill: var(--text-muted); }

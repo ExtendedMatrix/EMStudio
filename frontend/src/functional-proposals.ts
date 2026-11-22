@@ -33,9 +33,18 @@ export type ProposalSource = "activity" | "ai";
 export interface Proposal {
   key: string; source: ProposalSource; activity?: string | null; name: string; scale: string;
   function: string | null; epoch: string | null; lane: string | null; parent: string | null;
+  /** MICRO-MF09 · every lane the epoch it would take touches (absent: an older bridge) */
+  lanes?: string[];
   members: string[]; why: string; unknown?: string[]; model?: string; date?: string | null;
 }
 export type ProposalStatus = "open" | "accepted";
+
+/** MICRO-MF09 · the lanes a proposal stands in, oldest first: all the lanes
+ *  its epoch touches; an older answer, its one lane */
+export function proposalLanes(p: Pick<Proposal, "lane" | "lanes">): Array<string | null> {
+  const ls = p.lanes?.length ? [...p.lanes].reverse() : [p.lane];
+  return ls;
+}
 
 /** What the page gives this module (main.ts binds it). */
 export interface FpHost {
@@ -333,7 +342,7 @@ export function renderFunctionalProposalsInto(body: HTMLElement, _winId: string)
     card.innerHTML =
       `<div class="fp-t"><span class="fp-src">${esc(t(p.source === "ai" ? "fwp.src.ai" : "fwp.src.activity"))}</span>` +
       `<b class="fp-name" data-fp-name="">${esc(p.name)}</b>` +
-      `<span class="fm-note">${esc([t(`fm.scale.${p.scale}`), h.laneName(p.lane), t("fwp.members", { n: p.members.length }),
+      `<span class="fm-note">${esc([t(`fm.scale.${p.scale}`), proposalLanes(p).map((l) => h.laneName(l)).join(" · "), t("fwp.members", { n: p.members.length }),
         ...(p.function ? [p.function] : []), ...(parent ? [t("fwp.inside", { name: parent })] : [])].filter(Boolean).join(" · "))}</span></div>` +
       `<div class="fp-why">${esc(p.why)}</div>` +
       (p.unknown?.length ? `<div class="fm-note fp-unknown">${esc(t("fwp.unknown", { list: p.unknown.slice(0, 8).join(", ") }))}</div>` : "") +

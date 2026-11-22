@@ -47,6 +47,9 @@ export interface LmRow {
   members_rule: "own" | "identity" | "alive" | null;
   members_from: Array<{ graph_id: string; rule: string | null; handle: string | null; handle_name: string | null; members: number }>;
   rooms: string[]; alternative: string | null; life: Span; declared_horizon: string | null;
+  /** MICRO-MF09 · every lane of `lanes` with the share of the overlap (null:
+   *  named only by the declared horizon); absent: an older bridge */
+  present?: Array<{ id: string; share: number | null }>;
 }
 export interface LmColumn { id: string; name: string | null; code: string; rows: string[] }
 export interface LmBinding {
@@ -259,6 +262,14 @@ export function lmSvg(a: LmAnswer, o: LmDrawOpts): string {
   if (shown.some((r) => !r.lane || !a.lanes.some((l) => l.id === r.lane)))
     lanes.push({ id: NOLANE, name: t("lm.noHorizon"), start: null, end: null });
   const laneOf = (r: LmRow) => (r.lane && a.lanes.some((l) => l.id === r.lane) ? r.lane : NOLANE);
+  // MICRO-MF09 · a row in EVERY lane its life touches: the home lane (the
+  // earliest) holds the master, the others its instances
+  const lanesOf = (r: LmRow): string[] => {
+    const home = laneOf(r);
+    const out = [home];
+    if (r.present) for (const l of r.lanes) if (l !== home && a.lanes.some((x) => x.id === l)) out.push(l);
+    return out;
+  };
   const colW = Math.max(110, o.colW ?? 150);
   const rowH = (r: LmRow) => (o.counts && r.kind === "identity" && r.rooms.length ? ROW_H2 : ROW_H);
   // lane heights: the tallest stack of any column in it
@@ -266,7 +277,7 @@ export function lmSvg(a: LmAnswer, o: LmDrawOpts): string {
   for (const ln of lanes) {
     let max = 0;
     for (const c of cols) {
-      const h = c.rows.map((id) => rows.get(id)!).filter((r) => r && laneOf(r) === ln.id)
+      const h = c.rows.map((id) => rows.get(id)!).filter((r) => r && lanesOf(r).includes(ln.id))
         .reduce((s, r) => s + rowH(r), 0);
       max = Math.max(max, h);
     }
@@ -289,6 +300,7 @@ export function lmSvg(a: LmAnswer, o: LmDrawOpts): string {
   });
   // the columns: a dashed separator, the site's code and name on top
   const pos = new Map<string, { x: number; y: number; w: number; h: number }>();
+  const apps: Array<{ id: string; lane: string; p: { x: number; y: number; w: number; h: number }; instance: boolean }> = [];
   cols.forEach((c, ci) => {
     const x = RAIL + ci * colW;
     const name = c.id ? `${c.code ? c.code + " · " : ""}${c.name ?? ""}` : t("lm.noSite");
@@ -299,47 +311,58 @@ export function lmSvg(a: LmAnswer, o: LmDrawOpts): string {
     for (const id of c.rows) {
       const r = rows.get(id);
       if (!r) continue;
-      const ln = laneOf(r);
-      const ly = laneY.get(ln)!;
-      const off = stack.get(ln) ?? 0;
-      stack.set(ln, off + rowH(r));
-      pos.set(id, { x: x + 6, y: ly.y0 + LANE_PAD + off, w: colW - 12, h: rowH(r) - 6 });
+      for (const ln of lanesOf(r)) {
+        const ly = laneY.get(ln)!;
+        const off = stack.get(ln) ?? 0;
+        stack.set(ln, off + rowH(r));
+        const box = { x: x + 6, y: ly.y0 + LANE_PAD + off, w: colW - 12, h: rowH(r) - 6 };
+        if (ln === laneOf(r)) pos.set(id, box);
+        apps.push({ id, lane: ln, p: box, instance: ln !== laneOf(r) });
+      }
     }
   });
   // the life above the home lane: a dotted line up to the newest lane it meets
   let spans = "";
   for (const [id, p] of pos) {
     const r = rows.get(id)!;
-    if (r.lanes.length < 2) continue;
+    // MF09: an answer with `present` draws the instances instead of the line
+    if (r.present || r.lanes.length < 2) continue;
     const top = laneY.get(r.lanes[0]);
     if (!top || top.y0 + 14 >= p.y) continue;
     spans += `<line class="lm-span" data-lm-span="${esc(id)}" x1="${p.x + p.w - 4}" x2="${p.x + p.w - 4}" y1="${p.y}" y2="${top.y0 + 10}"/>`;
   }
   let body = "";
-  for (const [id, p] of pos) {
+  for (const { id, p, lane: inLane, instance } of apps) {
     const r = rows.get(id)!;
     const selected = o.sel === id || r.members_from.some((m) => m.handle && m.handle === o.sel);
+    const share = r.present?.find((x) => x.id === inLane)?.share ?? null;
     const attrs = `data-lm-row="${esc(id)}" data-lm-kind="${r.kind}" data-lm-lane="${esc(r.lane ?? "")}" ` +
+      `data-lm-in="${esc(inLane === NOLANE ? "" : inLane)}"${instance ? ` data-lm-appearance="${esc(r.lane ?? "")}"` : ""}` +
+      `${share !== null ? ` data-lm-share="${share}"` : ""} ` +
       `data-lm-site="${esc(r.site ?? "")}" data-lm-members="${r.members}"` +
       `${r.evidence ? ` data-lm-evidence="${r.evidence}"` : ""}${r.members_rule ? ` data-lm-rule="${r.members_rule}"` : ""}` +
       `${r.uncertain ? ' data-lm-uncertain="1"' : ""}${r.alternative ? ' data-lm-alt="1"' : ""}${selected ? ' data-lm-selected="1"' : ""}`;
+    const homeName = a.lanes.find((l) => l.id === r.lane)?.name ?? r.lane ?? "";
     const tip = [r.name, r.declared_horizon ? `${t("lm.horizon")}: ${r.declared_horizon}` : "",
                  r.evidence ? t(`fm.ev.${r.evidence}`) : "", r.members ? t("lm.members", { n: r.members }) : "",
-                 r.alternative ?? ""].filter(Boolean).join(" · ");
+                 r.alternative ?? "", instance ? t("fm.appearance", { lane: homeName }) : "",
+                 share !== null ? t("fm.share", { pct: Math.round(share * 100) }) : ""].filter(Boolean).join(" · ");
     if (r.kind === "ut") {
       const h = 22, cy = p.y + 4, w = p.w;
-      body += `<g class="lm-ut" ${attrs}><title>${esc(tip)}</title>` +
+      body += `<g class="lm-ut${instance ? " fm-appearance" : ""}" ${attrs}><title>${esc(tip)}</title>` +
         (selected ? `<rect class="fm-hl" x="${p.x - 2}" y="${cy - 2}" width="${w + 4}" height="${h + 4}" rx="4"/>` : "") +
-        `<polygon class="lm-hex" stroke="${esc(utStyle().stroke)}" fill="${esc(utStyle().fill)}" points="${p.x + 6},${cy} ${p.x + w - 6},${cy} ${p.x + w},${cy + h / 2} ${p.x + w - 6},${cy + h} ${p.x + 6},${cy + h} ${p.x},${cy + h / 2}"/>` +
+        `<polygon class="lm-hex" stroke="${esc(utStyle().stroke)}" fill="${esc(utStyle().fill)}"${instance ? ' stroke-dasharray="3.5 2"' : ""} points="${p.x + 6},${cy} ${p.x + w - 6},${cy} ${p.x + w},${cy + h / 2} ${p.x + w - 6},${cy + h} ${p.x + 6},${cy + h} ${p.x},${cy + h / 2}"/>` +
         `<text class="lm-uttxt" x="${p.x + w / 2}" y="${cy + 15}" text-anchor="middle">${esc(fit(r.name, w - 14, 5.4))}</text></g>`;
       continue;
     }
     const col = evidenceColour(r.evidence ?? "symbol");
-    const dash = (r.evidence ?? "symbol") === "symbol" ? ' stroke-dasharray="1.5 3"' : "";
+    // MF09 · an instance dashed; a symbol's instance dashed and dotted
+    const sym = (r.evidence ?? "symbol") === "symbol";
+    const dash = instance ? (sym ? ' stroke-dasharray="3.5 2 1 2"' : ' stroke-dasharray="3.5 2"') : sym ? ' stroke-dasharray="1.5 3"' : "";
     const h = 30, x = p.x, yy = p.y, w = p.w;
     let label = r.name;
     if (o.counts && r.members) label = `${r.name} · ${r.members}`;
-    body += `<g class="lm-id fm-unit" ${attrs}><title>${esc(tip)}</title>` +
+    body += `<g class="lm-id fm-unit${instance ? " fm-appearance" : ""}" ${attrs}><title>${esc(tip)}</title>` +
       (selected ? `<rect class="fm-hl" x="${x}" y="${yy}" width="${w}" height="${h}" rx="4"/>` : "") +
       `<rect class="fm-hit" x="${x}" y="${yy}" width="${w}" height="${h}" fill="transparent"/>` +
       `<path d="${bracePath(x + 1, yy, h, 1)}" fill="none" stroke="${col}" stroke-width="1.6"${dash}/>` +
@@ -391,7 +414,8 @@ function legend(t: LmHost["t"]): HTMLElement {
   el.innerHTML = (["stratigraphic", "documentary", "reconstructive", "symbol"] as Evidence[])
     .map((ev) => `<span class="fm-legend-item" data-lm-legend="${ev}">${sw(ev)}${esc(t(`fm.ev.${ev}`))}</span>`).join("") +
     `<span class="fm-legend-item"><span class="lm-sw-hex" style="border-color:${esc(utStyle().stroke)}"></span>${esc(t("lm.legend.ut"))}</span>` +
-    `<span class="fm-legend-item">${esc(t("lm.legend.chain"))}</span>`;
+    `<span class="fm-legend-item">${esc(t("lm.legend.chain"))}</span>` +
+    `<span class="fm-legend-item" data-lm-legend="appearance">${esc(t("fm.legend.appearance"))}</span>`;
   return el;
 }
 

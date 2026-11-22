@@ -16,7 +16,10 @@
  * hold — a unit in three or more functional units, two units that cannot
  * stand side by side, units of another scale — the view falls back to the
  * INSTANCE (the master in one brace, a dashed copy in the other); the
- * instances between epochs are drawn only inside the braces. THE LANES OF THE
+ * instances between epochs are drawn only inside the braces. MICRO-MF09: a
+ * functional unit stands in EVERY lane its declared life touches; after its
+ * home lane its braces are dashed (an instance) and hold the members alive
+ * there. THE LANES OF THE
  * MATRIX ARE NOT TOUCHED: every unit stays in its own lane (its band, its
  * height, its order among the lanes); only its place inside the lane changes.
  *
@@ -44,7 +47,10 @@ export type FoReason = "three_or_more" | "not_contiguous" | "other_scale" | "oth
   /** the page's own: the plan put a unit in a lane the Matrix draws it elsewhere */
   | "matrix_lane";
 export type FoSlot = { kind: "own"; unit: string } | { kind: "border"; units: [string, string] };
-export interface FoPlanLane { lane: string; slots: FoSlot[]; braces: Array<{ unit: string; slots: number[]; depth: number }> }
+export interface FoPlanLane { lane: string; slots: FoSlot[];
+  /** `instance` (MICRO-MF09): the lane is not the unit's home lane — a later
+   *  appearance, in another horizon its life touches */
+  braces: Array<{ unit: string; slots: number[]; depth: number; instance?: boolean }> }
 export interface FoPlan {
   lanes: FoPlanLane[];
   place: Record<string, { lane: string; slot: number; fu?: string; border?: [string, string] }>;
@@ -59,6 +65,8 @@ export type FoAnswer = FmAnswer & { overlay?: FoPlan };
 export interface FoBrace {
   unit: string; name: string; scale: string | null; evidence: Evidence;
   x: number; y: number; w: number; h: number; depth: number; lane: string;
+  /** MICRO-MF09 · a later appearance of the unit (drawn dashed) */
+  instance: boolean;
   /** what the renderer paints: the colour of the degree, the scale in words */
   colour: string; scaleText: string;
 }
@@ -137,6 +145,7 @@ export function overlayScene(base: Scene, answer: FoAnswer | null, opt: FoOption
   let placed = 0, restN = 0;
   const planOf = new Map(plan.lanes.map((l) => [l.lane, l]));
   const extra: SceneNode[] = [];
+  const taken = new Set<string>();
 
   for (const lane of lanes) {
     const here = nodes.filter((n) => laneOfNode.get(n.id) === lane.id && !opt.continuity(n));
@@ -198,8 +207,13 @@ export function overlayScene(base: Scene, answer: FoAnswer | null, opt: FoOption
         if (it.node) { it.node.x = cx + (cellW - it.node.w) / 2; it.node.y = cy + (cellH - it.node.h) / 2; return; }
         const m = byId.get(it.inst!.unit)!;
         const from = it.inst!.from ? opt.laneName(it.inst!.from) : null;
+        // MICRO-MF09 · a functional unit stands in every horizon its life
+        // touches: the same membership may be an instance in two lanes
+        const base = `fo:${it.inst!.fu}:${it.inst!.unit}`;
+        const id = taken.has(base) ? `${base}@${lane.id}` : base;
+        taken.add(id);
         extra.push({
-          id: `fo:${it.inst!.fu}:${it.inst!.unit}`, instanceOf: it.inst!.unit, node: m.node,
+          id, instanceOf: it.inst!.unit, node: m.node,
           x: cx + (cellW - m.w) / 2, y: cy + (cellH - m.h) / 2, w: m.w, h: m.h,
           functional: { fu: it.inst!.fu, reason: it.inst!.reason, from },
         });
@@ -216,6 +230,7 @@ export function overlayScene(base: Scene, answer: FoAnswer | null, opt: FoOption
       const x0 = Math.min(...rs.map((r) => r.x)), x1 = Math.max(...rs.map((r) => r.x + r.w));
       const y0 = Math.min(...rs.map((r) => r.y)), y1 = Math.max(...rs.map((r) => r.y + r.h));
       braces.push({ unit: b.unit, name: u.name, scale: u.scale, evidence: u.evidence, lane: lane.id, depth: b.depth,
+                    instance: !!b.instance,
                     colour: opt.colour(u.evidence), scaleText: opt.scaleText(u.scale),
                     x: x0 - FO_PAD(b.depth), y: y0 - FO_TOP(b.depth), w: x1 - x0 + 2 * FO_PAD(b.depth),
                     h: y1 - y0 + FO_TOP(b.depth) + FO_BOTTOM(b.depth) });

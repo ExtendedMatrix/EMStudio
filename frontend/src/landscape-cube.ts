@@ -134,6 +134,9 @@ export interface LcBuilding {
 export interface LcLandItem {
   kind: "footprint" | "symbol"; id: string; evidence: Evidence | null; why?: "no_members" | "no_outline";
   parts?: Array<{ graph_id: string | null; members: string[] }>;
+  /** MICRO-MF09 · a plane after the row's home lane: an instance; the share
+   *  of the overlap (null: named only by the declared horizon) */
+  instance?: boolean; share?: number | null;
 }
 export interface LcLandscape {
   scale: "landscape"; lanes: Lane[]; planes: Array<{ lane: string; name: string; start: number | null; end: number | null; items: LcLandItem[] }>;
@@ -353,7 +356,10 @@ function shareTurn(winId: string): void {
 }
 
 /** The lane of `lanes` that is the horizon `hz`: the same id, else the same
- *  name, else the widest overlap of their intervals (exported for the checks). */
+ *  name, else the widest overlap of their intervals (exported for the checks).
+ *  MICRO-MF09 · the ONE place where the widest overlap stays: it chooses the
+ *  PLANE a synchronised cube marks, it never places a unit (a unit is in
+ *  every horizon its life touches: s3dgraphy `functional_units.span_horizons`). */
 export function lcMatchLane(hz: LcHorizon | null | undefined, lanes: ReadonlyArray<{ id: string; name: string; start: number | null; end: number | null }>): string | null {
   if (!hz) return null;
   const byId = lanes.find((l) => l.id === hz.id);
@@ -685,7 +691,8 @@ export function lcLandscapeGeometry(a: LcLandscape, t: LcHost["t"], sc?: LcScope
         for (const rg of a.shapes[it.id]?.rings_by_lane[pl.lane] ?? []) {
           polys.push({ ring: rel(rg, c), layer: sc ? "plan" : "land", attrs: `class="lc-fp" data-lc-unit="${esc(it.id)}" data-lc-lane="${esc(pl.lane)}"` +
             ` data-lc-evidence="${esc(it.evidence ?? "symbol")}" data-lc-kind="footprint" fill="${col}" fill-opacity="0.16" stroke="${col}"` +
-            ` stroke-width="1"><title>${esc(r.name)}</title` });
+            // MICRO-MF09 · an instance (a later plane of its life): dashed, as the building's
+            `${it.instance ? ` data-lc-instance="${esc(r.lanes[r.lanes.length - 1] ?? "")}" stroke-dasharray="3 2" stroke-width="0.7"` : ` stroke-width="1"`}><title>${esc(r.name)}</title` });
         }
         // MF08 · at the scale of the territory: the presence's hull, its name
         const hull = sc ? a.shapes[it.id]?.hull_by_lane?.[pl.lane] : null;
@@ -699,6 +706,7 @@ export function lcLandscapeGeometry(a: LcLandscape, t: LcHost["t"], sc?: LcScope
       } else {
         symbols.push({ at: [-hx, -hy], text: r.kind, cls: "lc-sym", layer: "always",
                        attrs: `data-lc-unit="${esc(it.id)}" data-lc-lane="${esc(pl.lane)}" data-lc-kind="symbol" data-lc-why="${esc(it.why ?? "")}"` +
+                         `${it.instance ? ` data-lc-instance="1"` : ""}` +
                          ` data-lc-evidence="${esc(it.evidence ?? "symbol")}" data-col="${col}" data-title="${esc(`${r.name} · ${t(it.why === "no_outline" ? "lc.why.noOutline" : "lc.why.noMembers")}`)}"` });
       }
     }
@@ -885,8 +893,10 @@ function screenLayer(g: LcGeometry, f: LcFit, rot: number, tilt: number, L: Reco
         const x = x0 + (j % perRow) * 28, yy = front[1] + 14 + Math.floor(j / perRow) * 22;
         const col = /data-col="([^"]+)"/.exec(sy.attrs)?.[1] ?? "#8c8c8c";
         const title = /data-title="([^"]*)"/.exec(sy.attrs)?.[1] ?? "";
-        const shape = sy.text === "ut" ? `<path d="M${x - 6},${yy} l3,-5 h6 l3,5 l-3,5 h-6z" fill="#fff" stroke="${col}"/>`
-          : `<circle cx="${x}" cy="${yy}" r="6" fill="#fff" stroke="${col}"/>`;
+        // MICRO-MF09 · an instance (a later plane of its life): dashed
+        const dash = sy.attrs.includes("data-lc-instance=") ? ' stroke-dasharray="2.5 1.5"' : "";
+        const shape = sy.text === "ut" ? `<path d="M${x - 6},${yy} l3,-5 h6 l3,5 l-3,5 h-6z" fill="#fff" stroke="${col}"${dash}/>`
+          : `<circle cx="${x}" cy="${yy}" r="6" fill="#fff" stroke="${col}"${dash}/>`;
         s += `<g class="lc-sym" ${sy.attrs}>${shape}<title>${title}</title></g>`;
       });
     }
@@ -1431,7 +1441,8 @@ export function lcAnswerOf(winId: string): { scale: LcScale; state: Readonly<Ask
 
 // ── MICRO-MF07 · the plan by horizon: the «Space» of the workspace ─────────
 
-/** the horizon a plan window shows (a lane id); null → the plane with most */
+/** the horizon a plan window shows (a lane id); null → the plane with most
+ *  (MICRO-MF09: it picks the PLANE shown at first, it places no unit) */
 const planLane = new Map<string, string>();
 const planLasso = new Map<string, boolean>();
 export function setPlanView(winId: string, v: { lane?: string | null; lasso?: boolean }): void {

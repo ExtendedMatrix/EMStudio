@@ -40,9 +40,16 @@ export interface FmMember {
   id: string; name: string; type: string | null; lane: string | null;
   from_lane: string | null; from_name: string | null; life: Span; alive: boolean;
   evidence: Evidence | null;
+  /** MICRO-MF09 · every lane its life touches (absent: an older bridge) */
+  lanes?: string[];
 }
+/** MICRO-MF09 · a lane a unit is present in, with the share of the overlap
+ *  (the part of the horizon its life covers: for shading, never for choosing) */
+export interface FmPresent { id: string; share: number | null; share_of_life?: number | null; interval?: Span; by?: "life" | "window" }
 export interface FmUnit {
   id: string; name: string; scale: string | null; life: Span; lane: string | null; lanes: string[];
+  /** MICRO-MF09 · `lanes` with their share (absent: an older bridge) */
+  present?: FmPresent[];
   parents: string[]; children: string[]; members: FmMember[]; count: number; count_all: number;
   evidence: Evidence; evidence_own: Evidence; collapsed: boolean;
 }
@@ -400,16 +407,36 @@ function isClosed(c: DrawCtx, u: FmUnit): boolean {
   return u.collapsed;
 }
 
-function unitBox(c: DrawCtx, id: string, w: number, path: Set<string>): Box {
+/** MICRO-MF09 · the lanes a unit is DRAWN in: every lane its life touches
+ *  (`lanes`), its home lane first — the master; the others its instances.
+ *  An older answer (no `present`): the home lane only, as before. */
+export function fmLanesOf(u: FmUnit): string[] {
+  const out = u.lane ? [u.lane] : [];
+  if (u.present) for (const l of u.lanes) if (!out.includes(l)) out.push(l);
+  return out;
+}
+
+/** MICRO-MF09 · is a unit in lane `lane` (null: its home, always)? */
+function inLane(u: FmUnit, lane: string | null): boolean {
+  return lane === null || u.lane === lane || (!!u.present && u.lanes.includes(lane));
+}
+
+function unitBox(c: DrawCtx, id: string, w: number, path: Set<string>, lane: string | null = null): Box {
   const u = c.by.get(id)!;
   const closed = isClosed(c, u);
   const cols = Math.max(1, Math.floor((w - 2 * PAD + GAP) / (IW + GAP)));
-  const n = closed ? 0 : u.members.length;
+  // MICRO-MF09 · a later appearance (another horizon its life touches) is an
+  // INSTANCE: dashed braces, only the members alive in that lane
+  const appearance = lane !== null && lane !== u.lane;
+  const shown = appearance ? u.members.filter((m) => m.lane === lane || (m.lanes ?? []).includes(lane!)) : u.members;
+  const n = closed ? 0 : shown.length;
   // a row of instances leaves room above for «↑epoch» when one of them says it
-  const RH = IH + GAP + (u.members.some((m) => m.from_name) ? 8 : 0);
-  const top = u.members.some((m) => m.from_name) ? 8 : 0;
+  const RH = IH + GAP + (shown.some((m) => m.from_name) ? 8 : 0);
+  const top = shown.some((m) => m.from_name) ? 8 : 0;
   const mh = n ? top + Math.ceil(n / cols) * RH + 2 : 0;
-  const kids = closed ? [] : u.children.filter((k) => c.by.has(k) && !path.has(k));
+  // inside a master every child (as before); inside an instance only the
+  // children present in that lane
+  const kids = closed ? [] : u.children.filter((k) => c.by.has(k) && !path.has(k) && (!appearance || inLane(c.by.get(k)!, lane)));
   const rows: Array<{ row: Box[]; h: number }> = [];
   let chH = 0;
   if (kids.length) {
@@ -417,7 +444,7 @@ function unitBox(c: DrawCtx, id: string, w: number, path: Set<string>): Box {
     const cw = (w - 2 * (PAD - 2) - (per - 1) * 8) / per;
     const inner = new Set([...path, id]);
     for (let i = 0; i < kids.length; i += per) {
-      const row = kids.slice(i, i + per).map((k) => unitBox(c, k, cw, inner));
+      const row = kids.slice(i, i + per).map((k) => unitBox(c, k, cw, inner, lane !== null && inLane(c.by.get(k)!, lane) ? lane : null));
       const rh = Math.max(...row.map((b) => b.h));
       rows.push({ row, h: rh });
       chH += rh + 8;
@@ -427,13 +454,22 @@ function unitBox(c: DrawCtx, id: string, w: number, path: Set<string>): Box {
   return {
     id, w, h,
     draw(x: number, y: number): string {
-      c.rects.set(id, { x, y, w, h });
+      // the chain of identities joins the masters
+      if (!appearance) c.rects.set(id, { x, y, w, h });
       const col = evidenceColour(u.evidence);
-      const dash = u.evidence === "symbol" ? ' stroke-dasharray="1.5 3"' : "";
+      // MF09 · an instance dashed; a symbol's instance dashed and dotted
+      const dash = appearance ? (u.evidence === "symbol" ? ' stroke-dasharray="3.5 2 1 2"' : ' stroke-dasharray="3.5 2"')
+        : u.evidence === "symbol" ? ' stroke-dasharray="1.5 3"' : "";
+      const share = lane !== null ? u.present?.find((p) => p.id === lane)?.share ?? null : null;
       const dim = c.lit && !c.lit.fus.has(id) ? " fm-dim" : "";
       const selected = c.sel === id;
-      const title = `${u.name}${u.scale ? ` · ${c.t(`fm.scale.${u.scale}`)}` : ""} · ${fmSpan(u.life)} · ${c.t(`fm.ev.${u.evidence}`)}`;
-      let s = `<g class="fm-unit${dim}" data-fm-unit="${esc(id)}" data-fm-evidence="${u.evidence}" data-fm-lit="${c.lit ? (c.lit.fus.has(id) ? 1 : 0) : ""}"` +
+      const home = u.lane ? c.laneName.get(u.lane) ?? u.lane : "";
+      const title = `${u.name}${u.scale ? ` · ${c.t(`fm.scale.${u.scale}`)}` : ""} · ${fmSpan(u.life)} · ${c.t(`fm.ev.${u.evidence}`)}` +
+        (appearance ? ` · ${c.t("fm.appearance", { lane: home })}` : "") +
+        (share !== null ? ` · ${c.t("fm.share", { pct: Math.round(share * 100) })}` : "");
+      let s = `<g class="fm-unit${dim}${appearance ? " fm-appearance" : ""}" data-fm-unit="${esc(id)}" data-fm-evidence="${u.evidence}" data-fm-lit="${c.lit ? (c.lit.fus.has(id) ? 1 : 0) : ""}"` +
+        `${lane !== null ? ` data-fm-in="${esc(lane)}"` : ""}${appearance ? ` data-fm-appearance="${esc(u.lane ?? "")}"` : ""}` +
+        `${share !== null ? ` data-fm-share="${share}"` : ""}` +
         `${closed ? ' data-fm-collapsed="1"' : ""}${selected ? ' data-fm-selected="1"' : ""}>`;
       s += `<title>${esc(title)}</title>`;
       if (selected) s += `<rect class="fm-hl" x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/>`;
@@ -458,7 +494,7 @@ function unitBox(c: DrawCtx, id: string, w: number, path: Set<string>): Box {
           s += `<text class="fm-fold" data-fm-fold="${esc(id)}" x="${x + w - PAD - 1}" y="${y + h - 5}" text-anchor="end">−</text>`;
       }
       if (!closed) {
-        u.members.forEach((m, i) => {
+        shown.forEach((m, i) => {
           const mx = x + PAD + (i % cols) * (IW + GAP);
           const my = y + HEAD + top + Math.floor(i / cols) * RH;
           const mdim = c.lit && !c.lit.units.has(m.id) ? " fm-dim" : "";
@@ -519,11 +555,16 @@ export function fmSvg(a: FmAnswer, width: number, sel: string | null, t: FmHost[
   for (const u of a.units) if (!reach.has(u.id)) { roots.push(u.id); for (const d of descendants(by, u.id)) reach.add(d); }
   const NOLANE = "\u0000none";
   const perLane = new Map<string, Box[]>();
+  // MICRO-MF09 · a unit in EVERY lane its life touches: the home lane holds
+  // the master, the others its instances (never the lane it overlaps most)
   for (const r of roots) {
     const u = by.get(r)!;
-    const lane = u.lane && c.laneName.has(u.lane) ? u.lane : NOLANE;
-    const box = unitBox(c, r, inner, new Set());
-    (perLane.get(lane) ?? perLane.set(lane, []).get(lane)!).push(box);
+    const where = fmLanesOf(u).filter((l) => c.laneName.has(l));
+    if (!where.length) where.push(NOLANE);
+    for (const lane of where) {
+      const box = unitBox(c, r, inner, new Set(), lane === NOLANE ? null : lane);
+      (perLane.get(lane) ?? perLane.set(lane, []).get(lane)!).push(box);
+    }
   }
   if (perLane.has(NOLANE)) lanes.push({ id: NOLANE, name: t("fm.noLane"), start: null, end: null });
   let y = 4;
@@ -597,7 +638,8 @@ export function renderFunctionalMatrixInto(body: HTMLElement, winId: string): vo
   const sw = (ev: Evidence) => `<span class="fm-sw" style="border-color:${evidenceColour(ev)}${ev === "symbol" ? ";border-style:dotted" : ""}"></span>`;
   legend.innerHTML = (["stratigraphic", "documentary", "reconstructive", "symbol"] as Evidence[])
     .map((ev) => `<span class="fm-legend-item" data-fm-legend="${ev}">${sw(ev)}${esc(t(`fm.ev.${ev}`))}</span>`).join("") +
-    `<span class="fm-legend-item">${esc(t("fm.legend.instance"))}</span>`;
+    `<span class="fm-legend-item">${esc(t("fm.legend.instance"))}</span>` +
+    `<span class="fm-legend-item" data-fm-legend="appearance">${esc(t("fm.legend.appearance"))}</span>`;
   const count = document.createElement("span");
   count.className = "fm-count-line";
   count.dataset.fmUnits = String(a.units.length);

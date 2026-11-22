@@ -287,7 +287,19 @@ try {
   ok(await H(page, () => !!document.querySelector('.tile-fmbody [data-lm-chain="RUIN_cf_TEMPLE"]') && !!document.querySelector('.tile-fmbody [data-lm-after="TOMBS_after_COLONY"]')),
      "…the changed_from chain (dotted) and is_after (thin)");
   ok(await H(page, () => { const s = document.querySelector(".tile-fmbody .lm-scroll"); return getComputedStyle(s).overflowX === "auto"; }), "…it scrolls sideways");
-  await shot(page, "lm-1-city");
+  // MICRO-MF09 · a row in EVERY horizon its life touches: the master in its
+  // home lane, the others instances (dashed braces); no dotted line any more
+  const apps = await H(page, () => Object.fromEntries(["TOMBS", "RUIN", "TEMPLE"].map((id) => [id,
+    [...document.querySelectorAll(`.tile-fmbody [data-lm-row="${id}"]`)].map((e) => ({
+      in: e.getAttribute("data-lm-in"), app: e.getAttribute("data-lm-appearance"),
+      dashed: [...e.querySelectorAll("path")].every((p) => (p.getAttribute("stroke-dasharray") ?? "").startsWith("3.5 2")) }))])));
+  eq(apps.TOMBS.map((a) => [a.in, a.app]), [["H2", null], ["H3", "H2"]],
+     "MF09 · «H2–H3?»: drawn in H2 (the master) AND in H3 (an instance of the H2 row)");
+  eq(apps.RUIN.map((a) => [a.in, a.app]), [["H4", null], ["H7", "H4"], ["H56", "H4"]],
+     "MF09 · the ruin on THREE horizons: master in H4, instances in H5–H6 and H7");
+  ok(apps.RUIN.slice(1).every((a) => a.dashed) && !apps.RUIN[0].dashed, "…the instances drawn dashed (a symbol's dashed and dotted), the master not");
+  eq(apps.TEMPLE.length, 1, "…a row whose life touches one horizon only once");
+  eq(await H(page, () => document.querySelectorAll(".tile-fmbody .lm-span").length), 0, "…no dotted life line: the instances say it");
   // C · the bond declared from the page
   eq(await H(page, () => document.querySelector('[data-lm-bind="TEMPLE-GRAPH"]')?.value), "", "C · the bar «Grafi citati»: the temple, no site");
   await page.selectOption('[data-lm-bind="TEMPLE-GRAPH"]', "site_S03");
