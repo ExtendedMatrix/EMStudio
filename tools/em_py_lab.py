@@ -96,11 +96,97 @@ def _functional_matrix_route(handler: Any, route: str, raw: bytes) -> None:
     handler._json(out, status)
 
 
+# ── MICRO-MF03 · the Landscape Matrix and the semantic zoom ─────────────────
+#
+# ``POST /landscape-matrix`` → s3Dgraphy's ``functional_zoom``: the page sends
+# the LANDSCAPE's graph (its em.json with the header: the composition and the
+# bonds graph ↔ site are there), the lanes (the container's horizons, newest
+# first), the graphs it has open (fresher than their files) and the path of
+# the landscape file on disk (a cited graph not open is read from its
+# composition path, relative to it). ``mode: identities`` answers step 2 of
+# the zoom for ONE graph no landscape binds. Computed, never written.
+
+def landscape_matrix_answer(body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    """``{mode?, landscape | graph, lanes?, sources?, base?, sites?, focus?,
+    lang?}`` → ``(status, answer)``."""
+    import os  # noqa: PLC0415
+    try:
+        from s3dgraphy import api  # noqa: PLC0415
+        from s3dgraphy import functional_zoom as Z  # noqa: PLC0415
+    except ImportError as exc:
+        return 501, {"ok": False, "error": f"this s3dgraphy has no functional_zoom: {exc}"}
+    lang = "it" if str(body.get("lang") or "en").lower().startswith("it") else "en"
+    lanes = body.get("lanes") if isinstance(body.get("lanes"), list) else None
+    if body.get("mode") == "identities":
+        doc = body.get("graph")
+        if not isinstance(doc, dict):
+            return 400, {"ok": False, "error": "graph (an em.json) is required"}
+        graph, _w = api.load_emjson(doc)
+        out = Z.identities_view(graph, lanes=lanes or None, lang=lang)
+        out["ok"] = True
+        return 200, out
+    doc = body.get("landscape")
+    if not isinstance(doc, dict):
+        return 400, {"ok": False, "error": "landscape (an em.json) is required"}
+    landscape, _w = api.load_emjson(doc)
+    sources = []
+    for item in body.get("sources") or []:
+        sdoc = item.get("doc") if isinstance(item, dict) else None
+        if isinstance(sdoc, dict):
+            g, _sw = api.load_emjson(sdoc)
+            sources.append((str(item.get("origin") or "open"), g))
+    base = body.get("base")
+    base_dir = os.path.dirname(base) if isinstance(base, str) and base else None
+    sites = body.get("sites") if isinstance(body.get("sites"), list) else None
+    out = Z.landscape_view(landscape, header=doc.get("header") or {}, lanes=lanes or [],
+                           sources=sources, sites=sites, focus=body.get("focus"),
+                           base_dir=base_dir, read_missing=base_dir is not None, lang=lang)
+    out["ok"] = True
+    return 200, out
+
+
+def _landscape_matrix_route(handler: Any, route: str, raw: bytes) -> None:
+    import json  # noqa: PLC0415
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else {}
+    except Exception as exc:  # noqa: BLE001
+        handler._fail(400, f"bad JSON: {exc}")
+        return
+    try:
+        status, out = landscape_matrix_answer(body if isinstance(body, dict) else {})
+    except Exception as exc:  # pragma: no cover — surface to the UI
+        import traceback  # noqa: PLC0415
+        traceback.print_exc()
+        status, out = 500, {"ok": False, "error": f"landscape matrix failed: {exc}"}
+    handler._json(out, status)
+
+
 #: the bridge's POST routes this module adds (em_bridge.py merges them into
 #: POST_ROUTES when this module is importable: the dev stack and the lab sidecar)
 POST_ROUTES: Dict[str, Callable[[Any, str, bytes], None]] = {
     "/functional-matrix": _functional_matrix_route,
+    "/landscape-matrix": _landscape_matrix_route,
 }
+
+
+@lab_api("landscape-matrix", "landscape_matrix")
+class LandscapeMatrix:
+    """``em.app.landscape_matrix`` — the Landscape Matrix from a script:
+    ``em.app.landscape_matrix.compute(landscape_graph, header=…, lanes=…,
+    sources=[…])`` answers what the page draws (s3Dgraphy
+    ``functional_zoom.landscape_view``); ``bind(header, graph_id, site_id)``
+    the header with the bond graph ↔ site (``functional_zoom.bind_site``)."""
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    def compute(self, landscape: Any, **kw: Any) -> Dict[str, Any]:
+        from s3dgraphy import functional_zoom as Z  # noqa: PLC0415
+        return Z.landscape_view(landscape, **kw)
+
+    def bind(self, header: Any, graph_id: str, site_id: Any) -> Dict[str, Any]:
+        from s3dgraphy import functional_zoom as Z  # noqa: PLC0415
+        return Z.bind_site(header, graph_id, site_id)
 
 
 @lab_api("functional-matrix", "functional_matrix")

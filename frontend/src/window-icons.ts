@@ -49,7 +49,9 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
   ai: '<path d="M8 2.5 9.2 6.8 13.5 8 9.2 9.2 8 13.5 6.8 9.2 2.5 8 6.8 6.8z"/>',
   // MICRO-MF01 · EMBARGO (lab only) · the Functional Matrix: two braces, the
   // glyph of a functional unit (U6-bis)
-  ...(LAB ? { "functional-matrix": '<path d="M6 2.5c-1.4 0-2 .6-2 2v2c0 .9-.5 1.5-1.5 1.5 1 0 1.5.6 1.5 1.5v2c0 1.4.6 2 2 2M10 2.5c1.4 0 2 .6 2 2v2c0 .9.5 1.5 1.5 1.5-1 0-1.5.6-1.5 1.5v2c0 1.4-.6 2-2 2"/>' } : {}),
+  ...(LAB ? { "functional-matrix": '<path d="M6 2.5c-1.4 0-2 .6-2 2v2c0 .9-.5 1.5-1.5 1.5 1 0 1.5.6 1.5 1.5v2c0 1.4.6 2 2 2M10 2.5c1.4 0 2 .6 2 2v2c0 .9.5 1.5 1.5 1.5-1 0-1.5.6-1.5 1.5v2c0 1.4-.6 2-2 2"/>',
+              // MICRO-MF03 · the Landscape Matrix: three columns of braces, a hexagon
+              "landscape-matrix": '<path d="M2.5 3h3M2.5 7h3M10.5 3h3M10.5 9h3M6.5 3v10M9.5 3v10"/><path d="M3 12l1-1.5h1.5l1 1.5-1 1.5H4z"/>' } : {}),
 };
 
 /** The 16 px SVG for a window type (empty box for an unknown one). */

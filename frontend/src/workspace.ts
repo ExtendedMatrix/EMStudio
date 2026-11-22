@@ -97,7 +97,10 @@ export type WindowType =
   // functional units as braces in the lanes of the Matrix. Its metadata and
   // its surface exist only in the lab build (`LAB`), reached through
   // `featureOn("functional-matrix")`.
-  | "functional-matrix";
+  | "functional-matrix"
+  // MICRO-MF03 · EMBARGO (landscape-matrix): the Landscape Matrix — the highest
+  // identities of the sites in the lanes of the container's horizons. Lab only.
+  | "landscape-matrix";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -698,7 +701,9 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   console: { icon: windowIcon("console"), labelKey: "win.console" },
   script: { icon: windowIcon("script"), labelKey: "win.script" },
   // MICRO-MF01 · EMBARGO: the lab build only (folded out of the community)
-  ...(LAB ? { "functional-matrix": { icon: windowIcon("functional-matrix"), labelKey: "feat.functionalMatrix.title" } } : {}),
+  ...(LAB ? { "functional-matrix": { icon: windowIcon("functional-matrix"), labelKey: "feat.functionalMatrix.title" },
+              // MICRO-MF03 · the Landscape Matrix
+              "landscape-matrix": { icon: windowIcon("landscape-matrix"), labelKey: "feat.landscapeMatrix.title" } } : {}),
 } as Record<WindowType, { icon: string; labelKey: string }>;
 
 /** The window type the active workspace currently shows — the ACTIVE window's

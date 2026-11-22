@@ -1,0 +1,238 @@
+{
+  "active_graph_id": "TEMPLE-GRAPH",
+  "graphs": {
+    "TEMPLE-GRAPH": {
+      "edges": [
+        {
+          "edge_type": "has_first_epoch",
+          "id": "SU1_fe",
+          "source": "SU1",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "SU2_fe",
+          "source": "SU2",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "USD1_fe",
+          "source": "USD1",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "USD2_fe",
+          "source": "USD2",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "SU20_fe",
+          "source": "SU20",
+          "target": "E20"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "T_fe",
+          "source": "T",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "A_fe",
+          "source": "A",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "P_fe",
+          "source": "P",
+          "target": "E2"
+        },
+        {
+          "edge_type": "has_first_epoch",
+          "id": "F_fe",
+          "source": "F",
+          "target": "E2"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "A_in_T",
+          "source": "A",
+          "target": "T"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "P_in_T",
+          "source": "P",
+          "target": "T"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "SU1_in_A",
+          "source": "SU1",
+          "target": "A"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "SU2_in_P",
+          "source": "SU2",
+          "target": "P"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "USD1_in_F",
+          "source": "USD1",
+          "target": "F"
+        },
+        {
+          "edge_type": "is_in_functional_unit",
+          "id": "USD2_in_F",
+          "source": "USD2",
+          "target": "F"
+        }
+      ],
+      "graph_id": "TEMPLE-GRAPH",
+      "name": "Tempio (sintetico)",
+      "nodes": [
+        {
+          "data": {
+            "rotation": 0.0,
+            "rotation_reference": "grid",
+            "shift_x": 0.0,
+            "shift_y": 0.0,
+            "shift_z": 0.0
+          },
+          "id": "geo_TEMPLE-GRAPH",
+          "name": "geo_position",
+          "node_type": "geo_position"
+        },
+        {
+          "data": {
+            "color": "#FFFFFF",
+            "end_time": 179,
+            "start_time": 117
+          },
+          "id": "E2",
+          "name": "II d.C.",
+          "node_type": "EpochNode"
+        },
+        {
+          "data": {
+            "color": "#FFFFFF",
+            "end_time": 2026,
+            "start_time": 1990
+          },
+          "id": "E20",
+          "name": "Oggi",
+          "node_type": "EpochNode"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "SU1",
+          "name": "SU1",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "SU2",
+          "name": "SU2",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "label": "USD"
+          },
+          "id": "USD1",
+          "name": "USD1",
+          "node_type": "USD"
+        },
+        {
+          "data": {
+            "label": "USD"
+          },
+          "id": "USD2",
+          "name": "USD2",
+          "node_type": "USD"
+        },
+        {
+          "data": {
+            "label": "US (or SU)"
+          },
+          "id": "SU20",
+          "name": "SU20",
+          "node_type": "US"
+        },
+        {
+          "data": {
+            "scale": "building"
+          },
+          "id": "T",
+          "name": "tempio",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "room"
+          },
+          "id": "A",
+          "name": "aedes",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "room"
+          },
+          "id": "P",
+          "name": "portico",
+          "node_type": "FunctionalUnitNodeGroup"
+        },
+        {
+          "data": {
+            "scale": "component"
+          },
+          "id": "F",
+          "name": "fase precedente: drenaggio e forno",
+          "node_type": "FunctionalUnitNodeGroup"
+        }
+      ]
+    }
+  },
+  "header": {
+    "datamodel_versions": {
+      "connections": "1.6.57",
+      "nodes": "1.6.52",
+      "qualia": "1.6.14"
+    },
+    "format": "em.json",
+    "generator": {
+      "tool": "s3dgraphy",
+      "version": "1.6.0.dev136"
+    },
+    "ontology_versions": {
+      "CIDOC-CRM": "7.1.3",
+      "CRMarchaeo": "2.1.1",
+      "CRMdig": "5.0",
+      "CRMem": "1.6.27",
+      "CRMgeo": "1.2",
+      "CRMinf": "1.2.1",
+      "CRMsci": "3.2",
+      "HDT-O": "1.0",
+      "PROV-O": "W3C Recommendation 2013-04-30"
+    },
+    "schema_version": 2,
+    "title": "Tempio (sintetico)",
+    "version": "1.1"
+  },
+  "version": {
+    "id": "sha256:ef77767b095e",
+    "modified_at": "2026-11-22T11:02:31Z",
+    "number": 1
+  }
+}

@@ -95,6 +95,17 @@ export interface FmHost {
 let host: FmHost | null = null;
 export function setFunctionalMatrixHost(h: FmHost): void { host = h; }
 
+/** MICRO-MF03 · the semantic zoom (embargo `landscape-matrix`): the slider in
+ *  the head and the steps 2–4 (landscape-matrix.ts), given by main.ts when the
+ *  function is on. Step 1 is this module's drawing. */
+export interface FmZoom {
+  level(winId: string): number;
+  control(winId: string, onChange: () => void): HTMLElement;
+  draw(body: HTMLElement, winId: string): void;
+}
+let zoom: FmZoom | null = null;
+export function setFmZoom(z: FmZoom | null): void { zoom = z; }
+
 // ── the asker ────────────────────────────────────────────────────────────────
 
 let state: FmState = { status: "idle", answer: null, stale: false };
@@ -320,10 +331,10 @@ export function evidenceColour(ev: Evidence | null | undefined): string {
   }
 }
 
-const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+export const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 /** a brace, `k` = +1 the left one, −1 the right one (the scrivania's) */
-function bracePath(x: number, y: number, h: number, k: number): string {
+export function bracePath(x: number, y: number, h: number, k: number): string {
   const m = y + h / 2, b = x + 5 * k, c = x + 8 * k;
   return `M${c},${y} C${b},${y} ${b},${y + 3} ${b},${y + 8} L${b},${m - 5} C${b},${m - 2} ${x + 2 * k},${m} ${x},${m} ` +
     `C${x + 2 * k},${m} ${b},${m + 2} ${b},${m + 5} L${b},${y + h - 8} C${b},${y + h - 3} ${b},${y + h} ${c},${y + h}`;
@@ -349,7 +360,7 @@ function glyphSvg(type: string | null, x: number, y: number, w: number, h: numbe
 }
 
 /** a text that fits `max` px (≈ 5.6 px a character at 9 px) */
-function fit(s: string, max: number, px = 5.6): string {
+export function fit(s: string, max: number, px = 5.6): string {
   const n = Math.max(3, Math.floor(max / px));
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
@@ -534,6 +545,14 @@ export function renderFunctionalMatrixInto(body: HTMLElement, winId: string): vo
   const t = h.t;
   body.textContent = "";
   body.classList.add("fm-body");
+  // MICRO-MF03 · the zoom: the slider first; steps 2–4 are the landscape's
+  if (zoom) {
+    const bar = document.createElement("div");
+    bar.className = "fm-zoombar";
+    bar.appendChild(zoom.control(winId, () => h.changed()));
+    body.appendChild(bar);
+    if (zoom.level(winId) > 1) { zoom.draw(body, winId); return; }
+  }
   const head = document.createElement("div");
   head.className = "fm-head";
   const note = (key: string, vars?: Record<string, string | number>): HTMLElement => {

@@ -515,6 +515,13 @@ const FM_ON = LAB && featureOn("functional-matrix");
 // Matrix itself, a spatial layout, the view by activity off): behind FO_ON
 import { hitBrace, overlayScene, type FoAnswer } from "./functional-overlay";
 const FO_ON = LAB && featureOn("functional-overlay");
+// MICRO-MF03 · EMBARGO · the Landscape Matrix (an area) and the semantic zoom of
+// the Functional Matrix, from the room to the city: behind LM_ON
+import { bindSite, composition as lmComposition, lmAsk, lmColumnsOf, lmFocus, lmLocalSelection, lmState, lmZoom,
+         relPath as lmRelPath, renderLandscapeMatrixInto, renderZoomInto, setLandscapeMatrixHost, setLmZoom,
+         zoomControl } from "./landscape-matrix";
+import { setFmZoom } from "./functional-matrix";
+const LM_ON = LAB && featureOn("landscape-matrix");
 /** the Matrix windows with the overlay on (per person, this machine) */
 const foWins: Set<string> = FO_ON ? (() => {
   try { return new Set<string>(JSON.parse(localStorage.getItem("emstudio.fo") ?? "[]")); } catch { return new Set<string>(); }
@@ -2747,6 +2754,23 @@ window.__EM_SCENE__ = () => {
   } } : {}),
   // MICRO-MF01 · EMBARGO · the Functional Matrix as the page has it: the
   // bridge's state, the units, what the selection lights (lab, switch on)
+  // MICRO-MF03 · EMBARGO · the Landscape Matrix and the zoom (lab, switch on)
+  ...(LM_ON ? { landscapeMatrix: (winId?: string) => {
+    const st = lmState("landscape");
+    const id = lmState("identities");
+    const level = winId ? lmZoom(winId) : null;
+    return { status: st.status, stale: st.stale, answer: st.answer, identities: { status: id.status, answer: id.answer },
+             focus: lmFocus(), level, columns: level ? lmColumnsOf(level as 1 | 2 | 3 | 4) : null,
+             local: lmLocalSelection(),
+             // the landscape's header as it will be saved, and whether its file is dirty
+             landscape: (() => {
+               const sl = lmLandscapeSlot();
+               const f = sl ? emtree.fileOf(sl) : null;
+               return sl ? { graphId: graphIdOfSlot(sl), composition: lmComposition(lmHeaderOf(sl)), dirty: !!f?.dirty,
+                             others: emtree.slots.filter((x) => x !== sl).map((x) => ({ graphId: graphIdOfSlot(x),
+                               composition: lmComposition(lmHeaderOf(x)), dirty: !!emtree.fileOf(x)?.dirty })) } : null;
+             })() };
+  }, setZoom: (winId: string, level: number) => { setLmZoom(winId, level); refreshSurfaces("functional-matrix"); } } : {}),
   ...(FM_ON ? { functionalMatrix: () => {
     const st = fmState();
     const lit = fmLitOf(selectedId);
@@ -4364,6 +4388,7 @@ function select(nodeId: string | null): void {
   selectInSurfaces("sheet", nodeId);   // MICRO-G-SCHEDE · the sheet is OF the selected unit
   // MICRO-MF01 · EMBARGO · the Functional Matrix lights what the pick reads
   if (FM_ON) selectInSurfaces("functional-matrix", nodeId);
+  if (LM_ON) selectInSurfaces("landscape-matrix", nodeId);   // MICRO-MF03
   draw();
   // «Zoom to selection» · the other windows show the node — after the scenes
   // this pick may rebuild (a DTC set opening, a jump that rebuilds)
@@ -18747,7 +18772,9 @@ if (FM_ON || FO_ON) setFunctionalMatrixHost({
     if (!st) return null;
     return { owner: st, json: () => st.toJSON(), nodes: st.doc.graph.nodes ?? [], edges: st.doc.graph.edges ?? [] };
   },
-  lanes: () => fmHorizonLanes(),
+  // MICRO-MF03 · «the same lanes at every step»: with a landscape open (and
+  // the zoom on) the Functional Matrix reads the container's horizons too
+  lanes: () => fmHorizonLanes() ?? (LM_ON ? lmContainerLanes() : null),
   lang: () => getLocale(),
   selected: () => selectedId,
   select: (id) => { select(id); },
@@ -18759,6 +18786,104 @@ if (FM_ON || FO_ON) setFunctionalMatrixHost({
     draw();
   },
 });
+// ── MICRO-MF03 · EMBARGO · the Landscape Matrix and the semantic zoom ──────
+//
+// The landscape is an OPEN graph whose header says it (kind landscape, or a
+// composition): the active one's when it is one, else the one that cites the
+// active graph, else the first. Its cited graphs open here travel with the
+// question (fresher than their files); the others the bridge reads from their
+// composition path, relative to the landscape's file.
+type LmHeader = Record<string, unknown>;
+const lmHeaderOf = (sl: GraphSlot): LmHeader | undefined => (sl.store.doc as { header?: LmHeader }).header;
+function lmIsLandscape(h: LmHeader | undefined): boolean {
+  if (!LM_ON) return false;
+  return !!h && (String(h.kind ?? "").toLowerCase() === "landscape" || lmComposition(h).length > 0);
+}
+function lmLandscapeSlot(): GraphSlot | null {
+  const act = emtree.active();
+  if (act && lmIsLandscape(lmHeaderOf(act))) return act;
+  const gid = act ? graphIdOfSlot(act) : null;
+  const all = emtree.slots.filter((sl) => lmIsLandscape(lmHeaderOf(sl)));
+  return all.find((sl) => gid && lmComposition(lmHeaderOf(sl)).some((e) => String(e.id) === gid)) ?? all[0] ?? null;
+}
+/** the container's horizons, newest first, the hidden ones out — the lanes of
+ *  every step of the zoom (null: no landscape, or no periodization) */
+function lmContainerLanes(): Array<{ id: string; name: string; start: number | null; end: number | null }> | null {
+  if (!lmLandscapeSlot()) return null;
+  const per = chosenPeriodization(horizonsRead(), horizonView);
+  if (!per) return null;
+  return per.horizons.filter((h) => !horizonView.hidden.has(h.id))
+    .sort((a, b) => (b.start ?? -Infinity) - (a.start ?? -Infinity))
+    .map((h) => ({ id: h.id, name: h.name, start: h.start, end: h.end }));
+}
+/** C · the bond graph ↔ site written in the LANDSCAPE file's header (every
+ *  graph of that file carries the header), the file dirty, one «Annulla» */
+function lmBind(graphId: string, siteId: string | null, entry: { path: string | null; title: string | null }): void {
+  if (!LM_ON) return;
+  const sl = lmLandscapeSlot();
+  if (!sl) return;
+  const file = emtree.fileOf(sl);
+  const slots = file ? emtree.slotsOf(file.id) : [sl];
+  const headerOf = (st: DocumentStore): LmHeader => {
+    const d = st.doc as { header?: LmHeader };
+    d.header = d.header ?? {};
+    return d.header;
+  };
+  const before = slots.map((x) => [x.store, headerOf(x.store).composition] as const);
+  let path = entry.path;
+  if (path && file?.path) path = lmRelPath(file.path.replace(/[\\/][^\\/]*$/, ""), path);
+  const next = bindSite(headerOf(sl.store), graphId, siteId, { path, title: entry.title }).composition;
+  for (const x of slots) headerOf(x.store).composition = next;
+  const wasDirty = file?.dirty ?? false;
+  if (file) file.dirty = true;
+  updateToolbar(); refreshEMTree();
+  const site = lmState("landscape").answer?.sites.find((s) => s.id === siteId);
+  const graph = lmState("landscape").answer?.bindings.find((b) => b.graph_id === graphId)?.title ?? entry.title ?? graphId;
+  const msg = siteId ? t("lm.bind.done", { graph, site: site ? `${site.code} · ${site.name}` : siteId })
+    : t("lm.bind.removed", { graph });
+  toastUndoWith(msg, () => {
+    for (const [st, prev] of before) { if (prev === undefined) delete headerOf(st).composition; else headerOf(st).composition = prev; }
+    if (file) file.dirty = wasDirty;
+    updateToolbar(); refreshEMTree();
+    lmAsk();
+    refreshSurfaces("landscape-matrix"); refreshSurfaces("functional-matrix");
+  });
+  lmAsk();
+  refreshSurfaces("landscape-matrix"); refreshSurfaces("functional-matrix");
+}
+if (LM_ON) {
+  setLandscapeMatrixHost({
+    bridge: bridgeUrl,
+    landscape: () => {
+      const sl = lmLandscapeSlot();
+      if (!sl) return null;
+      return { graphId: graphIdOfSlot(sl), sig: `${sl.id}:${sl.store.rev}`, json: () => sl.store.toJSON(),
+               header: () => lmHeaderOf(sl) ?? {}, base: emtree.fileOf(sl)?.path ?? null };
+    },
+    sources: () => emtree.slots.map((sl) => ({ graphId: graphIdOfSlot(sl), sig: `${sl.id}:${sl.store.rev}`,
+                                               json: () => sl.store.toJSON(), name: slotLabel(sl), path: emtree.fileOf(sl)?.path ?? null })),
+    active: () => {
+      const sl = emtree.active();
+      if (!sl) return null;
+      const st = sl.store;
+      return { graphId: graphIdOfSlot(sl), sig: `${sl.id}:${st.rev}`, json: () => st.toJSON(), name: slotLabel(sl),
+               path: emtree.fileOf(sl)?.path ?? null, has: (id: string) => !!st.node(id) };
+    },
+    lanes: () => lmContainerLanes(),
+    lang: () => getLocale(),
+    selected: () => selectedId,
+    select: (id) => { select(id); },
+    t: (k, v) => t(k, v as Record<string, string>),
+    bind: lmBind,
+    changed: () => { refreshSurfaces("landscape-matrix"); refreshSurfaces("functional-matrix"); },
+  });
+  // the zoom lives in the Functional Matrix (its steps 2–4 are the landscape's)
+  if (FM_ON) setFmZoom({
+    level: (winId) => lmZoom(winId),
+    control: (winId, onChange) => zoomControl(winId, onChange),
+    draw: (body, winId) => renderZoomInto(body, winId),
+  });
+}
 /** MICRO-MF01 · the lanes of the Functional Matrix: the horizons a Matrix
  *  reads by (newest first, the hidden ones left out), else null — the
  *  graph's epochs, as the Matrix draws them. */
@@ -24031,6 +24156,7 @@ function refreshIssues(): void {
   if (FM_ON) {
     currentIssues.push(...fmIssues((id) => String(s.node(id)?.name || id)));
     fmAsk();
+    if (LM_ON) lmAsk();   // MICRO-MF03 · the landscape and the zoom follow the document
   } else if (FO_ON) fmAsk();   // MICRO-MF02 · the overlay reads the same answer
   schedulePluginChecks(s);
   schedulePluginCompute();                           // MICRO-PL25 · the values of phase 2
@@ -31321,6 +31447,8 @@ const TRANSFORM_TYPES: WindowType[] = [
   "script",
   // MICRO-MF01 · EMBARGO · the Functional Matrix (lab build, its switch on)
   ...(FM_ON ? ["functional-matrix" as WindowType] : []),
+  // MICRO-MF03 · EMBARGO · the Landscape Matrix (lab build, its switch on)
+  ...(LM_ON ? ["landscape-matrix" as WindowType] : []),
 ];
 /** MICRO-TIL002 · the types the selector marks «beta» (beta.ts) */
 const BETA_TYPES: ReadonlySet<WindowType> = new Set<WindowType>(["console", "script"]);
@@ -65146,7 +65274,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   console: [],
   script: [],
   // MICRO-MF01 · EMBARGO (lab): no «⋯» of its own yet
-  ...(LAB ? { "functional-matrix": [] } : {}),
+  ...(LAB ? { "functional-matrix": [], "landscape-matrix": [] } : {}),
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -69515,6 +69643,11 @@ registerBuiltinSurfaces({
   ...(LAB ? { renderFunctionalMatrixInto: (body: HTMLElement, win: Win) => {
     if (FM_ON) renderFunctionalMatrixInto(body, win.id);
     else { body.textContent = ""; body.appendChild(emptyState("fm.offSwitch")); }
+  } } : {}),
+  // MICRO-MF03 · EMBARGO · the Landscape Matrix: the lab build only
+  ...(LAB ? { renderLandscapeMatrixInto: (body: HTMLElement, win: Win) => {
+    if (LM_ON) renderLandscapeMatrixInto(body, win.id);
+    else { body.textContent = ""; body.appendChild(emptyState("lm.offSwitch")); }
   } } : {}),
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
