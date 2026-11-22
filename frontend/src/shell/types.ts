@@ -27,6 +27,7 @@ import { registerSurfaceType } from "./surface";
 export { convertedTypes, surfaceTypeOf, mountSurface, unmountSurface } from "./surface";
 import { paintSurface, surfacePlace } from "../surface-scroll";
 import { t } from "../i18n";
+import { LAB } from "../features";
 
 /** Just what this module needs of an EM-Data mount (`emdata.ts` owns the type). */
 export interface TableMount {
@@ -98,6 +99,8 @@ export interface SurfaceDeps {
    *  window. */
   mountConsole(body: HTMLElement, win: Win): { refresh(): void; destroy(): void };
   mountScriptEditor(body: HTMLElement, win: Win): { refresh(): void; destroy(): void };
+  /** MICRO-MF01 · EMBARGO (lab only) · the Functional Matrix of THIS window. */
+  renderFunctionalMatrixInto?(body: HTMLElement, win: Win): void;
   /** Which of its tabs this hosted window is showing (per WINDOW, never per
    *  type — two Inspector windows can sit on different tabs, and that is what
    *  makes the second one a view of its own instead of a duplicate). */
@@ -594,6 +597,40 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
           },
           setFocused(on) { markFocus(body, on); },
           destroy() { mounted?.destroy(); mounted = null; body?.remove(); body = null; },
+        };
+      },
+    });
+  }
+
+  // ── MICRO-MF01 · THE FUNCTIONAL MATRIX (EMBARGO: the lab build only) ─────
+  //
+  // Born converted, the shape of the sheet: a body, a repaint through
+  // `paintSurface`; the selection moving repaints it (a click on a unit lights
+  // the functional units that read it).
+  const fm = deps.renderFunctionalMatrixInto;
+  if (LAB && fm) {
+    registerSurfaceType({
+      id: "functional-matrix",
+      create(): Surface {
+        let body: HTMLElement | null = null;
+        let win: Win | null = null;
+        return {
+          mount(area, w) {
+            win = w;
+            body = document.createElement("div");
+            body.className = "tile-fmbody";
+            area.appendChild(body);
+            this.refresh();
+          },
+          refresh() {
+            if (!body || !win || !body.isConnected) return;
+            const el = body;
+            const ww = win;
+            paintSurface(ww, el, () => fm(el, ww));
+          },
+          select() { this.refresh(); },
+          setFocused(on) { markFocus(body, on); },
+          destroy() { body?.remove(); body = null; win = null; },
         };
       },
     });

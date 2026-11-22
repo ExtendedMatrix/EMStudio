@@ -12999,3 +12999,36 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .ext-plugin-cmds-list .dd-empty { color: var(--text-muted); font-size: 12px; }
 /* MICRO-SEG29 · the Inspector's «Edit vocabulary…» beside a value's term */
 .vt-row .vt-edit { margin-left: 6px; }
+
+/* ── MICRO-MF01 · EMBARGO (lab) · the Functional Matrix ─────────────────── */
+.tile-fmbody { overflow: auto; height: 100%; padding: 6px 8px 12px; box-sizing: border-box; }
+.fm-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; color: var(--text-muted); margin: 2px 0 6px; padding-right: 84px; }
+.fm-head.fm-stale { opacity: .7; }
+.fm-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.fm-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.fm-sw { display: inline-block; width: 14px; height: 9px; border: 2px solid; border-left-width: 3px; border-right-width: 3px; border-radius: 4px; box-sizing: border-box; margin-right: 4px; vertical-align: middle; }
+.fm-note { color: var(--text-muted); font-size: 13px; margin: 10px 4px; max-width: 70ch; }
+.fm-scroll { overflow-x: auto; }
+.fm-svg { display: block; }
+.fm-svg text:not(.fm-inst-name) { font-family: var(--font-ui, system-ui, sans-serif); fill: var(--text); }
+.fm-svg .fm-lanebg { fill: var(--bg-hover); opacity: .35; }
+.fm-svg .fm-lanebg2 { fill: transparent; }
+.fm-svg .fm-laneline { stroke: var(--border); }
+.fm-svg .fm-lanetxt { font-size: 11px; fill: var(--text-muted); font-weight: 600; }
+.fm-svg .fm-lanedate { font-size: 10px; fill: var(--text-faint); }
+.fm-svg .fm-label { font-size: 11px; font-weight: 600; }
+.fm-svg .fm-scale { font-size: 9.5px; fill: var(--text-faint); }
+.fm-svg .fm-count { font-size: 12px; font-weight: 600; cursor: pointer; }
+.fm-svg .fm-fold { font-size: 13px; fill: var(--text-faint); cursor: pointer; }
+.fm-svg .fm-inst-name { font-size: 9px; font-weight: 500; font-family: var(--font-mono, ui-monospace, monospace); pointer-events: none; }
+.fm-svg .fm-from { font-size: 8px; fill: var(--text-faint); }
+.fm-svg .fm-unit, .fm-svg .fm-inst { cursor: pointer; }
+.fm-svg .fm-dim { opacity: .18; transition: opacity .15s; }
+.fm-svg .fm-dead > :is(rect, polygon, ellipse, path) { stroke-dasharray: 1 2.5; }
+.fm-svg .fm-hl { fill: var(--accent); opacity: .28; }
+.fm-svg .fm-chainline { stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 0.1 5; }
+.fm-svg .fm-chaintxt { font-size: 9.5px; fill: var(--text-muted); }
+@media (prefers-reduced-motion: reduce) { .fm-svg .fm-dim { transition: none; } }
+.fm-insp .fm-kv { display: grid; grid-template-columns: minmax(7em, auto) 1fr; gap: 2px 10px; font-size: 12px; margin: 2px 0; }
+.fm-insp .fm-k { color: var(--text-muted); }
+.fm-insp .fm-v { overflow-wrap: anywhere; }

@@ -80,6 +80,11 @@ export interface RenderState {
   /** P4.3 · node id → who else has it selected, in a live room. Awareness, never
    *  a lock: nothing consults this before allowing an edit. */
   peerSelections?: Map<string, string[]> | null;
+  /** MICRO-MF01 · EMBARGO (lab only) · the members of the functional unit
+   *  selected (in the Functional Matrix, the Outliner…): a ring in the
+   *  evidence's accent, so the Matrix shows what the braces read — from
+   *  earlier lanes too. Chrome, never the node's own style. */
+  functionalLit?: Set<string> | null;
   /** edge_type predicate; edges failing it are skipped */
   edgeVisible: (edgeType: string | undefined) => boolean;
   /** index (into scene.edges) of the hovered connector, if any */
@@ -1659,6 +1664,21 @@ export function render(
       ctx.textBaseline = "middle";
       ctx.fillText(String(n.badge), bx, by + r * 0.05);
     }
+  }
+
+  // MICRO-MF01 · the members of the selected functional unit: a soft ring
+  if (state.functionalLit?.size) {
+    ctx.save();
+    ctx.strokeStyle = accentColor();
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 3 / vp.scale;
+    for (const n of shown) {
+      if (n.collapsed || n.instanceOf) continue;
+      if (!state.functionalLit.has(n.id)) continue;
+      const vb = visibleBoxOf(n);
+      ctx.strokeRect(vb.x - 5, vb.y - 5, vb.w + 10, vb.h + 10);
+    }
+    ctx.restore();
   }
 
   // P4.3 · AWARENESS: a dashed ring on the nodes somebody ELSE has selected.

@@ -20,6 +20,7 @@
 
 import type { ViewKind } from "./types";
 import { windowIcon } from "./window-icons";
+import { LAB } from "./features";
 
 /** The kinds of editor a window can host. DTC is a MODE of the graph window
  *  (WIN2), not a type of its own. */
@@ -91,7 +92,12 @@ export type WindowType =
   // EDITOR (`script-editor.ts`), two editors an area can be. «Run Script» runs
   // in the console's session and prints in it.
   | "console"
-  | "script";
+  | "script"
+  // MICRO-MF01 · EMBARGO (functional-matrix): the Functional Matrix — the
+  // functional units as braces in the lanes of the Matrix. Its metadata and
+  // its surface exist only in the lab build (`LAB`), reached through
+  // `featureOn("functional-matrix")`.
+  | "functional-matrix";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -691,7 +697,9 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   "plugin-panel": { icon: windowIcon("plugin-panel"), labelKey: "win.pluginPanel" },
   console: { icon: windowIcon("console"), labelKey: "win.console" },
   script: { icon: windowIcon("script"), labelKey: "win.script" },
-};
+  // MICRO-MF01 · EMBARGO: the lab build only (folded out of the community)
+  ...(LAB ? { "functional-matrix": { icon: windowIcon("functional-matrix"), labelKey: "feat.functionalMatrix.title" } } : {}),
+} as Record<WindowType, { icon: string; labelKey: string }>;
 
 /** The window type the active workspace currently shows — the ACTIVE window's
  *  own type (see the registry below), not the preset's, so a transformed or

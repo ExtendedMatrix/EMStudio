@@ -506,6 +506,11 @@ import { EXPERIMENTAL, experimentalStored, setExperimental } from "./experimenta
 import { APP_NAME, EMBARGO_ON, LAB, embargoStored, featureOn, featuresOf, featuresWire, setEmbargo } from "./features";
 /** EXPERIMENTAL · the site and its footprint, through the register (features.ts) */
 const SITE_ON = featureOn("site");
+// MICRO-MF01 · EMBARGO · the Functional Matrix, the lab build only: every use
+// below is behind FM_ON (`LAB` first, so the community build folds it away)
+import { fmAsk, fmInspectorInto, fmIssues, fmLitOf, fmMatrixLit, fmState, renderFunctionalMatrixInto,
+         setFunctionalMatrixHost } from "./functional-matrix";
+const FM_ON = LAB && featureOn("functional-matrix");
 import { betaMark } from "./beta";
 import { BUCKET_MIME, bucketView, bucketViewState } from "./bucket-view";
 import { initSiteDoor, onSiteMark, siteChip, siteDoorState, siteMarks, spaceButtons } from "./site-door";
@@ -2707,6 +2712,15 @@ window.__EM_SCENE__ = () => {
 // the selection, a node's first epoch, its stored position and the undo depth.
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
+  // MICRO-MF01 · EMBARGO · the Functional Matrix as the page has it: the
+  // bridge's state, the units, what the selection lights (lab, switch on)
+  ...(FM_ON ? { functionalMatrix: () => {
+    const st = fmState();
+    const lit = fmLitOf(selectedId);
+    return { status: st.status, stale: st.stale, units: st.answer?.units.length ?? null,
+             answer: st.answer, lit: lit ? { units: [...lit.units], fus: [...lit.fus] } : null,
+             matrixLit: [...(fmMatrixLit(selectedId) ?? [])] };
+  } } : {}),
   /** MICRO-SEG13 · the floating panels open now, bottom first (their `data-floating`) */
   floatingOpen: () => floatingOpen().map((el) => el.dataset.floating ?? ""),
   selected: () => [...selectedIds],
@@ -3720,6 +3734,8 @@ function paintGraphWindow(p: GraphPaint): void {
       // MICRO-PL02 · ◆ ◆? ◇ beside a property (the Inspector's sign)
       vocabMarks: vocabMarksNow(),
       peerSelections: hubPeerSelections,   // P4.3 · awareness, never a lock
+      // MICRO-MF01 · EMBARGO · the members of the selected functional unit
+      functionalLit: FM_ON ? fmMatrixLit(selId) : null,
       highlightEdgeType: p.highlightEdgeType ?? null,
       // G3 · the liquid Graph: hover, selection, the panel's filter, the local graph
       liquid: p.mode === "graph" ? {
@@ -4312,6 +4328,8 @@ function select(nodeId: string | null): void {
   refreshInspector();
   nodeList.setSelected(nodeId);
   selectInSurfaces("sheet", nodeId);   // MICRO-G-SCHEDE · the sheet is OF the selected unit
+  // MICRO-MF01 · EMBARGO · the Functional Matrix lights what the pick reads
+  if (FM_ON) selectInSurfaces("functional-matrix", nodeId);
   draw();
   // «Zoom to selection» · the other windows show the node — after the scenes
   // this pick may rebuild (a DTC set opening, a jump that rebuilds)
@@ -4690,6 +4708,7 @@ function renderInspectorInto(host: HTMLElement): void {
     renderChainSection(host, chainUi(owning), selectedId); // CATENA
     renderPoseSection(host, owning, selectedId);         // MICRO-PL10 · a landmark pose: placed, missing
     renderPluginSections(host, owning, selectedId);      // MICRO-PL25 · inspector.section@1
+    if (FM_ON) fmInspectorInto(host, selectedId);        // MICRO-MF01 · «how we know it», «read by»
     const chip = aiChipFor(selectedId);
     if (chip) host.querySelector(".insp-head .insp-chip")?.after(chip);
     renderReviewLine(host, selectedId);   // TRADUZIONI · waits for / verified by
@@ -18643,6 +18662,38 @@ setTreeBridgeResolver(bridgeUrl);
 // MICRO-cronologia · the Chronology view asks s3Dgraphy for the propagated
 // chronology through the same bridge, by the same rule.
 setChronologyBridgeResolver(bridgeUrl);
+// MICRO-MF01 · EMBARGO · the Functional Matrix asks the same bridge, of the
+// active graph; an answer repaints its areas, the issues, the Inspector
+if (FM_ON) setFunctionalMatrixHost({
+  bridge: bridgeUrl,
+  doc: () => {
+    const st = store;
+    if (!st) return null;
+    return { owner: st, json: () => st.toJSON(), nodes: st.doc.graph.nodes ?? [], edges: st.doc.graph.edges ?? [] };
+  },
+  lanes: () => fmHorizonLanes(),
+  lang: () => getLocale(),
+  selected: () => selectedId,
+  select: (id) => { select(id); },
+  t: (k, v) => t(k, v as Record<string, string>),
+  changed: () => {
+    refreshSurfaces("functional-matrix");
+    refreshIssues();
+    refreshInspector();
+    draw();
+  },
+});
+/** MICRO-MF01 · the lanes of the Functional Matrix: the horizons a Matrix
+ *  reads by (newest first, the hidden ones left out), else null — the
+ *  graph's epochs, as the Matrix draws them. */
+function fmHorizonLanes(): Array<{ id: string; name: string; start: number | null; end: number | null }> | null {
+  const w = windowsOf().find((x) => x.type === "graph" && hzWin(x.id));
+  const per = w ? bandsPerOfWin(w.id) : null;
+  if (!per) return null;
+  return per.horizons.filter((h) => !horizonView.hidden.has(h.id))
+    .sort((a, b) => (b.start ?? -Infinity) - (a.start ?? -Infinity))
+    .map((h) => ({ id: h.id, name: h.name, start: h.start, end: h.end }));
+}
 // MICRO-LAB orizzonti · an answer of the bridge repaints the horizons
 onChronologyUpdate(() => {
   // MICRO-LAB orizzonti come bande · a window reading by horizons waits for these
@@ -23898,6 +23949,13 @@ function refreshIssues(): void {
   // MICRO-PL17 · the plugins' checks (check@1): their last answer for this
   // store, and a new one asked when the document moved
   currentIssues.push(...pluginIssuesFor(s));
+  // MICRO-MF01 · EMBARGO · the coherence of the functional units (s3Dgraphy's
+  // functional_units.coherence, the bridge's last answer), and a new answer
+  // asked when the document moved
+  if (FM_ON) {
+    currentIssues.push(...fmIssues((id) => String(s.node(id)?.name || id)));
+    fmAsk();
+  }
   schedulePluginChecks(s);
   schedulePluginCompute();                           // MICRO-PL25 · the values of phase 2
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
@@ -31185,6 +31243,8 @@ const TRANSFORM_TYPES: WindowType[] = [
   // MICRO-TIL002 · Python, as in Blender: the console and the Script Editor
   "console",
   "script",
+  // MICRO-MF01 · EMBARGO · the Functional Matrix (lab build, its switch on)
+  ...(FM_ON ? ["functional-matrix" as WindowType] : []),
 ];
 /** MICRO-TIL002 · the types the selector marks «beta» (beta.ts) */
 const BETA_TYPES: ReadonlySet<WindowType> = new Set<WindowType>(["console", "script"]);
@@ -64969,6 +65029,8 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   // MICRO-TIL002 · the console and the editor carry their verbs in their own head
   console: [],
   script: [],
+  // MICRO-MF01 · EMBARGO (lab): no «⋯» of its own yet
+  ...(LAB ? { "functional-matrix": [] } : {}),
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -65020,7 +65082,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
       ],
     },
   ],
-};
+} as Record<WindowType, WinMenu[]>;
 
 /** The regions traced on a Doc's image (`annotation_region`, region2d, whose
  *  `resource_id` is the document: `setReadingGeometry(…, docId, …)`). */
@@ -69320,6 +69382,12 @@ registerBuiltinSurfaces({
   renderPluginPanelInto: (body: HTMLElement, win: Win) => renderPluginPanelInto(body, win),   // MICRO-PL25
   mountConsole: (body: HTMLElement, win: Win) => mountConsoleInto(body, win),           // MICRO-TIL002
   mountScriptEditor: (body: HTMLElement, win: Win) => mountScriptEditorInto(body, win), // MICRO-TIL002
+  // MICRO-MF01 · EMBARGO · the Functional Matrix: the lab build only; with the
+  // switch off a saved area of it says why it is empty
+  ...(LAB ? { renderFunctionalMatrixInto: (body: HTMLElement, win: Win) => {
+    if (FM_ON) renderFunctionalMatrixInto(body, win.id);
+    else { body.textContent = ""; body.appendChild(emptyState("fm.offSwitch")); }
+  } } : {}),
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
   // that a panel can be repainted, told the selection moved, and taken down.

@@ -1,0 +1,1091 @@
+{
+ "header": {
+  "title": "Villa e castello (sintetico, MICRO-MF01)",
+  "format": "em.json",
+  "version": "1.1",
+  "schema_version": 2,
+  "generator": {
+   "tool": "s3dgraphy",
+   "version": "1.6.0.dev136"
+  },
+  "datamodel_versions": {
+   "nodes": "1.6.52",
+   "connections": "1.6.56",
+   "qualia": "1.6.14"
+  },
+  "ontology_versions": {
+   "CIDOC-CRM": "7.1.3",
+   "CRMarchaeo": "2.1.1",
+   "CRMsci": "3.2",
+   "CRMdig": "5.0",
+   "CRMgeo": "1.2",
+   "CRMinf": "1.2.1",
+   "HDT-O": "1.0",
+   "PROV-O": "W3C Recommendation 2013-04-30",
+   "CRMem": "1.6.27"
+  }
+ },
+ "graphs": {
+  "VC": {
+   "graph_id": "VC",
+   "nodes": [
+    {
+     "id": "geo_VC",
+     "node_type": "geo_position",
+     "name": "geo_position",
+     "data": {
+      "shift_x": 0.0,
+      "shift_y": 0.0,
+      "shift_z": 0.0,
+      "rotation": 0.0,
+      "rotation_reference": "grid"
+     }
+    },
+    {
+     "id": "EP_ROM",
+     "node_type": "EpochNode",
+     "name": "Romana",
+     "data": {
+      "start_time": 0,
+      "end_time": 400,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "EP_TARD",
+     "node_type": "EpochNode",
+     "name": "Tardoantica",
+     "data": {
+      "start_time": 400,
+      "end_time": 600,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "EP_MED",
+     "node_type": "EpochNode",
+     "name": "Medievale",
+     "data": {
+      "start_time": 1100,
+      "end_time": 1400,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "USM1",
+     "node_type": "US",
+     "name": "USM1",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "USM2",
+     "node_type": "US",
+     "name": "USM2",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "USM4",
+     "node_type": "US",
+     "name": "USM4",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "US3",
+     "node_type": "US",
+     "name": "US3",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "USM10",
+     "node_type": "US",
+     "name": "USM10",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "USM20",
+     "node_type": "US",
+     "name": "USM20",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "US7",
+     "node_type": "US",
+     "name": "US7",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "USD5",
+     "node_type": "USD",
+     "name": "USD5",
+     "data": {
+      "label": "USD"
+     }
+    },
+    {
+     "id": "USV6",
+     "node_type": "USVs",
+     "name": "USV6",
+     "data": {
+      "label": "USV/s"
+     }
+    },
+    {
+     "id": "BR2",
+     "node_type": "BR",
+     "name": "BR2",
+     "data": {
+      "label": "continuity node"
+     }
+    },
+    {
+     "id": "BR3",
+     "node_type": "BR",
+     "name": "BR3",
+     "data": {
+      "label": "continuity node"
+     }
+    },
+    {
+     "id": "dfc6acd6703509239393b02304cb53ae",
+     "node_type": "LocationNodeGroup",
+     "name": "Colle del castello",
+     "description": "Site",
+     "data": {
+      "kind": "toponym",
+      "propagation": "additive",
+      "group_kind": "toponym",
+      "level": "sito",
+      "name": "Colle del castello",
+      "group_uuid": "dfc6acd6703509239393b02304cb53ae"
+     }
+    },
+    {
+     "id": "VILLA",
+     "node_type": "FunctionalUnitNodeGroup",
+     "name": "villa",
+     "data": {
+      "scale": "building"
+     }
+    },
+    {
+     "id": "CASTLE",
+     "node_type": "FunctionalUnitNodeGroup",
+     "name": "castello",
+     "data": {
+      "scale": "building"
+     }
+    },
+    {
+     "id": "STABLE",
+     "node_type": "FunctionalUnitNodeGroup",
+     "name": "stalla",
+     "data": {
+      "scale": "building"
+     }
+    },
+    {
+     "id": "HALL",
+     "node_type": "FunctionalUnitNodeGroup",
+     "name": "sala",
+     "data": {
+      "scale": "room"
+     }
+    },
+    {
+     "id": "TOWER",
+     "node_type": "FunctionalUnitNodeGroup",
+     "name": "torre",
+     "data": {
+      "scale": "room"
+     }
+    },
+    {
+     "id": "USM1.fp",
+     "node_type": "property",
+     "name": "footprint",
+     "description": "<https://w3id.org/em/ontology#LocalSceneFrame> POLYGON ((0 0, 10 0, 10 1, 0 1, 0 0))",
+     "data": {
+      "value": "<https://w3id.org/em/ontology#LocalSceneFrame> POLYGON ((0 0, 10 0, 10 1, 0 1, 0 0))",
+      "property_type": "footprint"
+     }
+    },
+    {
+     "id": "USM10.fp",
+     "node_type": "property",
+     "name": "footprint",
+     "description": "<https://w3id.org/em/ontology#LocalSceneFrame> POLYGON ((0 5, 3 5, 3 8, 0 8, 0 5))",
+     "data": {
+      "value": "<https://w3id.org/em/ontology#LocalSceneFrame> POLYGON ((0 5, 3 5, 3 8, 0 8, 0 5))",
+      "property_type": "footprint"
+     }
+    },
+    {
+     "id": "USM2.fp",
+     "node_type": "property",
+     "name": "footprint",
+     "description": "<https://w3id.org/em/ontology#LocalSceneFrame> POLYGON ((20 0, 30 0, 30 1, 20 1, 20 0))",
+     "data": {
+      "value": "<https://w3id.org/em/ontology#LocalSceneFrame> POLYGON ((20 0, 30 0, 30 1, 20 1, 20 0))",
+      "property_type": "footprint"
+     }
+    },
+    {
+     "id": "VILLA.use",
+     "node_type": "property",
+     "name": "use",
+     "description": "mansio",
+     "data": {
+      "valid_from": 300,
+      "valid_to": 400,
+      "value": "mansio",
+      "property_type": "use"
+     }
+    },
+    {
+     "id": "CASTLE.fn",
+     "node_type": "property",
+     "name": "primary_function",
+     "description": "castello",
+     "data": {
+      "value": "castello",
+      "property_type": "primary_function"
+     }
+    },
+    {
+     "id": "D1",
+     "node_type": "document",
+     "name": "D.01 Catasto 1820"
+    },
+    {
+     "id": "X1",
+     "node_type": "extractor",
+     "name": "D.01.01"
+    },
+    {
+     "id": "STORES",
+     "node_type": "FunctionalUnitNodeGroup",
+     "name": "magazzini",
+     "data": {
+      "scale": "room"
+     }
+    },
+    {
+     "id": "USV200",
+     "node_type": "USVn",
+     "name": "USV200",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV201",
+     "node_type": "USVn",
+     "name": "USV201",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV202",
+     "node_type": "USVn",
+     "name": "USV202",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV203",
+     "node_type": "USVn",
+     "name": "USV203",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV204",
+     "node_type": "USVn",
+     "name": "USV204",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV205",
+     "node_type": "USVn",
+     "name": "USV205",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV206",
+     "node_type": "USVn",
+     "name": "USV206",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV207",
+     "node_type": "USVn",
+     "name": "USV207",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV208",
+     "node_type": "USVn",
+     "name": "USV208",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV209",
+     "node_type": "USVn",
+     "name": "USV209",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV210",
+     "node_type": "USVn",
+     "name": "USV210",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV211",
+     "node_type": "USVn",
+     "name": "USV211",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV212",
+     "node_type": "USVn",
+     "name": "USV212",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV213",
+     "node_type": "USVn",
+     "name": "USV213",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV214",
+     "node_type": "USVn",
+     "name": "USV214",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV215",
+     "node_type": "USVn",
+     "name": "USV215",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV216",
+     "node_type": "USVn",
+     "name": "USV216",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV217",
+     "node_type": "USVn",
+     "name": "USV217",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV218",
+     "node_type": "USVn",
+     "name": "USV218",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV219",
+     "node_type": "USVn",
+     "name": "USV219",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV220",
+     "node_type": "USVn",
+     "name": "USV220",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV221",
+     "node_type": "USVn",
+     "name": "USV221",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV222",
+     "node_type": "USVn",
+     "name": "USV222",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV223",
+     "node_type": "USVn",
+     "name": "USV223",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV224",
+     "node_type": "USVn",
+     "name": "USV224",
+     "data": {
+      "label": "USV/n"
+     }
+    },
+    {
+     "id": "USV225",
+     "node_type": "USVn",
+     "name": "USV225",
+     "data": {
+      "label": "USV/n"
+     }
+    }
+   ],
+   "edges": [
+    {
+     "id": "USM1_fe_EP_ROM",
+     "edge_type": "has_first_epoch",
+     "source": "USM1",
+     "target": "EP_ROM"
+    },
+    {
+     "id": "USM2_fe_EP_ROM",
+     "edge_type": "has_first_epoch",
+     "source": "USM2",
+     "target": "EP_ROM"
+    },
+    {
+     "id": "USM4_fe_EP_ROM",
+     "edge_type": "has_first_epoch",
+     "source": "USM4",
+     "target": "EP_ROM"
+    },
+    {
+     "id": "US3_fe_EP_ROM",
+     "edge_type": "has_first_epoch",
+     "source": "US3",
+     "target": "EP_ROM"
+    },
+    {
+     "id": "USM10_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USM10",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USM20_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USM20",
+     "target": "EP_MED"
+    },
+    {
+     "id": "US7_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "US7",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USD5_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USD5",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV6_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV6",
+     "target": "EP_MED"
+    },
+    {
+     "id": "BR2_fe_EP_TARD",
+     "edge_type": "has_first_epoch",
+     "source": "BR2",
+     "target": "EP_TARD"
+    },
+    {
+     "id": "BR2_after_USM2",
+     "edge_type": "is_after",
+     "source": "BR2",
+     "target": "USM2"
+    },
+    {
+     "id": "BR3_fe_EP_TARD",
+     "edge_type": "has_first_epoch",
+     "source": "BR3",
+     "target": "EP_TARD"
+    },
+    {
+     "id": "BR3_after_US3",
+     "edge_type": "is_after",
+     "source": "BR3",
+     "target": "US3"
+    },
+    {
+     "id": "VILLA_fe_EP_ROM",
+     "edge_type": "has_first_epoch",
+     "source": "VILLA",
+     "target": "EP_ROM"
+    },
+    {
+     "id": "CASTLE_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "CASTLE",
+     "target": "EP_MED"
+    },
+    {
+     "id": "STABLE_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "STABLE",
+     "target": "EP_MED"
+    },
+    {
+     "id": "HALL_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "HALL",
+     "target": "EP_MED"
+    },
+    {
+     "id": "TOWER_fe_EP_TARD",
+     "edge_type": "has_first_epoch",
+     "source": "TOWER",
+     "target": "EP_TARD"
+    },
+    {
+     "id": "USM1_in_VILLA",
+     "edge_type": "is_in_functional_unit",
+     "source": "USM1",
+     "target": "VILLA"
+    },
+    {
+     "id": "USM2_in_VILLA",
+     "edge_type": "is_in_functional_unit",
+     "source": "USM2",
+     "target": "VILLA"
+    },
+    {
+     "id": "USM4_in_VILLA",
+     "edge_type": "is_in_functional_unit",
+     "source": "USM4",
+     "target": "VILLA"
+    },
+    {
+     "id": "US3_in_VILLA",
+     "edge_type": "is_in_functional_unit",
+     "source": "US3",
+     "target": "VILLA"
+    },
+    {
+     "id": "USM1_in_CASTLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "USM1",
+     "target": "CASTLE"
+    },
+    {
+     "id": "USM2_in_CASTLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "USM2",
+     "target": "CASTLE"
+    },
+    {
+     "id": "USM10_in_CASTLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "USM10",
+     "target": "CASTLE"
+    },
+    {
+     "id": "USD5_in_CASTLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "USD5",
+     "target": "CASTLE"
+    },
+    {
+     "id": "USV6_in_CASTLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV6",
+     "target": "CASTLE"
+    },
+    {
+     "id": "USM4_in_STABLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "USM4",
+     "target": "STABLE"
+    },
+    {
+     "id": "USM20_in_STABLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "USM20",
+     "target": "STABLE"
+    },
+    {
+     "id": "HALL_in_CASTLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "HALL",
+     "target": "CASTLE"
+    },
+    {
+     "id": "TOWER_in_CASTLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "TOWER",
+     "target": "CASTLE"
+    },
+    {
+     "id": "VILLA_loc",
+     "edge_type": "is_in_location",
+     "source": "VILLA",
+     "target": "dfc6acd6703509239393b02304cb53ae"
+    },
+    {
+     "id": "CASTLE_loc",
+     "edge_type": "is_in_location",
+     "source": "CASTLE",
+     "target": "dfc6acd6703509239393b02304cb53ae"
+    },
+    {
+     "id": "STABLE_loc",
+     "edge_type": "is_in_location",
+     "source": "STABLE",
+     "target": "dfc6acd6703509239393b02304cb53ae"
+    },
+    {
+     "id": "CASTLE_cf_VILLA",
+     "edge_type": "changed_from",
+     "source": "CASTLE",
+     "target": "VILLA",
+     "attributes": {
+      "change_type": "transformation",
+      "transformation_kind": "reuse"
+     }
+    },
+    {
+     "id": "STABLE_cf_VILLA",
+     "edge_type": "changed_from",
+     "source": "STABLE",
+     "target": "VILLA",
+     "attributes": {
+      "change_type": "transformation",
+      "transformation_kind": "reuse"
+     }
+    },
+    {
+     "id": "USM1_hp_USM1.fp",
+     "edge_type": "has_property",
+     "source": "USM1",
+     "target": "USM1.fp"
+    },
+    {
+     "id": "USM10_hp_USM10.fp",
+     "edge_type": "has_property",
+     "source": "USM10",
+     "target": "USM10.fp"
+    },
+    {
+     "id": "USM2_hp_USM2.fp",
+     "edge_type": "has_property",
+     "source": "USM2",
+     "target": "USM2.fp"
+    },
+    {
+     "id": "VILLA_hp_use",
+     "edge_type": "has_property",
+     "source": "VILLA",
+     "target": "VILLA.use"
+    },
+    {
+     "id": "CASTLE_hp_fn",
+     "edge_type": "has_property",
+     "source": "CASTLE",
+     "target": "CASTLE.fn"
+    },
+    {
+     "id": "fn_prov_X1",
+     "edge_type": "has_data_provenance",
+     "source": "CASTLE.fn",
+     "target": "X1"
+    },
+    {
+     "id": "X1_from_D1",
+     "edge_type": "extracted_from",
+     "source": "X1",
+     "target": "D1"
+    },
+    {
+     "id": "STORES_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "STORES",
+     "target": "EP_MED"
+    },
+    {
+     "id": "STORES_in_CASTLE",
+     "edge_type": "is_in_functional_unit",
+     "source": "STORES",
+     "target": "CASTLE"
+    },
+    {
+     "id": "USV200_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV200",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV200_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV200",
+     "target": "STORES"
+    },
+    {
+     "id": "USV201_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV201",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV201_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV201",
+     "target": "STORES"
+    },
+    {
+     "id": "USV202_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV202",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV202_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV202",
+     "target": "STORES"
+    },
+    {
+     "id": "USV203_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV203",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV203_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV203",
+     "target": "STORES"
+    },
+    {
+     "id": "USV204_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV204",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV204_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV204",
+     "target": "STORES"
+    },
+    {
+     "id": "USV205_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV205",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV205_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV205",
+     "target": "STORES"
+    },
+    {
+     "id": "USV206_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV206",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV206_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV206",
+     "target": "STORES"
+    },
+    {
+     "id": "USV207_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV207",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV207_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV207",
+     "target": "STORES"
+    },
+    {
+     "id": "USV208_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV208",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV208_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV208",
+     "target": "STORES"
+    },
+    {
+     "id": "USV209_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV209",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV209_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV209",
+     "target": "STORES"
+    },
+    {
+     "id": "USV210_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV210",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV210_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV210",
+     "target": "STORES"
+    },
+    {
+     "id": "USV211_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV211",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV211_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV211",
+     "target": "STORES"
+    },
+    {
+     "id": "USV212_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV212",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV212_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV212",
+     "target": "STORES"
+    },
+    {
+     "id": "USV213_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV213",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV213_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV213",
+     "target": "STORES"
+    },
+    {
+     "id": "USV214_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV214",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV214_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV214",
+     "target": "STORES"
+    },
+    {
+     "id": "USV215_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV215",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV215_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV215",
+     "target": "STORES"
+    },
+    {
+     "id": "USV216_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV216",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV216_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV216",
+     "target": "STORES"
+    },
+    {
+     "id": "USV217_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV217",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV217_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV217",
+     "target": "STORES"
+    },
+    {
+     "id": "USV218_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV218",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV218_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV218",
+     "target": "STORES"
+    },
+    {
+     "id": "USV219_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV219",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV219_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV219",
+     "target": "STORES"
+    },
+    {
+     "id": "USV220_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV220",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV220_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV220",
+     "target": "STORES"
+    },
+    {
+     "id": "USV221_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV221",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV221_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV221",
+     "target": "STORES"
+    },
+    {
+     "id": "USV222_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV222",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV222_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV222",
+     "target": "STORES"
+    },
+    {
+     "id": "USV223_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV223",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV223_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV223",
+     "target": "STORES"
+    },
+    {
+     "id": "USV224_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV224",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV224_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV224",
+     "target": "STORES"
+    },
+    {
+     "id": "USV225_fe_EP_MED",
+     "edge_type": "has_first_epoch",
+     "source": "USV225",
+     "target": "EP_MED"
+    },
+    {
+     "id": "USV225_in_STORES",
+     "edge_type": "is_in_functional_unit",
+     "source": "USV225",
+     "target": "STORES"
+    }
+   ],
+   "name": "Villa e castello (sintetico)"
+  }
+ },
+ "active_graph_id": "VC"
+}

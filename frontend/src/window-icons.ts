@@ -16,6 +16,7 @@
  *
  * Pure data + one string builder: no DOM, so `workspace.ts` can hold them.
  */
+import { LAB } from "./features";
 
 export const WINDOW_ICON_PATHS: Record<string, string> = {
   outliner: '<path d="M3 4h10M6 8h7M6 12h7M3 8h0M3 12h0"/>',
@@ -46,6 +47,9 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
   // RIFINITURE · not a window: the ✦ of «ask the AI», in the same stroke, so
   // the glyph is the same on every platform (the text ✦ is not)
   ai: '<path d="M8 2.5 9.2 6.8 13.5 8 9.2 9.2 8 13.5 6.8 9.2 2.5 8 6.8 6.8z"/>',
+  // MICRO-MF01 · EMBARGO (lab only) · the Functional Matrix: two braces, the
+  // glyph of a functional unit (U6-bis)
+  ...(LAB ? { "functional-matrix": '<path d="M6 2.5c-1.4 0-2 .6-2 2v2c0 .9-.5 1.5-1.5 1.5 1 0 1.5.6 1.5 1.5v2c0 1.4.6 2 2 2M10 2.5c1.4 0 2 .6 2 2v2c0 .9.5 1.5 1.5 1.5-1 0-1.5.6-1.5 1.5v2c0 1.4-.6 2-2 2"/>' } : {}),
 };
 
 /** The 16 px SVG for a window type (empty box for an unknown one). */

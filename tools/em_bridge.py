@@ -3277,6 +3277,13 @@ POST_ROUTES = {r: _py_route for r in ("/py/session", "/py/run", "/py/resume",
                                       "/py/complete", "/py/events", "/py/close",
                                       "/py/history", "/py/plugins", "/py/invoke", "/py/checks",
                                       "/py/plugins/dev", "/py/plugins/reload", "/py/compute")}
+# MICRO-MF01 · the routes of the functions under embargo live in em_py_lab,
+# which the community sidecar does not contain: there they do not exist (404)
+try:
+    import em_py_lab as _em_py_lab  # noqa: E402 — absent from the community sidecar
+    POST_ROUTES.update(getattr(_em_py_lab, "POST_ROUTES", {}))
+except ImportError:
+    pass
 
 
 def make_handler(api):

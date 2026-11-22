@@ -49,3 +49,69 @@ def attach(app: Any, name: str) -> Any:
         if f.get("id") == feature_id and f.get("state") == "embargo" and f.get("on"):
             return factory(app)
     return None
+
+
+# ── MICRO-MF01 · the Functional Matrix ───────────────────────────────────────
+#
+# The page's «Matrix funzionale» (frontend/src/functional-matrix.ts) asks the
+# bridge what to draw: ``POST /functional-matrix`` with ``{doc, lanes?, lang?}``
+# → s3Dgraphy's ``functional_matrix.functional_matrix`` (lanes, braces,
+# instances, readers, the changed_from chain, coherence, the cards «how we
+# know it»). Computed, never written. The route lives HERE, so the community
+# sidecar — which does not contain this module — has no such route (404), and
+# the page of the community build never asks it (featureOn is off there).
+
+def functional_matrix_answer(body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    """``{doc, lanes?, lang?}`` → ``(status, answer)``."""
+    try:
+        from s3dgraphy import api  # noqa: PLC0415 — the bridge's s3Dgraphy
+        from s3dgraphy import functional_matrix as FM  # noqa: PLC0415
+    except ImportError as exc:
+        return 501, {"ok": False, "error": f"this s3dgraphy has no functional_matrix: {exc}"}
+    doc = body.get("doc")
+    if not isinstance(doc, dict):
+        return 400, {"ok": False, "error": "doc (an em.json) is required"}
+    lanes = body.get("lanes")
+    lang = "it" if str(body.get("lang") or "en").lower().startswith("it") else "en"
+    graph, warnings = api.load_emjson(doc)
+    out = FM.functional_matrix(graph, lanes=lanes if isinstance(lanes, list) and lanes else None, lang=lang)
+    out["ok"] = True
+    out["warnings"] = [w for w in warnings if "functional" in str(w).lower()]
+    return 200, out
+
+
+def _functional_matrix_route(handler: Any, route: str, raw: bytes) -> None:
+    import json  # noqa: PLC0415
+    try:
+        body = json.loads(raw.decode("utf-8")) if raw else {}
+    except Exception as exc:  # noqa: BLE001
+        handler._fail(400, f"bad JSON: {exc}")
+        return
+    try:
+        status, out = functional_matrix_answer(body if isinstance(body, dict) else {})
+    except Exception as exc:  # pragma: no cover — surface to the UI
+        import traceback  # noqa: PLC0415
+        traceback.print_exc()
+        status, out = 500, {"ok": False, "error": f"functional matrix failed: {exc}"}
+    handler._json(out, status)
+
+
+#: the bridge's POST routes this module adds (em_bridge.py merges them into
+#: POST_ROUTES when this module is importable: the dev stack and the lab sidecar)
+POST_ROUTES: Dict[str, Callable[[Any, str, bytes], None]] = {
+    "/functional-matrix": _functional_matrix_route,
+}
+
+
+@lab_api("functional-matrix", "functional_matrix")
+class FunctionalMatrix:
+    """``em.app.functional_matrix`` — the Functional Matrix from a script:
+    ``em.app.functional_matrix.compute(graph, lang="it")`` answers what the
+    page draws (s3Dgraphy ``functional_matrix.functional_matrix``)."""
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    def compute(self, graph: Any, lanes: Any = None, lang: str = "en") -> Dict[str, Any]:
+        from s3dgraphy import functional_matrix as FM  # noqa: PLC0415
+        return FM.functional_matrix(graph, lanes=lanes, lang=lang)
