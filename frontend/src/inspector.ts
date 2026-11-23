@@ -10,6 +10,7 @@ import { activeTheme, canvasTheme } from "./theme";
 import { classOf, conceptParts, edgeLabel, isGroupType, isStratigraphicType, isUnnumbered, nodeElementText, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf, typeDescription, typeLabel } from "./rules";
 import { renderProvenance } from "./provenance-ui";
 import { renderObliteration } from "./obliteration-ui";
+import { renderProxyStatus } from "./proxy-status-ui";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
 import { qualiaList } from "./vocab";
 import { getSettings } from "./settings";
@@ -1551,6 +1552,11 @@ export function renderInspector(
   // when something is said; on a container the windows declared there, which
   // its members inherit. EM core: not embargoed.
   if (nodeId) renderObliteration(root, store, nodeId, cb.onJump);
+  // MICRO-LG12 (E.D., 23 Nov 2026) · the PROXY NOT DRAWN YET: for a unit
+  // without a proxy ONE quiet line «Proxy non ancora disegnato» (its state,
+  // placeholder and candidate sources when said, the form and the scoutings);
+  // a unit with its proxy: nothing. EM core: not embargoed.
+  if (nodeId) renderProxyStatus(root, store, nodeId, cb.onJump);
 
   // MICRO-P-GEOREF-PER-GRAFO p.4 · a GeoPositionNode: its data are the card's fields, edited here
   const geoEdited = node.node_type === "geo_position" && !!nodeId && !!cb.geoNodeEditor?.(root, nodeId);

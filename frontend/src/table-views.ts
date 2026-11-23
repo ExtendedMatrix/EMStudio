@@ -27,7 +27,8 @@ import type { ChronEntry } from "./chron-bridge";
 
 export type EmdbSheet = "Units" | "Epochs" | "Authors" | "Documents" | "Claims";
 // MICRO-VIEWER-UNICO p.6 · the resources, the extractors, the combiners (`ledger-sheets.ts`)
-export type ComputedView = "Chron" | "Issues" | "Models" | "Resources" | "Interpretations" | "Combiners";
+// MICRO-LG12 · «Da disegnare» (ToDraw): the units without a proxy, to draw from their sources
+export type ComputedView = "Chron" | "Issues" | "Models" | "ToDraw" | "Resources" | "Interpretations" | "Combiners";
 export type TableView = EmdbSheet | ComputedView;
 
 // NIGHT-SPAZIO · «Schede» (they are edited) in the order of the scrivania v11b.
@@ -35,7 +36,7 @@ export type TableView = EmdbSheet | ComputedView;
 // epoch, and the Units have that column now (a saved window on it opens on the
 // Units, `workspace.ts` `migrateWin`)
 export const EMDB_SHEETS: EmdbSheet[] = ["Units", "Epochs", "Documents", "Claims", "Authors"];
-export const COMPUTED_VIEWS: ComputedView[] = ["Chron", "Issues", "Models", "Resources", "Interpretations", "Combiners"];
+export const COMPUTED_VIEWS: ComputedView[] = ["Chron", "Issues", "Models", "ToDraw", "Resources", "Interpretations", "Combiners"];
 /** the sheets that ALSO have a card view; the others are rows only */
 export const CARD_VIEWS: TableView[] = ["Units", "Documents", "Chron"];
 

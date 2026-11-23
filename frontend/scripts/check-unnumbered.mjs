@@ -29,11 +29,11 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, what); checks++; }
 // 1 · the datamodel copies
 const read = (f) => JSON.parse(fs.readFileSync(`${SRC}assets/${f}`, "utf8"));
 const dm = read("s3Dgraphy_node_datamodel.json");
-eq(dm.s3Dgraphy_data_model_version, "1.6.55", "node datamodel 1.6.55");
+eq(dm.s3Dgraphy_data_model_version, "1.6.56", "node datamodel 1.6.56 (1.6.55 this MICRO; 1.6.56 MICRO-LG12, the proxy not drawn yet)");
 const el = dm.stratigraphic_nodes.StratigraphicNode.properties.unnumbered;
 eq([el.em_json, el.value], ["data.unnumbered", "boolean"], "the element data.unnumbered, boolean");
 const tr = read("datamodel_translations.json");
-eq(tr.version, "1.25", "translations 1.25");
+eq(tr.version, "1.26", "translations 1.26 (1.25 this MICRO; 1.26 MICRO-LG12, proxy_status)");
 eq([tr.node_elements.unnumbered.label.en, tr.node_elements.unnumbered.label.it],
    ["Without number", "Senza numero"], "its label EN + IT");
 const cn = read("s3Dgraphy_connections_datamodel.json");

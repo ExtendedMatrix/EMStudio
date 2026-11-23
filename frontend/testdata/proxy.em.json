@@ -1,0 +1,320 @@
+{
+ "header": {
+  "title": "Proxy non ancora disegnato: dichiara, cerca le fonti, accetta (sintetico, MICRO-LG12)",
+  "format": "em.json",
+  "version": "1.1",
+  "schema_version": 2,
+  "generator": {
+   "tool": "s3dgraphy",
+   "version": "1.6.0.dev139"
+  },
+  "datamodel_versions": {
+   "nodes": "1.6.56",
+   "connections": "1.6.61",
+   "qualia": "1.6.20"
+  }
+ },
+ "graphs": {
+  "PXS": {
+   "graph_id": "PXS",
+   "name": "Proxy non disegnato (sintetico, MICRO-LG12)",
+   "nodes": [
+    {
+     "id": "geo_PXS",
+     "node_type": "geo_position",
+     "name": "geo_position",
+     "data": {
+      "shift_x": 0.0,
+      "shift_y": 0.0,
+      "shift_z": 0.0,
+      "rotation": 0.0,
+      "rotation_reference": "grid"
+     }
+    },
+    {
+     "id": "ROM",
+     "node_type": "EpochNode",
+     "name": "II A.D.",
+     "data": {
+      "start_time": 100,
+      "end_time": 199,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "POST",
+     "node_type": "EpochNode",
+     "name": "Post antiquity",
+     "data": {
+      "start_time": 200,
+      "end_time": 1800,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "Y15",
+     "node_type": "EpochNode",
+     "name": "2015",
+     "data": {
+      "start_time": 2015,
+      "end_time": 2015,
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "W1",
+     "node_type": "US",
+     "name": "SU001",
+     "description": "foundation of the podium",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "S5",
+     "node_type": "US",
+     "name": "SU005",
+     "description": "earth over the foundation",
+     "data": {
+      "label": "US (or SU)"
+     }
+    },
+    {
+     "id": "D3",
+     "node_type": "USD",
+     "name": "USD003",
+     "description": "post-Roman drainage channels with reused pieces walled in",
+     "data": {
+      "label": "USD"
+     }
+    },
+    {
+     "id": "R75",
+     "node_type": "document",
+     "name": "D.02",
+     "description": "report of the 1975 excavation"
+    },
+    {
+     "id": "D3def",
+     "node_type": "property",
+     "name": "definition",
+     "description": "drainage channels",
+     "data": {
+      "value": "drainage channels",
+      "property_type": "definition"
+     }
+    },
+    {
+     "id": "X1",
+     "node_type": "extractor",
+     "name": "D.02.1",
+     "description": "p. 12, fig. 4"
+    },
+    {
+     "id": "D01",
+     "node_type": "document",
+     "name": "D.01",
+     "description": "photogrammetric survey 2013–2015"
+    },
+    {
+     "id": "D09",
+     "node_type": "document",
+     "name": "D.09",
+     "description": "reconstruction of the temple in the II century"
+    },
+    {
+     "id": "RM15",
+     "node_type": "representation_model",
+     "name": "Survey 2015",
+     "data": {
+      "transform": {
+       "position": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "rotation": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "rotation_order": "XYZ",
+       "angle_unit": "deg",
+       "scale": [
+        1,
+        1,
+        1
+       ],
+       "up_axis": "Z",
+       "quaternion": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+       ]
+      }
+     }
+    },
+    {
+     "id": "RM2",
+     "node_type": "representation_model",
+     "name": "Reconstruction II AD",
+     "data": {
+      "transform": {
+       "position": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "rotation": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "rotation_order": "XYZ",
+       "angle_unit": "deg",
+       "scale": [
+        1,
+        1,
+        1
+       ],
+       "up_axis": "Z",
+       "quaternion": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+       ]
+      }
+     }
+    },
+    {
+     "id": "eeaa1dd5-ef0e-56cb-8e66-067b6fc73dd9",
+     "node_type": "semantic_shape",
+     "name": "W1 geometry",
+     "data": {
+      "convexshapes": [],
+      "spheres": []
+     }
+    },
+    {
+     "id": "c679ce34-e2e5-59bf-a1ff-395d5715deb1",
+     "node_type": "property",
+     "name": "geometry",
+     "data": {
+      "value": "eeaa1dd5-ef0e-56cb-8e66-067b6fc73dd9",
+      "property_type": "geometry"
+     }
+    },
+    {
+     "id": "b6300379-eb20-50cd-b79b-b350f9d07e68",
+     "node_type": "resource",
+     "name": "SU001.glb",
+     "data": {
+      "url": "proxies/SU001.glb",
+      "url_type": "proxy_model",
+      "description": ""
+     }
+    },
+    {
+     "id": "ED",
+     "node_type": "author",
+     "name": "Test",
+     "data": {
+      "orcid": "0000-0002-1825-0097",
+      "name": "Test",
+      "surname": "Author",
+      "verified": false
+     }
+    }
+   ],
+   "edges": [
+    {
+     "id": "fe_W1",
+     "edge_type": "has_first_epoch",
+     "source": "W1",
+     "target": "ROM"
+    },
+    {
+     "id": "fe_S5",
+     "edge_type": "has_first_epoch",
+     "source": "S5",
+     "target": "POST"
+    },
+    {
+     "id": "ov",
+     "edge_type": "overlies",
+     "source": "S5",
+     "target": "W1"
+    },
+    {
+     "id": "fe_D3",
+     "edge_type": "has_first_epoch",
+     "source": "D3",
+     "target": "POST"
+    },
+    {
+     "id": "d3p",
+     "edge_type": "has_property",
+     "source": "D3",
+     "target": "D3def"
+    },
+    {
+     "id": "x1a",
+     "edge_type": "has_data_provenance",
+     "source": "D3def",
+     "target": "X1"
+    },
+    {
+     "id": "x1b",
+     "edge_type": "extracted_from",
+     "source": "X1",
+     "target": "R75"
+    },
+    {
+     "id": "rm15a",
+     "edge_type": "has_representation_model",
+     "source": "Y15",
+     "target": "RM15"
+    },
+    {
+     "id": "rm15b",
+     "edge_type": "has_representation_model",
+     "source": "D01",
+     "target": "RM15"
+    },
+    {
+     "id": "rm2a",
+     "edge_type": "has_representation_model",
+     "source": "ROM",
+     "target": "RM2"
+    },
+    {
+     "id": "rm2b",
+     "edge_type": "has_representation_model",
+     "source": "D09",
+     "target": "RM2"
+    },
+    {
+     "id": "76941f3c-cb30-5b3d-b9c6-b8638e7b4645",
+     "edge_type": "has_linked_resource",
+     "source": "eeaa1dd5-ef0e-56cb-8e66-067b6fc73dd9",
+     "target": "b6300379-eb20-50cd-b79b-b350f9d07e68"
+    },
+    {
+     "id": "d80f852b-567c-589f-aa7c-ac384f186ee3",
+     "edge_type": "has_semantic_shape",
+     "source": "c679ce34-e2e5-59bf-a1ff-395d5715deb1",
+     "target": "eeaa1dd5-ef0e-56cb-8e66-067b6fc73dd9"
+    },
+    {
+     "id": "209184b5-e392-5180-ba75-28ac3b2ede81",
+     "edge_type": "has_property",
+     "source": "W1",
+     "target": "c679ce34-e2e5-59bf-a1ff-395d5715deb1"
+    }
+   ]
+  }
+ },
+ "active_graph_id": "PXS"
+}

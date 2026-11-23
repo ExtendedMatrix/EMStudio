@@ -13274,4 +13274,25 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .insp-obl-empty { margin: 2px 0; }
 .insp-obl-empty .insp-btn-quiet { background: none; border: 0; padding: 2px 0; font-size: 11px; color: var(--muted, #666); cursor: pointer; }
 .insp-obl-empty .insp-btn-quiet:hover { color: inherit; text-decoration: underline; }
+/* MICRO-LG12 · the proxy not drawn yet: one quiet line, the rest only when said */
+.insp-pxs { margin: 4px 0; font-size: 12px; }
+.insp-pxs-line { color: var(--muted, #666); }
+.insp-pxs-label { font-style: italic; }
+.insp-pxs-count { font-size: 11px; color: var(--muted, #666); }
+.insp-pxs .insp-btn-quiet { background: none; border: 0; padding: 2px 0; font-size: 11px; color: var(--muted, #666); cursor: pointer; }
+.insp-pxs .insp-btn-quiet:hover { color: inherit; text-decoration: underline; }
+.insp-pxs-placeholder { margin: 2px 0 2px 8px; border-left: 2px dashed var(--muted, #999); padding-left: 6px; }
+.insp-pxs-sources { margin: 2px 0 2px 8px; padding-left: 12px; }
+.insp-pxs-source .insp-prov-from, .insp-pxs-proposal .insp-prov-from { display: inline; }
+.insp-pxs-strength { font-size: 10px; padding: 0 4px; border-radius: 3px; border: 1px solid currentColor; }
+.insp-pxs-strength.pxs-certain { color: #2e7d32; }
+.insp-pxs-strength.pxs-probable { color: #b26a00; }
+.insp-pxs-strength.pxs-to_verify { color: var(--muted, #777); border-style: dashed; }
+.insp-pxs-form, .insp-pxs-scout { margin: 4px 0 4px 8px; }
+.insp-pxs-proposal { margin: 3px 0; padding: 3px 4px; border: 1px dashed var(--muted, #aaa); border-radius: 3px; }
+.insp-pxs-origin { font-size: 10px; color: var(--muted, #666); }
+.insp-pxs-stale { margin: 2px 0; font-size: 11px; }
+.pxs-table td { vertical-align: top; }
+.pxs-src i { font-size: 10px; color: var(--muted, #666); }
+.pxs-unlinked { font-size: 10px; color: #b26a00; }
 .insp-obl-hint { opacity: .8; }

@@ -299,6 +299,11 @@ class EchoProvider(LLMProvider):
             return self._echo_translation(context["translation"])
         if context.get("functional"):
             return self._echo_functional(context)
+        if context.get("proxy_scouting"):
+            # MICRO-LG12 · the scouting of the proxies to draw: the library's
+            # own valid echo (each unit's first cited document, to_verify)
+            from s3dgraphy import proxy_status
+            return proxy_status.echo_reply(context)
         activity = (context.get("activity") or {}).get("name", "questa attività")
         actions = [a.get("name", "?") for a in context.get("actions") or []]
         epochs = [e.get("name", "?") for e in context.get("epochs") or []]

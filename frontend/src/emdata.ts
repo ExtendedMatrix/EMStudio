@@ -15,6 +15,7 @@
 //  · cards for Units (the provenance chain), Documents (master and instances)
 //    and Chronology.
 
+import { toDrawFor, toDrawTableHtml } from "./proxy-status-ui";
 import { floating } from "./floating";
 import { modelsRows, modelsTableHtml, type ModelsCtx } from "./models-sheet";
 import { listMayMove, listStep, ROW_KEYS } from "./list-keys";
@@ -237,7 +238,7 @@ interface TableState extends FacetSelection {
 }
 
 const VIEWS: TableView[] = ["Units", "Epochs", "Claims", "Authors", "Documents",
-                            "Chron", "Issues", "Models", "Resources", "Interpretations", "Combiners"];
+                            "Chron", "Issues", "Models", "ToDraw", "Resources", "Interpretations", "Combiners"];
 const isLedger = (v: TableView): v is LedgerSheet => (LEDGER_SHEETS as string[]).includes(v);
 /** MICRO-3DTILES-LOD · a sheet that is no more, and where it went: the «US view»
  *  was the Units with the first epoch (the Units have it now) */
@@ -328,6 +329,8 @@ export function sheetRowCount(sheet: TableView): number | null {
   if (!store || !ctx) return null;
   if (sheet === "Chron") return chronRows(ctx, indexOf(ctx), null).length;
   if (sheet === "Issues") return ctx.issues.length;
+  // MICRO-LG12 · the units to draw, as s3Dgraphy last answered (null: not yet)
+  if (sheet === "ToDraw") { const s = toDrawFor(store); return s.status === "ok" ? s.rows.length : null; }
   if (isLedger(sheet)) return ledgerIds(store.doc, sheet).size;
   if (sheet === "Models") {
     const sp = getSpace();
@@ -368,7 +371,7 @@ export function sheetsHolding(id: string): TableView[] {
 /** Add a row to the sheet on screen — the `Righe ▸` menu's own path. */
 export function addEmDataRow(store: DocumentStore, win?: Win): string | null {
   const sheet = stateOf(win).sheet;
-  if (sheet === "Chron" || sheet === "Issues" || sheet === "Models" || isLedger(sheet)) return null;
+  if (sheet === "Chron" || sheet === "Issues" || sheet === "Models" || sheet === "ToDraw" || isLedger(sheet)) return null;
   const id = addRow(store, sheet);
   if (id) renderEmData();
   return id;
@@ -653,6 +656,11 @@ function renderEmDataInto(host: EmDataHost): void {
       count = r.count;
       content = r.html;
     }
+  } else if (st.sheet === "ToDraw") {
+    // MICRO-LG12 · «Da disegnare»: s3Dgraphy's to_draw, asked of the bridge
+    const r = toDrawTableHtml(store, (id, text) => passes(id, text));
+    count = r.count;
+    content = r.html;
   } else if (st.sheet === "Models") {
     const sp = getSpace();
     if (sp) {
