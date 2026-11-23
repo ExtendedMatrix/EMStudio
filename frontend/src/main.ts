@@ -358,7 +358,9 @@ import { renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { NumGroup, numField } from "./num-field";
 import { checkForUpdates, RELEASES_PAGE, type UpdateCheck } from "./updates";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
-import { addFileSketch, addSketch, addWallSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPES, shapeById, shapeLabel, sketchById, updateSketch, updateWall, type Sketch } from "./shapes3d";
+import { addElevationSketch, addFileSketch, addSketch, addWallSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPES, shapeById, shapeLabel, sketchById, updateElevation, updateSketch, updateWall, type ProxyDrawing, type Sketch } from "./shapes3d";
+import { bakeElevationPose, buildElevation, depthFromPoint, depthHandle, depthOnAxis, editElevation, elevationSides, elevationSig, ELEV_TOL, facingOf, snapEdge,
+         type DepthFrom, type ElevationError, type ElevationInput, type ElevationResult, type ElevationWarning } from "./from-elevation";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
 import { buildOutlinerTree, loadSpacePrefs, opensFor, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
@@ -14243,6 +14245,12 @@ function extractors3d(doc: EmDocument): Map<string, Array<{ id: string; name: st
   if (!regions.size) return out;
   const onDoc = new Map<string, string>();
   for (const e of doc.graph.edges) if (e.edge_type === "is_on_resource" && regions.has(e.source) && byId.get(e.target)?.node_type === "document") onDoc.set(e.source, e.target);
+  // MICRO-PX1c · a reading placed on a MODEL (the points of «Muro da pianta» and
+  // «Dal prospetto»: is_on_resource the representation model clicked) belongs to
+  // that model's document — its mark is drawn, and selected, as the others
+  const rmDoc = new Map<string, string>();
+  for (const e of doc.graph.edges) if (e.edge_type === "has_representation_model" && byId.get(e.source)?.node_type === "document") rmDoc.set(e.target, e.source);
+  for (const e of doc.graph.edges) if (e.edge_type === "is_on_resource" && regions.has(e.source) && !onDoc.has(e.source) && rmDoc.has(e.target)) onDoc.set(e.source, rmDoc.get(e.target)!);
   for (const e of doc.graph.edges) {
     if (e.edge_type !== "extracted_from" || !regions.has(e.target)) continue;
     const x = byId.get(e.source);
@@ -14311,14 +14319,33 @@ function extractorMarks(winId?: string): SceneMark[] {
       const shown = lit ? !hidden.has(k) : forced.has(k);
       if (!shown) continue;
       const res = chain.resultOf(st.doc, x.id);
+      // MICRO-PX1c C · the annotation written at the click (its description), when it is one
+      const ann = pxAnnotationOf(x.id);
       marks.push({ id: k, kind: x.kind === "point" ? "point" : x.kind === "line" ? "line" : "polyline", vertices: x.vertices.map((q) => [q[0], q[1], q[2]] as V3),
-        label: `${x.name}${res ? ` · ${res}` : ""}${lit ? "" : ` · ${t("uo.x3dGhostShort")}`}`, selected: selectedId === x.id, ...(lit ? {} : { ghost: true }) });
+        label: `${x.name}${res ? ` · ${res}` : ""}${ann ? ` · «${ann}»` : ""}${lit ? "" : ` · ${t("uo.x3dGhostShort")}`}`, selected: selectedId === x.id, ...(lit ? {} : { ghost: true }) });
     }
   }
   x3dMarksMemo = { key, marks };
   return marks;
 }
 
+/** MICRO-PX1c · an extractor's annotation: its description, unless it is the
+ *  text a library writes by itself («Extractor for plan point») */
+function pxAnnotationOf(extractorId: string): string {
+  const d = String(store?.node(extractorId)?.description ?? "").trim();
+  return d && !/^Extractor for \S+ point$/.test(d) ? d : "";
+}
+/** MICRO-PX1c C · an extractor's mark clicked in the Space: the same field, its annotation (one undo step) */
+function pxAnnotateExtractor(extractorId: string): void {
+  const st = store;
+  const x = st?.node(extractorId);
+  if (!st || !x || x.node_type !== "extractor") return;
+  pxAskNote(spacePointer, String(x.name ?? extractorId), pxAnnotationOf(extractorId), (text) => {
+    if (text === pxAnnotationOf(extractorId)) return;
+    chain.setReadingDescription(st, extractorId, text);
+    refreshInspector();
+  });
+}
 /** a key of the Space (`rm:`, `proxy:`, `sketch:`, `x3d:`…), as a person names it */
 function spaceKeyName(k: string): string {
   const i = k.indexOf(":");
@@ -34884,6 +34911,8 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
       onReset: () => commitAll(`sketch:${sk.id}`, before, IDENTITY) });
     // MICRO-PX1 · a wall of «Muro da pianta»: its inputs, editable, the wall built again
     if (sk.shape === "wall") renderWallInputs(sect, sk, win);
+    // MICRO-PX1c · a solid of «Dal prospetto»: its inputs, editable
+    if (sk.shape === "elevation") renderElevInputs(sect, sk, win);
   } else if (key && (key.startsWith("rm:") || key.startsWith("proxy:"))) {
     // MICRO-SPAZIO-3D-3 p.10 · the active model's version: the mode, the version, its use, level and MB
     // (MICRO-PROVA-DEV47 p.3b: now the section «Livello di dettaglio», below)
@@ -35077,6 +35106,10 @@ function setSpaceTool(winId: string, id: string): boolean {
     ls?.arm(null);
     // MICRO-PX1 · leaving «Muro da pianta» drops its trace (a wall not finished)
     if (id !== WALL_TOOL) wallTraces.delete(winId);
+    // MICRO-PX1c · …and «Dal prospetto» its outline; a choice ends «Profondità da un clic»
+    if (id !== ELEV_TOOL) elevTraces.delete(winId);
+    elevAddDepth.delete(winId);
+    pxCloseNote();
     // MICRO-PX1b · any choice of the toolbar ends «Aggiungi punti alti» (it is set again after, when it is its)
     wallAddTop.delete(winId);
     wallHover.delete(winId);
@@ -35203,6 +35236,11 @@ function wallClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
   const tr = wallTrace(win.id);
   const w = wallPointOf(hit);
   (tr.phase === "plan" ? tr.plan : tr.top).push(w);
+  // MICRO-PX1c C · the annotation of the extractor this click will make
+  if (pxAsks(wallPrefs().annotate, w)) {
+    const n = tr.phase === "plan" ? tr.plan.length : tr.top.length;
+    pxAskNote(hit.screen, pxNoteLabel(w, t(tr.phase === "plan" ? "wall.noteCorner" : "wall.noteHead", { n: String(n) })), "", (text) => { if (text) w.note = text; renderSpaceNPanels(); });
+  }
   // C · the hybrid case said once, when the second document appears
   const all = [...tr.plan, ...tr.top];
   const docsBefore = wallDocuments({ plan: all.slice(0, -1).filter((x) => x.rm), top: [] });
@@ -35270,7 +35308,7 @@ function wallFinish(win: Win): void {
   const input = wallInputOf(tr, prefs);
   const r = buildWall(input);
   if (!r.ok) { toast(wallErrorWords(r.error)); return; }
-  const sk = addWallSketch({ ...input, annotate: prefs.annotate }, r.mesh.origin, t("wall.sketchName"));
+  const sk = addWallSketch({ ...input, annotate: prefs.annotate, source: pxSourceNow() }, r.mesh.origin, t("wall.sketchName"));
   wallTraces.set(win.id, { phase: "plan", plan: [], top: [] });
   wallHover.delete(win.id);
   setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
@@ -35330,8 +35368,8 @@ function wallMarks(winId: string): SceneMark[] {
 //    a point inside is a point of its surface) or "face" (the back hidden: the
 //    points on the visible face's line, the hidden side estimated).
 
-type WallStored = WallInput & { annotate?: boolean };
-interface WallTaken { id: string; wall: WallStored; position: V3; rotation: V3; scale: V3 }
+type WallStored = WallInput & ProxyDrawing;
+interface WallTaken { id: string; wall?: WallStored; elevation?: ElevationInput & ProxyDrawing; position: V3; rotation: V3; scale: V3 }
 /** the pointer's point on the horizontal plane of the last corner, per Space window */
 // eslint-disable-next-line no-var
 var wallHover = new Map<string, V3 | null>();
@@ -35357,7 +35395,10 @@ function wallBuiltMemo(key: string, inp: WallInput): WallResult | null {
   return r;
 }
 function wallsTaken(): WallTaken[] {
-  return listSketches().filter((x) => x.shape === "wall" && x.wall).map((x) => ({ id: x.id, wall: JSON.parse(JSON.stringify(x.wall)) as WallStored,
+  // MICRO-PX1c · the solids of «Dal prospetto» too
+  return listSketches().filter((x) => (x.shape === "wall" && x.wall) || (x.shape === "elevation" && x.elevation)).map((x) => ({ id: x.id,
+    ...(x.wall ? { wall: JSON.parse(JSON.stringify(x.wall)) as WallStored } : {}),
+    ...(x.elevation ? { elevation: JSON.parse(JSON.stringify(x.elevation)) as ElevationInput & ProxyDrawing } : {}),
     position: [...x.position] as V3, rotation: [...x.rotation] as V3, scale: [...x.scale] as V3 }));
 }
 /** an undo / redo: the walls still here take back their inputs and pose (a
@@ -35366,12 +35407,16 @@ function wallsRestore(list: WallTaken[]): void {
   let any = false;
   for (const w of list) {
     const sk = sketchById(w.id);
-    if (!sk || sk.shape !== "wall") continue;
-    if (JSON.stringify({ a: sk.wall, p: sk.position, r: sk.rotation, s: sk.scale }) === JSON.stringify({ a: w.wall, p: w.position, r: w.rotation, s: w.scale })) continue;
-    updateWall(w.id, w.wall, { position: w.position, rotation: w.rotation, scale: w.scale });
+    if (!sk || (sk.shape !== "wall" && sk.shape !== "elevation")) continue;
+    const mine = sk.shape === "wall" ? sk.wall : sk.elevation;
+    const taken = sk.shape === "wall" ? w.wall : w.elevation;
+    if (!taken) continue;
+    if (JSON.stringify({ a: mine, p: sk.position, r: sk.rotation, s: sk.scale }) === JSON.stringify({ a: taken, p: w.position, r: w.rotation, s: w.scale })) continue;
+    if (sk.shape === "wall") updateWall(w.id, w.wall!, { position: w.position, rotation: w.rotation, scale: w.scale });
+    else updateElevation(w.id, w.elevation!, { position: w.position, rotation: w.rotation, scale: w.scale });
     any = true;
   }
-  if (any) { wallDraft = null; refreshSurfaces("scene"); renderSpaceNPanels(); }
+  if (any) { wallDraft = null; elevDraft = null; refreshSurfaces("scene"); renderSpaceNPanels(); }
 }
 /** a wall's inputs where it is SEEN: a pose moved after the build (G / R / S) carried into them */
 function wallSeen(sk: Sketch): { input: WallStored; built: WallResult; moved: boolean } {
@@ -35380,7 +35425,7 @@ function wallSeen(sk: Sketch): { input: WallStored; built: WallResult; moved: bo
   const first = wallBuiltMemo(`seen:${sk.id}`, wall)!;
   const moved = first.ok && !poseIsBuilt(first.mesh.origin, sk);
   if (!moved || !first.ok) return { input: wall, built: first, moved: false };
-  const input: WallStored = { ...bakePose(wall, first.mesh.origin, sk), annotate: wall.annotate };
+  const input: WallStored = { ...bakePose(wall, first.mesh.origin, sk), annotate: wall.annotate, ...(wall.source ? { source: wall.source } : {}) };
   return { input, built: buildWall(input), moved: true };
 }
 /** a correction written: ONE step of the undo, the wall made again from its inputs */
@@ -35449,11 +35494,11 @@ function wallHandles(winId: string): SceneHandle[] {
   // the estimated corners first: drawn under the points that can be dragged (often right above a corner of the plan)
   if (r?.ok) r.mesh.headKind.forEach((kd, i) => { if (kd === "estimated") out.push({ id: wallHandleId(sk.id, "est", i), p: r.mesh.head[i], kind: "est", title: t("wall.h.est") }); });
   inp.plan.forEach((w, k) => { const id = wallHandleId(sk.id, "plan", k); out.push({ id, p: w.p, kind: "plan", active: id === act,
-    title: t(inp.mode === "axis" ? "wall.h.axis" : "wall.h.plan", { n: String(k + 1) }) }); });
+    title: t(inp.mode === "axis" ? "wall.h.axis" : "wall.h.plan", { n: String(k + 1) }) + (w.note ? ` — «${w.note}»` : ""), ...(w.note ? { cls: "has-note" } : {}) }); });
   if (!adding) for (const sd of wallSides(inp)) out.push({ id: wallHandleId(sk.id, "mid", sd.after), p: sd.p, kind: "mid", title: t("wall.h.mid") });
   const roles = r?.ok ? r.mesh.topRole : [];
   inp.top.forEach((w, k) => { const id = wallHandleId(sk.id, "top", k); out.push({ id, p: w.p, kind: roles[k] === "inner" ? "inner" : "top", active: id === act,
-    title: t(roles[k] === "inner" ? "wall.h.inner" : "wall.h.top", { n: String(k + 1) }) }); });
+    title: t(roles[k] === "inner" ? "wall.h.inner" : "wall.h.top", { n: String(k + 1) }) + (w.note ? ` — «${w.note}»` : ""), ...(w.note ? { cls: "has-note" } : {}) }); });
   return out;
 }
 /** the point a handle lands on: the model under it and its document */
@@ -35482,6 +35527,14 @@ function wallOnHandle(win: Win, e: SceneHandleEvent): void {
     if (h.kind === "est") { toast(t("wall.h.est")); return; }
     wallActive = { sketchId: sk.id, id: e.id };
     renderSpaceNPanels();
+    // MICRO-PX1c C · later: the same field beside the point, with what is written
+    const which = h.kind === "plan" ? "plan" : "top";
+    const w0 = seen()[which][h.k];
+    if (w0) pxAskNote(spacePointer, pxNoteLabel(w0, t(which === "plan" ? "wall.noteCorner" : "wall.noteHead", { n: String(h.k + 1) })), w0.note ?? "", (text) => {
+      const cur = wallSeen(sk).input;
+      if ((cur[which][h.k]?.note ?? "") === text) return;
+      wallCommit(sk, { ...cur, [which]: cur[which].map((q, i) => (i === h.k ? { ...q, note: text || undefined } : q)) });
+    });
     return;
   }
   if (e.phase === "start") { wallDraft = { winId: win.id, sketchId: sk.id, input: seen() }; wallActive = null; return; }
@@ -35531,8 +35584,16 @@ function wallAddTopClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
   const sk = sketchById(wallAddTop.get(win.id) ?? "");
   if (!sk?.wall) { wallEndAddTop(win); return true; }
   if (!hit) { toast(t("wall.noSurface")); return true; }
-  const ed = editWall(wallSeen(sk).input, { op: "add-top", point: wallPointOf(hit) });
-  if (ed.ok) wallCommit(sk, ed.input);
+  const pt0 = wallPointOf(hit);
+  const ed = editWall(wallSeen(sk).input, { op: "add-top", point: pt0 });
+  if (ed.ok && wallCommit(sk, ed.input) && pxAsks(sk.wall.annotate !== false && sk.wall.source?.mode !== "semantic", pt0)) {
+    const k = ed.input.top.length - 1;
+    pxAskNote(hit.screen, pxNoteLabel(pt0, t("wall.noteHead", { n: String(k + 1) })), "", (text) => {
+      const s2 = sketchById(sk.id);
+      if (!s2?.wall || !text || !s2.wall.top[k]) return;
+      wallCommit(s2, { ...wallSeen(s2).input, top: wallSeen(s2).input.top.map((q, i) => (i === k ? { ...q, note: text } : q)) });
+    });
+  }
   refreshWallBars();
   return true;
 }
@@ -35540,9 +35601,13 @@ function wallAddTopClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
 const wallBarRenderers = new Map<string, () => void>();
 function refreshWallBars(): void { for (const f of wallBarRenderers.values()) f(); }
 function drawWallBar(bar: HTMLElement, winId: string): void {
-  const on = spaceCoreTools.get(winId) === WALL_TOOL;
+  // MICRO-PX1c · the same bar for «Dal prospetto»
+  const elevOn = spaceCoreTools.get(winId) === ELEV_TOOL;
+  const on = spaceCoreTools.get(winId) === WALL_TOOL || elevOn;
   bar.classList.toggle("hidden", !on);
   if (!on) return;
+  bar.dataset.tool = elevOn ? ELEV_TOOL : WALL_TOOL;
+  if (elevOn) { drawElevBar(bar, winId); return; }
   bar.textContent = "";
   // MICRO-PX1b · «Aggiungi punti alti» on a wall made
   const adding = sketchById(wallAddTop.get(winId) ?? "");
@@ -35576,6 +35641,13 @@ function drawWallBar(bar: HTMLElement, winId: string): void {
   w.className = "scn-wallbar-where" + (where.hybrid ? " warn" : "");
   w.dataset.wallWhere = where.hybrid ? "hybrid" : "1";
   w.textContent = where.words ? (where.hybrid ? `⚠ ${t("wall.hybridNow")} ${where.words}` : where.words) : t("wall.whereNone");
+  // MICRO-PX1c B · the proxy's document, shown at all times (or: a semantic shape)
+  const src = pxSourceNow();
+  if (src.mode === "semantic") { w.dataset.wallWhere = "semantic"; w.textContent = t("px.barSemantic"); }
+  else {
+    const doc = pxDocumentOf([...tr.plan, ...tr.top], src) ?? pxDocumentInView();
+    w.textContent = `${t("px.barDoc", { doc: doc ? wallNodeName(doc) : "—" })} · ${w.textContent}`;
+  }
   bar.appendChild(w);
 }
 /** the «Tool» tab of «Muro da pianta»: its options, its phase, where the clicks fall */
@@ -35642,16 +35714,8 @@ function renderWallToolTab(box: HTMLElement, win: Win): void {
   // MICRO-PX1b · how the head's points are read; the pivot (where the proxy's origin is)
   row(t("wall.headMode"), wallHeadSelect(prefs.headMode, (v) => setWallPrefs({ headMode: v })), "head");
   row(t("wall.pivot"), wallPivotSelect(prefs.pivot, (v) => setWallPrefs({ pivot: v })), "pivot");
-  const cb = document.createElement("input");
-  cb.type = "checkbox";
-  cb.checked = prefs.annotate;
-  cb.dataset.wallAnnotate = "1";
-  cb.addEventListener("change", () => setWallPrefs({ annotate: cb.checked }));
-  const lab = document.createElement("label");
-  lab.className = "np-row np-check";
-  lab.title = t("wall.annotateTitle");
-  lab.append(cb, " ", t("wall.annotate"));
-  box.appendChild(lab);
+  // MICRO-PX1c B · the proxy's document (two modes), the switch, the annotation at the click
+  renderPxSourceRows(box, [...tr.plan, ...tr.top], prefs.annotate, (v) => setWallPrefs({ annotate: v }));
   const ph = wallPhaseWords(win.id);
   p(`${ph.counter} — ${ph.hint}`, "wall-phase");
   const where = wallWhere([...tr.plan, ...tr.top]);
@@ -35731,7 +35795,9 @@ function renderWallInputs(sect: NpSect, sk: Sketch, win: Win): void {
   if (est) note(`◇ ${est} — ${t("wall.estimateNotDoc")}`, "wall-estimate", "xf-note est");
   const where = wallWhere([...wall.plan, ...wall.top]);
   note(where.words ? t("wall.whereLine", { where: where.words }) : t("wall.whereNone"), "wall-where", where.hybrid ? "xf-note warn" : "xf-note");
-  note(wall.annotate === false ? t("wall.annotateOff") : t("wall.annotateOn"), "wall-annotate");
+  note(wall.source?.mode === "semantic" ? t("px.itemSemantic") : wall.annotate === false ? t("wall.annotateOff") : t("wall.annotateOn"), "wall-annotate");
+  // MICRO-PX1c B · the proxy's document, and the mode, changeable until the association
+  note(pxSourceWords(wall, [...wall.plan, ...wall.top]), "px-item-source", wall.source?.mode === "semantic" ? "xf-note est" : "xf-note");
   const field = (v: number, probe: string, set: (x: number) => void, step = "0.01") => {
     const i = document.createElement("input");
     i.type = "number";
@@ -35754,6 +35820,7 @@ function renderWallInputs(sect: NpSect, sk: Sketch, win: Win): void {
   if (wall.mode === "axis") line(t("wall.thickness"), field(wall.thickness, "thickness", (x) => { if (x > 0) regenerate({ ...wall, thickness: x }); }, "0.05"));
   line(t("wall.headMode"), wallHeadSelect(wall.headMode ?? "face", (v) => regenerate({ ...wall, headMode: v })));
   line(t("wall.pivot"), wallPivotSelect(wall.pivot ?? "bottom", (v) => regenerate({ ...wall, pivot: v })));
+  line(t("px.docLabel"), pxSourceSelect(wall, (src) => regenerate({ ...wall, source: src })));
   // C · «Aggiungi punti alti»: the tool armed on this wall, in its head's mode
   const acts = document.createElement("div");
   acts.className = "xf-actions";
@@ -35831,6 +35898,8 @@ function renderWallInputs(sect: NpSect, sk: Sketch, win: Win): void {
     del.appendChild(x);
     tr.appendChild(del);
     table.appendChild(tr);
+    // MICRO-PX1c C · the point's annotation (its extractor's description), on a row of its own
+    table.appendChild(wallNoteRow(w, (text) => regenerate({ ...wall, [which]: list.map((q, i) => (i === k ? { ...q, note: text || undefined } : q)) }), `${which}:${k}`, 6));
   });
   rows(wall.plan, "plan");
   rows(wall.top, "top");
@@ -35851,6 +35920,874 @@ function renderWallInputs(sect: NpSect, sk: Sketch, win: Win): void {
     }
   }
   box.appendChild(table);
+}
+
+
+// ── MICRO-PX1c (E.D., 23 Nov 2026) · THE SUITE: THE PROXY'S DOCUMENT, THE ANNOTATION AT THE CLICK ──
+//
+// B. Every tool of the suite (the wall, the elevation; the seven points and the
+//    areals when they come) draws in one of TWO MODES, chosen in the Tool tab:
+//    «Proxy from a document» — the document of the models under the clicks
+//    (or one chosen) is shown at all times, the proxy enters the chain as
+//    extracted from it, the clicks become extractors when the switch is on —
+//    or «Semantic shape, no document» — no document, no extractor: a form to
+//    refine elsewhere (Blender), still called a PROXY; the paradata says it has
+//    no document and the unit's proxy_status says «to refine» (s3Dgraphy).
+// C. Each click that will make an extractor opens a small field beside the
+//    point: a value or an annotation («quota 492,13»); Enter keeps it, Esc or a
+//    click elsewhere skips. It becomes the extractor's description. Later: a
+//    point of the sketch clicked (its handle), the Item tab, or — once the
+//    proxy is associated — the extractor's mark in the view or the Inspector.
+
+interface PxPrefs { docMode: "document" | "semantic"; document: string | null; notes: boolean; edgeSnap: boolean }
+const PX_PREFS_KEY = "emstudio.space.px";
+function pxPrefs(): PxPrefs {
+  const d: PxPrefs = { docMode: "document", document: null, notes: true, edgeSnap: false };
+  try {
+    const v = JSON.parse(localStorage.getItem(PX_PREFS_KEY) ?? "{}") as Partial<PxPrefs>;
+    return { docMode: v.docMode === "semantic" ? "semantic" : "document",
+      document: typeof v.document === "string" && v.document ? v.document : null,
+      notes: v.notes !== false, edgeSnap: v.edgeSnap === true };
+  } catch { return d; }
+}
+function setPxPrefs(p: Partial<PxPrefs>): void {
+  try { localStorage.setItem(PX_PREFS_KEY, JSON.stringify({ ...pxPrefs(), ...p })); } catch { /* private mode */ }
+  renderSpaceNPanels();
+  refreshWallBars();
+}
+/** the source a new proxy is drawn with (the Tool tab's choice) */
+function pxSourceNow(): NonNullable<ProxyDrawing["source"]> {
+  const p = pxPrefs();
+  return p.docMode === "semantic" ? { mode: "semantic" } : { mode: "document", ...(p.document && store?.node(p.document) ? { document: p.document } : {}) };
+}
+/** the document a proxy is extracted from: the one chosen, else the first of its clicks' */
+function pxDocumentOf(points: WallPoint[], src: ProxyDrawing["source"]): string | null {
+  if (src?.mode === "semantic") return null;
+  if (src?.document && store?.node(src.document)) return src.document;
+  return points.find((w) => w.doc && store?.node(w.doc))?.doc ?? null;
+}
+/** the document of the models in view when nothing was clicked yet: the selected model's, else none */
+function pxDocumentInView(): string | null {
+  const sp = currentSpace();
+  const k = spaceSel(sp).keys.find((x) => x.startsWith("rm:"));
+  if (!sp || !k) return null;
+  const id = k.slice(3);
+  return sp.rms.find((r) => r.id === id)?.documentId ?? sp.rmGroups.get(id)?.documentId ?? null;
+}
+
+/** B · the Tool tab's rows of the suite: the two modes (the document always shown), the switch, the annotation at the click */
+function renderPxSourceRows(box: HTMLElement, points: WallPoint[], annotate: boolean, setAnnotate: (v: boolean) => void, edge = false): void {
+  const p = pxPrefs();
+  const wrap = document.createElement("div");
+  wrap.className = "px-docmode";
+  wrap.dataset.pxDocmode = p.docMode;
+  const head = document.createElement("div");
+  head.className = "np-sub";
+  head.textContent = t("px.docLabel");
+  wrap.appendChild(head);
+  const radio = (mode: PxPrefs["docMode"], label: string, title: string) => {
+    const l = document.createElement("label");
+    l.title = title;
+    const r = document.createElement("input");
+    r.type = "radio";
+    r.name = `px-docmode-${Math.random().toString(36).slice(2, 7)}`;
+    r.checked = p.docMode === mode;
+    r.dataset.pxMode = mode;
+    r.addEventListener("change", () => { if (r.checked) setPxPrefs({ docMode: mode }); });
+    l.append(r, " ", label);
+    wrap.appendChild(l);
+    return r;
+  };
+  const r1 = radio("document", t("px.mode.document"), t("px.mode.documentTitle"));
+  const r2 = radio("semantic", t("px.mode.semantic"), t("px.mode.semanticTitle"));
+  r2.name = r1.name;
+  box.appendChild(wrap);
+  if (p.docMode === "document") {
+    // the document, shown at all times: the one chosen, else the clicks', else the model selected
+    const docs = (store?.doc.graph.nodes ?? []).filter((n) => n.node_type === "document");
+    const auto = pxDocumentOf(points, { mode: "document" }) ?? pxDocumentInView();
+    const l = document.createElement("label");
+    l.className = "np-row";
+    const sp = document.createElement("span");
+    sp.textContent = t("px.docOf");
+    const sel = document.createElement("select");
+    sel.dataset.pxDoc = "1";
+    sel.appendChild(Object.assign(document.createElement("option"), { value: "",
+      textContent: auto ? t("px.docAuto", { doc: wallNodeName(auto) }) : t("px.docAutoNone"), selected: !p.document }));
+    for (const d of docs) sel.appendChild(Object.assign(document.createElement("option"), { value: d.id, textContent: String(d.name ?? d.id), selected: p.document === d.id }));
+    sel.title = t("px.docTitle");
+    sel.addEventListener("change", () => setPxPrefs({ document: sel.value || null }));
+    l.append(sp, sel);
+    box.appendChild(l);
+    const now = p.document && store?.node(p.document) ? p.document : auto;
+    const shown = document.createElement("p");
+    shown.className = "xf-note";
+    shown.dataset.np = "px-doc";
+    shown.innerHTML = "";
+    shown.append(t("px.docNow") + " ");
+    const b = document.createElement("span");
+    b.className = "px-docname";
+    b.textContent = now ? wallNodeName(now) : "—";
+    shown.appendChild(b);
+    box.appendChild(shown);
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = annotate;
+    cb.dataset.wallAnnotate = "1";
+    cb.addEventListener("change", () => setAnnotate(cb.checked));
+    const lab = document.createElement("label");
+    lab.className = "np-row np-check px-check";
+    lab.title = t("wall.annotateTitle");
+    lab.append(cb, " ", t("wall.annotate"));
+    box.appendChild(lab);
+    const nb = document.createElement("input");
+    nb.type = "checkbox";
+    nb.checked = p.notes;
+    nb.disabled = !annotate;
+    nb.dataset.pxNotes = "1";
+    nb.addEventListener("change", () => setPxPrefs({ notes: nb.checked }));
+    const nl = document.createElement("label");
+    nl.className = "np-row np-check px-check";
+    nl.title = t("px.notesTitle");
+    nl.append(nb, " ", t("px.notes"));
+    box.appendChild(nl);
+  } else {
+    const n = document.createElement("p");
+    n.className = "xf-note";
+    n.dataset.np = "px-semantic";
+    n.textContent = t("px.semanticNote");
+    box.appendChild(n);
+  }
+  if (edge) {
+    const eb = document.createElement("input");
+    eb.type = "checkbox";
+    eb.checked = p.edgeSnap;
+    eb.dataset.pxEdge = "1";
+    eb.addEventListener("change", () => setPxPrefs({ edgeSnap: eb.checked }));
+    const el = document.createElement("label");
+    el.className = "np-row np-check px-check";
+    el.title = t("px.edgeTitle");
+    el.append(eb, " ", t("px.edge"));
+    box.appendChild(el);
+  }
+}
+/** the source of a sketch, in words (the Item tab) */
+function pxSourceWords(d: ProxyDrawing, points: WallPoint[]): string {
+  if (d.source?.mode === "semantic") return t("px.itemSemantic");
+  const doc = pxDocumentOf(points, d.source);
+  return (doc ? t("px.itemDoc", { doc: wallNodeName(doc) }) : t("px.itemDocNone"))
+    + " · " + (d.annotate === false ? t("px.itemNoExtractors") : t("px.itemExtractors"));
+}
+/** the Item tab's choice of the source of a sketch already drawn */
+function pxSourceSelect(d: ProxyDrawing, commit: (src: NonNullable<ProxyDrawing["source"]>) => void): HTMLElement {
+  const sel = document.createElement("select");
+  sel.dataset.pxItemSource = "1";
+  const cur = d.source?.mode === "semantic" ? "semantic" : (d.source?.document ?? "");
+  sel.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: t("px.srcAuto"), selected: cur === "" }));
+  for (const n of (store?.doc.graph.nodes ?? []).filter((x) => x.node_type === "document"))
+    sel.appendChild(Object.assign(document.createElement("option"), { value: n.id, textContent: t("px.srcDoc", { doc: String(n.name ?? n.id) }), selected: cur === n.id }));
+  sel.appendChild(Object.assign(document.createElement("option"), { value: "__semantic", textContent: t("px.mode.semantic"), selected: cur === "semantic" }));
+  sel.addEventListener("change", () => commit(sel.value === "__semantic" ? { mode: "semantic" } : { mode: "document", ...(sel.value ? { document: sel.value } : {}) }));
+  return sel;
+}
+
+/** C · the small field beside a point: Enter keeps, Esc or a click elsewhere skips */
+// eslint-disable-next-line no-var
+var pxNoteEl: HTMLElement | null = null;
+function pxCloseNote(): void {
+  const el = pxNoteEl;
+  pxNoteEl = null;
+  el?.remove();
+}
+function pxAskNote(at: { x: number; y: number } | null | undefined, label: string, initial: string, save: (text: string) => void): void {
+  pxCloseNote();
+  const pos = at ?? spacePointer;
+  if (!pos) return;
+  const box = document.createElement("div");
+  box.className = "px-note";
+  box.dataset.pxNote = label;
+  const k = document.createElement("span");
+  k.className = "px-note-k";
+  k.textContent = label;
+  const inp = document.createElement("input");
+  inp.type = "text";
+  inp.value = initial;
+  inp.placeholder = t("px.notePlaceholder");
+  inp.title = t("px.noteTitle");
+  let done = false;
+  const close = (keep: boolean) => {
+    if (done) return;
+    done = true;
+    if (keep) save(inp.value.trim());
+    if (pxNoteEl === box) pxCloseNote(); else box.remove();
+  };
+  inp.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); close(true); }
+    else if (e.key === "Escape") { e.preventDefault(); close(false); }
+  });
+  for (const ev of ["keyup", "keypress"]) inp.addEventListener(ev, (e) => e.stopPropagation());
+  // a click elsewhere: skipped, nothing written (the click goes on to its target)
+  inp.addEventListener("blur", () => close(false));
+  box.append(k, inp);
+  const x = Math.min(window.innerWidth - 280, pos.x + 14), y = Math.min(window.innerHeight - 40, pos.y + 10);
+  Object.assign(box.style, { left: `${Math.max(4, x)}px`, top: `${Math.max(4, y)}px` });
+  document.body.appendChild(box);
+  pxNoteEl = box;
+  inp.focus();
+}
+/** does a click of a drawing tool make an extractor (so the field opens)? */
+function pxAsks(annotate: boolean, w: WallPoint): boolean {
+  const p = pxPrefs();
+  return p.docMode === "document" && annotate && p.notes && !!w.doc && !!store?.node(w.doc);
+}
+const pxNoteLabel = (w: WallPoint, what: string): string => `${w.doc ? wallNodeName(w.doc) : "—"} · ${what}`;
+
+// ── MICRO-PX1c A · «DAL PROSPETTO» / «FROM ELEVATION» ──────────────────────
+//
+// FACE: a click per corner of the outline on the visible face (on the surface
+// of a model; with «Snap to the mesh's edges» the click goes to the edge or the
+// corner read around it), Enter or a double click closes (three at least).
+// DEPTH: a click on a point of a model behind or beside (its distance along
+// the mean plane's normal), or Enter with the depth written in the Tool tab.
+// The solid is a sketch that keeps its inputs (`from-elevation.ts`); the depth
+// can be changed later: a number, «Depth from a click», its handle.
+
+const ELEV_TOOL = "fromElevation";
+interface ElevTrace { phase: "face" | "depth"; front: WallPoint[]; normals: Array<V3 | null>; facing: V3 | null; snapped: number }
+// eslint-disable-next-line no-var
+var elevTraces = new Map<string, ElevTrace>();
+interface ElevPrefs { depth: number; annotate: boolean; depthTouched: boolean }
+const ELEV_PREFS_KEY = "emstudio.space.elevation";
+function elevPrefs(): ElevPrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(ELEV_PREFS_KEY) ?? "{}") as Partial<ElevPrefs>;
+    return { depth: Number(v.depth) > 0 ? Number(v.depth) : ELEV_TOL.depth, annotate: v.annotate !== false, depthTouched: v.depthTouched === true };
+  } catch { return { depth: ELEV_TOL.depth, annotate: true, depthTouched: false }; }
+}
+function setElevPrefs(p: Partial<ElevPrefs>): void {
+  try { localStorage.setItem(ELEV_PREFS_KEY, JSON.stringify({ ...elevPrefs(), ...p })); } catch { /* private mode */ }
+  renderSpaceNPanels();
+  refreshWallBars();
+}
+function elevTrace(winId: string): ElevTrace {
+  let tr = elevTraces.get(winId);
+  if (!tr) { tr = { phase: "face", front: [], normals: [], facing: null, snapped: 0 }; elevTraces.set(winId, tr); }
+  return tr;
+}
+type ElevStored = ElevationInput & ProxyDrawing;
+/** «Profondità da un clic» on a solid made: the sketch, per Space window */
+// eslint-disable-next-line no-var
+var elevAddDepth = new Map<string, string>();
+// eslint-disable-next-line no-var
+var elevDraft: { winId: string; sketchId: string; input: ElevStored } | null = null;
+// eslint-disable-next-line no-var
+var elevActive: { sketchId: string; k: number } | null = null;
+// eslint-disable-next-line no-var
+var elevMemo = new Map<string, { sig: string; r: ElevationResult }>();
+function elevBuiltMemo(key: string, inp: ElevationInput): ElevationResult {
+  const sig = elevationSig(inp);
+  const m = elevMemo.get(key);
+  if (m && m.sig === sig) return m.r;
+  const r = buildElevation(inp);
+  elevMemo.set(key, { sig, r });
+  return r;
+}
+/** the side seen: the clicks' surface normals, else towards the camera */
+function elevFacing(win: Win, tr: ElevTrace): V3 | null {
+  const cam = sceneHandles.get(win.id)?.camera() ?? null;
+  const n = tr.front.length || 1;
+  const c = tr.front.reduce((s, w) => [s[0] + w.p[0] / n, s[1] + w.p[1] / n, s[2] + w.p[2] / n] as V3, [0, 0, 0] as V3);
+  const toward: V3 | null = cam ? [cam.pos[0] - c[0], cam.pos[1] - c[1], cam.pos[2] - c[2]] : null;
+  return facingOf(tr.normals, toward);
+}
+function elevErrorWords(e: ElevationError): string {
+  if (e.code === "self_intersect") return t("elev.err.self_intersect", { a: String((e.edges?.[0] ?? 0) + 1), b: String((e.edges?.[1] ?? 0) + 1) });
+  return t(`elev.err.${e.code}`);
+}
+function elevWarningWords(ws: ElevationWarning[]): string {
+  const out: string[] = [];
+  const fmt = (v: number) => (v * 100).toLocaleString(getLocale(), { maximumFractionDigits: 1 });
+  for (const w of ws) {
+    if (w.code === "merged") out.push(t("elev.warn.merged", { n: String(w.n ?? 0) }));
+    if (w.code === "clamped") out.push(t("elev.warn.clamped", { n: String(w.n ?? 0) }));
+    if (w.code === "irregular") out.push(t("elev.warn.irregular", { rms: fmt(w.rms ?? 0), max: fmt(w.max ?? 0) }));
+  }
+  return out.join(" · ");
+}
+const fmtDepth = (v: number) => v.toLocaleString(getLocale(), { maximumFractionDigits: 3 });
+/** the counter and the hint of the bar */
+function elevPhaseWords(winId: string): { counter: string; hint: string } {
+  const tr = elevTrace(winId);
+  if (tr.phase === "face") {
+    const n = tr.front.length;
+    return { counter: t("elev.counter.face", { n: String(n) }), hint: n < 3 ? t("elev.hint.face") : t("elev.hint.faceClose") };
+  }
+  return { counter: t("elev.counter.depth", { d: fmtDepth(elevPrefs().depth) }), hint: t("elev.hint.depth") };
+}
+/** a click on the face: the point (snapped to an edge of the mesh when asked) */
+function elevPointOf(hit: ToolHit, tr: ElevTrace | null): WallPoint {
+  const w = wallPointOf(hit);
+  if (pxPrefs().edgeSnap && hit.ring?.length) {
+    const s = snapEdge({ p: hit.point, n: hit.normal }, hit.ring);
+    if (s.kind !== "surface") {
+      if (tr) tr.snapped++;
+      logInfo(t(s.kind === "corner" ? "elev.snapCorner" : "elev.snapEdge", { a: String(Math.round(s.angle ?? 0)) }));
+      return { ...w, p: s.p };
+    }
+  }
+  return w;
+}
+function elevClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
+  // «Profondità da un clic» on a solid already made
+  const adding = elevAddDepth.get(win.id);
+  if (adding) {
+    if (dbl) return true;
+    const sk = sketchById(adding);
+    if (!sk?.elevation) { elevEndAddDepth(win); return true; }
+    if (!hit) { toast(t("wall.noSurface")); return true; }
+    const seen = elevSeen(sk).input;
+    const w = wallPointOf(hit);
+    const d = depthFromPoint(seen.front, seen.facing, w.p);
+    if (!d.ok) { toast(t(`elev.depth.${d.why}`)); return true; }
+    const ed = editElevation(seen, { op: "depth", depth: d.depth, from: "click", point: w });
+    if (ed.ok && elevCommit(sk, ed.input)) {
+      toast(t("elev.depthSet", { d: fmtDepth(d.depth) }));
+      if (pxAsks(seen.annotate !== false && seen.source?.mode !== "semantic", w))
+        pxAskNote(hit.screen, pxNoteLabel(w, t("elev.depthPoint")), "", (text) => {
+          const s2 = sketchById(sk.id);
+          if (!s2?.elevation || !text) return;
+          const e2 = editElevation(elevSeen(s2).input, { op: "note", k: -1, note: text });
+          if (e2.ok) elevCommit(s2, e2.input);
+        });
+    }
+    elevEndAddDepth(win);
+    return true;
+  }
+  if (dbl) { elevClose(win); return true; }
+  if (!hit) { toast(t("wall.noSurface")); return true; }
+  const tr = elevTrace(win.id);
+  if (tr.phase === "face") {
+    const w = elevPointOf(hit, tr);
+    tr.front.push(w);
+    tr.normals.push(hit.normal);
+    const docsBefore = wallDocuments({ plan: tr.front.slice(0, -1).filter((x) => x.rm), top: [] });
+    if (w.rm && w.doc && docsBefore.length && !docsBefore.includes(w.doc)) toast(t("wall.hybrid", { doc: wallNodeName(w.doc) }));
+    if (pxAsks(elevPrefs().annotate, w))
+      pxAskNote(hit.screen, pxNoteLabel(w, t("elev.pointN", { n: String(tr.front.length) })), "", (text) => { if (text) w.note = text; renderSpaceNPanels(); });
+    refreshWallBars();
+    renderSpaceNPanels();
+    return true;
+  }
+  // the depth: a point of a model behind or beside
+  const w = wallPointOf(hit);
+  const facing = tr.facing ?? elevFacing(win, tr);
+  if (!facing) { toast(t("elev.err.facing")); return true; }
+  const d = depthFromPoint(tr.front, facing, w.p);
+  if (!d.ok) { toast(t(`elev.depth.${d.why}`)); return true; }
+  const sk = elevFinish(win, d.depth, "click", w);
+  if (sk && pxAsks(elevPrefs().annotate, w))
+    pxAskNote(hit.screen, pxNoteLabel(w, t("elev.depthPoint")), "", (text) => {
+      const s2 = sketchById(sk.id);
+      if (!s2?.elevation || !text) return;
+      const e2 = editElevation(s2.elevation, { op: "note", k: -1, note: text });
+      if (e2.ok) updateElevation(s2.id, e2.input);
+      renderSpaceNPanels();
+    });
+  return true;
+}
+/** Enter / a double click: the face closes into the depth's phase; the depth's phase makes the solid at the written depth */
+function elevClose(win: Win): void {
+  if (elevAddDepth.has(win.id)) { elevEndAddDepth(win); return; }
+  const tr = elevTrace(win.id);
+  if (tr.phase === "face") {
+    if (tr.front.length < 3) { toast(t("elev.hint.face")); return; }
+    const facing = elevFacing(win, tr);
+    if (!facing) { toast(t("elev.err.facing")); return; }
+    const r = buildElevation({ front: tr.front, depth: elevPrefs().depth, facing });
+    if (!r.ok) { toast(elevErrorWords(r.error)); return; }
+    tr.facing = facing;
+    tr.phase = "depth";
+  } else {
+    const p = elevPrefs();
+    elevFinish(win, p.depth, p.depthTouched ? "number" : "default", null);
+    return;
+  }
+  refreshWallBars();
+  renderSpaceNPanels();
+}
+function elevCancel(win: Win): boolean {
+  if (elevAddDepth.has(win.id)) { elevEndAddDepth(win); return true; }
+  const tr = elevTraces.get(win.id);
+  if (!tr) return false;
+  if (tr.phase === "depth") { tr.phase = "face"; tr.facing = null; }
+  else if (tr.front.length) { tr.front = []; tr.normals = []; tr.snapped = 0; }
+  else return false;
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+function elevUndoPoint(win: Win): boolean {
+  const tr = elevTraces.get(win.id);
+  if (!tr || tr.phase !== "face" || !tr.front.length) return false;
+  tr.front.pop();
+  tr.normals.pop();
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+/** the depth decided: the solid is a sketch, selected; the tool stays armed */
+function elevFinish(win: Win, depth: number, from: DepthFrom, point: WallPoint | null): Sketch | null {
+  const tr = elevTrace(win.id);
+  const facing = tr.facing ?? elevFacing(win, tr);
+  if (!facing) { toast(t("elev.err.facing")); return null; }
+  const input: ElevStored = { front: tr.front, depth, facing, depthFrom: from, ...(point ? { depthPoint: point } : {}),
+    annotate: elevPrefs().annotate, source: pxSourceNow() };
+  const r = buildElevation(input);
+  if (!r.ok) { toast(elevErrorWords(r.error)); return null; }
+  const sk = addElevationSketch(input, r.mesh.origin, t("elev.sketchName"));
+  elevTraces.set(win.id, { phase: "face", front: [], normals: [], facing: null, snapped: 0 });
+  setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
+  const warn = elevWarningWords(r.mesh.warnings);
+  const msg = t("elev.made", { name: sk.name, n: String(r.mesh.stats.corners), tris: String(r.mesh.stats.triangles),
+    d: fmtDepth(depth), v: meshVolume(r.mesh.positions, r.mesh.indices).toLocaleString(getLocale(), { maximumFractionDigits: 2 }) })
+    + (input.source?.mode === "semantic" ? ` · ${t("px.madeSemantic")}` : "") + (warn ? ` · ${warn}` : "");
+  logInfo(msg);
+  toast(msg);
+  refreshWallBars();
+  renderSpaceNPanels();
+  refreshInspector();
+  refreshSurfaces("scene");
+  return sk;
+}
+function elevMarks(winId: string): SceneMark[] {
+  if (spaceCoreTools.get(winId) !== ELEV_TOOL || elevAddDepth.has(winId)) return [];
+  const tr = elevTraces.get(winId);
+  if (!tr) return [];
+  const out: SceneMark[] = [];
+  const pts = tr.front.map((w) => w.p);
+  if (pts.length === 1) out.push({ id: "elev:face:0", kind: "point", vertices: [pts[0]], label: "", draft: true });
+  else if (pts.length > 1) out.push({ id: "elev:face", kind: "polyline", vertices: pts.length >= 3 ? [...pts, pts[0]] : pts, label: "", draft: true });
+  return out;
+}
+/** the see-through solid: the outline being drawn (three points at least) at the written depth, or a solid whose handle is dragged */
+function elevPreview(winId: string): SceneSolid | null {
+  let inp: ElevationInput | null = null;
+  if (elevDraft && elevDraft.winId === winId) inp = elevDraft.input;
+  else if (spaceCoreTools.get(winId) === ELEV_TOOL && !elevAddDepth.has(winId)) {
+    const tr = elevTraces.get(winId);
+    if (!tr || tr.front.length < 3) return null;
+    const win = { id: winId } as Win;
+    const facing = tr.facing ?? elevFacing(win, tr);
+    if (!facing) return null;
+    inp = { front: tr.front, depth: elevPrefs().depth, facing };
+  }
+  if (!inp) return null;
+  const r = elevBuiltMemo(`pv:${winId}`, inp);
+  if (!r.ok) return null;
+  return { sig: `e|${elevationSig(inp)}`, positions: r.mesh.positions, indices: r.mesh.indices, origin: r.mesh.origin };
+}
+/** a solid's inputs where it is SEEN (a pose moved after the build carried into them) */
+function elevSeen(sk: Sketch): { input: ElevStored; built: ElevationResult } {
+  const e = sk.elevation!;
+  const first = elevBuiltMemo(`seen:${sk.id}`, e);
+  if (!first.ok || poseIsBuilt(first.mesh.origin, sk)) return { input: e, built: first };
+  const input: ElevStored = { ...bakeElevationPose(e, first.mesh.origin, sk), annotate: e.annotate, ...(e.source ? { source: e.source } : {}) };
+  return { input, built: buildElevation(input) };
+}
+/** a correction written: ONE step of the undo, the solid made again */
+function elevCommit(sk: Sketch, inp: ElevStored): boolean {
+  if (!sketchById(sk.id)?.elevation) return false;
+  const r = buildElevation(inp);
+  if (!r.ok) { toast(elevErrorWords(r.error)); renderSpaceNPanels(); return false; }
+  store?.viewStep();
+  updateElevation(sk.id, inp, { position: r.mesh.origin, rotation: [0, 0, 0], scale: [1, 1, 1] });
+  const warn = elevWarningWords(r.mesh.warnings);
+  if (warn) toast(warn);
+  refreshSurfaces("scene");
+  renderSpaceNPanels();
+  return true;
+}
+function elevSelected(): Sketch | null {
+  if (spaceSketchSet.size !== 1 || !spaceSketchSel) return null;
+  const sk = sketchById(spaceSketchSel);
+  return sk && sk.shape === "elevation" && sk.elevation ? sk : null;
+}
+const elevHandleId = (sid: string, kind: string, k: number) => `e|${sid}|${kind}|${k}`;
+function parseElevHandle(id: string): { sid: string; kind: "face" | "mid" | "depth"; k: number } | null {
+  const m = /^e\|(.+)\|(face|mid|depth)\|(-?\d+)$/.exec(id);
+  return m ? { sid: m[1], kind: m[2] as "face" | "mid" | "depth", k: Number(m[3]) } : null;
+}
+/** the handles of the solid selected: its points, a «+» per side, the depth (on its axis) */
+function elevHandles(winId: string): SceneHandle[] {
+  const sk = elevSelected();
+  if (!sk) return [];
+  if ((spaceCoreTools.get(winId) ?? "select") !== "select") return [];
+  const inp = elevDraft?.sketchId === sk.id ? elevDraft.input : elevSeen(sk).input;
+  const r = elevBuiltMemo(`h:${sk.id}`, inp);
+  const out: SceneHandle[] = [];
+  const act = elevActive?.sketchId === sk.id ? elevActive.k : null;
+  inp.front.forEach((w, k) => out.push({ id: elevHandleId(sk.id, "face", k), p: w.p, kind: "face", active: act === k,
+    title: t("elev.h.face", { n: String(k + 1) }) + (w.note ? ` — «${w.note}»` : ""), ...(w.note ? { cls: "has-note" } : {}) }));
+  for (const sd of elevationSides(inp.front)) out.push({ id: elevHandleId(sk.id, "mid", sd.after), p: sd.p, kind: "mid", title: t("wall.h.mid") });
+  if (r.ok) { const dh = depthHandle(r.mesh); out.push({ id: elevHandleId(sk.id, "depth", 0), p: dh.p, kind: "depth", axis: dh.axis,
+    title: t("elev.h.depth", { d: fmtDepth(r.mesh.stats.depth) }) }); }
+  return out;
+}
+/** a handle's gesture: a click (the point active, its annotation asked), a drag, the release (one step) */
+function elevOnHandle(win: Win, e: SceneHandleEvent): boolean {
+  const h = parseElevHandle(e.id);
+  if (!h) return false;
+  const sk = sketchById(h.sid);
+  if (!sk?.elevation) return true;
+  const seen = () => elevSeen(sk).input;
+  if (e.phase === "click") {
+    if (h.kind === "mid") {
+      const sd = elevationSides(seen().front).find((x) => x.after === h.k);
+      if (sd) { const ed = editElevation(seen(), { op: "insert", after: h.k, point: { p: sd.p, rm: null, doc: null } }); if (ed.ok && elevCommit(sk, ed.input)) elevActive = { sketchId: sk.id, k: h.k + 1 }; }
+      return true;
+    }
+    if (h.kind === "face") {
+      elevActive = { sketchId: sk.id, k: h.k };
+      renderSpaceNPanels();
+      // C · later: the same field, with what is written
+      const w = seen().front[h.k];
+      if (w) pxAskNote(spacePointer, pxNoteLabel(w, t("elev.pointN", { n: String(h.k + 1) })), w.note ?? "", (text) => {
+        const ed = editElevation(elevSeen(sk).input, { op: "note", k: h.k, note: text });
+        if (ed.ok && (ed.input.front[h.k].note ?? "") !== (w.note ?? "")) elevCommit(sk, ed.input);
+      });
+    }
+    return true;
+  }
+  if (e.phase === "start") { elevDraft = { winId: win.id, sketchId: sk.id, input: seen() }; elevActive = null; return true; }
+  if (e.phase === "cancel") { elevDraft = null; return true; }
+  if (!e.point) return true;
+  const base = seen();
+  let ed: ReturnType<typeof editElevation<ElevStored>> | null = null;
+  if (h.kind === "depth") {
+    const r = elevBuiltMemo(`h:${sk.id}`, base);
+    if (r.ok) { const d = depthOnAxis(r.mesh, e.point); ed = editElevation(base, { op: "depth", depth: Math.max(ELEV_TOL.minDepth, d), from: "handle" }); }
+  } else {
+    const p = wallPointAt(e.point, e.key);
+    ed = h.kind === "face" ? editElevation(base, { op: "move", k: h.k, to: p }) : editElevation(base, { op: "insert", after: h.k, point: p });
+  }
+  if (e.phase === "move") { if (ed?.ok) elevDraft = { winId: win.id, sketchId: sk.id, input: ed.input }; return true; }
+  elevDraft = null;
+  if (ed?.ok && elevCommit(sk, ed.input)) {
+    if (h.kind !== "depth") elevActive = { sketchId: sk.id, k: h.kind === "mid" ? h.k + 1 : h.k };
+    if (h.kind !== "depth" && e.key === null) toast(t("wall.h.offModel"));
+  }
+  return true;
+}
+function elevDeleteActive(): boolean {
+  const sk = elevSelected();
+  if (!sk || !elevActive || elevActive.sketchId !== sk.id) return false;
+  const ed = editElevation(elevSeen(sk).input, { op: "remove", k: elevActive.k });
+  if (!ed.ok) { toast(ed.why === "too_few" ? t("elev.err.too_few") : t("wall.h.gone")); return true; }
+  elevActive = null;
+  elevCommit(sk, ed.input);
+  return true;
+}
+function elevStartAddDepth(win: Win, sk: Sketch): void {
+  setSpaceTool(win.id, ELEV_TOOL);
+  elevAddDepth.set(win.id, sk.id);
+  setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
+  refreshWallBars();
+  renderSpaceNPanels();
+}
+function elevEndAddDepth(win: Win): void {
+  const sid = elevAddDepth.get(win.id);
+  setSpaceTool(win.id, "select");
+  if (sid && sketchById(sid)) setSpaceSel({ keys: [`sketch:${sid}`], active: `sketch:${sid}` });
+  refreshWallBars();
+  renderSpaceNPanels();
+}
+function drawElevBar(bar: HTMLElement, winId: string): void {
+  bar.textContent = "";
+  const adding = sketchById(elevAddDepth.get(winId) ?? "");
+  const b = document.createElement("b");
+  b.dataset.wallCounter = "1";
+  const hint = document.createElement("span");
+  hint.className = "scn-wallbar-hint";
+  hint.dataset.wallHint = "1";
+  if (adding?.elevation) {
+    bar.dataset.wallPhase = "add-depth";
+    b.textContent = t("elev.addDepth.counter", { name: adding.name });
+    hint.textContent = t("elev.addDepth.hint");
+    bar.append(b, " ", hint);
+    return;
+  }
+  const tr = elevTrace(winId);
+  const ph = elevPhaseWords(winId);
+  bar.dataset.wallPhase = tr.phase;
+  bar.dataset.wallPoints = String(tr.front.length);
+  b.textContent = ph.counter;
+  hint.textContent = ph.hint;
+  bar.append(b, " ", hint);
+  const w = document.createElement("div");
+  const src = pxSourceNow();
+  if (src.mode === "semantic") {
+    w.className = "scn-wallbar-where";
+    w.dataset.wallWhere = "semantic";
+    w.textContent = t("px.barSemantic");
+  } else {
+    const where = wallWhere(tr.front);
+    const doc = pxDocumentOf(tr.front, src) ?? pxDocumentInView();
+    w.className = "scn-wallbar-where" + (where.hybrid ? " warn" : "");
+    w.dataset.wallWhere = where.hybrid ? "hybrid" : "1";
+    w.textContent = t("px.barDoc", { doc: doc ? wallNodeName(doc) : "—" }) + (where.words ? ` · ${where.hybrid ? `⚠ ${t("wall.hybridNow")} ` : ""}${where.words}` : "");
+  }
+  bar.appendChild(w);
+}
+function renderElevToolTab(box: HTMLElement, win: Win): void {
+  const adding = sketchById(elevAddDepth.get(win.id) ?? "");
+  if (adding?.elevation) {
+    const p0 = document.createElement("p");
+    p0.className = "xf-note";
+    p0.dataset.np = "elev-adddepth";
+    p0.textContent = t("elev.addDepth.how", { name: adding.name });
+    box.appendChild(p0);
+    return;
+  }
+  const prefs = elevPrefs();
+  const tr = elevTrace(win.id);
+  const note = (text: string, probe: string, cls = "xf-note") => {
+    const el = document.createElement("p");
+    el.className = cls;
+    el.dataset.np = probe;
+    el.textContent = text;
+    box.appendChild(el);
+  };
+  note(t("elev.how"), "elev-how");
+  const l = document.createElement("label");
+  l.className = "np-row";
+  l.dataset.wallOpt = "depth";
+  const sp = document.createElement("span");
+  sp.textContent = t("elev.depthLabel");
+  const i = document.createElement("input");
+  i.type = "number";
+  i.step = "0.05";
+  i.min = "0.01";
+  i.value = String(prefs.depth);
+  i.dataset.elevDepth = "1";
+  i.addEventListener("change", () => { const x = Number(i.value); if (x > 0) setElevPrefs({ depth: x, depthTouched: true }); else i.value = String(prefs.depth); });
+  i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const x = Number(i.value); if (x > 0) { setElevPrefs({ depth: x, depthTouched: true }); if (elevTrace(win.id).phase === "depth") elevClose(win); } } });
+  l.append(sp, i);
+  box.appendChild(l);
+  renderPxSourceRows(box, tr.front, prefs.annotate, (v) => setElevPrefs({ annotate: v }), true);
+  const ph = elevPhaseWords(win.id);
+  note(`${ph.counter} — ${ph.hint}`, "elev-phase");
+  if (tr.snapped) note(t("elev.snappedCount", { n: String(tr.snapped) }), "elev-snapped");
+  const where = wallWhere(tr.front);
+  if (where.hybrid) note(t("wall.hybridNote"), "wall-hybrid", "xf-note warn");
+  if (where.none) note(t("wall.noModel", { n: String(where.none) }), "wall-nomodel", "xf-note warn");
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const act = (label: string, probe: string, run: () => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.act = probe;
+    b.textContent = label;
+    b.disabled = disabled;
+    b.addEventListener("click", run);
+    acts.appendChild(b);
+  };
+  act(tr.phase === "face" ? t("elev.closeFace") : t("elev.closeDepth"), "elev-close", () => elevClose(win), tr.phase === "face" && tr.front.length < 3);
+  act(t("wall.undoPoint"), "elev-undo", () => { elevUndoPoint(win); }, tr.phase !== "face" || !tr.front.length);
+  act(t("wall.cancelPhase"), "elev-cancel", () => { elevCancel(win); }, tr.phase === "face" && !tr.front.length);
+  box.appendChild(acts);
+}
+/** the Item tab of a solid: its inputs, editable, made again at once (one step each) */
+function renderElevInputs(sect: NpSect, sk: Sketch, win: Win): void {
+  if (!sk.elevation) return;
+  const box = sect(t("elev.inputs"), "elev-inputs", t("elev.inputsHelp"));
+  box.dataset.elevSketch = sk.id;
+  const { input: inp, built } = elevSeen(sk);
+  const commit = (x: ElevStored) => { elevCommit(sk, x); };
+  const note = (text: string, probe: string, cls = "xf-note") => {
+    const el = document.createElement("p");
+    el.className = cls;
+    el.dataset.np = probe;
+    el.textContent = text;
+    box.appendChild(el);
+  };
+  if (built.ok) note(t("elev.stats", { n: String(built.mesh.stats.corners), tris: String(built.mesh.stats.triangles), d: fmtDepth(built.mesh.stats.depth),
+    v: meshVolume(built.mesh.positions, built.mesh.indices).toLocaleString(getLocale(), { maximumFractionDigits: 2 }) }), "elev-stats");
+  else note(elevErrorWords(built.error), "elev-error", "xf-note warn");
+  if (built.ok) note(t("elev.plane", { rms: (built.mesh.plane.rms * 100).toLocaleString(getLocale(), { maximumFractionDigits: 1 }),
+    max: (built.mesh.plane.max * 100).toLocaleString(getLocale(), { maximumFractionDigits: 1 }) }), "elev-plane");
+  const warn = built.ok ? elevWarningWords(built.mesh.warnings) : "";
+  if (warn) note(warn, "elev-warn", "xf-note warn");
+  note(t(`elev.depthFrom.${inp.depthFrom ?? "default"}`), "elev-depthfrom");
+  note(pxSourceWords(inp, inp.front), "px-item-source", inp.source?.mode === "semantic" ? "xf-note est" : "xf-note");
+  const line = (label: string, el: HTMLElement) => {
+    const l = document.createElement("label");
+    l.className = "np-row";
+    const s0 = document.createElement("span");
+    s0.textContent = label;
+    l.append(s0, el);
+    box.appendChild(l);
+  };
+  line(t("px.docLabel"), pxSourceSelect(inp, (src) => commit({ ...inp, source: src })));
+  const dep = document.createElement("input");
+  dep.type = "number";
+  dep.step = "0.01";
+  dep.value = String(Math.round(inp.depth * 1000) / 1000);
+  dep.dataset.elevIn = "depth";
+  dep.className = "wall-num";
+  dep.addEventListener("change", () => { const x = Number(dep.value); const ed = editElevation(inp, { op: "depth", depth: x, from: "number" }); if (ed.ok) commit(ed.input); });
+  line(t("elev.depthLabel"), dep);
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "btn";
+  add.dataset.act = "elev-adddepth";
+  add.textContent = t("elev.addDepth");
+  add.title = t("elev.addDepth.hint");
+  add.addEventListener("click", () => elevStartAddDepth(win, sk));
+  acts.appendChild(add);
+  box.appendChild(acts);
+  const docs = (store?.doc.graph.nodes ?? []).filter((n) => n.node_type === "document");
+  const table = document.createElement("table");
+  table.className = "wall-points elev-points";
+  table.dataset.elevPoints = sk.id;
+  const head = document.createElement("tr");
+  for (const h of ["", "X", "Y", "Z", t("wall.docCol"), ""]) head.appendChild(Object.assign(document.createElement("th"), { textContent: h }));
+  table.appendChild(head);
+  const act = elevActive?.sketchId === sk.id ? elevActive.k : null;
+  const row = (w: WallPoint, k: number) => {
+    const tr = document.createElement("tr");
+    tr.dataset.elevRow = String(k);
+    if (act === k) tr.classList.add("act");
+    tr.appendChild(Object.assign(document.createElement("td"), { textContent: k === -1 ? "↕" : String(k + 1),
+      title: w.rm ? (w.doc ? t("wall.onRmDoc", { rm: wallNodeName(w.rm), doc: wallNodeName(w.doc) }) : t("wall.onRm", { rm: wallNodeName(w.rm) })) : t("wall.whereNone") }));
+    const b = blenderXYZ(w.p);
+    [0, 1, 2].forEach((c) => {
+      const td = document.createElement("td");
+      if (k === -1) td.textContent = (Math.round(b[c] * 1000) / 1000).toLocaleString(getLocale());
+      else {
+        const i = document.createElement("input");
+        i.type = "number";
+        i.step = "0.01";
+        i.className = "wall-num";
+        i.value = String(Math.round(b[c] * 1000) / 1000);
+        i.dataset.elevIn = `${k}:${c}`;
+        i.addEventListener("change", () => {
+          const x = Number(i.value);
+          if (!Number.isFinite(x)) return;
+          const nb = [...b] as V3;
+          nb[c] = x;
+          const ed = editElevation(inp, { op: "move", k, to: { ...w, p: [nb[0], nb[2], -nb[1]] } });
+          if (ed.ok) commit(ed.input);
+        });
+        td.appendChild(i);
+      }
+      tr.appendChild(td);
+    });
+    const dtd = document.createElement("td");
+    const dsel = document.createElement("select");
+    dsel.className = "wall-doc";
+    dsel.dataset.elevDoc = String(k);
+    dsel.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: "—", selected: !w.doc }));
+    for (const d of docs) dsel.appendChild(Object.assign(document.createElement("option"), { value: d.id, textContent: String(d.name ?? d.id), selected: w.doc === d.id }));
+    dsel.title = t("wall.docTitle");
+    dsel.addEventListener("change", () => {
+      const moved = { ...w, doc: dsel.value || null };
+      const ed = k === -1 ? { ok: true as const, input: { ...inp, depthPoint: moved } } : editElevation(inp, { op: "move", k, to: moved });
+      if (ed.ok) commit(ed.input);
+    });
+    dtd.appendChild(dsel);
+    tr.appendChild(dtd);
+    const del = document.createElement("td");
+    if (k >= 0) {
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "link";
+      x.textContent = "×";
+      x.title = t("wall.removePoint");
+      x.dataset.elevDel = String(k);
+      x.addEventListener("click", () => { const ed = editElevation(inp, { op: "remove", k }); if (!ed.ok) { toast(t("elev.err.too_few")); return; } commit(ed.input); });
+      del.appendChild(x);
+    }
+    tr.appendChild(del);
+    table.appendChild(tr);
+    table.appendChild(wallNoteRow(w, (text) => { const ed = editElevation(inp, { op: "note", k, note: text }); if (ed.ok) commit(ed.input); }, String(k), 6));
+  };
+  table.appendChild(document.createElement("tr")).appendChild(Object.assign(document.createElement("th"), { colSpan: 6, textContent: t("elev.rowFace") }));
+  inp.front.forEach((w, k) => row(w, k));
+  if (inp.depthPoint) {
+    table.appendChild(document.createElement("tr")).appendChild(Object.assign(document.createElement("th"), { colSpan: 6, textContent: t("elev.rowDepth") }));
+    row(inp.depthPoint, -1);
+  }
+  box.appendChild(table);
+}
+
+/** C · a point's annotation in the tables of the Item tab: a row under the point */
+function wallNoteRow(w: WallPoint, set: (text: string) => void, probe: string, cols: number): HTMLTableRowElement {
+  const tr = document.createElement("tr");
+  tr.className = "px-note-row";
+  tr.appendChild(Object.assign(document.createElement("td"), { textContent: "✎", title: t("px.noteCol") }));
+  const td = document.createElement("td");
+  td.colSpan = cols - 1;
+  tr.appendChild(td);
+  const ni = document.createElement("input");
+  ni.type = "text";
+  ni.className = "px-note-cell";
+  ni.value = w.note ?? "";
+  ni.placeholder = "…";
+  ni.title = t("px.noteTitle");
+  ni.dataset.pxNoteCell = probe;
+  ni.addEventListener("change", () => set(ni.value.trim()));
+  td.appendChild(ni);
+  return tr;
+}
+
+/** The points of a drawn proxy as `proxy_from_points` takes them — the wall and
+ *  the elevation alike: one per click on a document's model (EM Tools'
+ *  attributes, the reading's place, the ANNOTATION as its description), named
+ *  `<document>.<NN>`; the proxy's DOCUMENT (the anchor: chosen, or the clicks'
+ *  first); a semantic shape: nothing of a document. */
+function proxyParadataItem(sk: Sketch): { tool: string; purpose: string; annotate: boolean; semantic: boolean; clicks: number; skipped: number;
+    points: Array<Record<string, unknown>>; documentId: string | null; documentName: string | null } | null {
+  const st = store;
+  const wall = sk.shape === "wall" ? sk.wall : null;
+  const elev = sk.shape === "elevation" ? sk.elevation : null;
+  const d: ProxyDrawing | null = wall ?? elev ?? null;
+  if (!d || !st) return null;
+  const typed: Array<{ w: WallPoint; type: string }> = wall
+    ? [...wall.plan.map((w) => ({ w, type: wall.mode === "axis" ? "axis" : "plan" })), ...wall.top.map((w) => ({ w, type: "head" }))]
+    : [...elev!.front.map((w) => ({ w, type: "face" })), ...(elev!.depthPoint ? [{ w: elev!.depthPoint, type: "depth" }] : [])];
+  const tool = wall ? "Wall from plan" : "From elevation";
+  const purpose = wall ? "wall_from_plan" : "from_elevation";
+  const semantic = d.source?.mode === "semantic";
+  const annotate = d.annotate !== false && !semantic;
+  const out = { tool, purpose, annotate, semantic, clicks: typed.length, skipped: 0, points: [] as Array<Record<string, unknown>>,
+    documentId: null as string | null, documentName: null as string | null };
+  if (semantic) return out;
+  const next = new Map<string, number>();
+  const ordinal = (docId: string): string | null => {
+    const dn = String(st.node(docId)?.name ?? "").trim();
+    if (!dn) return null;
+    const k = next.get(docId) ?? nextExtractorOrdinal(st.doc, dn);
+    next.set(docId, k + 1);
+    return `${dn}.${ordinalTag(k)}`;
+  };
+  if (annotate) for (const { w, type } of typed) {
+    if (!w.doc || !st.node(w.doc)) { out.skipped++; continue; }
+    const b = blenderXYZ(w.p);
+    const name = ordinal(w.doc);
+    out.points.push({ document_id: w.doc, x: b[0], y: b[1], z: b[2], point_type: type, coords: w.p,
+      ...(w.rm && st.node(w.rm) ? { on_id: w.rm } : {}), ...(name ? { name } : {}), ...(w.note ? { description: w.note } : {}) });
+  }
+  const doc = pxDocumentOf(typed.map((x) => x.w), d.source);
+  if (doc) {
+    out.documentId = doc;
+    // its extractor's name, when the library will write one (no point reads it)
+    if (!out.points.some((p) => p.document_id === doc)) out.documentName = ordinal(doc);
+  }
+  return out;
 }
 
 type NpSect = (title: string, probe: string, help?: string) => HTMLElement;
@@ -35891,6 +36828,7 @@ function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: N
   };
   if (!entry || entry.id === "select") note(t("tt.selectHow"));
   else if (entry.id === WALL_TOOL) renderWallToolTab(box, win);
+  else if (entry.id === ELEV_TOOL) renderElevToolTab(box, win);
   else if (entry.id === "cursor") {
     note(t("tt.cursorHow"));
     act(t("s3.nCentre"), "cursor-centre", () => { h.centreScene(); renderSpaceNPanels(); });
@@ -35907,7 +36845,7 @@ function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: N
     }
   }
   // (an extension's tool has «Stop tracing (Esc)» already: the same gesture)
-  if (entry?.id === "cursor" || entry?.id === WALL_TOOL) act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
+  if (entry?.id === "cursor" || entry?.id === WALL_TOOL || entry?.id === ELEV_TOOL) act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
   if (acts.childElementCount) box.appendChild(acts);
 }
 
@@ -36599,34 +37537,6 @@ function askProxyConflict(unitName: string): Promise<"replace" | "part" | null> 
 /** The roads all end here: one or more sketches to one unit, the conflict asked
  *  when the unit has a proxy (several sketches: the first as chosen, the others
  *  as parts). */
-/** MICRO-PX1 · the points of a wall as `proxy_from_points` takes them: one per
- *  click on a document's model (EM Tools' attributes: the point in Blender's
- *  frame, its type «plan» / «axis» / «head»; the place of the reading on the
- *  model, in the scene's frame), named by the naming rule `<document>.<NN>`.
- *  A click on no document is not an extractor (counted in `skipped`). */
-function wallParadataItem(wall: WallInput & { annotate?: boolean }): { annotate: boolean; clicks: number; skipped: number;
-    points: Array<Record<string, unknown>> } {
-  const annotate = wall.annotate !== false;
-  const clicks = wall.plan.length + wall.top.length;
-  if (!annotate || !store) return { annotate, clicks, skipped: 0, points: [] };
-  const st = store;
-  const next = new Map<string, number>();
-  const points: Array<Record<string, unknown>> = [];
-  let skipped = 0;
-  const add = (w: WallPoint, type: string) => {
-    if (!w.doc || !st.node(w.doc)) { skipped++; return; }
-    const dn = String(st.node(w.doc)?.name ?? "").trim();
-    const k = next.get(w.doc) ?? (dn ? nextExtractorOrdinal(st.doc, dn) : 1);
-    next.set(w.doc, k + 1);
-    const b = blenderXYZ(w.p);
-    points.push({ document_id: w.doc, x: b[0], y: b[1], z: b[2], point_type: type, coords: w.p,
-      ...(w.rm && st.node(w.rm) ? { on_id: w.rm } : {}), ...(dn ? { name: `${dn}.${ordinalTag(k)}` } : {}) });
-  };
-  for (const w of wall.plan) add(w, wall.mode === "axis" ? "axis" : "plan");
-  for (const w of wall.top) add(w, "head");
-  return { annotate, clicks, skipped, points };
-}
-
 async function associateFlow(win: Win, sketchIds: string[], unitId: string): Promise<boolean> {
   const st = store;
   const sp = currentSpace();
@@ -36722,7 +37632,11 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
   // MICRO-PX1 · a wall of «Muro da pianta» with «Annotate the points as
   // extractors»: each click on a document's model becomes an extractor of that
   // document — the chain EM Tools' Proxy Box writes, by s3Dgraphy
-  const wallItem = sk.shape === "wall" && sk.wall ? wallParadataItem(sk.wall) : null;
+  // MICRO-PX1c · …and a solid of «Dal prospetto», by the same road: the proxy's
+  // document (the proxy as a whole extracted from it), the clicks' annotations
+  // as their extractors' descriptions; a SEMANTIC SHAPE: no document, the
+  // unit's proxy_status «to refine»
+  const wallItem = proxyParadataItem(sk);
   // MICRO-PX1b D · the corners of the hidden side, estimated: not extractors, and the chain says it
   const wallBuilt = sk.shape === "wall" && sk.wall ? buildWall(sk.wall) : null;
   const wallEst = wallBuilt?.ok && wallBuilt.mesh.estimate.vertices.length ? wallBuilt.mesh.estimate : null;
@@ -36730,17 +37644,21 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
     wallEst.rule === "perpendicular" ? "the hidden side: the visible profile's height at the foot of the perpendicular"
     : wallEst.rule === "single" ? "the one point's height" : "the nearest point of the head's surface"}) — not extractors of a document.` : "";
   // the chain, by the library (a unit born now travels in the request)
-  let j: { ok?: boolean; nodes?: EmNode[]; edges?: EmEdge[]; error?: string;
-           paradata?: Array<{ extractor_ids?: string[]; combiner_name?: string }> };
+  let j: { ok?: boolean; nodes?: EmNode[]; edges?: EmEdge[]; error?: string; updated?: EmNode[];
+           paradata?: Array<{ extractor_ids?: string[]; combiner_name?: string }>; semantic?: Array<{ property_id?: string }> };
   try {
     const doc = JSON.parse(st.toJSON()) as EmDocument;
     if (newUnit) doc.graph.nodes.push(newUnit.node);
     const res = await fetch(`${await bridgeUrl()}/geometry-proxies`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ doc, items: [{ unit_id: unitId, url: rel, ...(wallItem?.points.length ? {
-        points: wallItem.points, purpose: "wall_from_plan",
-        combiner_description: `Combiner for the wall drawn in EMStudio with «Wall from plan» — aggregates the ${wallItem.points.length} clicked points.${estSay}`,
-      } : {}) }] }),
+      body: JSON.stringify({ doc, items: [{ unit_id: unitId, url: rel, ...(wallItem && (wallItem.points.length || wallItem.documentId) ? {
+        points: wallItem.points, purpose: wallItem.purpose,
+        ...(wallItem.documentId ? { document_id: wallItem.documentId, ...(wallItem.documentName ? { document_extractor_name: wallItem.documentName } : {}),
+          document_extractor_description: `The proxy drawn in EMStudio with «${wallItem.tool}» on this document, as a whole` } : {}),
+        combiner_description: `Combiner for the ${sk.shape === "wall" ? "wall" : "solid"} drawn in EMStudio with «${wallItem.tool}» — aggregates the ${wallItem.points.length} clicked points${
+          wallItem.documentName ? " and the proxy's document" : ""}.${estSay}`,
+      } : {}), ...(wallItem?.semantic ? { semantic: true,
+        semantic_placeholder: `A semantic shape drawn in EMStudio with «${wallItem.tool}», without a document: to refine from the sources (for example in Blender).` } : {}) }] }),
     });
     j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
@@ -36755,13 +37673,21 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
     const pd = j.paradata?.[0];
     const nx = pd?.extractor_ids?.length ?? 0;
     const geo = nodes.find((n) => n.node_type === "property" && String(((n.data ?? {}) as Record<string, unknown>).property_type ?? "") === "geometry");
-    if (geo) geo.description = wallItem.annotate && nx
-      ? `Drawn in EMStudio with «Wall from plan» from ${wallItem.clicks} clicked points; ${nx} of them are extractors of their documents (${pd?.combiner_name ?? "combiner"}).${estSay}`
-      : `Drawn in EMStudio with «Wall from plan»; the points were not annotated as extractors.${estSay}`;
-    if (wallItem.annotate && wallItem.points.length && !pd) wallSaid = t("wall.bridgeOld");
-    else if (wallItem.annotate && nx) wallSaid = t("wall.extractorsMade", { n: String(nx), c: pd?.combiner_name ?? "" })
-      + (wallItem.skipped ? ` · ${t("wall.extractorsSkipped", { n: String(wallItem.skipped) })}` : "");
+    const docName = wallItem.documentId ? String(st.node(wallItem.documentId)?.name ?? wallItem.documentId) : "";
+    if (geo) geo.description = wallItem.semantic
+      ? `A semantic shape drawn in EMStudio with «${wallItem.tool}», without a document: no extractor; to refine from the sources (proxy status: to refine).${estSay}`
+      : wallItem.annotate && wallItem.points.length && nx
+      ? `Drawn in EMStudio with «${wallItem.tool}» on ${docName || "its documents"} from ${wallItem.clicks} clicked points; ${wallItem.points.length} of them are extractors of their documents (${pd?.combiner_name ?? "combiner"}).${estSay}`
+      : docName ? `Drawn in EMStudio with «${wallItem.tool}» on ${docName}; the points were not annotated as extractors: the proxy as a whole is extracted from ${docName}.${estSay}`
+      : `Drawn in EMStudio with «${wallItem.tool}»; the points were not annotated as extractors.${estSay}`;
+    if ((wallItem.points.length || wallItem.documentId) && !pd) wallSaid = t("wall.bridgeOld");
+    else if (wallItem.semantic) wallSaid = t("px.assocSemantic");
+    else if (wallItem.annotate && wallItem.points.length) wallSaid = t("wall.extractorsMade", { n: String(wallItem.points.length), c: pd?.combiner_name ?? "" })
+      + (wallItem.skipped ? ` · ${t("wall.extractorsSkipped", { n: String(wallItem.skipped) })}` : "")
+      + (wallItem.documentName ? ` · ${t("px.assocDocToo", { doc: docName })}` : "");
+    else if (wallItem.documentId) wallSaid = t("px.assocDocOnly", { doc: docName });
     else if (wallItem.annotate && !wallItem.points.length) wallSaid = t("wall.extractorsNone");
+    void nx;
     if (wallEst && wallBuilt?.ok) wallSaid += (wallSaid ? " · " : "") + wallEstimateWords(wallBuilt.mesh);
   }
   // «Sostituisci»: the proxy the unit had leaves the graph in the same step,
@@ -36783,6 +37709,8 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
     if (old) for (const id of [old.propertyId, old.shapeId, old.resource?.id].filter((x): x is string => !!x)) st.deleteNode(id);
     // one step of undo, and — shared — one batch of operations to the room
     added = st.addSubgraph(nodes, j.edges ?? [], { share: true });
+    // MICRO-PX1c · a property the library updated (the unit's proxy_status, already there)
+    for (const u of j.updated ?? []) if (st.node(u.id)) st.updateNode(u.id, { name: u.name, description: u.description, data: u.data } as Partial<EmNode>);
   });
   removeSketch(sketchId);
   const msg = t(where === "folder" ? "s3.associatedFolder" : "s3.associatedStore",
@@ -40216,6 +41144,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (layerSpaces.get(win.id)?.toolClick(hit, dbl)) return true;
       // MICRO-PX1 · «Muro da pianta»: a corner, a point of the head; a double click closes the phase
       if (spaceCoreTools.get(win.id) === WALL_TOOL) return wallClick(win, hit, dbl);
+      // MICRO-PX1c · «Dal prospetto»: a point of the face, or the depth
+      if (spaceCoreTools.get(win.id) === ELEV_TOOL) return elevClick(win, hit, dbl);
       if (dbl || spaceCoreTools.get(win.id) !== "cursor") return false;
       if (hit) { handle.setCursor(hit.point); drawNPanel(); }
       return true;
@@ -40329,18 +41259,25 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
-    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id)],   // EXPERIMENTAL: the site's footprint
+    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id), ...elevMarks(win.id)],   // EXPERIMENTAL: the site's footprint
     // MICRO-PX1b · «Muro da pianta»: the see-through solid, the elastic side, the handles of a wall
-    preview: () => wallPreview(win.id),
+    preview: () => wallPreview(win.id) ?? elevPreview(win.id),
     hoverAnchor: () => wallHoverAnchor(win.id),
     onToolHover: (p) => { wallHover.set(win.id, p); },
-    handles: () => wallHandles(win.id),
-    onHandle: (e) => wallOnHandle(win, e),
+    handles: () => [...wallHandles(win.id), ...elevHandles(win.id)],
+    onHandle: (e) => { if (!elevOnHandle(win, e)) wallOnHandle(win, e); },
+    // MICRO-PX1c · «Agganciati agli spigoli»: a ring of rays around a click of «Dal prospetto»
+    toolRing: () => (spaceCoreTools.get(win.id) === ELEV_TOOL && pxPrefs().edgeSnap ? 10 : 0),
     onMark: (id) => {
       if (SITE_ON && onSiteMark(id)) return;
       if (id.startsWith("inst:")) goToInstance(id.slice(5));
       // MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · an extractor's mark: the chain source → extractor → property
-      else if (id.startsWith("x3d:")) { select(id.slice(4)); refreshInspector(); }
+      else if (id.startsWith("x3d:")) {
+        // MICRO-PX1c C · a click on a mark already selected opens its annotation
+        const again = selectedId === id.slice(4);
+        select(id.slice(4)); refreshInspector();
+        if (again) pxAnnotateExtractor(id.slice(4));
+      }
     },
     // MICRO-RITOCCHI-CHIARI p.3 · the selected 3D extractor with a point anchor moves
     markGrab: () => x3dPointGrab(win.id),
@@ -40359,8 +41296,15 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (a === "cancel" && wallCancel(win)) return true;
         if (a === "delete" && wallUndoPoint(win)) return true;
       }
+      if (spaceCoreTools.get(win.id) === ELEV_TOOL) {
+        if (a === "confirm") { elevClose(win); return true; }
+        if (a === "cancel" && elevCancel(win)) return true;
+        if (a === "delete" && elevUndoPoint(win)) return true;
+      }
       // MICRO-PX1b · a point of the selected wall active: X takes it away, Esc lets it go
       if (a === "delete" && wallDeleteActive()) return true;
+      if (a === "delete" && elevDeleteActive()) return true;
+      if (a === "cancel" && elevActive) { elevActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel" && wallActive) { wallActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel") {
         const armedNow = layerSpaces.get(win.id)?.trace().armed;
@@ -63723,6 +64667,10 @@ for (const tool of VIEWER_3D_TOOLS)
 registerSpaceTool({ id: "wall", primitive: "polyline", origin: "core", snap: "surface", glyph: "▥",
   clicks: { min: 3, max: null }, editors: ["space"],
   label: () => t("wall.toolName"), hint: () => t("wall.toolHint") });
+// MICRO-PX1c · «Dal prospetto»: the outline on the visible face, the depth after
+registerSpaceTool({ id: "fromElevation", primitive: "polyline", origin: "core", snap: "surface", glyph: "◫",
+  clicks: { min: 3, max: null }, editors: ["space"],
+  label: () => t("elev.toolName"), hint: () => t("elev.toolHint") });
 
 /** a package's tool by its register id */
 const packageToolInfo = new Map<string, PackageTool>();

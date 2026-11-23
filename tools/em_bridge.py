@@ -10424,7 +10424,7 @@ def make_handler(api):
                         **read})
 
         def _geometry_proxies(self, raw):
-            """P1 · ``{doc, items: [{unit_id, url, points?}]}`` → ``{nodes, edges}``: the
+            """P1 · ``{doc, items: [{unit_id, url, points?, document_id?, semantic?}]}`` → ``{nodes, edges}``: the
             nodes and edges `create_geometry_proxy` adds, as em.json, for the
             editor to merge (`addSubgraph`). Nothing of the chain is written in
             TypeScript: the ids are the library's (uuid5 of unit and payload)."""
@@ -10438,6 +10438,7 @@ def make_handler(api):
                 before_n = {n.node_id for n in graph.nodes}
                 before_e = {e.edge_id for e in graph.edges}
                 done, warnings, paradata = [], [], []
+                semantic, updated_ids = [], set()
                 for item in body.get("items") or []:
                     uid, url = str(item.get("unit_id") or ""), str(item.get("url") or "")
                     if not uid or not url:
@@ -10450,27 +10451,56 @@ def make_handler(api):
                     # per point from the document it fell on, a combiner, the unit's
                     # «Proxy Geometry» — written by the library (`proxy_from_points`)
                     points = item.get("points")
-                    if points:
+                    # MICRO-PX1c · the proxy's document: the proxy as a whole extracted
+                    # from it (one extractor when no point reads it); a point's
+                    # annotation travels as its `description`
+                    doc_id = item.get("document_id") or None
+                    if points or doc_id:
                         if not hasattr(api, "proxy_from_points"):
                             raise RuntimeError("this s3dgraphy has no `proxy_from_points` (MICRO-PX1): "
                                                "point the bridge at a newer s3Dgraphy")
-                        pp = api.proxy_from_points(graph, uid, list(points),
+                        kw = {}
+                        if doc_id:
+                            import inspect
+                            if "document_id" not in inspect.signature(api.proxy_from_points).parameters:
+                                raise RuntimeError("this s3dgraphy's `proxy_from_points` has no document_id (MICRO-PX1c): "
+                                                   "point the bridge at a newer s3Dgraphy")
+                            kw = {"document_id": str(doc_id),
+                                  "document_extractor_name": item.get("document_extractor_name") or None,
+                                  "document_extractor_description": item.get("document_extractor_description") or None}
+                        pp = api.proxy_from_points(graph, uid, list(points or []),
                                                    purpose=str(item.get("purpose") or "proxy_box_creator"),
                                                    property_description=item.get("property_description") or None,
                                                    combiner_description=item.get("combiner_description") or None,
-                                                   author=item.get("author") or None)
+                                                   author=item.get("author") or None, **kw)
                         warnings.extend(pp.warnings)
                         paradata.append({"unit_id": uid, **pp.as_dict()})
+                    # MICRO-PX1c · a SEMANTIC SHAPE, no document: no extractor; the
+                    # unit's proxy_status says «to refine» (s3Dgraphy proxy_status,
+                    # em_qualia_types 1.6.21) — a property updated is sent back too
+                    if item.get("semantic"):
+                        from s3dgraphy import proxy_status as _ps
+                        if "to_refine" not in getattr(_ps, "STATES", ()):
+                            raise RuntimeError("this s3dgraphy's proxy_status has no «to_refine» (MICRO-PX1c): "
+                                               "point the bridge at a newer s3Dgraphy")
+                        dec = _ps.declare(graph, uid, "to_refine",
+                                          placeholder=str(item.get("semantic_placeholder") or "") or None,
+                                          author_id=item.get("author") or None)
+                        semantic.append({"unit_id": uid, **dec})
+                        if dec.get("property_id") in before_n:
+                            updated_ids.add(dec["property_id"])
                 em = api.graph_to_emjson(graph)["graph"]
                 nodes = [n for n in em.get("nodes", []) if n.get("id") not in before_n]
                 edges = [e for e in em.get("edges", []) if e.get("id") not in before_e]
+                updated = [n for n in em.get("nodes", []) if n.get("id") in updated_ids]
             except Exception as exc:  # pragma: no cover — surface to the UI
                 import traceback
                 traceback.print_exc()
                 self._fail(500, f"geometry proxies failed: {exc}")
                 return
             self._json({"ok": True, "units": done, "nodes": nodes, "edges": edges,
-                        "warnings": warnings, "paradata": paradata})
+                        "warnings": warnings, "paradata": paradata,
+                        "semantic": semantic, "updated": updated})
 
         def _geometry_summary(self, raw):
             # the body is parsed in the worker (a bad one is still a 400)

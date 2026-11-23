@@ -62,6 +62,7 @@ import { medianPoint, pickUnder, type LastPick } from "./space-selection";
 import { altReleaseDue, altSide, bigTurn, pickByDistance, screenShare, SSE_PX, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { buildWall } from "./wall-from-plan";
+import { buildElevation } from "./from-elevation";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
 import { estimateMb, lighterThatFits, mbSay, roomFor, type Weight } from "./memory-guard";
 import { cutEdges } from "./threed-edges";
@@ -403,6 +404,11 @@ export interface SceneStats { triangles: number; vertices: number; objects: numb
 export interface ToolHit {
   point: V3; normal: V3 | null; key: string; vertex?: V3 | null;
   layer?: { item: string; plugin: string; layer: string; uv: [number, number] } | null;
+  /** MICRO-PX1c · the surface around the click: a ring of rays at `toolRing()`
+   *  pixels (each the point hit and its normal), to read an EDGE of the mesh */
+  ring?: Array<{ p: V3; n: V3 | null }> | null;
+  /** MICRO-PX1c · where the click was, in page pixels (a field opens there) */
+  screen?: { x: number; y: number } | null;
 }
 
 export interface SpaceSceneOptions {
@@ -551,6 +557,9 @@ export interface SpaceSceneOptions {
    *  ray-cast at every move: fluid on a heavy model) — the elastic side */
   hoverAnchor?: () => V3 | null;
   onToolHover?: (p: V3 | null) => void;
+  /** MICRO-PX1c · the radius in pixels of the ring of rays cast around a tool's
+   *  click (0 / absent: none) — only at the click, never at a move */
+  toolRing?: () => number;
   /** MICRO-PX1b · handles drawn over the view (the points of a wall), dragged
    *  with the mouse: while moving, the surface of a MODEL under the pointer
    *  (`rm:` — never a proxy nor a sketch), once per frame */
@@ -562,7 +571,11 @@ export interface SpaceSceneOptions {
 export interface ScenePreview { sig: string; positions: number[]; indices: number[]; origin: V3 }
 /** MICRO-PX1b · a handle: a point of the plan, of the head, a point of the head's
  *  surface, a side's «+», an estimated corner (shown, not dragged) */
-export interface SceneHandle { id: string; p: V3; kind: "plan" | "top" | "inner" | "mid" | "est"; active?: boolean; title?: string }
+export interface SceneHandle { id: string; p: V3; kind: "plan" | "top" | "inner" | "mid" | "est" | "face" | "depth"; active?: boolean; title?: string;
+  /** MICRO-PX1c · the handle slides on this axis (the depth of «From elevation»), not on a surface */
+  axis?: { o: V3; d: V3 };
+  /** MICRO-PX1c · classes more (`has-note`: the point carries an annotation) */
+  cls?: string }
 export interface SceneHandleEvent {
   id: string;
   phase: "start" | "move" | "end" | "cancel" | "click";
@@ -1732,6 +1745,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         return best;
       };
+      /** MICRO-PX1c · the ring of rays around a click (12, at `toolRing()` px):
+       *  the surface hit by each and its normal, models only (never a sketch);
+       *  null when no ring is asked */
+      const ringAt = (x: number, y: number): Array<{ p: V3; n: V3 | null }> | null => {
+        const rad = opts.toolRing?.() ?? 0;
+        if (!(rad > 0)) return null;
+        const out: Array<{ p: V3; n: V3 | null }> = [];
+        for (const k of [0, 1]) for (let i = 0; i < 6 + 6 * k; i++) {
+          const a = (i / (6 + 6 * k)) * Math.PI * 2, rr = rad * (k ? 1 : 0.5);
+          const h = hitsAt(x + rr * Math.cos(a), y + rr * Math.sin(a)).find((q) => q.kind !== "sketch");
+          if (h) out.push({ p: arr(h.point), n: worldNormal(h) });
+        }
+        return out;
+      };
       probe.__layerHit = (x: number, y: number) => layerHitAt(x, y);
       probe.__spaceHit = (x: number, y: number) => {
         const hh = hitsAt(x, y)[0];
@@ -2113,10 +2140,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           }
           // MICRO-PX1 · a wall of «Muro da pianta»: its mesh built from its inputs,
           // again when they change (a corrected point, the height)
-          const wallSig = s.shape === "wall" && s.wall ? JSON.stringify(s.wall) : "";
+          // MICRO-PX1c · …and a solid of «Dal prospetto» the same way
+          const wallSig = s.shape === "wall" && s.wall ? JSON.stringify(s.wall)
+            : s.shape === "elevation" && s.elevation ? JSON.stringify(s.elevation) : "";
           if (m && wallSig && m.userData.wallSig !== wallSig) { sketchGroup.remove(m); sketchMeshes.delete(s.id); m = undefined; }
-          if (!m && s.shape === "wall") {
-            const built = s.wall ? buildWall(s.wall) : null;
+          if (!m && (s.shape === "wall" || s.shape === "elevation")) {
+            const built = s.shape === "wall" ? (s.wall ? buildWall(s.wall) : null) : (s.elevation ? buildElevation(s.elevation) : null);
             if (!built || !built.ok) continue;
             const g = new THREE.BufferGeometry();
             g.setAttribute("position", new THREE.Float32BufferAttribute(built.mesh.positions, 3));
@@ -3370,10 +3399,24 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         g.dispose();
       };
       (probe as Record<string, unknown>).__spacePreview = () => (previewSig ? { sig: previewSig, objects: previewGroup.children.length } : null);
-      let handleDrag: { id: string; kind: SceneHandle["kind"]; start: V3; cur: V3; key: string | null; moved: boolean; x0: number; y0: number; plane: any; pending: { x: number; y: number } | null } | null = null;
+      let handleDrag: { id: string; kind: SceneHandle["kind"]; start: V3; cur: V3; key: string | null; moved: boolean; x0: number; y0: number; plane: any; pending: { x: number; y: number } | null; axis?: { o: V3; d: V3 } } | null = null;
+      /** MICRO-PX1c · the point of an axis nearest the ray under (x, y) */
+      const axisAt = (x: number, y: number, ax: { o: V3; d: V3 }): V3 | null => {
+        ray.setFromCamera(ndcOf(x, y), camera);
+        const o = new THREE.Vector3(...ax.o), d = new THREE.Vector3(...ax.d).normalize();
+        const r0 = ray.ray.origin, rd = ray.ray.direction;
+        const w0 = o.clone().sub(r0);
+        const a = d.dot(d), b = d.dot(rd), c = rd.dot(rd), dd = d.dot(w0), e2 = rd.dot(w0);
+        const den = a * c - b * b;
+        if (Math.abs(den) < 1e-12) return null;
+        const t = (b * e2 - c * dd) / den;
+        const p = o.clone().addScaledVector(d, t);
+        return [p.x, p.y, p.z];
+      };
       let handlesSig = "";
       const handleAt = (x: number, y: number, d = handleDrag): { p: V3; key: string | null } | null => {
         if (!d) return null;
+        if (d.axis) { const p = axisAt(x, y, d.axis); return p ? { p, key: null } : null; }
         const h = hitsAt(x, y).find((q) => q.kind === "rm");
         if (h) return { p: arr(h.point), key: `rm:${h.id}` };
         ray.setFromCamera(ndcOf(x, y), camera);
@@ -3430,7 +3473,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // horizontal plane, a point of the head on the plane facing the camera
         const plane = hd.kind === "plan" || hd.kind === "mid" ? new THREE.Plane(new THREE.Vector3(0, 1, 0), -hd.p[1])
           : new THREE.Plane().setFromNormalAndCoplanarPoint(n, at);
-        handleDrag = { id: hd.id, kind: hd.kind, start: hd.p, cur: hd.p, key: null, moved: false, x0: e.clientX, y0: e.clientY, plane, pending: null };
+        handleDrag = { id: hd.id, kind: hd.kind, start: hd.p, cur: hd.p, key: null, moved: false, x0: e.clientX, y0: e.clientY, plane, pending: null,
+          ...(hd.axis ? { axis: hd.axis } : {}) };
         const doc = renderer.domElement.ownerDocument;
         doc.addEventListener("pointermove", handleMove, true);
         doc.addEventListener("pointerup", handleUp, true);
@@ -3441,16 +3485,17 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const placeHandles = () => {
         const hs = opts.handles?.() ?? [];
-        const sig = hs.map((x) => `${x.id}:${x.kind}:${x.active ? 1 : 0}:${x.title ?? ""}`).join("|");
+        const sig = hs.map((x) => `${x.id}:${x.kind}:${x.active ? 1 : 0}:${x.title ?? ""}:${x.cls ?? ""}`).join("|");
         if (sig !== handlesSig) {
           handlesSig = sig;
           handlesEl.textContent = "";
           for (const hd of hs) {
             const el = document.createElement("span");
-            el.className = `scn-handle k-${hd.kind}${hd.active ? " act" : ""}`;
+            el.className = `scn-handle k-${hd.kind}${hd.active ? " act" : ""}${hd.cls ? ` ${hd.cls}` : ""}`;
             el.dataset.handle = hd.id;
             if (hd.title) el.title = hd.title;
             if (hd.kind === "mid") el.textContent = "+";
+            if (hd.kind === "depth") el.textContent = "↕";
             el.addEventListener("pointerdown", (e) => { if (e.button === 0) { const cur = (opts.handles?.() ?? []).find((x) => x.id === hd.id); if (cur) startHandle(cur, e); } });
             handlesEl.appendChild(el);
           }
@@ -4197,7 +4242,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const lh = layerHitAt(e.clientX, e.clientY);
           if (lh && (!hh || lh.distance <= hh.distance)) {
             if (opts.onTool({ point: lh.point, normal: null, key: `layer:${lh.layer.item}`, vertex: null, layer: lh.layer }, false)) return;
-          } else if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh) } : null, false)) return;
+          } else if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh),
+              ring: ringAt(e.clientX, e.clientY), screen: { x: e.clientX, y: e.clientY } } : null, false)) return;
         }
         // MICRO-3DTILES · «Più dettaglio qui» armed on a tileset: the click is its
         // (MICRO-SPAZIO-COMPATTO · the bar in the popover or its twin in the Inspector)

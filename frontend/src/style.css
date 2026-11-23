@@ -13328,3 +13328,23 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .wall-points th:nth-child(5) { width: 4.6em; }
 .wall-points select.wall-doc { width: 100%; max-width: 4.6em; font-size: 11px; padding: 0; }
 .xf-note.est { color: #1f7fd1; }
+
+/* MICRO-PX1c · «Dal prospetto»: the face's points, the depth handle; the
+   annotation field beside a click; a point with an annotation */
+.scn-handle.k-face { background: #fff; border-color: #2b7a3d; }
+.scn-handle.k-depth { width: 17px; height: 17px; margin: -9px 0 0 -9px; border-radius: 3px; background: #2b7a3d; border-color: #123d1c;
+  color: #fff; font: bold 12px/13px system-ui, sans-serif; text-align: center; cursor: ns-resize; }
+.scn-handle.has-note::after { content: "✎"; position: absolute; left: 9px; top: -11px; font-size: 10px; color: #123d1c;
+  background: rgba(255, 255, 255, 0.85); border-radius: 2px; padding: 0 1px; pointer-events: none; }
+.px-note { position: fixed; z-index: 80; display: flex; gap: 4px; align-items: center; padding: 3px 4px; border-radius: 4px;
+  background: var(--panel, #fff); border: 1px solid var(--border, #bbb); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); font-size: 12px; }
+.px-note input { width: 15em; font-size: 12px; padding: 2px 4px; }
+.px-note .px-note-k { font-size: 10px; color: var(--muted, #666); white-space: nowrap; }
+.px-docmode { margin: 4px 0; }
+.np-sect label.px-check { display: block; }
+.px-docmode label { display: block; margin: 2px 0; }
+.px-docmode .px-docname { font-weight: 600; }
+.wall-points input.px-note-cell { width: 100%; box-sizing: border-box; font-size: 11px; padding: 0 2px; }
+.wall-points tr.px-note-row td { padding-top: 0; }
+.wall-points tr.px-note-row td:first-child { color: var(--muted, #666); font-size: 10px; text-align: center; }
+.elev-points th:nth-child(5) { width: 4.6em; }

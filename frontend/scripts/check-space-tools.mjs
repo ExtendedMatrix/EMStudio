@@ -10,6 +10,9 @@
 //     its pair, then the set's order, «Salta» moving on), the ghost by
 //     Procrustes (an exact similarity found from three points, none from
 //     points on one line, none before three), «far from the expected»;
+//   · MICRO-PX1c: «Dal prospetto» registered and wired like the wall; the
+//     proxy's document (two modes) and the annotation at the click on both;
+//     the bridge passes the document and declares the semantic shape;
 //   · MICRO-PX1: a tool's editors (the Viewer's bar, the Space's toolbar), the
 //     Space's core tools of the register, «Muro da pianta» wired (click, Enter,
 //     Esc, Backspace, marks, the association's points, the bridge's paradata);
@@ -202,11 +205,25 @@ ok(/registered: registeredSpaceCoreTools\(\)\.map/.test(main), "the Space's tool
 ok(/if \(spaceCoreTools\.get\(win\.id\) === WALL_TOOL\) return wallClick\(win, hit, dbl\);/.test(main), "a click with the wall armed is the wall's (a double click closes the phase)");
 ok(/if \(a === "confirm"\) \{ wallClose\(win\); return true; \}/.test(main) && /a === "cancel" && wallCancel\(win\)/.test(main)
    && /a === "delete" && wallUndoPoint\(win\)/.test(main), "Enter closes the phase, Esc cancels it, Backspace takes the last point back");
-ok(/\.\.\.wallMarks\(win\.id\)\]/.test(main), "the trace drawn as the Space's marks");
-ok(/points: wallItem\.points, purpose: "wall_from_plan"/.test(main), "the association sends the wall's points (the extractors) with purpose wall_from_plan");
+ok(/\.\.\.wallMarks\(win\.id\), \.\.\.elevMarks\(win\.id\)\]/.test(main), "the trace drawn as the Space's marks (the wall's, the elevation's)");
+ok(/points: wallItem\.points, purpose: wallItem\.purpose/.test(main) && /const purpose = wall \? "wall_from_plan" : "from_elevation";/.test(main),
+   "the association sends the points (the extractors) with purpose wall_from_plan / from_elevation");
+// MICRO-PX1c · «Dal prospetto», the proxy's document, the annotation at the click
+ok(/registerSpaceTool\(\{ id: "fromElevation", primitive: "polyline", origin: "core", snap: "surface"[\s\S]{0,120}editors: \["space"\]/.test(main),
+   "«Dal prospetto» registered: core, snap surface, the Space's only");
+ok(/if \(spaceCoreTools\.get\(win\.id\) === ELEV_TOOL\) return elevClick\(win, hit, dbl\);/.test(main), "a click with «Dal prospetto» armed is its");
+ok(/if \(a === "confirm"\) \{ elevClose\(win\); return true; \}/.test(main) && /a === "cancel" && elevCancel\(win\)/.test(main)
+   && /a === "delete" && elevUndoPoint\(win\)/.test(main), "«Dal prospetto»: Enter closes the phase, Esc cancels it, Backspace takes the last point back");
+ok(/toolRing: \(\) => \(spaceCoreTools\.get\(win\.id\) === ELEV_TOOL && pxPrefs\(\)\.edgeSnap \? 10 : 0\)/.test(main), "the ring of rays only for «Dal prospetto» with the edge snap on");
+ok(/const wallItem = proxyParadataItem\(sk\);/.test(main), "ONE road to the chain for the wall and the elevation (proxyParadataItem)");
+ok(/document_id: wallItem\.documentId/.test(main) && /semantic: true,/.test(main), "the association sends the proxy's document, or the semantic shape");
+ok(/description: w\.note/.test(main), "a point's annotation travels as its extractor's description");
+ok(/renderPxSourceRows\(box, \[\.\.\.tr\.plan, \.\.\.tr\.top\]/.test(main) && /renderPxSourceRows\(box, tr\.front/.test(main),
+   "the two modes of the proxy's document in the Tool tab of BOTH tools");
 const bridge = fs.readFileSync(path.join(SRC, "../../tools/em_bridge.py"), "utf8");
 ok(/BRIDGE_LEVEL = (79|[89]\d)/.test(bridge) && /route\.startswith\("\/pose\/"\)/.test(bridge), "the bridge: level 79 or later, /pose/* routed");
-ok(/api\.proxy_from_points\(graph, uid, list\(points\)/.test(bridge) && /"paradata": paradata/.test(bridge),
+ok(/api\.proxy_from_points\(graph, uid, list\(points or \[\]\)/.test(bridge) && /"paradata": paradata/.test(bridge)
+   && /_ps\.declare\(graph, uid, "to_refine"/.test(bridge) && /"document_id": str\(doc_id\)/.test(bridge),
    "the bridge's /geometry-proxies writes the points' paradata with s3Dgraphy's proxy_from_points and says it");
 
 // ── the bridge's /pose/* over s3dgraphy.annotation, on em-profiles' example ──

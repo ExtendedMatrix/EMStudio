@@ -35,6 +35,10 @@ export interface WallPoint {
   rm?: string | null;
   /** the document the model is extracted from (its node id), null when none */
   doc?: string | null;
+  /** MICRO-PX1c · the ANNOTATION written at the click («quota 492,13»,
+   *  «spigolo rifatto in restauro»): the description of the extractor the
+   *  point becomes (the datamodel's P3_has_note) */
+  note?: string;
 }
 
 export type WallMode = "outline" | "axis";
@@ -644,7 +648,8 @@ export function readWallInput(v: unknown): WallInput | null {
     const r = x as Record<string, unknown> | null;
     const p = r?.p;
     if (!Array.isArray(p) || p.length !== 3 || !p.every((c) => Number.isFinite(Number(c)))) return null;
-    return { p: p.map(Number) as V3, rm: typeof r!.rm === "string" ? r!.rm : null, doc: typeof r!.doc === "string" ? r!.doc : null };
+    return { p: p.map(Number) as V3, rm: typeof r!.rm === "string" ? r!.rm : null, doc: typeof r!.doc === "string" ? r!.doc : null,
+             ...(typeof r!.note === "string" && r!.note.trim() ? { note: r!.note } : {}) };
   };
   const list = (x: unknown) => (Array.isArray(x) ? x.map(pt).filter((q): q is WallPoint => !!q) : []);
   const plan = list(o.plan);
@@ -673,12 +678,13 @@ export type WallEdit =
 /** An edit of the inputs: a new input, or why not (`too_few`: the plan would
  *  go under its least; `range`: no such point). The input is never changed. */
 export function editWall<T extends WallInput>(input: T, e: WallEdit): { ok: true; input: T } | { ok: false; why: "too_few" | "range" } {
-  const copy = (w: WallPoint): WallPoint => ({ p: [...w.p] as V3, rm: w.rm ?? null, doc: w.doc ?? null });
+  const copy = (w: WallPoint): WallPoint => ({ p: [...w.p] as V3, rm: w.rm ?? null, doc: w.doc ?? null, ...(w.note ? { note: w.note } : {}) });
   const plan = input.plan.map(copy), top = input.top.map(copy);
   if (e.op === "move") {
     const list = e.which === "plan" ? plan : top;
     if (e.k < 0 || e.k >= list.length) return { ok: false, why: "range" };
-    list[e.k] = copy(e.to);
+    // MICRO-PX1c · a point moved keeps its annotation (unless it brings one)
+    list[e.k] = copy({ ...e.to, note: e.to.note ?? list[e.k].note });
   } else if (e.op === "insert") {
     if (e.after < 0 || e.after >= plan.length) return { ok: false, why: "range" };
     plan.splice(e.after + 1, 0, copy(e.point));

@@ -42,7 +42,9 @@ import { addReading } from "./paradata-chain";
 import { currentIdentity } from "./identity";
 
 export const PXS_PROPERTY = "proxy_status";
-export const PXS_STATES = ["not_yet_drawn", "drawable", "not_drawn_by_choice", "drawn"] as const;
+// MICRO-PX1c · "to_refine": the unit HAS a proxy, a semantic shape drawn without a
+// document (em_qualia_types 1.6.21) — declared by the tool that drew it
+export const PXS_STATES = ["not_yet_drawn", "drawable", "not_drawn_by_choice", "drawn", "to_refine"] as const;
 export type PxsState = (typeof PXS_STATES)[number];
 export const PXS_STRENGTHS = ["certain", "probable", "to_verify"] as const;
 export type PxsStrength = (typeof PXS_STRENGTHS)[number];
@@ -384,12 +386,12 @@ export interface PxsRow {
   sources: Array<{ extractor: string; strength: PxsStrength; note: string; document: string | null; document_name: string | null; model_name: string | null; origin: string }>;
   unlinked_file: string | null;
 }
-interface ListSlot { status: "idle" | "loading" | "ok" | "off" | "missing" | "error"; sig: string | null; rows: PxsRow[]; byChoice: PxsRow[]; drawnDeclared: PxsRow[]; hints: Array<Record<string, unknown>>; error?: string; seq: number }
+interface ListSlot { status: "idle" | "loading" | "ok" | "off" | "missing" | "error"; sig: string | null; rows: PxsRow[]; byChoice: PxsRow[]; drawnDeclared: PxsRow[]; toRefine: PxsRow[]; hints: Array<Record<string, unknown>>; error?: string; seq: number }
 const lists = new WeakMap<DocumentStore, ListSlot>();
 
 export function toDrawFor(store: DocumentStore): ListSlot {
   let s = lists.get(store);
-  if (!s) lists.set(store, (s = { status: "idle", sig: null, rows: [], byChoice: [], drawnDeclared: [], hints: [], seq: 0 }));
+  if (!s) lists.set(store, (s = { status: "idle", sig: null, rows: [], byChoice: [], drawnDeclared: [], toRefine: [], hints: [], seq: 0 }));
   const sig = String((store as unknown as { rev?: number }).rev ?? -1);
   if (s.sig !== sig) {
     s.sig = sig;
@@ -401,8 +403,8 @@ export function toDrawFor(store: DocumentStore): ListSlot {
       if (status === 404) Object.assign(slot, { status: "missing" });
       else if (status !== 200 || !json?.ok) Object.assign(slot, { status: "error", error: String(json?.error ?? `bridge error ${status}`) });
       else {
-        const td = (json.to_draw ?? {}) as { units?: PxsRow[]; by_choice?: PxsRow[]; drawn_declared?: PxsRow[] };
-        Object.assign(slot, { status: "ok", rows: td.units ?? [], byChoice: td.by_choice ?? [], drawnDeclared: td.drawn_declared ?? [],
+        const td = (json.to_draw ?? {}) as { units?: PxsRow[]; by_choice?: PxsRow[]; drawn_declared?: PxsRow[]; to_refine?: PxsRow[] };
+        Object.assign(slot, { status: "ok", rows: td.units ?? [], byChoice: td.by_choice ?? [], drawnDeclared: td.drawn_declared ?? [], toRefine: td.to_refine ?? [],
           hints: (json.hints as Array<Record<string, unknown>>) ?? [], error: undefined });
       }
       for (const fn of listListeners) fn();
@@ -446,6 +448,13 @@ export function toDrawTableHtml(store: DocumentStore, passes: (id: string, text:
     h += `<p class="note2" data-pxs-by-choice="${s.byChoice.length}">${escHtml(t("pxs.list.byChoice", { names: s.byChoice.map((r) => r.name).join(", ") }))}</p>`;
   if (s.drawnDeclared.length)
     h += `<p class="note2" data-pxs-drawn-declared="${s.drawnDeclared.length}">${escHtml(t("pxs.list.drawnDeclared", { names: s.drawnDeclared.map((r) => r.name).join(", ") }))}</p>`;
+  // MICRO-PX1c · the proxies drawn as a semantic shape, without a document: to refine
+  const refine = s.toRefine.filter((r) => passes(r.unit, `${r.name} ${r.placeholder ?? ""} ${r.description}`));
+  if (refine.length) {
+    h += `<p class="note2" data-pxs-to-refine="${refine.length}">${escHtml(t("pxs.list.toRefine"))} `
+      + refine.map((r) => `<button class="tv-link" type="button" data-go="${escHtml(r.unit)}" data-pxs-refine="${escHtml(r.name)}" title="${escHtml(r.placeholder ?? "")}">${escHtml(r.name)}</button>`).join(", ")
+      + `</p>`;
+  }
   h += `<p class="note2">${escHtml(t("pxs.list.note"))}</p></div>`;
   return { html: h, count: rows.length };
 }
@@ -497,6 +506,16 @@ function paintUnit(host_: HTMLElement, store: DocumentStore, id: string, onJump:
   const ix = new Ix(doc);
   const st = proxyStatusOf(doc, id, ix);
   if (hasProxy(doc, id, ix)) {
+    // MICRO-PX1c · a semantic shape, no document: one quiet line, its placeholder
+    if (st.property && st.declared === "to_refine") {
+      const line = el("div", "insp-pxs insp-pxs-refine");
+      line.dataset.pxsSect = id;
+      line.dataset.pxsState = "to_refine";
+      line.append(el("span", "insp-hint", t("pxs.toRefine")));
+      if (st.placeholder) line.title = st.placeholder;
+      host_.appendChild(line);
+      return;
+    }
     // drawn: nothing — unless a placeholder was left on it (a hint, never corrected)
     if (st.property && st.declared && st.declared !== "drawn") {
       const line = el("div", "insp-pxs insp-pxs-stale");

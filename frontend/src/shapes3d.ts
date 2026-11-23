@@ -21,6 +21,34 @@
  */
 import catalogue from "./rules/shape_catalogue.json";
 import { buildWall, readWallInput, type WallInput } from "./wall-from-plan";
+import { readElevationInput, type ElevationInput } from "./from-elevation";
+
+/** MICRO-PX1c · how a proxy drawn in the Space says where it comes from — the
+ *  same for every tool of the suite (wall, elevation; the seven points and the
+ *  areals when they come):
+ *  · `annotate`: the clicks on a document's model become extractors (default on);
+ *  · `source.mode` "document" (default, what PX1 did): the proxy is extracted
+ *    from a document — `source.document` the one chosen, else the document of
+ *    the models the clicks fell on; "semantic": a SEMANTIC SHAPE with no
+ *    document, no extractor — a form to refine elsewhere (Blender), said in the
+ *    paradata and in the unit's proxy_status («to refine»). */
+export interface ProxyDrawing {
+  annotate?: boolean;
+  source?: { mode: "document" | "semantic"; document?: string | null };
+}
+/** the source read back (absent: a proxy from its document, as PX1) */
+export function readProxySource(v: unknown): ProxyDrawing["source"] | undefined {
+  const o = v as Record<string, unknown> | null;
+  if (!o || typeof o !== "object") return undefined;
+  if (o.mode === "semantic") return { mode: "semantic" };
+  if (o.mode === "document") return { mode: "document", ...(typeof o.document === "string" && o.document ? { document: o.document } : {}) };
+  return undefined;
+}
+function drawingOf(o: unknown): ProxyDrawing {
+  const r = (o ?? {}) as Record<string, unknown>;
+  const src = readProxySource(r.source);
+  return { annotate: r.annotate !== false, ...(src ? { source: src } : {}) };
+}
 
 type V3 = [number, number, number];
 
@@ -141,7 +169,10 @@ export interface Sketch {
   /** MICRO-PX1 · shape "wall": the inputs of «Muro da pianta» (the clicks in
    *  the scene's frame, the mode, the height or thickness), kept so the wall
    *  can be generated again after a correction (`wall-from-plan.ts`) */
-  wall?: WallInput & { annotate?: boolean };
+  wall?: WallInput & ProxyDrawing;
+  /** MICRO-PX1c · shape "elevation": the inputs of «Dal prospetto» (the
+   *  outline clicked on the visible face, the depth, the side seen) */
+  elevation?: ElevationInput & ProxyDrawing;
   name: string;
   position: V3;
   /** Euler XYZ, radians */
@@ -200,19 +231,20 @@ export function removeSketch(id: string): void {
 export function serializeSketches(): Sketch[] {
   return sketches.map((s) => ({ id: s.id, shape: s.shape, name: s.name, position: [...s.position] as V3,
     rotation: [...s.rotation] as V3, scale: [...s.scale] as V3, ...(s.file ? { file: { ...s.file } } : {}),
-    ...(s.wall ? { wall: wallWithEstimate(s.wall) } : {}) }));
+    ...(s.wall ? { wall: wallWithEstimate(s.wall) } : {}),
+    ...(s.elevation ? { elevation: JSON.parse(JSON.stringify(s.elevation)) } : {}) }));
 }
 
 /** MICRO-PX1b · a wall as the layout keeps it: its inputs, and — written, not
  *  read back (it is computed again) — the corners of its head ESTIMATED, so the
  *  sketch's paradata says which points are not clicks of a document */
-function wallWithEstimate(w: WallInput & { annotate?: boolean }): WallInput & { annotate?: boolean } {
+function wallWithEstimate(w: WallInput & ProxyDrawing): WallInput & ProxyDrawing {
   const out = JSON.parse(JSON.stringify(w)) as Record<string, unknown>;
   const r = buildWall(w);
   if (r.ok && r.mesh.estimate.vertices.length)
     out.estimated = { rule: r.mesh.estimate.rule, from: r.mesh.estimate.from,
       points: r.mesh.estimate.vertices.map((i) => r.mesh.head[i].map((c) => Math.round(c * 1e4) / 1e4)) };
-  return out as unknown as WallInput & { annotate?: boolean };
+  return out as unknown as WallInput & ProxyDrawing;
 }
 
 /** A list read back (the layout of a file opened): what is not a sketch is
@@ -226,11 +258,14 @@ export function loadSketches(list: unknown): void {
     if (!o || typeof o.id !== "string" || typeof o.shape !== "string") continue;
     const f = o.file as Record<string, unknown> | undefined;
     const wall = o.shape === "wall" ? readWallInput(o.wall) : null;
-    if (o.shape !== "file" && o.shape !== "wall" && !shapeById(o.shape)) continue;
+    const elev = o.shape === "elevation" ? readElevationInput(o.elevation) : null;
+    if (o.shape === "elevation" && !elev) continue;
+    if (o.shape !== "file" && o.shape !== "wall" && o.shape !== "elevation" && !shapeById(o.shape)) continue;
     if (o.shape === "file" && !(f && typeof f.url === "string")) continue;
     if (o.shape === "wall" && !wall) continue;
     sketches.push({ id: o.id, shape: o.shape, name: String(o.name ?? o.id),
-      ...(wall ? { wall: { ...wall, annotate: (o.wall as { annotate?: unknown }).annotate !== false } } : {}),
+      ...(wall ? { wall: { ...wall, ...drawingOf(o.wall) } } : {}),
+      ...(elev ? { elevation: { ...elev, ...drawingOf(o.elevation) } } : {}),
       position: tri(o.position, [0, 0, 0]), rotation: tri(o.rotation, [0, 0, 0]), scale: tri(o.scale, [1, 1, 1]),
       ...(f ? { file: { url: String(f.url), ...(typeof f.checksum === "string" ? { checksum: f.checksum } : {}), ...(typeof f.from === "string" ? { from: f.from } : {}) } } : {}) });
     const m = /(\d+)$/.exec(o.id);
@@ -251,7 +286,7 @@ export function addFileSketch(file: { url: string; checksum?: string; from?: str
 
 /** MICRO-PX1 · a wall of «Muro da pianta»: its inputs, its pose at the
  *  mesh's origin (upright, scale 1). */
-export function addWallSketch(wall: WallInput & { annotate?: boolean }, at: V3, name: string): Sketch {
+export function addWallSketch(wall: WallInput & ProxyDrawing, at: V3, name: string): Sketch {
   seq += 1;
   const s: Sketch = { id: `sketch-${seq}`, shape: "wall", wall: JSON.parse(JSON.stringify(wall)),
     name: `${name}.${String(seq).padStart(3, "0")}`, position: [...at] as V3, rotation: [0, 0, 0], scale: [1, 1, 1] };
@@ -262,10 +297,32 @@ export function addWallSketch(wall: WallInput & { annotate?: boolean }, at: V3, 
 
 /** MICRO-PX1 · a wall's inputs changed (a corrected point, the height): the
  *  scene builds its mesh again; the pose given with it. */
-export function updateWall(id: string, wall: WallInput & { annotate?: boolean }, pose?: Partial<Pick<Sketch, "position" | "rotation" | "scale">>): void {
+export function updateWall(id: string, wall: WallInput & ProxyDrawing, pose?: Partial<Pick<Sketch, "position" | "rotation" | "scale">>): void {
   const s = sketchById(id);
   if (!s || s.shape !== "wall") return;
   s.wall = JSON.parse(JSON.stringify(wall));
+  if (pose?.position) s.position = [...pose.position] as V3;
+  if (pose?.rotation) s.rotation = [...pose.rotation] as V3;
+  if (pose?.scale) s.scale = [...pose.scale] as V3;
+  changed();
+}
+
+/** MICRO-PX1c · a solid of «Dal prospetto»: its inputs, its pose at the
+ *  mesh's origin (the outline's centroid on its mean plane), scale 1. */
+export function addElevationSketch(elev: ElevationInput & ProxyDrawing, at: V3, name: string): Sketch {
+  seq += 1;
+  const s: Sketch = { id: `sketch-${seq}`, shape: "elevation", elevation: JSON.parse(JSON.stringify(elev)),
+    name: `${name}.${String(seq).padStart(3, "0")}`, position: [...at] as V3, rotation: [0, 0, 0], scale: [1, 1, 1] };
+  sketches.push(s);
+  changed();
+  return s;
+}
+
+/** MICRO-PX1c · its inputs changed (a point, the depth, an annotation): built again. */
+export function updateElevation(id: string, elev: ElevationInput & ProxyDrawing, pose?: Partial<Pick<Sketch, "position" | "rotation" | "scale">>): void {
+  const s = sketchById(id);
+  if (!s || s.shape !== "elevation") return;
+  s.elevation = JSON.parse(JSON.stringify(elev));
   if (pose?.position) s.position = [...pose.position] as V3;
   if (pose?.rotation) s.rotation = [...pose.rotation] as V3;
   if (pose?.scale) s.scale = [...pose.scale] as V3;
