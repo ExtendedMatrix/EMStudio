@@ -62,6 +62,7 @@ import { medianPoint, pickUnder, type LastPick } from "./space-selection";
 import { altReleaseDue, altSide, bigTurn, pickByDistance, screenShare, SSE_PX, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { buildWall } from "./wall-from-plan";
+import { buildBox } from "./box-seven-points";
 import { buildElevation } from "./from-elevation";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
 import { estimateMb, lighterThatFits, mbSay, roomFor, type Weight } from "./memory-guard";
@@ -2141,11 +2142,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // MICRO-PX1 · a wall of «Muro da pianta»: its mesh built from its inputs,
           // again when they change (a corrected point, the height)
           // MICRO-PX1c · …and a solid of «Dal prospetto» the same way
+          // MICRO-PX2 · …and a box of «Scatola a sette punti»
           const wallSig = s.shape === "wall" && s.wall ? JSON.stringify(s.wall)
-            : s.shape === "elevation" && s.elevation ? JSON.stringify(s.elevation) : "";
+            : s.shape === "elevation" && s.elevation ? JSON.stringify(s.elevation)
+            : s.shape === "box" && s.box ? JSON.stringify(s.box) : "";
           if (m && wallSig && m.userData.wallSig !== wallSig) { sketchGroup.remove(m); sketchMeshes.delete(s.id); m = undefined; }
-          if (!m && (s.shape === "wall" || s.shape === "elevation")) {
-            const built = s.shape === "wall" ? (s.wall ? buildWall(s.wall) : null) : (s.elevation ? buildElevation(s.elevation) : null);
+          if (!m && (s.shape === "wall" || s.shape === "elevation" || s.shape === "box")) {
+            const built = s.shape === "wall" ? (s.wall ? buildWall(s.wall) : null)
+              : s.shape === "box" ? (s.box ? buildBox(s.box) : null) : (s.elevation ? buildElevation(s.elevation) : null);
             if (!built || !built.ok) continue;
             const g = new THREE.BufferGeometry();
             g.setAttribute("position", new THREE.Float32BufferAttribute(built.mesh.positions, 3));

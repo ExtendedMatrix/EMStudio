@@ -205,9 +205,9 @@ ok(/registered: registeredSpaceCoreTools\(\)\.map/.test(main), "the Space's tool
 ok(/if \(spaceCoreTools\.get\(win\.id\) === WALL_TOOL\) return wallClick\(win, hit, dbl\);/.test(main), "a click with the wall armed is the wall's (a double click closes the phase)");
 ok(/if \(a === "confirm"\) \{ wallClose\(win\); return true; \}/.test(main) && /a === "cancel" && wallCancel\(win\)/.test(main)
    && /a === "delete" && wallUndoPoint\(win\)/.test(main), "Enter closes the phase, Esc cancels it, Backspace takes the last point back");
-ok(/\.\.\.wallMarks\(win\.id\), \.\.\.elevMarks\(win\.id\)\]/.test(main), "the trace drawn as the Space's marks (the wall's, the elevation's)");
-ok(/points: wallItem\.points, purpose: wallItem\.purpose/.test(main) && /const purpose = wall \? "wall_from_plan" : "from_elevation";/.test(main),
-   "the association sends the points (the extractors) with purpose wall_from_plan / from_elevation");
+ok(/\.\.\.wallMarks\(win\.id\), \.\.\.elevMarks\(win\.id\), \.\.\.boxMarks\(win\.id\)\]/.test(main), "the trace drawn as the Space's marks (the wall's, the elevation's, the box's)");
+ok(/points: wallItem\.points, purpose: wallItem\.purpose/.test(main) && /const purpose = wall \? "wall_from_plan" : box7 \? "proxy_box_creator" : "from_elevation";/.test(main),
+   "the association sends the points (the extractors) with purpose wall_from_plan / from_elevation / proxy_box_creator (EM Tools')");
 // MICRO-PX1c · «Dal prospetto», the proxy's document, the annotation at the click
 ok(/registerSpaceTool\(\{ id: "fromElevation", primitive: "polyline", origin: "core", snap: "surface"[\s\S]{0,120}editors: \["space"\]/.test(main),
    "«Dal prospetto» registered: core, snap surface, the Space's only");
@@ -220,6 +220,20 @@ ok(/document_id: wallItem\.documentId/.test(main) && /semantic: true,/.test(main
 ok(/description: w\.note/.test(main), "a point's annotation travels as its extractor's description");
 ok(/renderPxSourceRows\(box, \[\.\.\.tr\.plan, \.\.\.tr\.top\]/.test(main) && /renderPxSourceRows\(box, tr\.front/.test(main),
    "the two modes of the proxy's document in the Tool tab of BOTH tools");
+// MICRO-PX2 · «Scatola a sette punti»: EM Tools' Proxy Box in the Space, the suite's pieces shared
+ok(/registerSpaceTool\(\{ id: "box7", primitive: "point", origin: "core", snap: "surface"[\s\S]{0,80}clicks: \{ min: 7, max: 7 \}, editors: \["space"\]/.test(main),
+   "«Scatola a sette punti» registered: core, snap surface, seven clicks, the Space's only");
+ok(/\/\/ MICRO-PX1c · «Dal prospetto»[^\n]*\nregisterSpaceTool\(\{ id: "fromElevation"[\s\S]{0,300}\n\/\/ MICRO-PX2[^\n]*\nregisterSpaceTool\(\{ id: "box7"/.test(main), "…beside «Muro da pianta» and «Dal prospetto»");
+ok(/if \(spaceCoreTools\.get\(win\.id\) === BOX_TOOL\) return boxClick\(win, hit, dbl\);/.test(main), "a click with the box armed records the point the bar names");
+ok(/a === "cancel" && boxCancel\(win\)/.test(main) && /a === "delete" && boxUndoPoint\(win\)/.test(main) && /if \(!boxRedo\.has\(win\.id\)\) boxFinish\(win\)/.test(main),
+   "the box: Enter makes it, Esc clears, Backspace takes the last point back");
+ok(/type: BOX_POINT_TYPES\[BOX_ROLES\[k\]\]/.test(main), "the box's extractors: EM Tools' point_type («Alignment Start»…)");
+ok(/renderPxSourceRows\(box, tr\.points\.filter/.test(main), "the two modes of the proxy's document and the switch in the box's Tool tab (the shared rows)");
+ok((main.match(/bar\.appendChild\(pxBarWhere\(/g) ?? []).length === 3, "ONE line of the document in the bar for the three tools (pxBarWhere)");
+ok(/pxAskNote\(hit\.screen, pxNoteLabel\(w, boxRoleName\(k\)\)/.test(main), "the annotation at the click, named by the point's role");
+ok(/\.\.\.boxHandles\(win\.id\)\]/.test(main) && /!boxOnHandle\(win, e\)/.test(main), "the box's seven points are handles");
+ok(/if \(sk\.shape === "box"\) renderBoxInputs\(sect, sk, win\);/.test(main), "the Item tab lists the seven points");
+ok(/addDrawnSketch\("box", input, r\.mesh\.origin/.test(main), "the box is a sketch that keeps its seven points (the shared road of the drawn shapes)");
 const bridge = fs.readFileSync(path.join(SRC, "../../tools/em_bridge.py"), "utf8");
 ok(/BRIDGE_LEVEL = (79|[89]\d)/.test(bridge) && /route\.startswith\("\/pose\/"\)/.test(bridge), "the bridge: level 79 or later, /pose/* routed");
 ok(/api\.proxy_from_points\(graph, uid, list\(points or \[\]\)/.test(bridge) && /"paradata": paradata/.test(bridge)

@@ -358,9 +358,11 @@ import { renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { NumGroup, numField } from "./num-field";
 import { checkForUpdates, RELEASES_PAGE, type UpdateCheck } from "./updates";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
-import { addElevationSketch, addFileSketch, addSketch, addWallSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPES, shapeById, shapeLabel, sketchById, updateElevation, updateSketch, updateWall, type ProxyDrawing, type Sketch } from "./shapes3d";
+import { addDrawnSketch, addElevationSketch, addFileSketch, addSketch, addWallSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPES, shapeById, shapeLabel, sketchById, drawnOf, updateDrawn, updateElevation, updateSketch, updateWall, type DrawnShape, type ProxyDrawing, type Sketch } from "./shapes3d";
 import { bakeElevationPose, buildElevation, depthFromPoint, depthHandle, depthOnAxis, editElevation, elevationSides, elevationSig, ELEV_TOL, facingOf, snapEdge,
          type DepthFrom, type ElevationError, type ElevationInput, type ElevationResult, type ElevationWarning } from "./from-elevation";
+import { bakeBoxPose, BOX_POINT_TYPES, BOX_ROLES, boxDocuments, boxNextRole, boxSig, buildBox, editBox,
+         type BoxError, type BoxInput, type BoxMesh, type BoxResult, type BoxWarning } from "./box-seven-points";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
 import { buildOutlinerTree, loadSpacePrefs, opensFor, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
@@ -34913,6 +34915,8 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     if (sk.shape === "wall") renderWallInputs(sect, sk, win);
     // MICRO-PX1c · a solid of «Dal prospetto»: its inputs, editable
     if (sk.shape === "elevation") renderElevInputs(sect, sk, win);
+    // MICRO-PX2 · a box of «Scatola a sette punti»: its seven points, editable
+    if (sk.shape === "box") renderBoxInputs(sect, sk, win);
   } else if (key && (key.startsWith("rm:") || key.startsWith("proxy:"))) {
     // MICRO-SPAZIO-3D-3 p.10 · the active model's version: the mode, the version, its use, level and MB
     // (MICRO-PROVA-DEV47 p.3b: now the section «Livello di dettaglio», below)
@@ -35109,6 +35113,9 @@ function setSpaceTool(winId: string, id: string): boolean {
     // MICRO-PX1c · …and «Dal prospetto» its outline; a choice ends «Profondità da un clic»
     if (id !== ELEV_TOOL) elevTraces.delete(winId);
     elevAddDepth.delete(winId);
+    // MICRO-PX2 · …and «Scatola a sette punti» its points; a choice ends «Registra di nuovo»
+    if (id !== BOX_TOOL) boxTraces.delete(winId);
+    boxRedo.delete(winId);
     pxCloseNote();
     // MICRO-PX1b · any choice of the toolbar ends «Aggiungi punti alti» (it is set again after, when it is its)
     wallAddTop.delete(winId);
@@ -35369,7 +35376,7 @@ function wallMarks(winId: string): SceneMark[] {
 //    points on the visible face's line, the hidden side estimated).
 
 type WallStored = WallInput & ProxyDrawing;
-interface WallTaken { id: string; wall?: WallStored; elevation?: ElevationInput & ProxyDrawing; position: V3; rotation: V3; scale: V3 }
+interface WallTaken { id: string; wall?: WallStored; elevation?: ElevationInput & ProxyDrawing; box?: BoxInput & ProxyDrawing; position: V3; rotation: V3; scale: V3 }
 /** the pointer's point on the horizontal plane of the last corner, per Space window */
 // eslint-disable-next-line no-var
 var wallHover = new Map<string, V3 | null>();
@@ -35395,11 +35402,10 @@ function wallBuiltMemo(key: string, inp: WallInput): WallResult | null {
   return r;
 }
 function wallsTaken(): WallTaken[] {
-  // MICRO-PX1c · the solids of «Dal prospetto» too
-  return listSketches().filter((x) => (x.shape === "wall" && x.wall) || (x.shape === "elevation" && x.elevation)).map((x) => ({ id: x.id,
-    ...(x.wall ? { wall: JSON.parse(JSON.stringify(x.wall)) as WallStored } : {}),
-    ...(x.elevation ? { elevation: JSON.parse(JSON.stringify(x.elevation)) as ElevationInput & ProxyDrawing } : {}),
-    position: [...x.position] as V3, rotation: [...x.rotation] as V3, scale: [...x.scale] as V3 }));
+  // MICRO-PX1c · the solids of «Dal prospetto» too; MICRO-PX2 · the boxes of «Scatola a sette punti»
+  return listSketches().filter((x) => drawnOf(x)).map((x) => ({ id: x.id,
+    [x.shape]: JSON.parse(JSON.stringify(drawnOf(x))),
+    position: [...x.position] as V3, rotation: [...x.rotation] as V3, scale: [...x.scale] as V3 }) as WallTaken);
 }
 /** an undo / redo: the walls still here take back their inputs and pose (a
  *  wall made or removed since is not brought back nor removed by it) */
@@ -35407,16 +35413,16 @@ function wallsRestore(list: WallTaken[]): void {
   let any = false;
   for (const w of list) {
     const sk = sketchById(w.id);
-    if (!sk || (sk.shape !== "wall" && sk.shape !== "elevation")) continue;
-    const mine = sk.shape === "wall" ? sk.wall : sk.elevation;
-    const taken = sk.shape === "wall" ? w.wall : w.elevation;
+    if (!sk || !drawnOf(sk)) continue;
+    const shape = sk.shape as DrawnShape;
+    const mine = drawnOf(sk);
+    const taken = (w as unknown as Record<string, unknown>)[shape];
     if (!taken) continue;
     if (JSON.stringify({ a: mine, p: sk.position, r: sk.rotation, s: sk.scale }) === JSON.stringify({ a: taken, p: w.position, r: w.rotation, s: w.scale })) continue;
-    if (sk.shape === "wall") updateWall(w.id, w.wall!, { position: w.position, rotation: w.rotation, scale: w.scale });
-    else updateElevation(w.id, w.elevation!, { position: w.position, rotation: w.rotation, scale: w.scale });
+    updateDrawn(w.id, shape, taken as never, { position: w.position, rotation: w.rotation, scale: w.scale });
     any = true;
   }
-  if (any) { wallDraft = null; elevDraft = null; refreshSurfaces("scene"); renderSpaceNPanels(); }
+  if (any) { wallDraft = null; elevDraft = null; boxDraft = null; refreshSurfaces("scene"); renderSpaceNPanels(); }
 }
 /** a wall's inputs where it is SEEN: a pose moved after the build (G / R / S) carried into them */
 function wallSeen(sk: Sketch): { input: WallStored; built: WallResult; moved: boolean } {
@@ -35603,11 +35609,14 @@ function refreshWallBars(): void { for (const f of wallBarRenderers.values()) f(
 function drawWallBar(bar: HTMLElement, winId: string): void {
   // MICRO-PX1c · the same bar for «Dal prospetto»
   const elevOn = spaceCoreTools.get(winId) === ELEV_TOOL;
-  const on = spaceCoreTools.get(winId) === WALL_TOOL || elevOn;
+  // MICRO-PX2 · …and for «Scatola a sette punti»
+  const boxOn = spaceCoreTools.get(winId) === BOX_TOOL;
+  const on = spaceCoreTools.get(winId) === WALL_TOOL || elevOn || boxOn;
   bar.classList.toggle("hidden", !on);
   if (!on) return;
-  bar.dataset.tool = elevOn ? ELEV_TOOL : WALL_TOOL;
+  bar.dataset.tool = elevOn ? ELEV_TOOL : boxOn ? BOX_TOOL : WALL_TOOL;
   if (elevOn) { drawElevBar(bar, winId); return; }
+  if (boxOn) { drawBoxBar(bar, winId); return; }
   bar.textContent = "";
   // MICRO-PX1b · «Aggiungi punti alti» on a wall made
   const adding = sketchById(wallAddTop.get(winId) ?? "");
@@ -35637,18 +35646,9 @@ function drawWallBar(bar: HTMLElement, winId: string): void {
   hint.dataset.wallHint = "1";
   hint.textContent = ph.hint;
   bar.append(b, " ", hint);
-  const w = document.createElement("div");
-  w.className = "scn-wallbar-where" + (where.hybrid ? " warn" : "");
-  w.dataset.wallWhere = where.hybrid ? "hybrid" : "1";
-  w.textContent = where.words ? (where.hybrid ? `⚠ ${t("wall.hybridNow")} ${where.words}` : where.words) : t("wall.whereNone");
-  // MICRO-PX1c B · the proxy's document, shown at all times (or: a semantic shape)
-  const src = pxSourceNow();
-  if (src.mode === "semantic") { w.dataset.wallWhere = "semantic"; w.textContent = t("px.barSemantic"); }
-  else {
-    const doc = pxDocumentOf([...tr.plan, ...tr.top], src) ?? pxDocumentInView();
-    w.textContent = `${t("px.barDoc", { doc: doc ? wallNodeName(doc) : "—" })} · ${w.textContent}`;
-  }
-  bar.appendChild(w);
+  // MICRO-PX1c B · the proxy's document, shown at all times (or: a semantic shape) — MICRO-PX2 C: one line for the suite
+  void where;
+  bar.appendChild(pxBarWhere([...tr.plan, ...tr.top], undefined, t("wall.whereNone")));
 }
 /** the «Tool» tab of «Muro da pianta»: its options, its phase, where the clicks fall */
 function renderWallToolTab(box: HTMLElement, win: Win): void {
@@ -36097,7 +36097,8 @@ var pxNoteEl: HTMLElement | null = null;
 function pxCloseNote(): void {
   const el = pxNoteEl;
   pxNoteEl = null;
-  el?.remove();
+  // MICRO-PX2 · removing the field blurs it: its own blur handler must not remove it again (NotFoundError)
+  if (el) { el.dataset.closing = "1"; if (el.isConnected) el.remove(); }
 }
 function pxAskNote(at: { x: number; y: number } | null | undefined, label: string, initial: string, save: (text: string) => void): void {
   pxCloseNote();
@@ -36119,7 +36120,7 @@ function pxAskNote(at: { x: number; y: number } | null | undefined, label: strin
     if (done) return;
     done = true;
     if (keep) save(inp.value.trim());
-    if (pxNoteEl === box) pxCloseNote(); else box.remove();
+    if (pxNoteEl === box) pxCloseNote(); else if (box.isConnected && !box.dataset.closing) box.remove();
   };
   inp.addEventListener("keydown", (e) => {
     e.stopPropagation();
@@ -36524,20 +36525,7 @@ function drawElevBar(bar: HTMLElement, winId: string): void {
   b.textContent = ph.counter;
   hint.textContent = ph.hint;
   bar.append(b, " ", hint);
-  const w = document.createElement("div");
-  const src = pxSourceNow();
-  if (src.mode === "semantic") {
-    w.className = "scn-wallbar-where";
-    w.dataset.wallWhere = "semantic";
-    w.textContent = t("px.barSemantic");
-  } else {
-    const where = wallWhere(tr.front);
-    const doc = pxDocumentOf(tr.front, src) ?? pxDocumentInView();
-    w.className = "scn-wallbar-where" + (where.hybrid ? " warn" : "");
-    w.dataset.wallWhere = where.hybrid ? "hybrid" : "1";
-    w.textContent = t("px.barDoc", { doc: doc ? wallNodeName(doc) : "—" }) + (where.words ? ` · ${where.hybrid ? `⚠ ${t("wall.hybridNow")} ` : ""}${where.words}` : "");
-  }
-  bar.appendChild(w);
+  bar.appendChild(pxBarWhere(tr.front));
 }
 function renderElevToolTab(box: HTMLElement, win: Win): void {
   const adding = sketchById(elevAddDepth.get(win.id) ?? "");
@@ -36724,6 +36712,528 @@ function renderElevInputs(sect: NpSect, sk: Sketch, win: Win): void {
   box.appendChild(table);
 }
 
+// ── MICRO-PX2 · «SCATOLA A SETTE PUNTI» / «SEVEN-POINT BOX» ─────────────────
+//
+// EM Tools' «Proxy Box Creator» in the Space: seven measurement points with
+// fixed roles (alignment start / end, thickness, quota min / max, length start
+// / end), guided — the bar and the Tool tab say which point the next click
+// records and what it measures, as EM Tools' panel; a row of the Tool tab
+// clicked records that point again. The seventh point makes the box (EM Tools'
+// geometry to the vertex: `box-seven-points.ts`), a sketch that keeps its seven
+// points (layout.sketches): the Item tab lists them, editable (a point, its
+// document, its annotation, «Record again»), the handles drag them. The same
+// rules as the wall and the elevation (PX1, PX1c): the document always shown,
+// the hybrid case said, «Annotate the points as extractors» on by default, the
+// annotation at the click; «Associate with a unit» writes EM Tools' chain
+// (seven extractors with EM Tools' point_type, a combiner, the Proxy Geometry).
+
+const BOX_TOOL = "box7";
+interface BoxTrace { points: Array<WallPoint | null>; next: number }
+// eslint-disable-next-line no-var
+var boxTraces = new Map<string, BoxTrace>();
+interface BoxPrefs { annotate: boolean; pivot: WallPivot }
+const BOX_PREFS_KEY = "emstudio.space.box";
+function boxPrefs(): BoxPrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(BOX_PREFS_KEY) ?? "{}") as Partial<BoxPrefs>;
+    return { annotate: v.annotate !== false, pivot: v.pivot === "center" || v.pivot === "top" ? v.pivot : "bottom" };
+  } catch { return { annotate: true, pivot: "bottom" }; }
+}
+function setBoxPrefs(p: Partial<BoxPrefs>): void {
+  try { localStorage.setItem(BOX_PREFS_KEY, JSON.stringify({ ...boxPrefs(), ...p })); } catch { /* private mode */ }
+  renderSpaceNPanels();
+  refreshWallBars();
+}
+function boxTrace(winId: string): BoxTrace {
+  let tr = boxTraces.get(winId);
+  if (!tr) { tr = { points: Array(7).fill(null), next: 0 }; boxTraces.set(winId, tr); }
+  return tr;
+}
+type BoxStored = BoxInput & ProxyDrawing;
+/** «Record again» a point of a box made: the sketch and the point, per Space window */
+// eslint-disable-next-line no-var
+var boxRedo = new Map<string, { sketchId: string; k: number }>();
+// eslint-disable-next-line no-var
+var boxDraft: { winId: string; sketchId: string; input: BoxStored } | null = null;
+// eslint-disable-next-line no-var
+var boxActive: { sketchId: string; k: number } | null = null;
+// eslint-disable-next-line no-var
+var boxMemo = new Map<string, { sig: string; r: BoxResult }>();
+function boxBuiltMemo(key: string, inp: BoxInput, provisional = false): BoxResult {
+  const sig = boxSig(inp, provisional ? "p" : "");
+  const m = boxMemo.get(key);
+  if (m && m.sig === sig) return m.r;
+  const r = buildBox(inp, { provisional });
+  boxMemo.set(key, { sig, r });
+  return r;
+}
+const boxRoleName = (k: number): string => t(`box.role.${BOX_ROLES[k]}`);
+const boxM = (v: number, d = 3) => v.toLocaleString(getLocale(), { maximumFractionDigits: d });
+function boxErrorWords(e: BoxError): string {
+  if (e.code === "missing") return t("box.err.missing", { roles: (e.missing ?? []).map(boxRoleName).join(", ") });
+  return t(`box.err.${e.code}`);
+}
+function boxWarningWords(ws: BoxWarning[]): string {
+  const out: string[] = [];
+  for (const w of ws) {
+    if (w.code === "thickness_slant") out.push(t("box.warn.thickness_slant", { plan: boxM(w.plan ?? 0), measured: boxM(w.measured ?? 0) }));
+    else if (w.code !== "provisional") out.push(t(`box.warn.${w.code}`));
+  }
+  return out.join(" · ");
+}
+function boxStatsWords(m: BoxMesh): string {
+  return t("box.stats", { l: boxM(m.dims.length), w: boxM(m.dims.thickness), h: boxM(m.dims.height), v: boxM(m.stats.volume, 2) });
+}
+/** the counter and the hint of the bar: which point the next click records */
+function boxPhaseWords(winId: string): { counter: string; hint: string } {
+  const redo = boxRedo.get(winId);
+  const sk = redo ? sketchById(redo.sketchId) : null;
+  if (redo && sk?.box) return { counter: t("box.redo.counter", { name: sk.name, n: String(redo.k + 1), role: boxRoleName(redo.k) }), hint: t(`box.hint.${BOX_ROLES[redo.k]}`) };
+  const tr = boxTrace(winId);
+  const done = tr.points.filter(Boolean).length;
+  if (tr.next >= 7) return { counter: t("box.counter.done", { n: String(done) }), hint: t("box.hint.done") };
+  return { counter: t("box.counter", { n: String(tr.next + 1), role: boxRoleName(tr.next), done: String(done) }), hint: t(`box.hint.${BOX_ROLES[tr.next]}`) };
+}
+/** a click: the point the bar names is recorded; the seventh makes the box */
+function boxClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
+  if (dbl) return true;
+  const redo = boxRedo.get(win.id);
+  if (redo) {
+    const sk = sketchById(redo.sketchId);
+    if (!sk?.box) { boxEndRedo(win); return true; }
+    if (!hit) { toast(t("wall.noSurface")); return true; }
+    const w = wallPointOf(hit);
+    const seen = boxSeen(sk).input;
+    const ed = editBox(seen, { op: "set", k: redo.k, to: w });
+    const k = redo.k;
+    // the tool back to Select first: the annotation's field opened after stays open
+    boxEndRedo(win);
+    if (ed.ok && boxCommit(sk, ed.input)) {
+      toast(t("box.redo.done", { role: boxRoleName(k) }));
+      if (pxAsks(seen.annotate !== false && seen.source?.mode !== "semantic", w))
+        pxAskNote(hit.screen, pxNoteLabel(w, boxRoleName(k)), seen.points[k]?.note ?? "", (text) => {
+          const s2 = sketchById(sk.id);
+          if (!s2?.box) return;
+          const e2 = editBox(boxSeen(s2).input, { op: "note", k, note: text });
+          if (e2.ok && (e2.input.points[k]?.note ?? "") !== (boxSeen(s2).input.points[k]?.note ?? "")) boxCommit(s2, e2.input);
+        });
+    }
+    return true;
+  }
+  if (!hit) { toast(t("wall.noSurface")); return true; }
+  const tr = boxTrace(win.id);
+  if (tr.next >= 7) tr.next = boxNextRole({ points: tr.points });
+  if (tr.next >= 7) { boxFinish(win); return true; }
+  const k = tr.next;
+  const w = wallPointOf(hit);
+  const docsBefore = boxDocuments({ points: tr.points.filter((x) => x?.rm) });
+  tr.points[k] = { ...w, ...(tr.points[k]?.note ? { note: tr.points[k]!.note } : {}) };
+  if (w.rm && w.doc && docsBefore.length && !docsBefore.includes(w.doc)) toast(t("wall.hybrid", { doc: wallNodeName(w.doc) }));
+  logInfo(t("box.recorded", { role: boxRoleName(k), x: boxM(blenderXYZ(w.p)[0]), y: boxM(blenderXYZ(w.p)[1]), z: boxM(blenderXYZ(w.p)[2]) }));
+  tr.next = boxNextRole({ points: tr.points });
+  // the seventh point makes the box first; the annotation asked after goes to the box made
+  const made = tr.next >= 7 ? boxFinish(win) : null;
+  if (pxAsks(boxPrefs().annotate, w))
+    pxAskNote(hit.screen, pxNoteLabel(w, boxRoleName(k)), "", (text) => {
+      if (!text) return;
+      const s2 = made ? sketchById(made.id) : null;
+      if (s2?.box) { const e2 = editBox(boxSeen(s2).input, { op: "note", k, note: text }); if (e2.ok) boxCommit(s2, e2.input); return; }
+      const pk = tr.points[k];
+      if (pk) pk.note = text;
+      renderSpaceNPanels();
+    });
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+/** the seven points there: the box is a sketch, selected; the tool stays armed for the next */
+function boxFinish(win: Win): Sketch | null {
+  const tr = boxTrace(win.id);
+  const input: BoxStored = { points: tr.points, pivot: boxPrefs().pivot, annotate: boxPrefs().annotate, source: pxSourceNow() };
+  const r = buildBox(input);
+  // refused: said in the toast and in the Log (the points stay: one of them is recorded again)
+  if (!r.ok) { const why = boxErrorWords(r.error); toast(why); logInfo(why); tr.next = 7; refreshWallBars(); renderSpaceNPanels(); return null; }
+  const sk = addDrawnSketch("box", input, r.mesh.origin, t("box.sketchName"));
+  boxTraces.set(win.id, { points: Array(7).fill(null), next: 0 });
+  setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
+  const warn = boxWarningWords(r.mesh.warnings);
+  const msg = t("box.made", { name: sk.name, stats: boxStatsWords(r.mesh) })
+    + (input.source?.mode === "semantic" ? ` · ${t("px.madeSemantic")}` : "") + (warn ? ` · ${warn}` : "");
+  logInfo(msg);
+  toast(msg);
+  refreshWallBars();
+  renderSpaceNPanels();
+  refreshInspector();
+  refreshSurfaces("scene");
+  return sk;
+}
+/** Esc: the «Record again» ends; else the points recorded go (once) */
+function boxCancel(win: Win): boolean {
+  if (boxRedo.has(win.id)) { boxEndRedo(win); return true; }
+  const tr = boxTraces.get(win.id);
+  if (!tr || !tr.points.some(Boolean)) return false;
+  boxTraces.set(win.id, { points: Array(7).fill(null), next: 0 });
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+/** Backspace: the last point recorded goes back (it is the next again) */
+function boxUndoPoint(win: Win): boolean {
+  const tr = boxTraces.get(win.id);
+  if (!tr) return false;
+  const k = tr.next >= 7 ? 6 : tr.next - 1;
+  let j = k;
+  while (j >= 0 && !tr.points[j]) j--;
+  if (j < 0) return false;
+  tr.points[j] = null;
+  tr.next = j;
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+/** a row of the Tool tab: that point is the next to record (recorded again) */
+function boxAim(win: Win, k: number): void {
+  const tr = boxTrace(win.id);
+  tr.next = k;
+  refreshWallBars();
+  renderSpaceNPanels();
+}
+function boxMarks(winId: string): SceneMark[] {
+  if (spaceCoreTools.get(winId) !== BOX_TOOL || boxRedo.has(winId)) return [];
+  const tr = boxTraces.get(winId);
+  if (!tr) return [];
+  const out: SceneMark[] = [];
+  tr.points.forEach((w, k) => { if (w) out.push({ id: `box:pt:${k}`, kind: "point", vertices: [w.p], label: `${k + 1} · ${boxRoleName(k)}`, draft: true }); });
+  if (tr.points[0] && tr.points[1]) out.push({ id: "box:axis", kind: "line", vertices: [tr.points[0].p, tr.points[1].p], label: "", draft: true });
+  return out;
+}
+/** the see-through box: from five points on (the length the alignment's until its points come), or a box whose handle is dragged */
+function boxPreview(winId: string): SceneSolid | null {
+  let inp: BoxInput | null = null;
+  let provisional = false;
+  if (boxDraft && boxDraft.winId === winId) inp = boxDraft.input;
+  else if (spaceCoreTools.get(winId) === BOX_TOOL && !boxRedo.has(winId)) {
+    const tr = boxTraces.get(winId);
+    if (!tr || tr.points.slice(0, 5).some((w) => !w)) return null;
+    inp = { points: tr.points, pivot: boxPrefs().pivot };
+    provisional = true;
+  }
+  if (!inp) return null;
+  const r = boxBuiltMemo(`pv:${winId}`, inp, provisional);
+  if (!r.ok) return null;
+  return { sig: `b|${boxSig(inp, provisional ? "p" : "")}`, positions: r.mesh.positions, indices: r.mesh.indices, origin: r.mesh.origin };
+}
+/** a box's inputs where it is SEEN (a pose moved after the build carried into them) */
+function boxSeen(sk: Sketch): { input: BoxStored; built: BoxResult } {
+  const b = sk.box!;
+  const first = boxBuiltMemo(`seen:${sk.id}`, b);
+  if (!first.ok || poseIsBuilt(first.mesh.origin, sk)) return { input: b, built: first };
+  const input: BoxStored = { ...bakeBoxPose(b, first.mesh.origin, sk), annotate: b.annotate, ...(b.source ? { source: b.source } : {}) };
+  return { input, built: buildBox(input) };
+}
+/** a correction written: ONE step of the undo, the box made again */
+function boxCommit(sk: Sketch, inp: BoxStored): boolean {
+  if (!sketchById(sk.id)?.box) return false;
+  const r = buildBox(inp);
+  if (!r.ok) { toast(boxErrorWords(r.error)); renderSpaceNPanels(); return false; }
+  store?.viewStep();
+  updateDrawn(sk.id, "box", inp, { position: r.mesh.origin, rotation: [0, 0, 0], scale: [1, 1, 1] });
+  const warn = boxWarningWords(r.mesh.warnings);
+  if (warn) toast(warn);
+  refreshSurfaces("scene");
+  renderSpaceNPanels();
+  return true;
+}
+function boxSelected(): Sketch | null {
+  if (spaceSketchSet.size !== 1 || !spaceSketchSel) return null;
+  const sk = sketchById(spaceSketchSel);
+  return sk && sk.shape === "box" && sk.box ? sk : null;
+}
+const boxHandleId = (sid: string, k: number) => `b|${sid}|${k}`;
+function parseBoxHandle(id: string): { sid: string; k: number } | null {
+  const m = /^b\|(.+)\|(\d)$/.exec(id);
+  return m ? { sid: m[1], k: Number(m[2]) } : null;
+}
+/** the handles of the box selected: its seven points */
+function boxHandles(winId: string): SceneHandle[] {
+  const sk = boxSelected();
+  if (!sk) return [];
+  if ((spaceCoreTools.get(winId) ?? "select") !== "select") return [];
+  const inp = boxDraft?.sketchId === sk.id ? boxDraft.input : boxSeen(sk).input;
+  const act = boxActive?.sketchId === sk.id ? boxActive.k : null;
+  const out: SceneHandle[] = [];
+  inp.points.forEach((w, k) => { if (w) out.push({ id: boxHandleId(sk.id, k), p: w.p, kind: "face", active: act === k,
+    title: `${k + 1} · ${boxRoleName(k)}` + (w.note ? ` — «${w.note}»` : ""), ...(w.note ? { cls: "has-note" } : {}) }); });
+  return out;
+}
+/** a handle's gesture: a click (the point active, its annotation asked), a drag (on a model), the release (one step) */
+function boxOnHandle(win: Win, e: SceneHandleEvent): boolean {
+  const h = parseBoxHandle(e.id);
+  if (!h) return false;
+  const sk = sketchById(h.sid);
+  if (!sk?.box) return true;
+  const seen = () => boxSeen(sk).input;
+  if (e.phase === "click") {
+    boxActive = { sketchId: sk.id, k: h.k };
+    renderSpaceNPanels();
+    const w = seen().points[h.k];
+    if (w) pxAskNote(spacePointer, pxNoteLabel(w, boxRoleName(h.k)), w.note ?? "", (text) => {
+      const ed = editBox(boxSeen(sk).input, { op: "note", k: h.k, note: text });
+      if (ed.ok && (ed.input.points[h.k]?.note ?? "") !== (w.note ?? "")) boxCommit(sk, ed.input);
+    });
+    return true;
+  }
+  if (e.phase === "start") { boxDraft = { winId: win.id, sketchId: sk.id, input: seen() }; boxActive = null; return true; }
+  if (e.phase === "cancel") { boxDraft = null; return true; }
+  if (!e.point) return true;
+  const ed = editBox(seen(), { op: "set", k: h.k, to: wallPointAt(e.point, e.key) });
+  if (e.phase === "move") { if (ed.ok && buildBox(ed.input).ok) boxDraft = { winId: win.id, sketchId: sk.id, input: ed.input }; return true; }
+  boxDraft = null;
+  if (ed.ok && boxCommit(sk, ed.input)) {
+    boxActive = { sketchId: sk.id, k: h.k };
+    if (e.key === null) toast(t("wall.h.offModel"));
+  }
+  return true;
+}
+function boxStartRedo(win: Win, sk: Sketch, k: number): void {
+  setSpaceTool(win.id, BOX_TOOL);
+  boxRedo.set(win.id, { sketchId: sk.id, k });
+  setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
+  refreshWallBars();
+  renderSpaceNPanels();
+}
+function boxEndRedo(win: Win): void {
+  const sid = boxRedo.get(win.id)?.sketchId;
+  setSpaceTool(win.id, "select");
+  if (sid && sketchById(sid)) setSpaceSel({ keys: [`sketch:${sid}`], active: `sketch:${sid}` });
+  refreshWallBars();
+  renderSpaceNPanels();
+}
+function drawBoxBar(bar: HTMLElement, winId: string): void {
+  bar.textContent = "";
+  const ph = boxPhaseWords(winId);
+  const redo = boxRedo.get(winId);
+  const tr = boxTrace(winId);
+  bar.dataset.wallPhase = redo ? "redo" : tr.next >= 7 ? "done" : BOX_ROLES[tr.next];
+  bar.dataset.wallPoints = String(tr.points.filter(Boolean).length);
+  const b = document.createElement("b");
+  b.dataset.wallCounter = "1";
+  b.textContent = ph.counter;
+  const hint = document.createElement("span");
+  hint.className = "scn-wallbar-hint";
+  hint.dataset.wallHint = "1";
+  hint.textContent = ph.hint;
+  bar.append(b, " ", hint);
+  const sk = redo ? sketchById(redo.sketchId) : null;
+  bar.appendChild(pxBarWhere(sk?.box ? sk.box.points.filter((w): w is WallPoint => !!w) : tr.points.filter((w): w is WallPoint => !!w), sk?.box?.source));
+}
+/** the «Tool» tab: the seven points, which one the next click records, the options */
+function renderBoxToolTab(box: HTMLElement, win: Win): void {
+  const note = (text: string, probe: string, cls = "xf-note") => {
+    const el = document.createElement("p");
+    el.className = cls;
+    el.dataset.np = probe;
+    el.textContent = text;
+    box.appendChild(el);
+  };
+  const redo = boxRedo.get(win.id);
+  const rsk = redo ? sketchById(redo.sketchId) : null;
+  if (redo && rsk?.box) {
+    note(t("box.redo.how", { name: rsk.name, role: boxRoleName(redo.k) }), "box-redo");
+    return;
+  }
+  const prefs = boxPrefs();
+  const tr = boxTrace(win.id);
+  note(t("box.how"), "box-how");
+  const table = document.createElement("table");
+  table.className = "wall-points box-roles";
+  table.dataset.boxRoles = "1";
+  BOX_ROLES.forEach((role, k) => {
+    const row = document.createElement("tr");
+    row.dataset.boxRole = role;
+    const w = tr.points[k];
+    if (tr.next === k) row.classList.add("act");
+    row.appendChild(Object.assign(document.createElement("td"), { textContent: w ? "✓" : tr.next === k ? "▸" : "○" }));
+    const name = document.createElement("td");
+    name.textContent = `${k + 1} · ${boxRoleName(k)}`;
+    name.title = t(`box.hint.${role}`);
+    row.appendChild(name);
+    const where = document.createElement("td");
+    where.className = "box-where";
+    // the document in the row (the sidebar is narrow), the coordinates and the note in its tooltip
+    if (w) { const b3 = blenderXYZ(w.p); where.textContent = `${w.doc ? wallNodeName(w.doc) : "—"}${w.note ? " ✎" : ""}`;
+      where.title = `x ${b3.map((c) => boxM(c, 3)).join(" · ")}${w.note ? ` — «${w.note}»` : ""}`; }
+    else where.textContent = "—";
+    row.appendChild(where);
+    const td = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "link";
+    btn.dataset.boxAim = String(k);
+    btn.textContent = w ? "⟲" : "◎";
+    btn.title = w ? t("box.aimAgain") : t("box.aim");
+    btn.addEventListener("click", () => boxAim(win, k));
+    td.appendChild(btn);
+    row.appendChild(td);
+    table.appendChild(row);
+  });
+  box.appendChild(table);
+  const l = document.createElement("label");
+  l.className = "np-row";
+  l.dataset.wallOpt = "pivot";
+  const sp = document.createElement("span");
+  sp.textContent = t("wall.pivot");
+  l.append(sp, wallPivotSelect(prefs.pivot, (v) => setBoxPrefs({ pivot: v })));
+  box.appendChild(l);
+  renderPxSourceRows(box, tr.points.filter((w): w is WallPoint => !!w), prefs.annotate, (v) => setBoxPrefs({ annotate: v }));
+  const ph = boxPhaseWords(win.id);
+  note(`${ph.counter} — ${ph.hint}`, "box-phase");
+  const pv = tr.points.slice(0, 5).every(Boolean) ? buildBox({ points: tr.points, pivot: prefs.pivot }, { provisional: true }) : null;
+  if (pv && pv.ok) note(boxStatsWords(pv.mesh) + (pv.mesh.warnings.some((x) => x.code === "provisional") ? ` · ${t("box.provisional")}` : ""), "box-preview");
+  else if (pv && !pv.ok) note(boxErrorWords(pv.error), "box-error", "xf-note warn");
+  const where = wallWhere(tr.points.filter((w): w is WallPoint => !!w));
+  if (where.hybrid) note(t("wall.hybridNote"), "wall-hybrid", "xf-note warn");
+  if (where.none) note(t("wall.noModel", { n: String(where.none) }), "wall-nomodel", "xf-note warn");
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const act = (label: string, probe: string, run: () => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.act = probe;
+    b.textContent = label;
+    b.disabled = disabled;
+    b.addEventListener("click", run);
+    acts.appendChild(b);
+  };
+  const all = tr.points.every(Boolean);
+  act(t("box.make"), "box-make", () => { boxFinish(win); }, !all);
+  act(t("wall.undoPoint"), "box-undo", () => { boxUndoPoint(win); }, !tr.points.some(Boolean));
+  act(t("box.clearAll"), "box-cancel", () => { boxCancel(win); }, !tr.points.some(Boolean));
+  box.appendChild(acts);
+}
+/** the Item tab of a box: its seven points, editable, made again at once (one step each) */
+function renderBoxInputs(sect: NpSect, sk: Sketch, win: Win): void {
+  if (!sk.box) return;
+  const box = sect(t("box.inputs"), "box-inputs", t("box.inputsHelp"));
+  box.dataset.boxSketch = sk.id;
+  const { input: inp, built } = boxSeen(sk);
+  const commit = (x: BoxStored) => { boxCommit(sk, x); };
+  const note = (text: string, probe: string, cls = "xf-note") => {
+    const el = document.createElement("p");
+    el.className = cls;
+    el.dataset.np = probe;
+    el.textContent = text;
+    box.appendChild(el);
+    return el;
+  };
+  if (built.ok) note(boxStatsWords(built.mesh), "box-stats");
+  else note(boxErrorWords(built.error), "box-error", "xf-note warn");
+  const warn = built.ok ? boxWarningWords(built.mesh.warnings) : "";
+  if (warn) note(warn, "box-warn", "xf-note warn");
+  if (built.ok && built.mesh.warnings.some((w) => w.code === "length_reversed")) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.act = "box-swap";
+    b.textContent = t("box.swapLength");
+    b.addEventListener("click", () => { const ed = editBox(inp, { op: "swapLength" }); if (ed.ok) commit(ed.input); });
+    box.appendChild(b);
+  }
+  note(pxSourceWords(inp, inp.points.filter((w): w is WallPoint => !!w)), "px-item-source", inp.source?.mode === "semantic" ? "xf-note est" : "xf-note");
+  const line = (label: string, el: HTMLElement) => {
+    const l = document.createElement("label");
+    l.className = "np-row";
+    const s0 = document.createElement("span");
+    s0.textContent = label;
+    l.append(s0, el);
+    box.appendChild(l);
+  };
+  line(t("px.docLabel"), pxSourceSelect(inp, (src) => commit({ ...inp, source: src })));
+  line(t("wall.pivot"), wallPivotSelect(inp.pivot ?? "bottom", (v) => { const ed = editBox(inp, { op: "pivot", pivot: v }); if (ed.ok) commit(ed.input); }));
+  const docs = (store?.doc.graph.nodes ?? []).filter((n) => n.node_type === "document");
+  const table = document.createElement("table");
+  table.className = "wall-points box-points";
+  table.dataset.boxPoints = sk.id;
+  const head = document.createElement("tr");
+  for (const h of ["", "X", "Y", "Z", t("wall.docCol"), ""]) head.appendChild(Object.assign(document.createElement("th"), { textContent: h }));
+  table.appendChild(head);
+  const act = boxActive?.sketchId === sk.id ? boxActive.k : null;
+  inp.points.forEach((w, k) => {
+    table.appendChild(document.createElement("tr")).appendChild(Object.assign(document.createElement("th"), { colSpan: 6, textContent: `${k + 1} · ${boxRoleName(k)}`, title: t(`box.hint.${BOX_ROLES[k]}`) }));
+    if (!w) return;
+    const tr = document.createElement("tr");
+    tr.dataset.boxRow = String(k);
+    if (act === k) tr.classList.add("act");
+    tr.appendChild(Object.assign(document.createElement("td"), { textContent: String(k + 1),
+      title: w.rm ? (w.doc ? t("wall.onRmDoc", { rm: wallNodeName(w.rm), doc: wallNodeName(w.doc) }) : t("wall.onRm", { rm: wallNodeName(w.rm) })) : t("wall.whereNone") }));
+    const b3 = blenderXYZ(w.p);
+    [0, 1, 2].forEach((c) => {
+      const td = document.createElement("td");
+      const i = document.createElement("input");
+      i.type = "number";
+      i.step = "0.01";
+      i.className = "wall-num";
+      i.value = String(Math.round(b3[c] * 1000) / 1000);
+      i.dataset.boxIn = `${k}:${c}`;
+      i.addEventListener("change", () => {
+        const x = Number(i.value);
+        if (!Number.isFinite(x)) return;
+        const nb = [...b3] as V3;
+        nb[c] = x;
+        const ed = editBox(inp, { op: "set", k, to: { ...w, p: [nb[0], nb[2], -nb[1]] } });
+        if (ed.ok) commit(ed.input);
+      });
+      td.appendChild(i);
+      tr.appendChild(td);
+    });
+    const dtd = document.createElement("td");
+    const dsel = document.createElement("select");
+    dsel.className = "wall-doc";
+    dsel.dataset.boxDoc = String(k);
+    dsel.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: "—", selected: !w.doc }));
+    for (const d of docs) dsel.appendChild(Object.assign(document.createElement("option"), { value: d.id, textContent: String(d.name ?? d.id), selected: w.doc === d.id }));
+    dsel.title = t("wall.docTitle");
+    dsel.addEventListener("change", () => { const ed = editBox(inp, { op: "set", k, to: { ...w, doc: dsel.value || null } }); if (ed.ok) commit(ed.input); });
+    dtd.appendChild(dsel);
+    tr.appendChild(dtd);
+    const rtd = document.createElement("td");
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "link";
+    again.textContent = "⟲";
+    again.title = t("box.redo");
+    again.dataset.boxRedo = String(k);
+    again.addEventListener("click", () => boxStartRedo(win, sk, k));
+    rtd.appendChild(again);
+    tr.appendChild(rtd);
+    table.appendChild(tr);
+    table.appendChild(wallNoteRow(w, (text) => { const ed = editBox(inp, { op: "note", k, note: text }); if (ed.ok) commit(ed.input); }, `b${k}`, 6));
+  });
+  box.appendChild(table);
+}
+
+/** MICRO-PX2 C · the bar's line of the document, the same for every tool of the
+ *  suite: the proxy's document (or «semantic shape»), the models and documents
+ *  the clicks fell on, the hybrid case warned */
+function pxBarWhere(points: WallPoint[], source?: ProxyDrawing["source"], noneWords?: string): HTMLElement {
+  const w = document.createElement("div");
+  const src = source ?? pxSourceNow();
+  if (src.mode === "semantic") {
+    w.className = "scn-wallbar-where";
+    w.dataset.wallWhere = "semantic";
+    w.textContent = t("px.barSemantic");
+    return w;
+  }
+  const where = wallWhere(points);
+  const doc = pxDocumentOf(points, src) ?? pxDocumentInView();
+  w.className = "scn-wallbar-where" + (where.hybrid ? " warn" : "");
+  w.dataset.wallWhere = where.hybrid ? "hybrid" : "1";
+  const tail = where.words ? `${where.hybrid ? `⚠ ${t("wall.hybridNow")} ` : ""}${where.words}` : (noneWords ?? "");
+  w.textContent = t("px.barDoc", { doc: doc ? wallNodeName(doc) : "—" }) + (tail ? ` · ${tail}` : "");
+  return w;
+}
+
 /** C · a point's annotation in the tables of the Item tab: a row under the point */
 function wallNoteRow(w: WallPoint, set: (text: string) => void, probe: string, cols: number): HTMLTableRowElement {
   const tr = document.createElement("tr");
@@ -36754,13 +37264,16 @@ function proxyParadataItem(sk: Sketch): { tool: string; purpose: string; annotat
   const st = store;
   const wall = sk.shape === "wall" ? sk.wall : null;
   const elev = sk.shape === "elevation" ? sk.elevation : null;
-  const d: ProxyDrawing | null = wall ?? elev ?? null;
+  // MICRO-PX2 · a box: its seven points, EM Tools' point_type («Alignment Start»…) and purpose
+  const box7 = sk.shape === "box" ? sk.box : null;
+  const d: ProxyDrawing | null = wall ?? elev ?? box7 ?? null;
   if (!d || !st) return null;
   const typed: Array<{ w: WallPoint; type: string }> = wall
     ? [...wall.plan.map((w) => ({ w, type: wall.mode === "axis" ? "axis" : "plan" })), ...wall.top.map((w) => ({ w, type: "head" }))]
+    : box7 ? box7.points.flatMap((w, k) => (w ? [{ w, type: BOX_POINT_TYPES[BOX_ROLES[k]] }] : []))
     : [...elev!.front.map((w) => ({ w, type: "face" })), ...(elev!.depthPoint ? [{ w: elev!.depthPoint, type: "depth" }] : [])];
-  const tool = wall ? "Wall from plan" : "From elevation";
-  const purpose = wall ? "wall_from_plan" : "from_elevation";
+  const tool = wall ? "Wall from plan" : box7 ? "Seven-point box" : "From elevation";
+  const purpose = wall ? "wall_from_plan" : box7 ? "proxy_box_creator" : "from_elevation";
   const semantic = d.source?.mode === "semantic";
   const annotate = d.annotate !== false && !semantic;
   const out = { tool, purpose, annotate, semantic, clicks: typed.length, skipped: 0, points: [] as Array<Record<string, unknown>>,
@@ -36829,6 +37342,7 @@ function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: N
   if (!entry || entry.id === "select") note(t("tt.selectHow"));
   else if (entry.id === WALL_TOOL) renderWallToolTab(box, win);
   else if (entry.id === ELEV_TOOL) renderElevToolTab(box, win);
+  else if (entry.id === BOX_TOOL) renderBoxToolTab(box, win);
   else if (entry.id === "cursor") {
     note(t("tt.cursorHow"));
     act(t("s3.nCentre"), "cursor-centre", () => { h.centreScene(); renderSpaceNPanels(); });
@@ -36845,7 +37359,7 @@ function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: N
     }
   }
   // (an extension's tool has «Stop tracing (Esc)» already: the same gesture)
-  if (entry?.id === "cursor" || entry?.id === WALL_TOOL || entry?.id === ELEV_TOOL) act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
+  if (entry?.id === "cursor" || entry?.id === WALL_TOOL || entry?.id === ELEV_TOOL || entry?.id === BOX_TOOL) act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
   if (acts.childElementCount) box.appendChild(acts);
 }
 
@@ -37655,7 +38169,11 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
         points: wallItem.points, purpose: wallItem.purpose,
         ...(wallItem.documentId ? { document_id: wallItem.documentId, ...(wallItem.documentName ? { document_extractor_name: wallItem.documentName } : {}),
           document_extractor_description: `The proxy drawn in EMStudio with «${wallItem.tool}» on this document, as a whole` } : {}),
-        combiner_description: `Combiner for the ${sk.shape === "wall" ? "wall" : "solid"} drawn in EMStudio with «${wallItem.tool}» — aggregates the ${wallItem.points.length} clicked points${
+        combiner_description: sk.shape === "box"
+          // MICRO-PX2 · EM Tools' words for its proxy box, the tool said
+          ? `Combiner for proxy box ${JSON.stringify(unitName)} drawn in EMStudio with «${wallItem.tool}» — aggregates the ${wallItem.points.length} measurement-point extractors${
+            wallItem.documentName ? " and the proxy's document" : ""}.`
+          : `Combiner for the ${sk.shape === "wall" ? "wall" : "solid"} drawn in EMStudio with «${wallItem.tool}» — aggregates the ${wallItem.points.length} clicked points${
           wallItem.documentName ? " and the proxy's document" : ""}.${estSay}`,
       } : {}), ...(wallItem?.semantic ? { semantic: true,
         semantic_placeholder: `A semantic shape drawn in EMStudio with «${wallItem.tool}», without a document: to refine from the sources (for example in Blender).` } : {}) }] }),
@@ -41146,6 +41664,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (spaceCoreTools.get(win.id) === WALL_TOOL) return wallClick(win, hit, dbl);
       // MICRO-PX1c · «Dal prospetto»: a point of the face, or the depth
       if (spaceCoreTools.get(win.id) === ELEV_TOOL) return elevClick(win, hit, dbl);
+      // MICRO-PX2 · «Scatola a sette punti»: the point the bar names
+      if (spaceCoreTools.get(win.id) === BOX_TOOL) return boxClick(win, hit, dbl);
       if (dbl || spaceCoreTools.get(win.id) !== "cursor") return false;
       if (hit) { handle.setCursor(hit.point); drawNPanel(); }
       return true;
@@ -41259,13 +41779,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
-    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id), ...elevMarks(win.id)],   // EXPERIMENTAL: the site's footprint
+    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id), ...elevMarks(win.id), ...boxMarks(win.id)],   // EXPERIMENTAL: the site's footprint
     // MICRO-PX1b · «Muro da pianta»: the see-through solid, the elastic side, the handles of a wall
-    preview: () => wallPreview(win.id) ?? elevPreview(win.id),
+    preview: () => wallPreview(win.id) ?? elevPreview(win.id) ?? boxPreview(win.id),
     hoverAnchor: () => wallHoverAnchor(win.id),
     onToolHover: (p) => { wallHover.set(win.id, p); },
-    handles: () => [...wallHandles(win.id), ...elevHandles(win.id)],
-    onHandle: (e) => { if (!elevOnHandle(win, e)) wallOnHandle(win, e); },
+    handles: () => [...wallHandles(win.id), ...elevHandles(win.id), ...boxHandles(win.id)],
+    onHandle: (e) => { if (!elevOnHandle(win, e) && !boxOnHandle(win, e)) wallOnHandle(win, e); },
     // MICRO-PX1c · «Agganciati agli spigoli»: a ring of rays around a click of «Dal prospetto»
     toolRing: () => (spaceCoreTools.get(win.id) === ELEV_TOOL && pxPrefs().edgeSnap ? 10 : 0),
     onMark: (id) => {
@@ -41301,10 +41821,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (a === "cancel" && elevCancel(win)) return true;
         if (a === "delete" && elevUndoPoint(win)) return true;
       }
+      if (spaceCoreTools.get(win.id) === BOX_TOOL) {
+        if (a === "confirm") { if (!boxRedo.has(win.id)) boxFinish(win); return true; }
+        if (a === "cancel" && boxCancel(win)) return true;
+        if (a === "delete" && boxUndoPoint(win)) return true;
+      }
       // MICRO-PX1b · a point of the selected wall active: X takes it away, Esc lets it go
       if (a === "delete" && wallDeleteActive()) return true;
       if (a === "delete" && elevDeleteActive()) return true;
       if (a === "cancel" && elevActive) { elevActive = null; renderSpaceNPanels(); return true; }
+      if (a === "cancel" && boxActive) { boxActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel" && wallActive) { wallActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel") {
         const armedNow = layerSpaces.get(win.id)?.trace().armed;
@@ -64671,6 +65197,10 @@ registerSpaceTool({ id: "wall", primitive: "polyline", origin: "core", snap: "su
 registerSpaceTool({ id: "fromElevation", primitive: "polyline", origin: "core", snap: "surface", glyph: "◫",
   clicks: { min: 3, max: null }, editors: ["space"],
   label: () => t("elev.toolName"), hint: () => t("elev.toolHint") });
+// MICRO-PX2 · «Scatola a sette punti»: EM Tools' Proxy Box, seven guided points
+registerSpaceTool({ id: "box7", primitive: "point", origin: "core", snap: "surface", glyph: "⬚",
+  clicks: { min: 7, max: 7 }, editors: ["space"],
+  label: () => t("box.toolName"), hint: () => t("box.toolHint") });
 
 /** a package's tool by its register id */
 const packageToolInfo = new Map<string, PackageTool>();
