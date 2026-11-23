@@ -309,6 +309,16 @@ export interface TilesLayer {
   setAutoError(px: number, reason?: string): void;
   /** …the draw calls the tileset's visible tiles cost (a mesh, a call) */
   drawCalls(): number;
+  /** MICRO-PX3 · «Annota superficie»: the tiles whose volume meets this WORLD box
+   *  are refined down to their LEAVES (the full resolution) whatever the error
+   *  says, in both modes, until the focus is taken away (null) */
+  focus(box: any | null): void;
+  /** …where the focus stands: the leaves under it, how many are loaded, the
+   *  tiles still waiting (a leaf not loaded, an external tileset not read), the
+   *  deepest level loaded and the deepest level there is */
+  focusState(): { leaves: number; loaded: number; pending: number; levelLoaded: number; levelMax: number } | null;
+  /** …the scenes of the LEAVES under it that are loaded (their meshes are the full resolution) */
+  focusMeshes(): any[];
 }
 
 export type RelocateFn = (root: { transform: number[] | null; boundingVolume: unknown }) =>
@@ -529,6 +539,15 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   applyError();
 
   let mode: RefineMode = opts.mode ?? "manual";
+  // MICRO-PX3 · the focus: a box in the group's frame (the tiles' volumes are there)
+  let focusLocal: any = null;
+  const focusTmp = new THREE.Box3();
+  const meetsFocus = (tile: any): boolean => {
+    const bv = tile?.engineData?.boundingVolume;
+    if (!bv || !focusLocal) return false;
+    try { bv.getAABB(focusTmp); } catch { return true; }
+    return focusTmp.intersectsBox(focusLocal);
+  };
   let leafRead: ReturnType<TilesLayer["leaves"]> | null = null;
   const asked = new Set<any>();
   const history: any[] = [];
@@ -580,6 +599,8 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       }
     }
     else if (ge && ge.scale !== 1) target.error *= ge.scale;
+    // MICRO-PX3 · under the focus every tile with children refines: the leaves come
+    if (focusLocal && (tile.children?.length || tile.internal?.hasUnrenderableContent) && meetsFocus(tile)) target.error = 1e9;
   };
 
   tiles.addEventListener("load-model", (e: any) => {
@@ -940,6 +961,46 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
         });
       }
       return n;
+    },
+    focus(box: any | null) {
+      if (!box) { focusLocal = null; changed(); return; }
+      tiles.group.updateMatrixWorld(true);
+      focusLocal = box.clone().applyMatrix4(tiles.group.matrixWorld.clone().invert());
+      changed();
+    },
+    focusState() {
+      const root = tiles.root;
+      if (!focusLocal || !root) return null;
+      let leaves = 0, loaded = 0, pending = 0, levelLoaded = -1, levelMax = -1;
+      const walk = (t: any, depth: number) => {
+        if (depth > 64 || !meetsFocus(t)) return;
+        const kids = t.children ?? [];
+        if (kids.length) { for (const c of kids) walk(c, depth + 1); return; }
+        // an external tileset not read yet: its children are still to come
+        if (t.internal?.hasUnrenderableContent) { pending++; return; }
+        leaves++;
+        const lv = levelOf(t);
+        levelMax = Math.max(levelMax, lv);
+        if (!t.internal?.hasRenderableContent) return;
+        if (t.internal.loadingState === LOADED_STATE && t.engineData?.scene) { loaded++; levelLoaded = Math.max(levelLoaded, lv); }
+        else pending++;
+      };
+      walk(root, 0);
+      return { leaves, loaded, pending, levelLoaded, levelMax };
+    },
+    focusMeshes() {
+      const out: any[] = [];
+      const root = tiles.root;
+      if (!focusLocal || !root) return out;
+      const walk = (t: any, depth: number) => {
+        if (depth > 64 || !meetsFocus(t)) return;
+        const kids = t.children ?? [];
+        if (kids.length) { for (const c of kids) walk(c, depth + 1); return; }
+        const sc = t.engineData?.scene;
+        if (sc && t.internal?.loadingState === LOADED_STATE) out.push(sc);
+      };
+      walk(root, 0);
+      return out;
     },
     leaves() {
       leafRead ??= (async () => {

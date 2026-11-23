@@ -358,11 +358,13 @@ import { renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { NumGroup, numField } from "./num-field";
 import { checkForUpdates, RELEASES_PAGE, type UpdateCheck } from "./updates";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
-import { addDrawnSketch, addElevationSketch, addFileSketch, addSketch, addWallSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPES, shapeById, shapeLabel, sketchById, drawnOf, updateDrawn, updateElevation, updateSketch, updateWall, type DrawnShape, type ProxyDrawing, type Sketch } from "./shapes3d";
+import { addDrawnSketch, addElevationSketch, addFileSketch, addSketch, addWallSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPES, shapeById, shapeLabel, sketchById, drawnOf, updateDrawn, updateElevation, updateSketch, updateWall, type DrawnShape, type ProxyDrawing, type Sketch, type SurfaceStored } from "./shapes3d";
 import { bakeElevationPose, buildElevation, depthFromPoint, depthHandle, depthOnAxis, editElevation, elevationSides, elevationSig, ELEV_TOL, facingOf, snapEdge,
          type DepthFrom, type ElevationError, type ElevationInput, type ElevationResult, type ElevationWarning } from "./from-elevation";
 import { bakeBoxPose, BOX_POINT_TYPES, BOX_ROLES, boxDocuments, boxNextRole, boxSig, buildBox, editBox,
          type BoxError, type BoxInput, type BoxMesh, type BoxResult, type BoxWarning } from "./box-seven-points";
+import { cutSurface, drapePath, editSurface, packMesh, surfaceFrame, surfaceLift, surfaceModels, surfaceSides, SURF_TOL,
+         type SurfaceError, type SurfaceInput, type SurfaceMesh, type SurfaceTris, type SurfaceWarning } from "./surface-annotation";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
 import { buildOutlinerTree, loadSpacePrefs, opensFor, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
@@ -3512,6 +3514,14 @@ window.__EM_SCENE__ = () => {
   assetCells: (k: AL.TargetKey) => (assetUi.ans?.assets ?? []).map((a) => ({ id: a.id, name: a.name, state: a.targets[k]?.state ?? "",
     why: a.targets[k]?.why ?? "", versions: a.versions.filter((v) => !v.master).map((v) => v.name) })),
   logTail: (n = 20) => logEntries().slice(-n).map((e) => `${e.level} ${e.message}`),
+  /** MICRO-PX3 · «Annota superficie»: the contour being clicked in each Space window, its draped path, the triangles gathered */
+  surfState: () => [...surfTraces.entries()].map(([w, tr]) => ({ win: w, points: tr.points.length, busy: tr.busy,
+    models: surfaceModels(tr.points), path: surfPathMemo.get(`tr:${w}`)?.path.length ?? 0, elastic: surfPathMemo.get(`el:${w}`)?.path.length ?? 0,
+    triangles: (surfTrisCache.get(`tr:${w}`)?.tris.positions.length ?? 0) / 9, from: surfTrisCache.get(`tr:${w}`)?.from ?? null })),
+  /** MICRO-PX3 · the triangles the last areal was cut from (a soup, scene frame) */
+  surfLastTris: () => (surfLastTris ? { positions: Array.from(surfLastTris.positions), owners: surfLastTris.owners ? Array.from(surfLastTris.owners) : null } : null),
+  /** MICRO-PX3 · the Space's hidden keys (the Outliner's eyes): read, or set */
+  spaceHidden: (keys?: string[]) => { if (keys) setSpace3dPrefs({ ...space3dPrefs(), hidden: keys }); return space3dPrefs().hidden; },
   needSigner: (op: who.SignOp) => needSigner(op, () => { (window as unknown as { __whoResumed?: string }).__whoResumed = op; }),
   whoFacts: () => whoFacts(),
   useToken: (tok: string | null) => {
@@ -34917,6 +34927,8 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     if (sk.shape === "elevation") renderElevInputs(sect, sk, win);
     // MICRO-PX2 · a box of «Scatola a sette punti»: its seven points, editable
     if (sk.shape === "box") renderBoxInputs(sect, sk, win);
+    // MICRO-PX3 · an areal of «Annota superficie»: what the cut measured, its contour, editable
+    if (sk.shape === "surface") renderSurfInputs(sect, sk, win);
   } else if (key && (key.startsWith("rm:") || key.startsWith("proxy:"))) {
     // MICRO-SPAZIO-3D-3 p.10 · the active model's version: the mode, the version, its use, level and MB
     // (MICRO-PROVA-DEV47 p.3b: now the section «Livello di dettaglio», below)
@@ -35116,6 +35128,9 @@ function setSpaceTool(winId: string, id: string): boolean {
     // MICRO-PX2 · …and «Scatola a sette punti» its points; a choice ends «Registra di nuovo»
     if (id !== BOX_TOOL) boxTraces.delete(winId);
     boxRedo.delete(winId);
+    // MICRO-PX3 · …and «Annota superficie» its contour (not while it is being cut)
+    if (id !== SURF_TOOL && !surfTraces.get(winId)?.busy) { surfTraces.delete(winId); surfTrisCache.delete(`tr:${winId}`); }
+    surfHover.delete(winId);
     pxCloseNote();
     // MICRO-PX1b · any choice of the toolbar ends «Aggiungi punti alti» (it is set again after, when it is its)
     wallAddTop.delete(winId);
@@ -35422,7 +35437,7 @@ function wallsRestore(list: WallTaken[]): void {
     updateDrawn(w.id, shape, taken as never, { position: w.position, rotation: w.rotation, scale: w.scale });
     any = true;
   }
-  if (any) { wallDraft = null; elevDraft = null; boxDraft = null; refreshSurfaces("scene"); renderSpaceNPanels(); }
+  if (any) { wallDraft = null; elevDraft = null; boxDraft = null; surfDraft = null; refreshSurfaces("scene"); renderSpaceNPanels(); }
 }
 /** a wall's inputs where it is SEEN: a pose moved after the build (G / R / S) carried into them */
 function wallSeen(sk: Sketch): { input: WallStored; built: WallResult; moved: boolean } {
@@ -35611,12 +35626,15 @@ function drawWallBar(bar: HTMLElement, winId: string): void {
   const elevOn = spaceCoreTools.get(winId) === ELEV_TOOL;
   // MICRO-PX2 · …and for «Scatola a sette punti»
   const boxOn = spaceCoreTools.get(winId) === BOX_TOOL;
-  const on = spaceCoreTools.get(winId) === WALL_TOOL || elevOn || boxOn;
+  // MICRO-PX3 · …and for «Annota superficie»
+  const surfOn = spaceCoreTools.get(winId) === SURF_TOOL;
+  const on = spaceCoreTools.get(winId) === WALL_TOOL || elevOn || boxOn || surfOn;
   bar.classList.toggle("hidden", !on);
   if (!on) return;
-  bar.dataset.tool = elevOn ? ELEV_TOOL : boxOn ? BOX_TOOL : WALL_TOOL;
+  bar.dataset.tool = elevOn ? ELEV_TOOL : boxOn ? BOX_TOOL : surfOn ? SURF_TOOL : WALL_TOOL;
   if (elevOn) { drawElevBar(bar, winId); return; }
   if (boxOn) { drawBoxBar(bar, winId); return; }
+  if (surfOn) { drawSurfBar(bar, winId); return; }
   bar.textContent = "";
   // MICRO-PX1b · «Aggiungi punti alti» on a wall made
   const adding = sketchById(wallAddTop.get(winId) ?? "");
@@ -37213,6 +37231,591 @@ function renderBoxInputs(sect: NpSect, sk: Sketch, win: Win): void {
   box.appendChild(table);
 }
 
+// ── MICRO-PX3 · «ANNOTA SUPERFICIE» / «ANNOTATE SURFACE» ────────────────────
+//
+// EM Tools' «Surface Areale» in the Space: a contour clicked on ONE
+// representation model, closed with Enter or a double click, becomes an
+// AREAL — the model's own triangles inside the contour, cut along it, draped
+// (`surface-annotation.ts`). While clicking, the contour is drawn draped on
+// the surface (each side split where it crosses the mesh's edges) and the
+// elastic side follows the pointer on the contour's plane. On a tileset the
+// LEAVES under the contour are forced and waited for (tiles3d focus) before
+// the cut. The areal is a sketch that keeps its contour and its cut
+// (layout.sketches): handles on the contour (drag, «+», X), the Item tab, one
+// undo step each, a correction cuts it again. The suite's rules (PX1, PX1c,
+// PX2): the document and the model always shown, a contour on two models
+// refused (refine in Blender), «Annotate the points as extractors» on: ONE
+// extractor of the whole surface, as EM Tools' full chain does, its place
+// the contour (the form `empkg.areale_from_graph` reads in Blender).
+
+const SURF_TOOL = "surface";
+interface SurfTrace { points: WallPoint[]; normals: Array<V3 | null>; busy: string | null }
+// eslint-disable-next-line no-var
+var surfTraces = new Map<string, SurfTrace>();
+interface SurfPrefs { annotate: boolean; offsetMm: number }
+const SURF_PREFS_KEY = "emstudio.space.surface";
+function surfPrefs(): SurfPrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(SURF_PREFS_KEY) ?? "{}") as Partial<SurfPrefs>;
+    const mm = Number(v.offsetMm);
+    return { annotate: v.annotate !== false, offsetMm: Number.isFinite(mm) && mm >= 0 && mm <= SURF_TOL.offsetMax * 1000 ? mm : SURF_TOL.offset * 1000 };
+  } catch { return { annotate: true, offsetMm: SURF_TOL.offset * 1000 }; }
+}
+function setSurfPrefs(p: Partial<SurfPrefs>): void {
+  try { localStorage.setItem(SURF_PREFS_KEY, JSON.stringify({ ...surfPrefs(), ...p })); } catch { /* private mode */ }
+  renderSpaceNPanels();
+  refreshWallBars();
+}
+function surfTrace(winId: string): SurfTrace {
+  let tr = surfTraces.get(winId);
+  if (!tr) { tr = { points: [], normals: [], busy: null }; surfTraces.set(winId, tr); }
+  return tr;
+}
+type SurfStored = SurfaceStored & ProxyDrawing;
+const surfM = (v: number, d = 2) => v.toLocaleString(getLocale(), { maximumFractionDigits: d });
+/** the triangles around a contour, per trace or areal: gathered again only when the contour leaves their box */
+interface SurfTris { key: string; box: [V3, V3]; tris: SurfaceTris; from: "mesh" | "tiles"; meshes: number }
+// eslint-disable-next-line no-var
+var surfTrisCache = new Map<string, SurfTris>();
+/** the box of points, grown by a margin (a quarter of their size, 30 cm at least) */
+function surfBoxOf(points: V3[], grow = true): [V3, V3] {
+  const lo: V3 = [Infinity, Infinity, Infinity], hi: V3 = [-Infinity, -Infinity, -Infinity];
+  for (const p of points) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
+  const m = grow ? Math.max(0.3, 0.25 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])) : 0;
+  return [[lo[0] - m, lo[1] - m, lo[2] - m], [hi[0] + m, hi[1] + m, hi[2] + m]];
+}
+const surfBoxHolds = (outer: [V3, V3], inner: [V3, V3]) => [0, 1, 2].every((k) => outer[0][k] <= inner[0][k] && outer[1][k] >= inner[1][k]);
+/** the triangles of `rmKey` around `points` as the view draws them now (no wait) */
+function surfTrianglesNow(cacheKey: string, winId: string, rmKey: string, points: V3[]): SurfTris | null {
+  if (!points.length) return null;
+  const c = surfTrisCache.get(cacheKey);
+  const need = surfBoxOf(points, false);
+  if (c && c.key === rmKey && surfBoxHolds(c.box, need)) return c;
+  const h = sceneHandles.get(winId);
+  const box = surfBoxOf(points);
+  const got = h?.surfaceTriangles?.(rmKey, box) ?? null;
+  if (!got) return null;
+  const v: SurfTris = { key: rmKey, box, tris: { positions: got.positions }, from: got.from, meshes: got.meshes };
+  surfTrisCache.set(cacheKey, v);
+  return v;
+}
+/** the model a contour is on (one), or why not */
+function surfModelOf(points: WallPoint[]): { rm: string } | { why: string } {
+  const models = surfaceModels(points);
+  if (models.includes(null)) return { why: t("surf.noModel") };
+  if (models.length > 1) return { why: t("surf.twoRms", { a: wallNodeName(models[0]), b: wallNodeName(models[1]) }) };
+  return models[0] ? { rm: models[0] } : { why: t("surf.noModel") };
+}
+function surfErrorWords(e: SurfaceError): string {
+  if (e.code === "self_intersect") return t("surf.err.self_intersect", { a: String((e.edges?.[0] ?? 0) + 1), b: String((e.edges?.[1] ?? 0) + 1) });
+  if (e.code === "off_model" && e.at?.length) return t("surf.err.off_model", { at: e.at.map((i) => String(i + 1)).join(", ") });
+  if (e.code === "off_model") return t("surf.err.off_model_cov", { pc: surfM((e.coverage ?? 0) * 100, 1) });
+  if (e.code === "too_3d") return t("surf.err.too_3d", { pc: surfM((e.coverage ?? 0) * 100, 1) });
+  return t(`surf.err.${e.code}`);
+}
+function surfWarningWords(ws: SurfaceWarning[]): string {
+  const out: string[] = [];
+  for (const w of ws) {
+    if (w.code === "merged") out.push(t("surf.warn.merged", { n: String(w.n ?? 0) }));
+    if (w.code === "folds") out.push(t("surf.warn.folds", { pc: surfM(((w.ratio ?? 1) - 1) * 100, 1) }));
+  }
+  return out.join(" · ");
+}
+/** where the cut was read: the mesh, or the tileset's leaves (UI words) */
+function surfLevelWords(i: SurfStored["info"]): string {
+  if (!i.tiles) return t("surf.level.mesh", { n: String(i.sourceTriangles) });
+  return i.tiles.timeout ? t("surf.level.tilesTimeout", { loaded: String(i.tiles.loaded), leaves: String(i.tiles.leaves) })
+    : t("surf.level.tiles", { loaded: String(i.tiles.loaded), leaves: String(i.tiles.leaves), lv: String(i.tiles.level), max: String(i.tiles.max) });
+}
+/** …the same in the graph's words (English, fixed) */
+function surfLevelGraph(i: SurfStored["info"]): string {
+  if (!i.tiles) return `on the model's mesh (${i.sourceTriangles} triangles around the contour)`;
+  return `on the tileset's leaves under the contour (${i.tiles.loaded}/${i.tiles.leaves} loaded, level ${i.tiles.level} of ${i.tiles.max}${i.tiles.timeout ? ", the wait ran out" : ""})`;
+}
+const surfStatsWords = (i: SurfStored["info"]) => t("surf.stats", { area: surfM(i.area, 3), per: surfM(i.perimeter, 2), tris: String(i.triangles) });
+const surfScenarioWords = (i: SurfStored["info"]) => t("surf.scenario", { s: i.scenario,
+  strategy: i.scenario === "A" ? "projective" : i.scenario === "B" ? "shrinkwrap" : "boolean", p: surfM(i.planarity, 3), a: surfM(i.normalVariation, 1) });
+/** EM Tools' stacking: the areals already on the same model whose box meets this one */
+function surfStack(points: WallPoint[], rm: string, except?: string): number {
+  const b = surfBoxOf(points.map((w) => w.p), false);
+  const meets = (o: [V3, V3]) => [0, 1, 2].every((k) => o[0][k] <= b[1][k] + 0.01 && o[1][k] >= b[0][k] - 0.01);
+  return listSketches().filter((s) => s.id !== except && s.shape === "surface" && s.surface?.contour[0]?.rm === rm
+    && meets(surfBoxOf(s.surface.contour.map((w) => w.p), false))).length;
+}
+/** the counter and the hint of the bar */
+function surfPhaseWords(winId: string): { counter: string; hint: string } {
+  const tr = surfTrace(winId);
+  if (tr.busy) return { counter: t("surf.counter", { n: String(tr.points.length) }), hint: tr.busy };
+  return { counter: t("surf.counter", { n: String(tr.points.length) }), hint: tr.points.length < 3 ? t("surf.hint.min", { min: "3" }) : t("surf.hint.close") };
+}
+/** a click: a point of the contour, on a model (its normal kept: the side seen); a double click closes */
+function surfClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
+  const tr = surfTrace(win.id);
+  if (tr.busy) return true;
+  if (dbl) { void surfFinish(win); return true; }
+  if (!hit) { toast(t("wall.noSurface")); return true; }
+  const w = wallPointOf(hit);
+  if (!w.rm) { toast(t("surf.noModel")); return true; }
+  const before = surfaceModels(tr.points);
+  tr.points.push(w);
+  tr.normals.push(hit.normal ? [hit.normal[0], hit.normal[1], hit.normal[2]] : null);
+  // B · a second model under the contour: said at once (the cut will refuse it)
+  if (before.length && !before.includes(w.rm)) toast(t("surf.twoRms", { a: wallNodeName(before[0]), b: wallNodeName(w.rm) }));
+  // the triangles around the contour, for the draped preview (gathered again only when it grows out of them)
+  surfTrianglesNow(`tr:${win.id}`, win.id, `rm:${w.rm}`, tr.points.map((q) => q.p));
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+/** Esc: the contour goes (once); false: nothing to cancel */
+function surfCancel(win: Win): boolean {
+  const tr = surfTraces.get(win.id);
+  if (!tr || tr.busy || !tr.points.length) return false;
+  surfTraces.set(win.id, { points: [], normals: [], busy: null });
+  surfTrisCache.delete(`tr:${win.id}`);
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+/** Backspace: the last point goes back */
+function surfUndoPoint(win: Win): boolean {
+  const tr = surfTraces.get(win.id);
+  if (!tr || tr.busy || !tr.points.length) return false;
+  tr.points.pop();
+  tr.normals.pop();
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+const surfSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** the triangles to CUT from: a mesh as drawn; a tileset's LEAVES under the contour, forced and waited for */
+async function surfTrianglesToCut(winId: string, rmKey: string, points: V3[], say: (s: string) => void):
+    Promise<{ tris: SurfaceTris; from: "mesh" | "tiles"; tiles: SurfStored["info"]["tiles"] | null; count: number } | null> {
+  const h = sceneHandles.get(winId);
+  if (!h?.surfaceTriangles) return null;
+  const box = surfBoxOf(points);
+  let tiles: SurfStored["info"]["tiles"] | null = null;
+  const first = h.focusTiles?.(rmKey, box) ?? null;
+  if (first) {
+    // a tileset: its leaves under the contour (the full resolution), whatever the view's error says
+    const t0 = performance.now();
+    let st = first;
+    for (;;) {
+      say(t("surf.busy.tiles", { n: String(st.loaded), m: String(st.leaves || "?") }));
+      if (st.leaves > 0 && st.pending === 0 && st.loaded === st.leaves) break;
+      if (performance.now() - t0 > 45000) break;
+      await surfSleep(250);
+      st = h.focusTiles?.(rmKey, box) ?? st;
+    }
+    // two frames: the leaves shown in place of their parents
+    await surfSleep(120);
+    const done = st.leaves > 0 && st.pending === 0 && st.loaded === st.leaves;
+    tiles = { leaves: st.leaves, loaded: st.loaded, level: st.levelLoaded, max: st.levelMax, initially: first.loaded, timeout: !done };
+    logInfo(`«Annotate surface» · tileset ${rmKey}: ${st.loaded}/${st.leaves} leaves under the contour loaded, level ${st.levelLoaded} of ${st.levelMax}; `
+      + `at the start ${first.loaded}/${first.leaves} were loaded (level ${first.levelLoaded}) · ${Math.round(performance.now() - t0)} ms${done ? "" : " · the wait ran out"}`);
+  }
+  say(t("surf.busy.cut"));
+  await surfSleep(0);
+  const got = h.surfaceTriangles(rmKey, box);
+  if (first) h.focusTiles?.(rmKey, null);
+  if (!got) return null;
+  return { tris: { positions: got.positions, owners: got.owners }, from: got.from, tiles, count: got.triangles };
+}
+/** the triangles of the last cut (the checks read them: `__EM_DRAG__.surfLastTris`) */
+// eslint-disable-next-line no-var
+var surfLastTris: SurfaceTris | null = null;
+/** cut an areal from inputs: the stored form, or the reason */
+async function surfCut(winId: string, inp: SurfaceInput & ProxyDrawing & { note?: string }, say: (s: string) => void, except?: string):
+    Promise<{ ok: true; stored: SurfStored; mesh: SurfaceMesh } | { ok: false; why: string }> {
+  const on = surfModelOf(inp.contour);
+  if ("why" in on) return { ok: false, why: on.why };
+  const got = await surfTrianglesToCut(winId, `rm:${on.rm}`, inp.contour.map((w) => w.p), say);
+  if (!got) return { ok: false, why: t("surf.notDrawn") };
+  const input: SurfaceInput = { contour: inp.contour, normals: inp.normals, offset: inp.offset, stack: surfStack(inp.contour, on.rm, except) };
+  surfLastTris = got.tris;
+  const r = cutSurface(input, got.tris);
+  if (!r.ok) return { ok: false, why: surfErrorWords(r.error) };
+  const m = r.mesh;
+  const stored: SurfStored = { ...input, ...(inp.note ? { note: inp.note } : {}), mesh: packMesh(m.positions, m.indices),
+    info: { area: m.area, perimeter: m.perimeter, triangles: m.stats.triangles, coverage: m.coverage, offset: m.offset,
+      scenario: m.classification.scenario, planarity: m.classification.planarity, normalVariation: m.classification.normalVariation,
+      from: got.from, sourceTriangles: got.count, loops: m.stats.loops, turned: m.stats.turned, ...(got.tiles ? { tiles: got.tiles } : {}) },
+    annotate: inp.annotate, ...(inp.source ? { source: inp.source } : {}) };
+  return { ok: true, stored, mesh: m };
+}
+/** Enter / a double click: the contour closed, the areal cut — a sketch, selected; the tool stays armed */
+async function surfFinish(win: Win): Promise<Sketch | null> {
+  const tr = surfTrace(win.id);
+  if (tr.busy) return null;
+  if (tr.points.length < 3) { toast(t("surf.hint.min", { min: "3" })); return null; }
+  const say = (s: string) => { tr.busy = s; refreshWallBars(); };
+  const prefs = surfPrefs();
+  let res: Awaited<ReturnType<typeof surfCut>>;
+  try {
+    res = await surfCut(win.id, { contour: tr.points, normals: tr.normals, offset: prefs.offsetMm / 1000, annotate: prefs.annotate, source: pxSourceNow() }, say);
+  } catch (e) {
+    res = { ok: false, why: String(e instanceof Error ? e.message : e) };
+  }
+  tr.busy = null;
+  // refused: said in the toast and in the Log (the points stay: one is moved or taken back)
+  if (!res.ok) { toast(res.why); logInfo(res.why); refreshWallBars(); renderSpaceNPanels(); return null; }
+  const lastAt = sceneHandles.get(win.id) ? spacePointer : null;
+  const sk = addDrawnSketch("surface", res.stored, res.mesh.origin, t("surf.sketchName"));
+  surfTraces.set(win.id, { points: [], normals: [], busy: null });
+  surfTrisCache.delete(`tr:${win.id}`);
+  setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
+  const warn = surfWarningWords(res.mesh.warnings);
+  const msg = t("surf.made", { name: sk.name, stats: surfStatsWords(res.stored.info) }) + ` · ${surfLevelWords(res.stored.info)}`
+    + (res.stored.source?.mode === "semantic" ? ` · ${t("px.madeSemantic")}` : "") + (warn ? ` · ${warn}` : "");
+  logInfo(`${msg} · ${surfScenarioWords(res.stored.info)} · offset ${surfM(res.stored.info.offset * 1000, 1)} mm`);
+  toast(msg);
+  // the annotation of its ONE extractor, asked at the closing
+  const w0 = res.stored.contour[0];
+  if (pxAsks(res.stored.annotate !== false && res.stored.source?.mode !== "semantic", w0))
+    pxAskNote(lastAt, pxNoteLabel(w0, t("surf.notePrompt")), "", (text) => {
+      const s2 = sketchById(sk.id);
+      if (!text || !s2?.surface) return;
+      updateDrawn(sk.id, "surface", { ...s2.surface, note: text });
+      renderSpaceNPanels();
+    });
+  refreshWallBars();
+  renderSpaceNPanels();
+  refreshInspector();
+  refreshSurfaces("scene");
+  return sk;
+}
+/** the marks of the contour being clicked: its points, and the path DRAPED on the model (the elastic side to the pointer) */
+// eslint-disable-next-line no-var
+var surfHover = new Map<string, V3 | null>();
+// eslint-disable-next-line no-var
+var surfPathMemo = new Map<string, { sig: string; path: V3[] }>();
+function surfDraped(memoKey: string, cacheKey: string, points: V3[], closed: boolean, normals: Array<V3 | null>): V3[] {
+  if (points.length < 2) return points;
+  const sig = `${points.map((p) => p.map((c) => c.toFixed(4)).join(",")).join(";")}|${closed ? 1 : 0}`;
+  const m = surfPathMemo.get(memoKey);
+  if (m && m.sig === sig) return m.path;
+  const c = surfTrisCache.get(cacheKey);
+  let path = closed ? [...points, points[0]] : points;
+  // a very heavy model: the elastic side stays straight (draped at the cut)
+  if (c && c.tris.positions.length / 9 <= 600000) path = drapePath(points, closed, c.tris, surfaceFrame(points, normals));
+  if (closed && path.length && path[path.length - 1] !== path[0]) path = [...path, path[0]];
+  surfPathMemo.set(memoKey, { sig, path });
+  return path;
+}
+function surfMarks(winId: string): SceneMark[] {
+  const out: SceneMark[] = [];
+  // a dragged handle of an areal: its contour draped as it would be cut
+  if (surfDraft && surfDraft.winId === winId) {
+    const pts = surfDraft.input.contour.map((w) => w.p);
+    out.push({ id: "surf:draft", kind: "polyline", vertices: surfDraped("draft", `sk:${surfDraft.sketchId}`, pts, true, surfDraft.input.normals ?? []), label: "", draft: true, path: true });
+  }
+  if (spaceCoreTools.get(winId) !== SURF_TOOL) return out;
+  const tr = surfTraces.get(winId);
+  if (!tr || !tr.points.length) return out;
+  tr.points.forEach((w, k) => out.push({ id: `surf:pt:${k}`, kind: "point", vertices: [w.p], label: k ? "" : "1", draft: true }));
+  const pts = tr.points.map((w) => w.p);
+  const hov = surfHover.get(winId);
+  if (pts.length >= 2) out.push({ id: "surf:path", kind: "polyline", vertices: surfDraped(`tr:${winId}`, `tr:${winId}`, pts, false, tr.normals), label: "", draft: true, path: true });
+  // the elastic sides: last point → pointer → first point, draped too
+  if (hov && !tr.busy) {
+    const el = pts.length >= 2 ? [pts[pts.length - 1], hov, pts[0]] : [pts[0], hov];
+    out.push({ id: "surf:elastic", kind: "polyline", vertices: surfDraped(`el:${winId}`, `tr:${winId}`, el, false, tr.normals), label: "", draft: true, path: true });
+  }
+  return out;
+}
+/** the elastic side's plane: the contour's (the clicks' side), through its last point */
+function surfHoverPlane(winId: string): { o: V3; n: V3 } | null {
+  if (spaceCoreTools.get(winId) !== SURF_TOOL) return null;
+  const tr = surfTraces.get(winId);
+  if (!tr || !tr.points.length || tr.busy) return null;
+  const pl = surfaceFrame(tr.points.map((w) => w.p), tr.normals);
+  return pl ? { o: tr.points[tr.points.length - 1].p, n: pl.n } : null;
+}
+
+// ── the areal made: handles, corrections (cut again), the Item tab ──────────
+// eslint-disable-next-line no-var
+var surfDraft: { winId: string; sketchId: string; input: SurfStored } | null = null;
+// eslint-disable-next-line no-var
+var surfActive: { sketchId: string; k: number } | null = null;
+// eslint-disable-next-line no-var
+var surfBusy = new Set<string>();
+function surfSelected(): Sketch | null {
+  if (spaceSketchSet.size !== 1 || !spaceSketchSel) return null;
+  const sk = sketchById(spaceSketchSel);
+  return sk && sk.shape === "surface" && sk.surface ? sk : null;
+}
+/** a correction: cut again from the model (a tileset's leaves forced again), ONE step of undo */
+async function surfCommit(win: Win, sk: Sketch, inp: SurfStored): Promise<boolean> {
+  if (!sketchById(sk.id)?.surface || surfBusy.has(sk.id)) return false;
+  surfBusy.add(sk.id);
+  let res: Awaited<ReturnType<typeof surfCut>>;
+  try { res = await surfCut(win.id, inp, (s) => { const b = document.querySelector<HTMLElement>(`[data-surf-busy="${CSS.escape(sk.id)}"]`); if (b) b.textContent = s; }, sk.id); }
+  catch (e) { res = { ok: false, why: String(e instanceof Error ? e.message : e) }; }
+  surfBusy.delete(sk.id);
+  if (!res.ok) { toast(res.why); logInfo(res.why); renderSpaceNPanels(); return false; }
+  if (!sketchById(sk.id)?.surface) return false;
+  store?.viewStep();
+  updateDrawn(sk.id, "surface", res.stored, { position: res.mesh.origin, rotation: [0, 0, 0], scale: [1, 1, 1] });
+  surfTrisCache.delete(`sk:${sk.id}`);
+  const warn = surfWarningWords(res.mesh.warnings);
+  logInfo(`${sk.name}: ${surfStatsWords(res.stored.info)} · ${surfLevelWords(res.stored.info)}${warn ? ` · ${warn}` : ""}`);
+  if (warn) toast(warn);
+  refreshSurfaces("scene");
+  renderSpaceNPanels();
+  return true;
+}
+const surfHandleId = (sid: string, kind: "p" | "m", k: number) => `s|${sid}|${kind}|${k}`;
+function parseSurfHandle(id: string): { sid: string; kind: "p" | "m"; k: number } | null {
+  const m = /^s\|(.+)\|(p|m)\|(\d+)$/.exec(id);
+  return m ? { sid: m[1], kind: m[2] as "p" | "m", k: Number(m[3]) } : null;
+}
+/** the handles of the areal selected: its contour's points and a «+» per side */
+function surfHandles(winId: string): SceneHandle[] {
+  const sk = surfSelected();
+  if (!sk || (spaceCoreTools.get(winId) ?? "select") !== "select" || surfBusy.has(sk.id)) return [];
+  const inp = surfDraft?.sketchId === sk.id ? surfDraft.input : sk.surface!;
+  const act = surfActive?.sketchId === sk.id ? surfActive.k : null;
+  const out: SceneHandle[] = [];
+  inp.contour.forEach((w, k) => out.push({ id: surfHandleId(sk.id, "p", k), p: w.p, kind: "face", active: act === k, title: t("surf.h.point", { n: String(k + 1) }) }));
+  if (!surfDraft) for (const sd of surfaceSides(inp.contour)) out.push({ id: surfHandleId(sk.id, "m", sd.after), p: sd.p, kind: "mid", title: t("surf.h.mid") });
+  return out;
+}
+/** a handle's gesture: a click (the point active; a «+» inserts its midpoint), a drag (the draped contour follows), the release (cut again) */
+function surfOnHandle(win: Win, e: SceneHandleEvent): boolean {
+  const h = parseSurfHandle(e.id);
+  if (!h) return false;
+  const sk = sketchById(h.sid);
+  if (!sk?.surface) return true;
+  const inp = sk.surface;
+  // the triangles around the areal, for the draped draft
+  if (e.phase === "start" && inp.contour[0]?.rm) surfTrianglesNow(`sk:${sk.id}`, win.id, `rm:${inp.contour[0].rm}`, inp.contour.map((w) => w.p));
+  if (e.phase === "click") {
+    if (h.kind === "m") {
+      const sd = surfaceSides(inp.contour).find((x) => x.after === h.k);
+      // the midpoint on the model: the surface under its place is read again at the cut (draped)
+      // …brought onto the model under it (the side's chord may run inside the relief)
+      const c = surfTrianglesNow(`sk:${sk.id}`, win.id, `rm:${inp.contour[h.k].rm}`, inp.contour.map((w) => w.p));
+      const fr = surfaceFrame(inp.contour.map((w) => w.p), inp.normals ?? []);
+      const on = c && fr && sd ? surfaceLift(sd.p, c.tris, fr) : null;
+      if (sd) { const ed = editSurface(inp, { op: "insert", after: h.k, at: { p: on ?? sd.p, rm: inp.contour[h.k].rm, doc: inp.contour[h.k].doc } });
+        if (ed.ok) { surfActive = { sketchId: sk.id, k: h.k + 1 }; void surfCommit(win, sk, ed.input); } }
+      return true;
+    }
+    surfActive = { sketchId: sk.id, k: h.k };
+    renderSpaceNPanels();
+    return true;
+  }
+  if (e.phase === "start") { surfDraft = { winId: win.id, sketchId: sk.id, input: inp }; surfActive = null; return true; }
+  if (e.phase === "cancel") { surfDraft = null; return true; }
+  if (!e.point) return true;
+  const to = wallPointAt(e.point, e.key);
+  const ed = h.kind === "p" ? editSurface(inp, { op: "set", k: h.k, to }) : editSurface(inp, { op: "insert", after: h.k, at: to });
+  if (e.phase === "move") { if (ed.ok) surfDraft = { winId: win.id, sketchId: sk.id, input: ed.input }; return true; }
+  surfDraft = null;
+  if (e.key === null) { toast(t("wall.h.offModel")); return true; }
+  if (ed.ok) { surfActive = { sketchId: sk.id, k: h.kind === "p" ? h.k : h.k + 1 }; void surfCommit(win, sk, ed.input); }
+  return true;
+}
+/** X on the active point of the selected areal: taken away (three stay) */
+function surfDeleteActive(win: Win): boolean {
+  const a = surfActive;
+  const sk = a ? sketchById(a.sketchId) : null;
+  if (!a || !sk?.surface) return false;
+  const ed = editSurface(sk.surface, { op: "remove", k: a.k });
+  if (!ed.ok) { toast(t("surf.err.too_few")); return true; }
+  surfActive = null;
+  void surfCommit(win, sk, ed.input);
+  return true;
+}
+function drawSurfBar(bar: HTMLElement, winId: string): void {
+  bar.textContent = "";
+  const tr = surfTrace(winId);
+  const ph = surfPhaseWords(winId);
+  bar.dataset.wallPhase = tr.busy ? "busy" : tr.points.length >= 3 ? "close" : "contour";
+  bar.dataset.wallPoints = String(tr.points.length);
+  const b = document.createElement("b");
+  b.dataset.wallCounter = "1";
+  b.textContent = ph.counter;
+  const hint = document.createElement("span");
+  hint.className = "scn-wallbar-hint";
+  hint.dataset.wallHint = "1";
+  hint.textContent = ph.hint;
+  bar.append(b, " ", hint);
+  // B · the document and the model, always (or: a semantic shape) — the suite's one line
+  bar.appendChild(pxBarWhere(tr.points, undefined, t("wall.whereNone")));
+  if (surfaceModels(tr.points).length > 1) {
+    const w = document.createElement("div");
+    w.className = "scn-wallbar-where warn";
+    w.dataset.surfTwo = "1";
+    w.textContent = `⚠ ${t("surf.twoRmsNow")}`;
+    bar.appendChild(w);
+  }
+}
+/** the «Tool» tab: how it works, the offset, the source, the contour's state */
+function renderSurfToolTab(box: HTMLElement, win: Win): void {
+  const note = (text: string, probe: string, cls = "xf-note") => {
+    const el = document.createElement("p");
+    el.className = cls;
+    el.dataset.np = probe;
+    el.textContent = text;
+    box.appendChild(el);
+  };
+  const prefs = surfPrefs();
+  const tr = surfTrace(win.id);
+  note(t("surf.how"), "surf-how");
+  const l = document.createElement("label");
+  l.className = "np-row";
+  l.dataset.surfOpt = "offset";
+  l.title = t("surf.offsetTitle");
+  const sp = document.createElement("span");
+  sp.textContent = t("surf.offset");
+  const inp = document.createElement("input");
+  inp.type = "number";
+  inp.min = "0";
+  inp.max = String(SURF_TOL.offsetMax * 1000);
+  inp.step = "0.5";
+  inp.className = "wall-num";
+  inp.value = String(prefs.offsetMm);
+  inp.dataset.surfOffset = "1";
+  inp.addEventListener("change", () => { const v = Number(inp.value); if (Number.isFinite(v)) setSurfPrefs({ offsetMm: Math.max(0, Math.min(SURF_TOL.offsetMax * 1000, v)) }); });
+  l.append(sp, inp);
+  box.appendChild(l);
+  renderPxSourceRows(box, tr.points, prefs.annotate, (v) => setSurfPrefs({ annotate: v }));
+  const ph = surfPhaseWords(win.id);
+  note(`${ph.counter} — ${ph.hint}`, "surf-phase");
+  const where = wallWhere(tr.points);
+  if (where.words) note(where.words, "surf-where");
+  if (surfaceModels(tr.points).length > 1) note(t("surf.twoRmsNow"), "surf-two", "xf-note warn");
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const act = (label: string, probe: string, run: () => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.act = probe;
+    b.textContent = label;
+    b.disabled = disabled;
+    b.addEventListener("click", run);
+    acts.appendChild(b);
+  };
+  act(t("surf.close"), "surf-close", () => { void surfFinish(win); }, tr.points.length < 3 || !!tr.busy);
+  act(t("wall.undoPoint"), "surf-undo", () => { surfUndoPoint(win); }, !tr.points.length || !!tr.busy);
+  act(t("surf.clearAll"), "surf-cancel", () => { surfCancel(win); }, !tr.points.length || !!tr.busy);
+  box.appendChild(acts);
+}
+/** the Item tab of an areal: what the cut measured, its source, annotation, offset, contour (editable: cut again) */
+function renderSurfInputs(sect: NpSect, sk: Sketch, win: Win): void {
+  if (!sk.surface) return;
+  const box = sect(t("surf.inputs"), "surf-inputs", t("surf.inputsHelp"));
+  box.dataset.surfSketch = sk.id;
+  const inp = sk.surface;
+  const commit = (x: SurfStored) => { void surfCommit(win, sk, x); };
+  const note = (text: string, probe: string, cls = "xf-note") => {
+    const el = document.createElement("p");
+    el.className = cls;
+    el.dataset.np = probe;
+    el.textContent = text;
+    box.appendChild(el);
+    return el;
+  };
+  const busy = note(surfBusy.has(sk.id) ? t("surf.busy.cut") : "", "surf-busy", "xf-note est");
+  busy.dataset.surfBusy = sk.id;
+  if (!surfBusy.has(sk.id)) busy.remove();
+  note(surfStatsWords(inp.info), "surf-stats");
+  note(surfLevelWords(inp.info), "surf-level");
+  note(`${surfScenarioWords(inp.info)} · ${t("surf.offset")} ${surfM(inp.info.offset * 1000, 1)}`, "surf-scenario");
+  // the source in words: for an areal ONE extractor (of the whole surface), not one per point
+  const doc = pxDocumentOf(inp.contour, inp.source);
+  note(inp.source?.mode === "semantic" ? t("px.itemSemantic")
+    : `${doc ? t("px.itemDoc", { doc: wallNodeName(doc) }) : t("px.itemDocNone")} · ${inp.annotate === false ? t("px.itemNoExtractors") : t("surf.itemOne")}`,
+    "px-item-source", inp.source?.mode === "semantic" ? "xf-note est" : "xf-note");
+  const line = (label: string, el: HTMLElement, title?: string) => {
+    const l = document.createElement("label");
+    l.className = "np-row";
+    if (title) l.title = title;
+    const s0 = document.createElement("span");
+    s0.textContent = label;
+    l.append(s0, el);
+    box.appendChild(l);
+  };
+  line(t("px.docLabel"), pxSourceSelect(inp, (src) => updateDrawn(sk.id, "surface", { ...inp, source: src })));
+  const ni = document.createElement("input");
+  ni.type = "text";
+  ni.className = "px-note-cell";
+  ni.value = inp.note ?? "";
+  ni.placeholder = "…";
+  ni.dataset.surfNote = sk.id;
+  ni.addEventListener("change", () => { store?.viewStep(); updateDrawn(sk.id, "surface", { ...inp, note: ni.value.trim() || undefined }); renderSpaceNPanels(); });
+  line(t("surf.noteLabel"), ni, t("surf.noteTitle"));
+  const oi = document.createElement("input");
+  oi.type = "number";
+  oi.min = "0";
+  oi.max = String(SURF_TOL.offsetMax * 1000);
+  oi.step = "0.5";
+  oi.className = "wall-num";
+  oi.value = String(Math.round((inp.offset ?? SURF_TOL.offset) * 10000) / 10);
+  oi.dataset.surfItemOffset = sk.id;
+  oi.addEventListener("change", () => { const v = Number(oi.value); if (Number.isFinite(v)) { const ed = editSurface(inp, { op: "offset", offset: v / 1000 }); if (ed.ok) commit(ed.input); } });
+  line(t("surf.offset"), oi, t("surf.offsetTitle"));
+  const rc = document.createElement("button");
+  rc.type = "button";
+  rc.className = "btn";
+  rc.dataset.act = "surf-recut";
+  rc.textContent = t("surf.recut");
+  rc.title = t("surf.recutTitle");
+  rc.disabled = surfBusy.has(sk.id);
+  rc.addEventListener("click", () => commit(inp));
+  box.appendChild(rc);
+  const table = document.createElement("table");
+  table.className = "wall-points surf-points";
+  table.dataset.surfPoints = sk.id;
+  table.appendChild(document.createElement("tr")).appendChild(Object.assign(document.createElement("th"), { colSpan: 5, textContent: t("surf.pointsHead") }));
+  const head = document.createElement("tr");
+  for (const hd of ["", "X", "Y", "Z", ""]) head.appendChild(Object.assign(document.createElement("th"), { textContent: hd }));
+  table.appendChild(head);
+  const act = surfActive?.sketchId === sk.id ? surfActive.k : null;
+  inp.contour.forEach((w, k) => {
+    const tr = document.createElement("tr");
+    tr.dataset.surfRow = String(k);
+    if (act === k) tr.classList.add("act");
+    tr.appendChild(Object.assign(document.createElement("td"), { textContent: String(k + 1),
+      title: w.rm ? (w.doc ? t("wall.onRmDoc", { rm: wallNodeName(w.rm), doc: wallNodeName(w.doc) }) : t("wall.onRm", { rm: wallNodeName(w.rm) })) : t("wall.whereNone") }));
+    const b3 = blenderXYZ(w.p);
+    [0, 1, 2].forEach((c) => {
+      const td = document.createElement("td");
+      const i = document.createElement("input");
+      i.type = "number";
+      i.step = "0.01";
+      i.className = "wall-num";
+      i.value = String(Math.round(b3[c] * 1000) / 1000);
+      i.dataset.surfIn = `${k}:${c}`;
+      i.addEventListener("change", () => {
+        const x = Number(i.value);
+        if (!Number.isFinite(x)) return;
+        const nb = [...b3] as V3;
+        nb[c] = x;
+        const ed = editSurface(inp, { op: "set", k, to: { ...w, p: [nb[0], nb[2], -nb[1]] } });
+        if (ed.ok) commit(ed.input);
+      });
+      td.appendChild(i);
+      tr.appendChild(td);
+    });
+    const xtd = document.createElement("td");
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "link";
+    x.textContent = "×";
+    x.title = t("surf.removePoint");
+    x.disabled = inp.contour.length <= 3;
+    x.dataset.surfRemove = String(k);
+    x.addEventListener("click", () => { const ed = editSurface(inp, { op: "remove", k }); if (ed.ok) commit(ed.input); });
+    xtd.appendChild(x);
+    tr.appendChild(xtd);
+    table.appendChild(tr);
+  });
+  box.appendChild(table);
+}
+
 /** MICRO-PX2 C · the bar's line of the document, the same for every tool of the
  *  suite: the proxy's document (or «semantic shape»), the models and documents
  *  the clicks fell on, the hybrid case warned */
@@ -37260,24 +37863,30 @@ function wallNoteRow(w: WallPoint, set: (text: string) => void, probe: string, c
  *  `<document>.<NN>`; the proxy's DOCUMENT (the anchor: chosen, or the clicks'
  *  first); a semantic shape: nothing of a document. */
 function proxyParadataItem(sk: Sketch): { tool: string; purpose: string; annotate: boolean; semantic: boolean; clicks: number; skipped: number;
-    points: Array<Record<string, unknown>>; documentId: string | null; documentName: string | null } | null {
+    points: Array<Record<string, unknown>>; documentId: string | null; documentName: string | null;
+    reading?: Record<string, unknown> | null; note?: string } | null {
   const st = store;
   const wall = sk.shape === "wall" ? sk.wall : null;
   const elev = sk.shape === "elevation" ? sk.elevation : null;
   // MICRO-PX2 · a box: its seven points, EM Tools' point_type («Alignment Start»…) and purpose
   const box7 = sk.shape === "box" ? sk.box : null;
-  const d: ProxyDrawing | null = wall ?? elev ?? box7 ?? null;
+  // MICRO-PX3 · an areal: ONE extractor of the whole surface (EM Tools' Surface Areale), its place the contour
+  const surf = sk.shape === "surface" ? sk.surface : null;
+  const d: ProxyDrawing | null = wall ?? elev ?? box7 ?? surf ?? null;
   if (!d || !st) return null;
   const typed: Array<{ w: WallPoint; type: string }> = wall
     ? [...wall.plan.map((w) => ({ w, type: wall.mode === "axis" ? "axis" : "plan" })), ...wall.top.map((w) => ({ w, type: "head" }))]
     : box7 ? box7.points.flatMap((w, k) => (w ? [{ w, type: BOX_POINT_TYPES[BOX_ROLES[k]] }] : []))
+    : surf ? surf.contour.map((w) => ({ w, type: "contour" }))
     : [...elev!.front.map((w) => ({ w, type: "face" })), ...(elev!.depthPoint ? [{ w: elev!.depthPoint, type: "depth" }] : [])];
-  const tool = wall ? "Wall from plan" : box7 ? "Seven-point box" : "From elevation";
-  const purpose = wall ? "wall_from_plan" : box7 ? "proxy_box_creator" : "from_elevation";
+  const tool = wall ? "Wall from plan" : box7 ? "Seven-point box" : surf ? "Annotate surface" : "From elevation";
+  // EM Tools' purpose of an areal's extractor (surface_areale data.extractor_name)
+  const purpose = wall ? "wall_from_plan" : box7 ? "proxy_box_creator" : surf ? "3D drawing on surface" : "from_elevation";
   const semantic = d.source?.mode === "semantic";
   const annotate = d.annotate !== false && !semantic;
   const out = { tool, purpose, annotate, semantic, clicks: typed.length, skipped: 0, points: [] as Array<Record<string, unknown>>,
-    documentId: null as string | null, documentName: null as string | null };
+    documentId: null as string | null, documentName: null as string | null,
+    reading: null as Record<string, unknown> | null, note: undefined as string | undefined };
   if (semantic) return out;
   const next = new Map<string, number>();
   const ordinal = (docId: string): string | null => {
@@ -37287,7 +37896,7 @@ function proxyParadataItem(sk: Sketch): { tool: string; purpose: string; annotat
     next.set(docId, k + 1);
     return `${dn}.${ordinalTag(k)}`;
   };
-  if (annotate) for (const { w, type } of typed) {
+  if (annotate && !surf) for (const { w, type } of typed) {
     if (!w.doc || !st.node(w.doc)) { out.skipped++; continue; }
     const b = blenderXYZ(w.p);
     const name = ordinal(w.doc);
@@ -37299,6 +37908,19 @@ function proxyParadataItem(sk: Sketch): { tool: string; purpose: string; annotat
     out.documentId = doc;
     // its extractor's name, when the library will write one (no point reads it)
     if (!out.points.some((p) => p.document_id === doc)) out.documentName = ordinal(doc);
+  }
+  if (surf) {
+    const rm = surf.contour[0]?.rm ?? null;
+    const i = surf.info;
+    if (surf.note) out.note = surf.note;
+    // the reading of the whole: its place the contour on the model (what EM Tools' empkg.areale_from_graph reads)
+    if (annotate && doc) out.reading = { point_type: "surface",
+      attributes: { source_rm: rm ? wallNodeName(rm) : null, area_m2: Math.round(i.area * 1e6) / 1e6, perimeter_m: Math.round(i.perimeter * 1e4) / 1e4,
+        triangles: i.triangles, offset_m: i.offset, coverage: Math.round(i.coverage * 1e4) / 1e4, cut: "rm_triangles_clipped",
+        emtools_scenario: i.scenario, rm_source: i.from,
+        ...(i.tiles ? { rm_tiles_level: `${i.tiles.level}/${i.tiles.max}`, rm_tiles_leaves: `${i.tiles.loaded}/${i.tiles.leaves}` } : {}) },
+      geometry: { geometry_kind: "surface", vertices: surf.contour.map((w) => w.p.map((c) => Math.round(c * 1e5) / 1e5)) },
+      ...(rm && st.node(rm) ? { on_id: rm } : {}) };
   }
   return out;
 }
@@ -37343,6 +37965,7 @@ function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: N
   else if (entry.id === WALL_TOOL) renderWallToolTab(box, win);
   else if (entry.id === ELEV_TOOL) renderElevToolTab(box, win);
   else if (entry.id === BOX_TOOL) renderBoxToolTab(box, win);
+  else if (entry.id === SURF_TOOL) renderSurfToolTab(box, win);
   else if (entry.id === "cursor") {
     note(t("tt.cursorHow"));
     act(t("s3.nCentre"), "cursor-centre", () => { h.centreScene(); renderSpaceNPanels(); });
@@ -37359,7 +37982,7 @@ function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: N
     }
   }
   // (an extension's tool has «Stop tracing (Esc)» already: the same gesture)
-  if (entry?.id === "cursor" || entry?.id === WALL_TOOL || entry?.id === ELEV_TOOL || entry?.id === BOX_TOOL) act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
+  if (entry?.id === "cursor" || entry?.id === WALL_TOOL || entry?.id === ELEV_TOOL || entry?.id === BOX_TOOL || entry?.id === SURF_TOOL) act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
   if (acts.childElementCount) box.appendChild(acts);
 }
 
@@ -38168,7 +38791,12 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
       body: JSON.stringify({ doc, items: [{ unit_id: unitId, url: rel, ...(wallItem && (wallItem.points.length || wallItem.documentId) ? {
         points: wallItem.points, purpose: wallItem.purpose,
         ...(wallItem.documentId ? { document_id: wallItem.documentId, ...(wallItem.documentName ? { document_extractor_name: wallItem.documentName } : {}),
-          document_extractor_description: `The proxy drawn in EMStudio with «${wallItem.tool}» on this document, as a whole` } : {}),
+          document_extractor_description: sk.shape === "surface" && sk.surface
+            // MICRO-PX3 · the areal's annotation, else EM Tools' words for it («3D drawing on surface»)
+            ? (wallItem.note || `3D drawing on surface — an areal of ${Math.round(sk.surface.info.area * 1000) / 1000} m² cut from ${wallNodeName(sk.surface.contour[0]?.rm)}, drawn in EMStudio with «${wallItem.tool}»`)
+            : `The proxy drawn in EMStudio with «${wallItem.tool}» on this document, as a whole`,
+          ...(wallItem.reading ? { document_reading: wallItem.reading } : {}) } : {}),
+        ...(sk.shape === "surface" ? { property_description: "Surface of the unit (proxy): an areal cut out of the Representation Model inside a contour drawn on it." } : {}),
         combiner_description: sk.shape === "box"
           // MICRO-PX2 · EM Tools' words for its proxy box, the tool said
           ? `Combiner for proxy box ${JSON.stringify(unitName)} drawn in EMStudio with «${wallItem.tool}» — aggregates the ${wallItem.points.length} measurement-point extractors${
@@ -38192,13 +38820,19 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
     const nx = pd?.extractor_ids?.length ?? 0;
     const geo = nodes.find((n) => n.node_type === "property" && String(((n.data ?? {}) as Record<string, unknown>).property_type ?? "") === "geometry");
     const docName = wallItem.documentId ? String(st.node(wallItem.documentId)?.name ?? wallItem.documentId) : "";
-    if (geo) geo.description = wallItem.semantic
+    const sf = sk.shape === "surface" ? sk.surface : null;
+    if (geo && sf && !wallItem.semantic) geo.description = `Drawn in EMStudio with «${wallItem.tool}»${docName ? ` on ${docName}` : ""}: an areal of ${Math.round(sf.info.area * 1000) / 1000} m² `
+      + `cut out of ${wallNodeName(sf.contour[0]?.rm)} — the model's ${sf.info.triangles} triangles inside a contour of ${sf.contour.length} clicked points, the border draped, `
+      + `${(Math.round(sf.info.offset * 10000) / 10)} mm off the surface, ${surfLevelGraph(sf.info)}. `
+      + (wallItem.reading ? "One extractor of the whole surface (as EM Tools' Surface Areale), its place the contour." : docName ? `Not annotated: the proxy as a whole is extracted from ${docName}.` : "");
+    else if (geo) geo.description = wallItem.semantic
       ? `A semantic shape drawn in EMStudio with «${wallItem.tool}», without a document: no extractor; to refine from the sources (proxy status: to refine).${estSay}`
       : wallItem.annotate && wallItem.points.length && nx
       ? `Drawn in EMStudio with «${wallItem.tool}» on ${docName || "its documents"} from ${wallItem.clicks} clicked points; ${wallItem.points.length} of them are extractors of their documents (${pd?.combiner_name ?? "combiner"}).${estSay}`
       : docName ? `Drawn in EMStudio with «${wallItem.tool}» on ${docName}; the points were not annotated as extractors: the proxy as a whole is extracted from ${docName}.${estSay}`
       : `Drawn in EMStudio with «${wallItem.tool}»; the points were not annotated as extractors.${estSay}`;
     if ((wallItem.points.length || wallItem.documentId) && !pd) wallSaid = t("wall.bridgeOld");
+    else if (sk.shape === "surface" && wallItem.reading && !wallItem.semantic) wallSaid = t("surf.assocMade", { doc: docName, rm: wallNodeName(sk.surface?.contour[0]?.rm) });
     else if (wallItem.semantic) wallSaid = t("px.assocSemantic");
     else if (wallItem.annotate && wallItem.points.length) wallSaid = t("wall.extractorsMade", { n: String(wallItem.points.length), c: pd?.combiner_name ?? "" })
       + (wallItem.skipped ? ` · ${t("wall.extractorsSkipped", { n: String(wallItem.skipped) })}` : "")
@@ -41666,6 +42300,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (spaceCoreTools.get(win.id) === ELEV_TOOL) return elevClick(win, hit, dbl);
       // MICRO-PX2 · «Scatola a sette punti»: the point the bar names
       if (spaceCoreTools.get(win.id) === BOX_TOOL) return boxClick(win, hit, dbl);
+      // MICRO-PX3 · «Annota superficie»: a point of the contour; a double click closes it
+      if (spaceCoreTools.get(win.id) === SURF_TOOL) return surfClick(win, hit, dbl);
       if (dbl || spaceCoreTools.get(win.id) !== "cursor") return false;
       if (hit) { handle.setCursor(hit.point); drawNPanel(); }
       return true;
@@ -41779,13 +42415,15 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
-    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id), ...elevMarks(win.id), ...boxMarks(win.id)],   // EXPERIMENTAL: the site's footprint
+    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id), ...elevMarks(win.id), ...boxMarks(win.id), ...surfMarks(win.id)],   // EXPERIMENTAL: the site's footprint
     // MICRO-PX1b · «Muro da pianta»: the see-through solid, the elastic side, the handles of a wall
     preview: () => wallPreview(win.id) ?? elevPreview(win.id) ?? boxPreview(win.id),
     hoverAnchor: () => wallHoverAnchor(win.id),
-    onToolHover: (p) => { wallHover.set(win.id, p); },
-    handles: () => [...wallHandles(win.id), ...elevHandles(win.id), ...boxHandles(win.id)],
-    onHandle: (e) => { if (!elevOnHandle(win, e) && !boxOnHandle(win, e)) wallOnHandle(win, e); },
+    // MICRO-PX3 · «Annota superficie»: the elastic side on the contour's plane
+    hoverPlane: () => surfHoverPlane(win.id),
+    onToolHover: (p) => { wallHover.set(win.id, p); if (spaceCoreTools.get(win.id) === SURF_TOOL) surfHover.set(win.id, p); },
+    handles: () => [...wallHandles(win.id), ...elevHandles(win.id), ...boxHandles(win.id), ...surfHandles(win.id)],
+    onHandle: (e) => { if (!elevOnHandle(win, e) && !boxOnHandle(win, e) && !surfOnHandle(win, e)) wallOnHandle(win, e); },
     // MICRO-PX1c · «Agganciati agli spigoli»: a ring of rays around a click of «Dal prospetto»
     toolRing: () => (spaceCoreTools.get(win.id) === ELEV_TOOL && pxPrefs().edgeSnap ? 10 : 0),
     onMark: (id) => {
@@ -41826,9 +42464,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (a === "cancel" && boxCancel(win)) return true;
         if (a === "delete" && boxUndoPoint(win)) return true;
       }
+      if (spaceCoreTools.get(win.id) === SURF_TOOL) {
+        if (a === "confirm") { void surfFinish(win); return true; }
+        if (a === "cancel" && surfCancel(win)) return true;
+        if (a === "delete" && surfUndoPoint(win)) return true;
+      }
       // MICRO-PX1b · a point of the selected wall active: X takes it away, Esc lets it go
       if (a === "delete" && wallDeleteActive()) return true;
       if (a === "delete" && elevDeleteActive()) return true;
+      if (a === "delete" && surfDeleteActive(win)) return true;
+      if (a === "cancel" && surfActive) { surfActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel" && elevActive) { elevActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel" && boxActive) { boxActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel" && wallActive) { wallActive = null; renderSpaceNPanels(); return true; }
@@ -65201,6 +65846,10 @@ registerSpaceTool({ id: "fromElevation", primitive: "polyline", origin: "core", 
 registerSpaceTool({ id: "box7", primitive: "point", origin: "core", snap: "surface", glyph: "⬚",
   clicks: { min: 7, max: 7 }, editors: ["space"],
   label: () => t("box.toolName"), hint: () => t("box.toolHint") });
+// MICRO-PX3 · «Annota superficie»: a contour on a model, the areal cut out of it
+registerSpaceTool({ id: "surface", primitive: "surface", origin: "core", snap: "surface", glyph: "⬠",
+  clicks: { min: 3, max: null }, editors: ["space"],
+  label: () => t("surf.toolName"), hint: () => t("surf.toolHint") });
 
 /** a package's tool by its register id */
 const packageToolInfo = new Map<string, PackageTool>();

@@ -193,6 +193,8 @@ eq(P.posesOn(graph, "stat:volto", "d1"), ["us1", null], "the poses of a set on a
 
 // ── the wiring in main.ts ───────────────────────────────────────────────────
 const main = fs.readFileSync(path.join(SRC, "main.ts"), "utf8");
+const read = (f) => fs.readFileSync(path.join(SRC, f), "utf8");
+const scene = read("scene3d.ts");
 ok(/for \(const tool of VIEWER_3D_TOOLS\)\s*\n?\s*registerSpaceTool\(/.test(main), "the six tools of the Viewer registered first, from VIEWER_3D_TOOLS");
 ok(/spaceTools\(\)/.test(main) && !/for \(const tool of VIEWER_3D_TOOLS\) \{\s*const on = s\.trace\.tool === tool/.test(main), "the bar draws the register, not the constant");
 ok(/const need = CLICKS\[tool\]/.test(main) === false, "the clicks come from the register");
@@ -205,8 +207,8 @@ ok(/registered: registeredSpaceCoreTools\(\)\.map/.test(main), "the Space's tool
 ok(/if \(spaceCoreTools\.get\(win\.id\) === WALL_TOOL\) return wallClick\(win, hit, dbl\);/.test(main), "a click with the wall armed is the wall's (a double click closes the phase)");
 ok(/if \(a === "confirm"\) \{ wallClose\(win\); return true; \}/.test(main) && /a === "cancel" && wallCancel\(win\)/.test(main)
    && /a === "delete" && wallUndoPoint\(win\)/.test(main), "Enter closes the phase, Esc cancels it, Backspace takes the last point back");
-ok(/\.\.\.wallMarks\(win\.id\), \.\.\.elevMarks\(win\.id\), \.\.\.boxMarks\(win\.id\)\]/.test(main), "the trace drawn as the Space's marks (the wall's, the elevation's, the box's)");
-ok(/points: wallItem\.points, purpose: wallItem\.purpose/.test(main) && /const purpose = wall \? "wall_from_plan" : box7 \? "proxy_box_creator" : "from_elevation";/.test(main),
+ok(/\.\.\.wallMarks\(win\.id\), \.\.\.elevMarks\(win\.id\), \.\.\.boxMarks\(win\.id\), \.\.\.surfMarks\(win\.id\)\]/.test(main), "the trace drawn as the Space's marks (the wall's, the elevation's, the box's, the areal's)");
+ok(/points: wallItem\.points, purpose: wallItem\.purpose/.test(main) && /const purpose = wall \? "wall_from_plan" : box7 \? "proxy_box_creator" : surf \? "3D drawing on surface" : "from_elevation";/.test(main),
    "the association sends the points (the extractors) with purpose wall_from_plan / from_elevation / proxy_box_creator (EM Tools')");
 // MICRO-PX1c · «Dal prospetto», the proxy's document, the annotation at the click
 ok(/registerSpaceTool\(\{ id: "fromElevation", primitive: "polyline", origin: "core", snap: "surface"[\s\S]{0,120}editors: \["space"\]/.test(main),
@@ -229,9 +231,24 @@ ok(/a === "cancel" && boxCancel\(win\)/.test(main) && /a === "delete" && boxUndo
    "the box: Enter makes it, Esc clears, Backspace takes the last point back");
 ok(/type: BOX_POINT_TYPES\[BOX_ROLES\[k\]\]/.test(main), "the box's extractors: EM Tools' point_type («Alignment Start»…)");
 ok(/renderPxSourceRows\(box, tr\.points\.filter/.test(main), "the two modes of the proxy's document and the switch in the box's Tool tab (the shared rows)");
-ok((main.match(/bar\.appendChild\(pxBarWhere\(/g) ?? []).length === 3, "ONE line of the document in the bar for the three tools (pxBarWhere)");
+ok((main.match(/bar\.appendChild\(pxBarWhere\(/g) ?? []).length === 4, "ONE line of the document in the bar for the four tools (pxBarWhere)");
 ok(/pxAskNote\(hit\.screen, pxNoteLabel\(w, boxRoleName\(k\)\)/.test(main), "the annotation at the click, named by the point's role");
-ok(/\.\.\.boxHandles\(win\.id\)\]/.test(main) && /!boxOnHandle\(win, e\)/.test(main), "the box's seven points are handles");
+ok(/\.\.\.boxHandles\(win\.id\), \.\.\.surfHandles\(win\.id\)\]/.test(main) && /!boxOnHandle\(win, e\)/.test(main), "the box's seven points are handles");
+// MICRO-PX3 · «Annota superficie»
+ok(/registerSpaceTool\(\{ id: "surface", primitive: "surface", origin: "core", snap: "surface"[\s\S]{0,80}clicks: \{ min: 3, max: null \}, editors: \["space"\]/.test(main),
+   "«Annota superficie» registered: core, snap surface, three clicks at least, the Space's only");
+ok(/\/\/ MICRO-PX2[^\n]*\nregisterSpaceTool\(\{ id: "box7"[\s\S]{0,300}\n\/\/ MICRO-PX3[^\n]*\nregisterSpaceTool\(\{ id: "surface"/.test(main), "…after «Scatola a sette punti»");
+ok(/if \(spaceCoreTools\.get\(win\.id\) === SURF_TOOL\) return surfClick\(win, hit, dbl\);/.test(main), "a click with the areal armed is a point of its contour (a double click closes it)");
+ok(/a === "confirm"\) \{ void surfFinish\(win\); return true; \}/.test(main) && /a === "cancel" && surfCancel\(win\)/.test(main) && /a === "delete" && surfUndoPoint\(win\)/.test(main),
+   "the areal: Enter closes and cuts, Esc clears, Backspace takes the last point back");
+ok(/hoverPlane: \(\) => surfHoverPlane\(win\.id\)/.test(main) && /hoverPlane\?: \(\) => \{ o: V3; n: V3 \} \| null;/.test(scene), "the elastic side on the contour's plane (not the horizontal one)");
+ok(/drapePath\(points, closed, c\.tris, surfaceFrame\(points, normals\)\)/.test(main), "the contour drawn DRAPED on the model while clicking");
+ok(/const models = surfaceModels\(points\);[\s\S]{0,200}models\.length > 1\) return \{ why: t\("surf\.twoRms"/.test(main), "a contour on two models refused (refine in Blender)");
+ok(/const first = h\.focusTiles\?\.\(rmKey, box\) \?\? null;/.test(main) && /focus\(box: any \| null\): void;/.test(read("tiles3d.ts")), "on a tileset the leaves under the contour forced and waited for before the cut");
+ok(/renderPxSourceRows\(box, tr\.points, prefs\.annotate/.test(main), "the two modes of the proxy's document and the switch in the areal's Tool tab (the shared rows)");
+ok(/out\.reading = \{ point_type: "surface",[\s\S]{0,700}geometry: \{ geometry_kind: "surface", vertices: surf\.contour/.test(main), "ONE extractor of the whole surface, its place the contour (EM Tools' chain, read by empkg.areale_from_graph)");
+ok(/document_reading: wallItem\.reading/.test(main) && /kw\["document_reading"\] = item\["document_reading"\]/.test(read("../../tools/em_bridge.py")), "the reading travels to s3Dgraphy through /geometry-proxies");
+ok(/export const DRAWN_SHAPES = \["wall", "elevation", "box", "surface"\] as const;/.test(read("shapes3d.ts")), "the areal is a drawn shape of the suite (one road to add, update, undo)");
 ok(/if \(sk\.shape === "box"\) renderBoxInputs\(sect, sk, win\);/.test(main), "the Item tab lists the seven points");
 ok(/addDrawnSketch\("box", input, r\.mesh\.origin/.test(main), "the box is a sketch that keeps its seven points (the shared road of the drawn shapes)");
 const bridge = fs.readFileSync(path.join(SRC, "../../tools/em_bridge.py"), "utf8");

@@ -23,6 +23,37 @@ import catalogue from "./rules/shape_catalogue.json";
 import { buildWall, readWallInput, type WallInput } from "./wall-from-plan";
 import { readElevationInput, type ElevationInput } from "./from-elevation";
 import { readBoxInput, type BoxInput } from "./box-seven-points";
+import { readSurfaceInput, unpackMesh, type SurfaceInput, type PackedMesh } from "./surface-annotation";
+
+/** MICRO-PX3 · an areal of «Annota superficie»: its contour and offset (the
+ *  inputs, corrected and cut again while the RM is drawn), and the CUT itself —
+ *  the RM's triangles under the contour — kept with it: after a reload the RM
+ *  may not be loaded (a tileset's leaves), the areal is shown all the same */
+export interface SurfaceStored extends SurfaceInput {
+  mesh: PackedMesh;
+  /** the areal's annotation: the description of its ONE extractor */
+  note?: string;
+  /** what the cut measured, and on what (the paradata and the Item tab say it) */
+  info: { area: number; perimeter: number; triangles: number; coverage: number; offset: number;
+    scenario: "A" | "B" | "C"; planarity: number; normalVariation: number;
+    from: "mesh" | "tiles"; sourceTriangles: number; loops: number; turned: number;
+    /** a tileset: the leaves under the contour forced — how many, loaded, their level and the deepest,
+     *  how many were already loaded before, and whether the wait ran out */
+    tiles?: { leaves: number; loaded: number; level: number; max: number; initially: number; timeout: boolean } };
+}
+function readSurfaceStored(v: unknown): SurfaceStored | null {
+  const inp = readSurfaceInput(v);
+  const o = v as Record<string, unknown> | null;
+  if (!inp || !o || !unpackMesh(o.mesh)) return null;
+  const i = (o.info ?? {}) as Record<string, unknown>;
+  const num = (x: unknown) => (Number.isFinite(Number(x)) ? Number(x) : 0);
+  const sc = i.scenario === "B" || i.scenario === "C" ? i.scenario : "A";
+  return { ...inp, mesh: o.mesh as PackedMesh, ...(typeof o.note === "string" && o.note ? { note: o.note } : {}), info: { area: num(i.area), perimeter: num(i.perimeter), triangles: num(i.triangles),
+    coverage: num(i.coverage), offset: num(i.offset), scenario: sc, planarity: num(i.planarity), normalVariation: num(i.normalVariation),
+    from: i.from === "tiles" ? "tiles" : "mesh", sourceTriangles: num(i.sourceTriangles), loops: num(i.loops) || 1, turned: num(i.turned),
+    ...(i.tiles && typeof i.tiles === "object" ? { tiles: (({ leaves, loaded, level, max, initially, timeout }) => ({ leaves: num(leaves), loaded: num(loaded),
+      level: num(level), max: num(max), initially: num(initially), timeout: timeout === true }))(i.tiles as Record<string, unknown>) } : {}) } };
+}
 
 /** MICRO-PX1c · how a proxy drawn in the Space says where it comes from — the
  *  same for every tool of the suite (wall, elevation, the seven-point box of
@@ -177,6 +208,9 @@ export interface Sketch {
   /** MICRO-PX2 · shape "box": the seven measurement points of «Scatola a sette
    *  punti» (EM Tools' Proxy Box), in role order, and the pivot */
   box?: BoxInput & ProxyDrawing;
+  /** MICRO-PX3 · shape "surface": an areal of «Annota superficie» (its contour,
+   *  its offset, the cut out of the RM) */
+  surface?: SurfaceStored & ProxyDrawing;
   name: string;
   position: V3;
   /** Euler XYZ, radians */
@@ -237,7 +271,8 @@ export function serializeSketches(): Sketch[] {
     rotation: [...s.rotation] as V3, scale: [...s.scale] as V3, ...(s.file ? { file: { ...s.file } } : {}),
     ...(s.wall ? { wall: wallWithEstimate(s.wall) } : {}),
     ...(s.elevation ? { elevation: JSON.parse(JSON.stringify(s.elevation)) } : {}),
-    ...(s.box ? { box: JSON.parse(JSON.stringify(s.box)) } : {}) }));
+    ...(s.box ? { box: JSON.parse(JSON.stringify(s.box)) } : {}),
+    ...(s.surface ? { surface: JSON.parse(JSON.stringify(s.surface)) } : {}) }));
 }
 
 /** MICRO-PX1b · a wall as the layout keeps it: its inputs, and — written, not
@@ -265,6 +300,8 @@ export function loadSketches(list: unknown): void {
     const wall = o.shape === "wall" ? readWallInput(o.wall) : null;
     const elev = o.shape === "elevation" ? readElevationInput(o.elevation) : null;
     const box = o.shape === "box" ? readBoxInput(o.box) : null;
+    const surface = o.shape === "surface" ? readSurfaceStored(o.surface) : null;
+    if (o.shape === "surface" && !surface) continue;
     if (o.shape === "elevation" && !elev) continue;
     if (o.shape === "box" && !box) continue;
     if (o.shape !== "file" && !DRAWN_SHAPES.includes(o.shape as DrawnShape) && !shapeById(o.shape)) continue;
@@ -274,6 +311,7 @@ export function loadSketches(list: unknown): void {
       ...(wall ? { wall: { ...wall, ...drawingOf(o.wall) } } : {}),
       ...(elev ? { elevation: { ...elev, ...drawingOf(o.elevation) } } : {}),
       ...(box ? { box: { ...box, ...drawingOf(o.box) } } : {}),
+      ...(surface ? { surface: { ...surface, ...drawingOf(o.surface) } } : {}),
       position: tri(o.position, [0, 0, 0]), rotation: tri(o.rotation, [0, 0, 0]), scale: tri(o.scale, [1, 1, 1]),
       ...(f ? { file: { url: String(f.url), ...(typeof f.checksum === "string" ? { checksum: f.checksum } : {}), ...(typeof f.from === "string" ? { from: f.from } : {}) } } : {}) });
     const m = /(\d+)$/.exec(o.id);
@@ -306,9 +344,9 @@ export function updateWall(id: string, wall: WallInput & ProxyDrawing, pose?: Pa
 
 /** MICRO-PX2 · the shapes DRAWN by the tools of the suite, and the field of
  *  the sketch that keeps their inputs: one road to add and to update them */
-export const DRAWN_SHAPES = ["wall", "elevation", "box"] as const;
+export const DRAWN_SHAPES = ["wall", "elevation", "box", "surface"] as const;
 export type DrawnShape = typeof DRAWN_SHAPES[number];
-interface DrawnInputs { wall: WallInput & ProxyDrawing; elevation: ElevationInput & ProxyDrawing; box: BoxInput & ProxyDrawing }
+interface DrawnInputs { wall: WallInput & ProxyDrawing; elevation: ElevationInput & ProxyDrawing; box: BoxInput & ProxyDrawing; surface: SurfaceStored & ProxyDrawing }
 /** a drawn shape: its inputs, its pose at the mesh's origin (upright, scale 1) */
 export function addDrawnSketch<K extends DrawnShape>(shape: K, input: DrawnInputs[K], at: V3, name: string): Sketch {
   seq += 1;
@@ -329,8 +367,9 @@ export function updateDrawn<K extends DrawnShape>(id: string, shape: K, input: D
   changed();
 }
 /** the inputs a drawn sketch keeps (null: not a drawn shape) */
-export function drawnOf(s: Sketch): (WallInput | ElevationInput | BoxInput) & ProxyDrawing | null {
-  return s.shape === "wall" ? s.wall ?? null : s.shape === "elevation" ? s.elevation ?? null : s.shape === "box" ? s.box ?? null : null;
+export function drawnOf(s: Sketch): (WallInput | ElevationInput | BoxInput | SurfaceStored) & ProxyDrawing | null {
+  return s.shape === "wall" ? s.wall ?? null : s.shape === "elevation" ? s.elevation ?? null : s.shape === "box" ? s.box ?? null
+    : s.shape === "surface" ? s.surface ?? null : null;
 }
 
 /** MICRO-PX1c · a solid of «Dal prospetto»: its inputs, its pose at the

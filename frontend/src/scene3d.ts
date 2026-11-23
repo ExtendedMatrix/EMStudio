@@ -64,6 +64,7 @@ import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch 
 import { buildWall } from "./wall-from-plan";
 import { buildBox } from "./box-seven-points";
 import { buildElevation } from "./from-elevation";
+import { unpackMesh } from "./surface-annotation";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
 import { estimateMb, lighterThatFits, mbSay, roomFor, type Weight } from "./memory-guard";
 import { cutEdges } from "./threed-edges";
@@ -339,6 +340,14 @@ export interface SpaceSceneHandle {
   setLayers(g: GeoDriver | null): void;
   /** MICRO-GEOREF-GRAFO p.3 · the box of the models drawn (three's axes), null while none has come */
   contentBox(): [V3, V3] | null;
+  /** MICRO-PX3 · «Annota superficie»: the triangles of a model (`rm:<id>`) that
+   *  meet a WORLD box (scene frame), as a soup (9 numbers each) — its meshes,
+   *  or, for a tileset, the LEAVES loaded under its focus (else what is drawn);
+   *  null when the scene does not draw it */
+  surfaceTriangles?(key: string, box: [V3, V3]): { positions: Float32Array; owners: Uint32Array; triangles: number; from: "mesh" | "tiles"; meshes: number } | null;
+  /** MICRO-PX3 · a tileset (`rm:<id>`): its leaves under the world box forced
+   *  (null: the focus taken away) and where they stand; null: not a tileset */
+  focusTiles?(key: string, box: [V3, V3] | null): { leaves: number; loaded: number; pending: number; levelLoaded: number; levelMax: number } | null;
 }
 
 /** MICRO-GEOGLOBO · what the scene hands the globe (`globe3d.ts`) once its
@@ -395,6 +404,8 @@ export interface SceneMark {
   ghost?: boolean;
   /** MICRO-PX1b · an ESTIMATED point (a wall's hidden side): not a reading of a document */
   est?: boolean;
+  /** MICRO-PX3 · a PATH (a contour draped on a model, hundreds of vertices): the line only, no dot per vertex */
+  path?: boolean;
 }
 
 /** MICRO-VIEWER-SPAZIO-EMTREE p.4 · what the renderer drew in its last frame */
@@ -557,6 +568,9 @@ export interface SpaceSceneOptions {
    *  the HORIZONTAL plane through `hoverAnchor()` under it (no surface is
    *  ray-cast at every move: fluid on a heavy model) — the elastic side */
   hoverAnchor?: () => V3 | null;
+  /** MICRO-PX3 · …or the point of THIS plane under the pointer (a contour on a
+   *  wall's face is not horizontal): read first, `hoverAnchor` when null */
+  hoverPlane?: () => { o: V3; n: V3 } | null;
   onToolHover?: (p: V3 | null) => void;
   /** MICRO-PX1c · the radius in pixels of the ring of rays cast around a tool's
    *  click (0 / absent: none) — only at the click, never at a move */
@@ -2145,8 +2159,45 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // MICRO-PX2 · …and a box of «Scatola a sette punti»
           const wallSig = s.shape === "wall" && s.wall ? JSON.stringify(s.wall)
             : s.shape === "elevation" && s.elevation ? JSON.stringify(s.elevation)
-            : s.shape === "box" && s.box ? JSON.stringify(s.box) : "";
+            : s.shape === "box" && s.box ? JSON.stringify(s.box)
+            // MICRO-PX3 · an areal: its cut (the mesh kept), again when it is cut again
+            : s.shape === "surface" && s.surface ? `${s.surface.mesh.p.length}|${s.surface.mesh.p.slice(0, 64)}|${s.surface.mesh.p.slice(-64)}|${s.surface.mesh.i.length}` : "";
           if (m && wallSig && m.userData.wallSig !== wallSig) { sketchGroup.remove(m); sketchMeshes.delete(s.id); m = undefined; }
+          if (!m && s.shape === "surface" && s.surface) {
+            const um = unpackMesh(s.surface.mesh);
+            if (!um) continue;
+            const g = new THREE.BufferGeometry();
+            g.setAttribute("position", new THREE.Float32BufferAttribute(um.positions, 3));
+            g.setIndex(new THREE.Uint32BufferAttribute(um.indices, 1));
+            // smooth: the RM's own relief, shaded as the RM is
+            g.computeVertexNormals();
+            m = new THREE.Mesh(g, sketchMaterial());
+            m.userData.wallSig = wallSig;
+            m.userData.wallGeom = g;
+            m.userData.surface = true;
+            // the border only (the edges of one triangle): a draped mesh's inner edges are the RM's
+            const use = new Map<string, number>();
+            const ix = um.indices;
+            for (let i = 0; i < ix.length; i += 3) for (let k = 0; k < 3; k++) {
+              const a = ix[i + k], b = ix[i + (k + 1) % 3];
+              const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+              use.set(key, (use.get(key) ?? 0) + 1);
+            }
+            const seg: number[] = [];
+            for (const [key, c] of use) {
+              if (c !== 1) continue;
+              const [a, b] = key.split("_").map(Number);
+              seg.push(um.positions[a * 3], um.positions[a * 3 + 1], um.positions[a * 3 + 2], um.positions[b * 3], um.positions[b * 3 + 1], um.positions[b * 3 + 2]);
+            }
+            const eg = new THREE.BufferGeometry();
+            eg.setAttribute("position", new THREE.Float32BufferAttribute(seg, 3));
+            const edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x7a3d00 }));
+            edges.userData.edges = true;
+            m.add(edges);
+            m.userData.sketchId = s.id;
+            sketchGroup.add(m);
+            sketchMeshes.set(s.id, m);
+          }
           if (!m && (s.shape === "wall" || s.shape === "elevation" || s.shape === "box")) {
             const built = s.shape === "wall" ? (s.wall ? buildWall(s.wall) : null)
               : s.shape === "box" ? (s.box ? buildBox(s.box) : null) : (s.elevation ? buildElevation(s.elevation) : null);
@@ -2190,6 +2241,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           }
           m.material.dispose();
           m.material = sketchMaterial();
+          // MICRO-PX3 · an areal lies on the RM: pulled towards the eye in the depth buffer, both faces
+          if (m.userData.surface) Object.assign(m.material, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide });
           for (const c of m.children) if (c.userData.edges) c.material.color.set(edgeCol);
         }
         if (sketchSel && !want.has(sketchSel)) sketchSel = null;
@@ -3307,20 +3360,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (!(v.z < 1)) return null;
           return { x: ((v.x + 1) / 2) * W, y: ((1 - v.y) / 2) * H };
         };
-        const sig = ms.map((m) => `${m.id}:${m.vertices.length}:${m.selected ? 1 : 0}:${m.draft ? 1 : 0}:${m.ghost ? 1 : 0}:${m.est ? 1 : 0}:${m.label}`).join("|");
+        const sig = ms.map((m) => `${m.id}:${m.vertices.length}:${m.selected ? 1 : 0}:${m.draft ? 1 : 0}:${m.ghost ? 1 : 0}:${m.est ? 1 : 0}:${m.path ? 1 : 0}:${m.label}`).join("|");
         if (sig !== marksSig) {
           marksSig = sig;
           marksEl.textContent = "";
           markLabels.textContent = "";
           for (const m of ms) {
             const g = document.createElementNS(MARKNS, "g");
-            g.setAttribute("class", `scn-mark k-${m.kind}${m.selected ? " sel" : ""}${m.draft ? " draft" : ""}${m.ghost ? " ghost" : ""}${m.est ? " est" : ""}`);
+            g.setAttribute("class", `scn-mark k-${m.kind}${m.selected ? " sel" : ""}${m.draft ? " draft" : ""}${m.ghost ? " ghost" : ""}${m.est ? " est" : ""}${m.path ? " path" : ""}`);
             g.dataset.mark = m.id;
             if (m.vertices.length > 1) {
               const pl = document.createElementNS(MARKNS, m.kind === "plane" ? "polygon" : "polyline");
               g.appendChild(pl);
             }
-            for (let i = 0; i < m.vertices.length; i++) {
+            for (let i = 0; i < (m.path ? 0 : m.vertices.length); i++) {
               const c = document.createElementNS(MARKNS, "circle");
               c.setAttribute("r", m.selected ? "5" : "4");
               g.appendChild(c);
@@ -4128,8 +4181,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         // MICRO-PX1b · a tool drawing: the elastic side follows the pointer on a horizontal plane
         if (!drag && opts.onToolHover) {
-          const a = opts.hoverAnchor?.() ?? null;
-          if (a) {
+          const hp = opts.hoverPlane?.() ?? null;
+          const a = hp ? null : opts.hoverAnchor?.() ?? null;
+          if (hp) {
+            ray.setFromCamera(ndcOf(e.clientX, e.clientY), camera);
+            const p = new THREE.Vector3();
+            const pln = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(...hp.n).normalize(), new THREE.Vector3(...hp.o));
+            opts.onToolHover(ray.ray.intersectPlane(pln, p) ? [p.x, p.y, p.z] : null);
+          } else if (a) {
             ray.setFromCamera(ndcOf(e.clientX, e.clientY), camera);
             const p = new THREE.Vector3();
             opts.onToolHover(ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -a[1]), p) ? [p.x, p.y, p.z] : null);
@@ -4618,6 +4677,78 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const ge = l.layer.status().ge;
           return { mode: l.layer.mode(), errorScale: !ge || ge.auto ? "auto" as const : ge.scale, errorChoice: l.layer.errorChoice() };
         },
+        surfaceTriangles: (k: string, box: [V3, V3]) => {
+          const wb = new THREE.Box3(new THREE.Vector3(...box[0]), new THREE.Vector3(...box[1]));
+          const id = k.startsWith("rm:") ? k.slice(3) : k;
+          const live = liveLayers().find((l) => l.itemId === id && l.layer.object.visible !== false);
+          const shown = (q: any): boolean => { for (let o = q; o; o = o.parent) if (o.visible === false) return false; return true; };
+          const meshes: any[] = [];
+          let from: "mesh" | "tiles" = "mesh";
+          if (live) {
+            from = "tiles";
+            // the leaves under the focus when there is one (the full resolution), else what is drawn
+            const scenes = live.layer.focusMeshes();
+            if (scenes.length) {
+              for (const sc of scenes) {
+                const was = sc.parent;
+                if (!was) sc.parent = live.layer.object;
+                sc.updateMatrixWorld(true);
+                sc.traverse((o: any) => { if (o.isMesh) meshes.push(o); });
+                if (!was) sc.parent = null;
+              }
+            } else live.layer.object.traverse((o: any) => { if (o.isMesh && shown(o)) meshes.push(o); });
+          } else {
+            for (const o of pickables) if (o.userData.rmId === id && !o.userData.unitId && shown(o)) meshes.push(o);
+          }
+          if (!meshes.length) return null;
+          const chunks: Float32Array[] = [];
+          const ownerOf: number[] = [];
+          let total = 0;
+          const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+          const lb = new THREE.Box3();
+          const tb = new THREE.Box3();
+          for (const o of meshes) {
+            const g = o.geometry;
+            const pos = g?.attributes?.position;
+            if (!pos) continue;
+            if (!g.boundingBox) g.computeBoundingBox();
+            o.updateMatrixWorld?.(false);
+            if (g.boundingBox && !g.boundingBox.clone().applyMatrix4(o.matrixWorld).intersectsBox(wb)) continue;
+            // the box in the mesh's own frame: the triangles are tested there, only the kept ones turned
+            lb.copy(wb).applyMatrix4(o.matrixWorld.clone().invert());
+            const idx = g.index;
+            const nt = idx ? idx.count / 3 : pos.count / 3;
+            const out = new Float32Array(nt * 9);
+            let m = 0;
+            for (let t = 0; t < nt; t++) {
+              const ia = idx ? idx.getX(t * 3) : t * 3, ib = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, ic = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+              va.fromBufferAttribute(pos, ia); vb.fromBufferAttribute(pos, ib); vc.fromBufferAttribute(pos, ic);
+              tb.makeEmpty(); tb.expandByPoint(va); tb.expandByPoint(vb); tb.expandByPoint(vc);
+              if (!tb.intersectsBox(lb)) continue;
+              va.applyMatrix4(o.matrixWorld); vb.applyMatrix4(o.matrixWorld); vc.applyMatrix4(o.matrixWorld);
+              out[m++] = va.x; out[m++] = va.y; out[m++] = va.z;
+              out[m++] = vb.x; out[m++] = vb.y; out[m++] = vb.z;
+              out[m++] = vc.x; out[m++] = vc.y; out[m++] = vc.z;
+            }
+            if (m) { chunks.push(out.subarray(0, m)); ownerOf.push(meshes.indexOf(o)); total += m; }
+          }
+          const positions = new Float32Array(total);
+          const owners = new Uint32Array(total / 9);
+          let o2 = 0;
+          chunks.forEach((c, i) => { positions.set(c, o2); owners.fill(ownerOf[i], o2 / 9, (o2 + c.length) / 9); o2 += c.length; });
+          return { positions, owners, triangles: total / 9, from, meshes: meshes.length };
+        },
+        focusTiles: (k: string, box: [V3, V3] | null) => {
+          const id = k.startsWith("rm:") ? k.slice(3) : k;
+          const live = liveLayers().find((l) => l.itemId === id);
+          if (!live) return null;
+          const key = box ? box.flat().map((c) => c.toFixed(3)).join(",") : "";
+          if ((live as any).focusKey !== key) {
+            (live as any).focusKey = key;
+            live.layer.focus(box ? new THREE.Box3(new THREE.Vector3(...box[0]), new THREE.Vector3(...box[1])) : null);
+          }
+          return box ? live.layer.focusState() : null;
+        },
         leavesOf: (k: string) => {
           // every layer of the item, shown or not: the leaves are the tileset's JSON
           const l = [...layers.values()].find((x) => `rm:${x.itemId}` === k);
@@ -4716,6 +4847,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     localCentre: (k) => api.localCentre?.(k) ?? null,
     boxOf: (k) => api.boxOf?.(k) ?? null,
     leavesOf: (k) => api.leavesOf?.(k) ?? Promise.resolve(null),
+    surfaceTriangles: (k, b) => api.surfaceTriangles?.(k, b) ?? null,
+    focusTiles: (k, b) => api.focusTiles?.(k, b) ?? null,
     altLine: (g) => api.altLine?.(g) ?? null,
     tilesControls: (k) => api.tilesControls?.(k) ?? null,
     tilesPopover: (o) => api.tilesPopover?.(o) ?? false,

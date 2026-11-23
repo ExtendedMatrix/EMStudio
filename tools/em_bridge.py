@@ -10468,6 +10468,13 @@ def make_handler(api):
                             kw = {"document_id": str(doc_id),
                                   "document_extractor_name": item.get("document_extractor_name") or None,
                                   "document_extractor_description": item.get("document_extractor_description") or None}
+                            # MICRO-PX3 · an areal («Annota superficie»): the extractor of the whole
+                            # surface with its point_type, attributes and place (the contour)
+                            if isinstance(item.get("document_reading"), dict):
+                                if "document_reading" not in inspect.signature(api.proxy_from_points).parameters:
+                                    raise RuntimeError("this s3dgraphy's `proxy_from_points` has no document_reading (MICRO-PX3): "
+                                                       "point the bridge at a newer s3Dgraphy")
+                                kw["document_reading"] = item["document_reading"]
                         pp = api.proxy_from_points(graph, uid, list(points or []),
                                                    purpose=str(item.get("purpose") or "proxy_box_creator"),
                                                    property_description=item.get("property_description") or None,
