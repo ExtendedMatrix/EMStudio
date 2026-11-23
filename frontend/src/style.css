@@ -13310,3 +13310,21 @@ body.em-no-area-headers .tile-area > .tile-bar { display: none; }
 .pxs-src i { font-size: 10px; color: var(--muted, #666); }
 .pxs-unlinked { font-size: 10px; color: #b26a00; }
 .insp-obl-hint { opacity: .8; }
+
+/* MICRO-PX1b · «Muro da pianta»: the handles of a wall, the estimated corners */
+.scn-handles { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.scn-handle { position: absolute; width: 11px; height: 11px; margin: -6px 0 0 -6px; border-radius: 50%; box-sizing: border-box;
+  background: #fff; border: 2px solid #d9822b; pointer-events: auto; cursor: grab; touch-action: none; }
+.scn-handle.k-top { background: #d9822b; border-color: #5a2d00; }
+.scn-handle.k-inner { background: #d9822b; border-color: #5a2d00; border-radius: 2px; transform: rotate(45deg); }
+.scn-handle.k-mid { width: 13px; height: 13px; margin: -7px 0 0 -7px; border: 1px dashed #7a3d00; background: rgba(255, 255, 255, 0.85);
+  color: #7a3d00; font: bold 11px/11px system-ui, sans-serif; text-align: center; cursor: copy; opacity: 0.8; }
+.scn-handle.k-est { background: transparent; border: 2px dashed #1f7fd1; transform: rotate(45deg); border-radius: 2px; pointer-events: none; }
+.scn-handle.act { box-shadow: 0 0 0 3px #f15800; }
+.scn-handle-moving, .scn-handle-moving canvas { cursor: grabbing; }
+.scn-mark.est circle { fill: transparent; stroke: #1f7fd1; stroke-width: 2; stroke-dasharray: 3 2; }
+.wall-points tr.act td { background: #fff3e0; }
+.wall-points tr.est td { color: #1f7fd1; font-style: italic; }
+.wall-points th:nth-child(5) { width: 4.6em; }
+.wall-points select.wall-doc { width: 100%; max-width: 4.6em; font-size: 11px; padding: 0; }
+.xf-note.est { color: #1f7fd1; }

@@ -340,14 +340,16 @@ import { cardModelsOf, chooseGraph, geoObjectOf, modelStateWords, renderGeorefCa
   type CardModel, type GeorefCardDeps, type GeorefGraph } from "./georef-card";
 import { hasTrouble, loadTrouble, viewportSize, type LoadTrouble, type ViewportSize } from "./compact-viewport";
 import { LEGEND_ROWS, boxesMeet, legendForm, legendRowsShown, loadLegendPref, nearestCorner, saveLegendPref, type LegendForm, type LegendPref } from "./space-legend";
-import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle, type ToolHit } from "./scene3d";
+import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle, type ToolHit,
+         type SceneHandle, type SceneHandleEvent, type ScenePreview as SceneSolid } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
 import { CLICKS, readingOf as reading3dOf, VIEWER_3D_TOOLS, type ReadTexts, type Viewer3dTool } from "./viewer-annot";
 import { canClose, clickCount, clickVerdict, inEditor, registerSpaceTool, snapped, spaceCoreTools as registeredSpaceCoreTools,
          spaceTool, spaceTools, unregisterOrigin, type SpaceToolSpec } from "./space-tools";
-import { bakePose, blenderXYZ, buildWall, meshVolume, poseIsBuilt, WALL_TOL, wallDocuments,
-         type WallError, type WallInput, type WallMode, type WallPoint, type WallWarning } from "./wall-from-plan";
+import { bakePose, blenderXYZ, buildWall, editWall, meshVolume, poseIsBuilt, WALL_TOL, wallDocuments, wallSides, wallSig,
+         type HeadMode, type WallEdit, type WallError, type WallInput, type WallMesh, type WallMode, type WallPivot, type WallPoint,
+         type WallResult, type WallWarning } from "./wall-from-plan";
 import { farFromExpected, ghostsOf, missingOf, nextPoint, packageToolsOf, pointLabel, poseStateOf, posesOn,
          type PackageTool, type SetPoint } from "./space-pose";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
@@ -8413,10 +8415,13 @@ function wireStore(s: DocumentStore): void {
   // MICRO-Q p.1 · …and the Graph's hand positions (a group dragged there with
   // its members is one step too)
   s.setViewHistory({
-    take: () => (s === store ? JSON.stringify({ matrix: matrixViewLayout, graph: [...graphOverrides] }) : null),
+    // MICRO-PX1b · …and the walls of «Muro da pianta» (their inputs and pose): a
+    // correction of a wall is a step of the Space's undo like any other
+    take: () => (s === store ? JSON.stringify({ matrix: matrixViewLayout, graph: [...graphOverrides], walls: wallsTaken() }) : null),
     restore: (v) => {
       if (s !== store) return;
-      const o = JSON.parse(v) as { matrix?: import("./types").EmLayout | null; graph?: [string, { x: number; y: number }][] };
+      const o = JSON.parse(v) as { matrix?: import("./types").EmLayout | null; graph?: [string, { x: number; y: number }][]; walls?: WallTaken[] };
+      if (o.walls) wallsRestore(o.walls);
       if (o.matrix) {
         matrixViewLayout = o.matrix;
         matrixViewSig = matrixViewSigNow();
@@ -34878,7 +34883,7 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
       onCommit: (xf) => commitAll(`sketch:${sk.id}`, before, xf),
       onReset: () => commitAll(`sketch:${sk.id}`, before, IDENTITY) });
     // MICRO-PX1 · a wall of «Muro da pianta»: its inputs, editable, the wall built again
-    if (sk.shape === "wall") renderWallInputs(sect, sk);
+    if (sk.shape === "wall") renderWallInputs(sect, sk, win);
   } else if (key && (key.startsWith("rm:") || key.startsWith("proxy:"))) {
     // MICRO-SPAZIO-3D-3 p.10 · the active model's version: the mode, the version, its use, level and MB
     // (MICRO-PROVA-DEV47 p.3b: now the section «Livello di dettaglio», below)
@@ -35072,6 +35077,9 @@ function setSpaceTool(winId: string, id: string): boolean {
     ls?.arm(null);
     // MICRO-PX1 · leaving «Muro da pianta» drops its trace (a wall not finished)
     if (id !== WALL_TOOL) wallTraces.delete(winId);
+    // MICRO-PX1b · any choice of the toolbar ends «Aggiungi punti alti» (it is set again after, when it is its)
+    wallAddTop.delete(winId);
+    wallHover.delete(winId);
     spaceCoreTools.set(winId, id);
   } else {
     ls?.arm(id);
@@ -35102,16 +35110,18 @@ interface WallTrace { phase: "plan" | "top"; plan: WallPoint[]; top: WallPoint[]
 /** the trace of each Space window */
 // eslint-disable-next-line no-var
 var wallTraces = new Map<string, WallTrace>();
-interface WallPrefs { mode: WallMode; height: number; thickness: number; annotate: boolean }
+interface WallPrefs { mode: WallMode; height: number; thickness: number; annotate: boolean; headMode: HeadMode; pivot: WallPivot }
 const WALL_PREFS_KEY = "emstudio.space.wall";
 function wallPrefs(): WallPrefs {
-  const d: WallPrefs = { mode: "outline", height: WALL_TOL.height, thickness: WALL_TOL.thickness, annotate: true };
+  const d: WallPrefs = { mode: "outline", height: WALL_TOL.height, thickness: WALL_TOL.thickness, annotate: true, headMode: "surface", pivot: "bottom" };
   try {
     const v = JSON.parse(localStorage.getItem(WALL_PREFS_KEY) ?? "{}") as Partial<WallPrefs>;
     return { mode: v.mode === "axis" ? "axis" : "outline",
       height: Number(v.height) > 0 ? Number(v.height) : d.height,
       thickness: Number(v.thickness) > 0 ? Number(v.thickness) : d.thickness,
-      annotate: v.annotate !== false };
+      annotate: v.annotate !== false,
+      headMode: v.headMode === "face" ? "face" : "surface",
+      pivot: v.pivot === "center" || v.pivot === "top" ? v.pivot : "bottom" };
   } catch { return d; }
 }
 function setWallPrefs(p: Partial<WallPrefs>): void {
@@ -35150,7 +35160,7 @@ function wallWhere(points: WallPoint[]): { words: string; hybrid: boolean; none:
   return { words, hybrid: docs.length > 1, none };
 }
 function wallInputOf(tr: WallTrace, prefs = wallPrefs()): WallInput {
-  return { mode: prefs.mode, plan: tr.plan, top: tr.top, height: prefs.height, thickness: prefs.thickness };
+  return { mode: prefs.mode, plan: tr.plan, top: tr.top, height: prefs.height, thickness: prefs.thickness, headMode: prefs.headMode, pivot: prefs.pivot };
 }
 function wallErrorWords(e: WallError): string {
   if (e.code === "self_intersect") return t("wall.err.self_intersect", { a: String((e.edges?.[0] ?? 0) + 1), b: String((e.edges?.[1] ?? 0) + 1) });
@@ -35186,6 +35196,8 @@ function wallPhaseWords(winId: string): { counter: string; hint: string } {
 
 /** a click of the tool: a corner (plan) or a point of the head (top); a double click closes the phase */
 function wallClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
+  // MICRO-PX1b · «Aggiungi punti alti» on a wall already made: each click a point of its head
+  if (wallAddTop.has(win.id)) return wallAddTopClick(win, hit, dbl);
   if (dbl) { wallClose(win); return true; }
   if (!hit) { toast(t("wall.noSurface")); return true; }
   const tr = wallTrace(win.id);
@@ -35201,6 +35213,7 @@ function wallClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
 }
 /** Enter / a double click: the plan closes into the head's phase, the head closes into the wall */
 function wallClose(win: Win): void {
+  if (wallAddTop.has(win.id)) { wallEndAddTop(win); return; }
   const tr = wallTrace(win.id);
   const prefs = wallPrefs();
   if (tr.phase === "plan") {
@@ -35219,6 +35232,7 @@ function wallClose(win: Win): void {
 /** Esc: the phase under way is cancelled (the plan's points, or the head's and back to the plan);
  *  false: nothing to cancel (the toolbar goes back to «Select») */
 function wallCancel(win: Win): boolean {
+  if (wallAddTop.has(win.id)) { wallEndAddTop(win); return true; }
   const tr = wallTraces.get(win.id);
   if (!tr) return false;
   if (tr.phase === "top") { tr.top = []; tr.phase = "plan"; }
@@ -35230,6 +35244,17 @@ function wallCancel(win: Win): boolean {
 }
 /** Backspace / X: the last point of the phase taken back */
 function wallUndoPoint(win: Win): boolean {
+  // MICRO-PX1b · adding points to a wall: the last point of its head taken back (one step)
+  const adding = wallAddTop.get(win.id);
+  if (adding) {
+    const sk = sketchById(adding);
+    if (!sk?.wall?.top.length) return false;
+    const seen = wallSeen(sk).input;
+    const ed = editWall(seen, { op: "remove", which: "top", k: seen.top.length - 1 });
+    if (ed.ok) wallCommit(sk, ed.input);
+    refreshWallBars();
+    return true;
+  }
   const tr = wallTraces.get(win.id);
   const list = tr ? (tr.phase === "plan" ? tr.plan : tr.top) : null;
   if (!list?.length) return false;
@@ -35247,6 +35272,7 @@ function wallFinish(win: Win): void {
   if (!r.ok) { toast(wallErrorWords(r.error)); return; }
   const sk = addWallSketch({ ...input, annotate: prefs.annotate }, r.mesh.origin, t("wall.sketchName"));
   wallTraces.set(win.id, { phase: "plan", plan: [], top: [] });
+  wallHover.delete(win.id);
   setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
   const warn = wallWarningWords(r.mesh.warnings);
   const where = wallWhere([...input.plan, ...input.top]);
@@ -35274,7 +35300,241 @@ function wallMarks(winId: string): SceneMark[] {
   }
   tr.top.forEach((w, k) => out.push({ id: `wall:top:${k}`, kind: "point", vertices: [w.p], label: "", draft: true }));
   if (tr.top.length > 1) out.push({ id: "wall:top", kind: "polyline", vertices: tr.top.map((w) => w.p), label: "", draft: true });
+  // MICRO-PX1b · the elastic side: from the last corner to the pointer (and back to the first)
+  const hv = wallHover.get(winId);
+  if (tr.phase === "plan" && hv && pts.length) {
+    const outline = wallPrefs().mode === "outline" && pts.length >= 2;
+    out.push({ id: "wall:rubber", kind: "polyline", vertices: outline ? [pts[pts.length - 1], hv, pts[0]] : [pts[pts.length - 1], hv], label: "", draft: true });
+  }
+  // …and, in the head's phase, the corners whose height is ESTIMATED (the hidden side)
+  if (tr.phase === "top") {
+    const r = wallBuiltMemo(`draw:${winId}`, wallInputOf(tr));
+    if (r?.ok) r.mesh.headKind.forEach((k, i) => { if (k === "estimated") out.push({ id: `wall:est:${i}`, kind: "point", vertices: [r.mesh.head[i]], label: "", draft: true, est: true }); });
+  }
   return out;
+}
+
+// ── MICRO-PX1b (E.D., 23 Nov 2026) · «MURO DA PIANTA»: LIVE PREVIEW, CORRECTION, HEAD ADDED LATER ──
+//
+// A. While drawing: the outline clicked, the elastic side to the pointer (on
+//    the horizontal plane of the last corner: no surface ray-cast at every move),
+//    the provisional solid at the current height, see-through; in the head's
+//    phase the solid follows each point. Built again only when an input changes
+//    (`wallSig`, `wallBuiltMemo`).
+// B. A wall selected (also closed long ago, also after a reload — its inputs are
+//    in layout.sketches): its handles. A corner or a head point dragged (on the
+//    surface of a MODEL under the pointer), a side's «+» inserts a corner, X
+//    takes the active point away. Each correction is a step of the Space's undo
+//    (`store.viewStep()`, the walls in the view's history).
+// C. «Aggiungi punti alti» on a wall: its head mode — "surface" (the head seen:
+//    a point inside is a point of its surface) or "face" (the back hidden: the
+//    points on the visible face's line, the hidden side estimated).
+
+type WallStored = WallInput & { annotate?: boolean };
+interface WallTaken { id: string; wall: WallStored; position: V3; rotation: V3; scale: V3 }
+/** the pointer's point on the horizontal plane of the last corner, per Space window */
+// eslint-disable-next-line no-var
+var wallHover = new Map<string, V3 | null>();
+/** «Aggiungi punti alti»: the wall (sketch id) getting head points, per Space window */
+// eslint-disable-next-line no-var
+var wallAddTop = new Map<string, string>();
+/** a handle being dragged: the wall's inputs as they would be */
+// eslint-disable-next-line no-var
+var wallDraft: { winId: string; sketchId: string; input: WallStored } | null = null;
+/** the handle clicked last (X / Delete takes its point away) */
+// eslint-disable-next-line no-var
+var wallActive: { sketchId: string; id: string } | null = null;
+/** the last build of each input, by its signature: the preview, the marks and
+ *  the handles read it at every frame without building again */
+// eslint-disable-next-line no-var
+var wallMemo = new Map<string, { sig: string; r: WallResult }>();
+function wallBuiltMemo(key: string, inp: WallInput): WallResult | null {
+  const sig = wallSig(inp);
+  const m = wallMemo.get(key);
+  if (m && m.sig === sig) return m.r;
+  const r = buildWall(inp);
+  wallMemo.set(key, { sig, r });
+  return r;
+}
+function wallsTaken(): WallTaken[] {
+  return listSketches().filter((x) => x.shape === "wall" && x.wall).map((x) => ({ id: x.id, wall: JSON.parse(JSON.stringify(x.wall)) as WallStored,
+    position: [...x.position] as V3, rotation: [...x.rotation] as V3, scale: [...x.scale] as V3 }));
+}
+/** an undo / redo: the walls still here take back their inputs and pose (a
+ *  wall made or removed since is not brought back nor removed by it) */
+function wallsRestore(list: WallTaken[]): void {
+  let any = false;
+  for (const w of list) {
+    const sk = sketchById(w.id);
+    if (!sk || sk.shape !== "wall") continue;
+    if (JSON.stringify({ a: sk.wall, p: sk.position, r: sk.rotation, s: sk.scale }) === JSON.stringify({ a: w.wall, p: w.position, r: w.rotation, s: w.scale })) continue;
+    updateWall(w.id, w.wall, { position: w.position, rotation: w.rotation, scale: w.scale });
+    any = true;
+  }
+  if (any) { wallDraft = null; refreshSurfaces("scene"); renderSpaceNPanels(); }
+}
+/** a wall's inputs where it is SEEN: a pose moved after the build (G / R / S) carried into them */
+function wallSeen(sk: Sketch): { input: WallStored; built: WallResult; moved: boolean } {
+  const wall = sk.wall!;
+  // read at every frame by the handles: built again only when the inputs change
+  const first = wallBuiltMemo(`seen:${sk.id}`, wall)!;
+  const moved = first.ok && !poseIsBuilt(first.mesh.origin, sk);
+  if (!moved || !first.ok) return { input: wall, built: first, moved: false };
+  const input: WallStored = { ...bakePose(wall, first.mesh.origin, sk), annotate: wall.annotate };
+  return { input, built: buildWall(input), moved: true };
+}
+/** a correction written: ONE step of the undo, the wall made again from its inputs */
+function wallCommit(sk: Sketch, inp: WallStored): boolean {
+  if (!sketchById(sk.id)?.wall) return false;
+  const r = buildWall(inp);
+  if (!r.ok) { toast(wallErrorWords(r.error)); renderSpaceNPanels(); return false; }
+  store?.viewStep();
+  updateWall(sk.id, inp, { position: r.mesh.origin, rotation: [0, 0, 0], scale: [1, 1, 1] });
+  const warn = wallWarningWords(r.mesh.warnings);
+  if (warn) toast(warn);
+  refreshSurfaces("scene");
+  renderSpaceNPanels();
+  return true;
+}
+/** the wall selected alone in the Space, when it is one */
+function wallSelected(): Sketch | null {
+  if (spaceSketchSet.size !== 1 || !spaceSketchSel) return null;
+  const sk = sketchById(spaceSketchSel);
+  return sk && sk.shape === "wall" && sk.wall ? sk : null;
+}
+/** A · the see-through solid of a window: the wall being drawn (the pointer as
+ *  its next corner), or a wall whose handle is being dragged */
+function wallPreview(winId: string): SceneSolid | null {
+  let inp: WallInput | null = null;
+  if (wallDraft && wallDraft.winId === winId) inp = wallDraft.input;
+  else if (spaceCoreTools.get(winId) === WALL_TOOL && !wallAddTop.has(winId)) {
+    const tr = wallTraces.get(winId);
+    if (!tr) return null;
+    const prefs = wallPrefs();
+    if (tr.phase === "plan") {
+      const hv = wallHover.get(winId);
+      const plan = hv && tr.plan.length ? [...tr.plan, { p: hv, rm: null, doc: null }] : tr.plan;
+      if (plan.length < wallPlanMin(prefs.mode)) return null;
+      inp = { ...wallInputOf(tr, prefs), plan, top: [] };
+    } else inp = wallInputOf(tr, prefs);
+  }
+  if (!inp) return null;
+  const r = wallBuiltMemo(`pv:${winId}`, inp);
+  if (!r?.ok) return null;
+  return { sig: wallSig(inp), positions: r.mesh.positions, indices: r.mesh.indices, origin: r.mesh.origin };
+}
+/** A · the elastic side's plane: the last corner of the plan being clicked */
+function wallHoverAnchor(winId: string): V3 | null {
+  if (spaceCoreTools.get(winId) !== WALL_TOOL || wallAddTop.has(winId)) return null;
+  const tr = wallTraces.get(winId);
+  if (!tr || tr.phase !== "plan" || !tr.plan.length) return null;
+  return tr.plan[tr.plan.length - 1].p;
+}
+const wallHandleId = (sid: string, kind: string, k: number) => `w|${sid}|${kind}|${k}`;
+function parseWallHandle(id: string): { sid: string; kind: SceneHandle["kind"]; k: number } | null {
+  const m = /^w\|(.+)\|(plan|top|inner|mid|est)\|(\d+)$/.exec(id);
+  return m ? { sid: m[1], kind: m[2] as SceneHandle["kind"], k: Number(m[3]) } : null;
+}
+/** B · the handles of the wall selected (the Select tool, or adding points to it) */
+function wallHandles(winId: string): SceneHandle[] {
+  const sk = wallSelected();
+  if (!sk) return [];
+  const tool = spaceCoreTools.get(winId) ?? "select";
+  const adding = wallAddTop.get(winId) === sk.id;
+  if (tool !== "select" && !adding) return [];
+  const inp = wallDraft?.sketchId === sk.id ? wallDraft.input : wallSeen(sk).input;
+  const r = wallBuiltMemo(`h:${sk.id}`, inp);
+  const out: SceneHandle[] = [];
+  const act = wallActive?.sketchId === sk.id ? wallActive.id : null;
+  // the estimated corners first: drawn under the points that can be dragged (often right above a corner of the plan)
+  if (r?.ok) r.mesh.headKind.forEach((kd, i) => { if (kd === "estimated") out.push({ id: wallHandleId(sk.id, "est", i), p: r.mesh.head[i], kind: "est", title: t("wall.h.est") }); });
+  inp.plan.forEach((w, k) => { const id = wallHandleId(sk.id, "plan", k); out.push({ id, p: w.p, kind: "plan", active: id === act,
+    title: t(inp.mode === "axis" ? "wall.h.axis" : "wall.h.plan", { n: String(k + 1) }) }); });
+  if (!adding) for (const sd of wallSides(inp)) out.push({ id: wallHandleId(sk.id, "mid", sd.after), p: sd.p, kind: "mid", title: t("wall.h.mid") });
+  const roles = r?.ok ? r.mesh.topRole : [];
+  inp.top.forEach((w, k) => { const id = wallHandleId(sk.id, "top", k); out.push({ id, p: w.p, kind: roles[k] === "inner" ? "inner" : "top", active: id === act,
+    title: t(roles[k] === "inner" ? "wall.h.inner" : "wall.h.top", { n: String(k + 1) }) }); });
+  return out;
+}
+/** the point a handle lands on: the model under it and its document */
+function wallPointAt(point: V3, key: string | null): WallPoint {
+  return wallPointOf({ point, normal: null, key: key ?? "" });
+}
+/** B · a handle's gesture: a click (the active point; a side's «+» inserts its
+ *  midpoint), a drag (the preview follows), the release (one step) */
+function wallOnHandle(win: Win, e: SceneHandleEvent): void {
+  const h = parseWallHandle(e.id);
+  const sk = h ? sketchById(h.sid) : undefined;
+  if (!h || !sk?.wall) return;
+  const seen = () => wallSeen(sk).input;
+  const editOf = (p: WallPoint): WallEdit | null =>
+    h.kind === "plan" ? { op: "move", which: "plan", k: h.k, to: p }
+    : h.kind === "top" || h.kind === "inner" ? { op: "move", which: "top", k: h.k, to: p }
+    : h.kind === "mid" ? { op: "insert", after: h.k, point: p } : null;
+  if (e.phase === "click") {
+    if (h.kind === "mid") {
+      const sd = wallSides(seen()).find((x) => x.after === h.k);
+      const inp = seen();
+      // the midpoint: the base interpolated, no model under it (none was clicked there)
+      if (sd) { const ed = editWall(inp, { op: "insert", after: h.k, point: { p: sd.p, rm: null, doc: null } }); if (ed.ok && wallCommit(sk, ed.input)) wallActive = { sketchId: sk.id, id: wallHandleId(sk.id, "plan", h.k + 1) }; }
+      return;
+    }
+    if (h.kind === "est") { toast(t("wall.h.est")); return; }
+    wallActive = { sketchId: sk.id, id: e.id };
+    renderSpaceNPanels();
+    return;
+  }
+  if (e.phase === "start") { wallDraft = { winId: win.id, sketchId: sk.id, input: seen() }; wallActive = null; return; }
+  if (e.phase === "cancel") { wallDraft = null; return; }
+  if (!e.point) return;
+  const base = seen();
+  const ed0 = editOf(wallPointAt(e.point, e.key));
+  const ed = ed0 ? editWall(base, ed0) : null;
+  if (e.phase === "move") { if (ed?.ok) wallDraft = { winId: win.id, sketchId: sk.id, input: ed.input }; return; }
+  // the release
+  wallDraft = null;
+  if (ed?.ok && wallCommit(sk, ed.input)) {
+    wallActive = { sketchId: sk.id, id: h.kind === "mid" ? wallHandleId(sk.id, "plan", h.k + 1) : wallHandleId(sk.id, h.kind === "inner" ? "top" : h.kind, h.k) };
+    if (e.key === null) toast(t("wall.h.offModel"));
+  }
+}
+/** B · X / Delete with a point of the selected wall active: the point leaves (one step) */
+function wallDeleteActive(): boolean {
+  const sk = wallSelected();
+  if (!sk || !wallActive || wallActive.sketchId !== sk.id) return false;
+  const h = parseWallHandle(wallActive.id);
+  if (!h || (h.kind !== "plan" && h.kind !== "top" && h.kind !== "inner")) return false;
+  const ed = editWall(wallSeen(sk).input, { op: "remove", which: h.kind === "plan" ? "plan" : "top", k: h.k });
+  if (!ed.ok) { toast(ed.why === "too_few" ? t("wall.err.too_few") : t("wall.h.gone")); return true; }
+  wallActive = null;
+  wallCommit(sk, ed.input);
+  return true;
+}
+/** C · «Aggiungi punti alti»: the wall's head mode chosen, the tool armed on it */
+function wallStartAddTop(win: Win, sk: Sketch): void {
+  setSpaceTool(win.id, WALL_TOOL);
+  wallAddTop.set(win.id, sk.id);
+  wallActive = null;
+  setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
+  refreshWallBars();
+  renderSpaceNPanels();
+}
+function wallEndAddTop(win: Win): void {
+  const sid = wallAddTop.get(win.id);
+  setSpaceTool(win.id, "select");
+  if (sid && sketchById(sid)) setSpaceSel({ keys: [`sketch:${sid}`], active: `sketch:${sid}` });
+  refreshWallBars();
+  renderSpaceNPanels();
+}
+function wallAddTopClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
+  if (dbl) { wallEndAddTop(win); return true; }
+  const sk = sketchById(wallAddTop.get(win.id) ?? "");
+  if (!sk?.wall) { wallEndAddTop(win); return true; }
+  if (!hit) { toast(t("wall.noSurface")); return true; }
+  const ed = editWall(wallSeen(sk).input, { op: "add-top", point: wallPointOf(hit) });
+  if (ed.ok) wallCommit(sk, ed.input);
+  refreshWallBars();
+  return true;
 }
 /** the floating bar of each Space window (the phase, the counter, where the clicks fall) */
 const wallBarRenderers = new Map<string, () => void>();
@@ -35283,10 +35543,25 @@ function drawWallBar(bar: HTMLElement, winId: string): void {
   const on = spaceCoreTools.get(winId) === WALL_TOOL;
   bar.classList.toggle("hidden", !on);
   if (!on) return;
+  bar.textContent = "";
+  // MICRO-PX1b · «Aggiungi punti alti» on a wall made
+  const adding = sketchById(wallAddTop.get(winId) ?? "");
+  if (adding?.wall) {
+    bar.dataset.wallPhase = "add-top";
+    bar.dataset.wallPoints = String(adding.wall.top.length);
+    const b = document.createElement("b");
+    b.dataset.wallCounter = "1";
+    b.textContent = t("wall.addTop.counter", { name: adding.name, n: String(adding.wall.top.length) });
+    const hint = document.createElement("span");
+    hint.className = "scn-wallbar-hint";
+    hint.dataset.wallHint = "1";
+    hint.textContent = t((adding.wall.headMode ?? "face") === "surface" ? "wall.addTop.hintSurface" : "wall.addTop.hintFace");
+    bar.append(b, " ", hint);
+    return;
+  }
   const tr = wallTrace(winId);
   const ph = wallPhaseWords(winId);
   const where = wallWhere([...tr.plan, ...tr.top]);
-  bar.textContent = "";
   bar.dataset.wallPhase = tr.phase;
   bar.dataset.wallPoints = String(tr.phase === "plan" ? tr.plan.length : tr.top.length);
   const b = document.createElement("b");
@@ -35305,6 +35580,26 @@ function drawWallBar(bar: HTMLElement, winId: string): void {
 }
 /** the «Tool» tab of «Muro da pianta»: its options, its phase, where the clicks fall */
 function renderWallToolTab(box: HTMLElement, win: Win): void {
+  // MICRO-PX1b · adding head points to a wall made: what the clicks do, and the end
+  const adding = sketchById(wallAddTop.get(win.id) ?? "");
+  if (adding?.wall) {
+    const p0 = document.createElement("p");
+    p0.className = "xf-note";
+    p0.dataset.np = "wall-addtop";
+    p0.textContent = t("wall.addTop.how", { name: adding.name }) + " " + t((adding.wall.headMode ?? "face") === "surface" ? "wall.addTop.hintSurface" : "wall.addTop.hintFace");
+    box.appendChild(p0);
+    const acts0 = document.createElement("div");
+    acts0.className = "xf-actions";
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "btn";
+    done.dataset.act = "wall-addtop-end";
+    done.textContent = t("wall.addTop.end");
+    done.addEventListener("click", () => wallEndAddTop(win));
+    acts0.appendChild(done);
+    box.appendChild(acts0);
+    return;
+  }
   const prefs = wallPrefs();
   const tr = wallTrace(win.id);
   const p = (text: string, probe: string, cls = "xf-note") => {
@@ -35344,6 +35639,9 @@ function renderWallToolTab(box: HTMLElement, win: Win): void {
   };
   row(t("wall.height"), num(prefs.height, "height", (x) => setWallPrefs({ height: x })), "height");
   if (prefs.mode === "axis") row(t("wall.thickness"), num(prefs.thickness, "thickness", (x) => setWallPrefs({ thickness: x })), "thickness");
+  // MICRO-PX1b · how the head's points are read; the pivot (where the proxy's origin is)
+  row(t("wall.headMode"), wallHeadSelect(prefs.headMode, (v) => setWallPrefs({ headMode: v })), "head");
+  row(t("wall.pivot"), wallPivotSelect(prefs.pivot, (v) => setWallPrefs({ pivot: v })), "pivot");
   const cb = document.createElement("input");
   cb.type = "checkbox";
   cb.checked = prefs.annotate;
@@ -35379,29 +35677,41 @@ function renderWallToolTab(box: HTMLElement, win: Win): void {
   box.appendChild(acts);
 }
 
-/** E · the Item tab of a wall: its inputs, editable — a point corrected, the
- *  height, the thickness — and the wall built again at once (a pure function:
- *  cheap). A pose moved after the build is carried into the inputs first. */
-function renderWallInputs(sect: NpSect, sk: Sketch): void {
+/** MICRO-PX1b · the head's mode, a select */
+function wallHeadSelect(v: HeadMode, set: (x: HeadMode) => void): HTMLSelectElement {
+  const sel = document.createElement("select");
+  sel.dataset.wallHead = "1";
+  for (const m of ["surface", "face"] as const) sel.appendChild(Object.assign(document.createElement("option"), { value: m, textContent: t(`wall.head.${m}`), selected: v === m }));
+  sel.title = t("wall.headTitle");
+  sel.addEventListener("change", () => set(sel.value === "face" ? "face" : "surface"));
+  return sel;
+}
+/** MICRO-PX1b · the pivot (EM Tools' Proxy Box: TOP / CENTER / BOTTOM), a select */
+function wallPivotSelect(v: WallPivot, set: (x: WallPivot) => void): HTMLSelectElement {
+  const sel = document.createElement("select");
+  sel.dataset.wallPivot = "1";
+  for (const m of ["bottom", "center", "top"] as const) sel.appendChild(Object.assign(document.createElement("option"), { value: m, textContent: t(`wall.pivot.${m}`), selected: v === m }));
+  sel.title = t("wall.pivotTitle");
+  sel.addEventListener("change", () => set(sel.value === "top" ? "top" : sel.value === "center" ? "center" : "bottom"));
+  return sel;
+}
+/** the estimate of a wall, in words («3 corners estimated from 2 visible points») */
+function wallEstimateWords(m: WallMesh): string {
+  if (!m.estimate.vertices.length) return "";
+  return t(`wall.estimate.${m.estimate.rule}`, { n: String(m.estimate.vertices.length), k: String(m.estimate.from) });
+}
+
+/** E · the Item tab of a wall: its inputs, editable — a point corrected, its
+ *  document, the height, the thickness, the head's mode, the pivot — and the
+ *  wall built again at once, ONE step of the undo each (MICRO-PX1b). A pose
+ *  moved after the build is carried into the inputs first. */
+function renderWallInputs(sect: NpSect, sk: Sketch, win: Win): void {
   if (!sk.wall) return;
   const box = sect(t("wall.inputs"), "wall-inputs", t("wall.inputsHelp"));
   box.dataset.wallSketch = sk.id;
-  // the pose moved since the build (G / R / S): the inputs are shown, and edited,
-  // where the wall is seen — carried by the pose (`bakePose`)
-  const first = buildWall(sk.wall);
-  const moved = first.ok && !poseIsBuilt(first.mesh.origin, sk);
-  const wall: WallInput & { annotate?: boolean } = moved && first.ok ? { ...bakePose(sk.wall, first.mesh.origin, sk), annotate: sk.wall.annotate } : sk.wall;
-  const built = moved ? buildWall(wall) : first;
-  const regenerate = (inp: WallInput & { annotate?: boolean }) => {
-    if (!sketchById(sk.id)?.wall) return;
-    const r = buildWall(inp);
-    if (!r.ok) { toast(wallErrorWords(r.error)); renderSpaceNPanels(); return; }
-    updateWall(sk.id, inp, { position: r.mesh.origin, rotation: [0, 0, 0], scale: [1, 1, 1] });
-    const warn = wallWarningWords(r.mesh.warnings);
-    if (warn) toast(warn);
-    refreshSurfaces("scene");
-    renderSpaceNPanels();
-  };
+  const seen = wallSeen(sk);
+  const wall = seen.input, built = seen.built;
+  const regenerate = (inp: WallStored) => { wallCommit(sk, inp); };
   const note = (text: string, probe: string, cls = "xf-note") => {
     const el = document.createElement("p");
     el.className = cls;
@@ -35411,10 +35721,14 @@ function renderWallInputs(sect: NpSect, sk: Sketch): void {
   };
   note(t(`wall.mode.${wall.mode}`), "wall-mode");
   if (built.ok) note(t("wall.stats", { n: String(built.mesh.stats.corners), tris: String(built.mesh.stats.triangles),
-    v: meshVolume(built.mesh.positions, built.mesh.indices).toLocaleString(getLocale(), { maximumFractionDigits: 2 }) }), "wall-stats");
+    v: meshVolume(built.mesh.positions, built.mesh.indices).toLocaleString(getLocale(), { maximumFractionDigits: 2 }) })
+    + (built.mesh.stats.inner ? ` · ${t("wall.innerCount", { n: String(built.mesh.stats.inner) })}` : ""), "wall-stats");
   else note(wallErrorWords(built.error), "wall-error", "xf-note warn");
   const warn = built.ok ? wallWarningWords(built.mesh.warnings) : "";
   if (warn) note(warn, "wall-warn", "xf-note warn");
+  // MICRO-PX1b · the hidden side's corners, estimated: said, and never extractors
+  const est = built.ok ? wallEstimateWords(built.mesh) : "";
+  if (est) note(`◇ ${est} — ${t("wall.estimateNotDoc")}`, "wall-estimate", "xf-note est");
   const where = wallWhere([...wall.plan, ...wall.top]);
   note(where.words ? t("wall.whereLine", { where: where.words }) : t("wall.whereNone"), "wall-where", where.hybrid ? "xf-note warn" : "xf-note");
   note(wall.annotate === false ? t("wall.annotateOff") : t("wall.annotateOn"), "wall-annotate");
@@ -35438,27 +35752,47 @@ function renderWallInputs(sect: NpSect, sk: Sketch): void {
   };
   if (!wall.top.length) line(t("wall.height"), field(wall.height, "height", (x) => { if (x > 0) regenerate({ ...wall, height: x }); }, "0.05"));
   if (wall.mode === "axis") line(t("wall.thickness"), field(wall.thickness, "thickness", (x) => { if (x > 0) regenerate({ ...wall, thickness: x }); }, "0.05"));
-  // the points: X, Y, Z as Blender's (Z up), each editable
+  line(t("wall.headMode"), wallHeadSelect(wall.headMode ?? "face", (v) => regenerate({ ...wall, headMode: v })));
+  line(t("wall.pivot"), wallPivotSelect(wall.pivot ?? "bottom", (v) => regenerate({ ...wall, pivot: v })));
+  // C · «Aggiungi punti alti»: the tool armed on this wall, in its head's mode
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "btn";
+  add.dataset.act = "wall-addtop";
+  add.textContent = t("wall.addTop");
+  add.title = t((wall.headMode ?? "face") === "surface" ? "wall.addTop.hintSurface" : "wall.addTop.hintFace");
+  add.addEventListener("click", () => wallStartAddTop(win, sk));
+  acts.appendChild(add);
+  box.appendChild(acts);
+  // the points: X, Y, Z as Blender's (Z up), each editable; its document (EM Tools'
+  // «search_point_document»: a point's document can be another than its model's)
+  const docs = (store?.doc.graph.nodes ?? []).filter((n) => n.node_type === "document");
   const table = document.createElement("table");
   table.className = "wall-points";
   table.dataset.wallPoints = sk.id;
   const head = document.createElement("tr");
-  for (const h of ["", "X", "Y", "Z", ""]) head.appendChild(Object.assign(document.createElement("th"), { textContent: h }));
+  for (const h of ["", "X", "Y", "Z", t("wall.docCol"), ""]) head.appendChild(Object.assign(document.createElement("th"), { textContent: h }));
   table.appendChild(head);
+  const act = wallActive?.sketchId === sk.id ? wallActive.id : null;
+  const roles = built.ok ? built.mesh.topRole : [];
   const rows = (list: WallPoint[], which: "plan" | "top") => list.forEach((w, k) => {
     // the group's name once, on a row of its own (the column is narrow)
     if (k === 0) {
       const g = document.createElement("tr");
-      const th = Object.assign(document.createElement("th"), { colSpan: 5,
+      const th = Object.assign(document.createElement("th"), { colSpan: 6,
         textContent: which === "plan" ? (wall.mode === "axis" ? t("wall.rowAxis") : t("wall.rowPlan")) : t("wall.rowTop") });
       g.appendChild(th);
       table.appendChild(g);
     }
     const tr = document.createElement("tr");
     tr.dataset.wallRow = `${which}:${k}`;
+    if (act === wallHandleId(sk.id, which, k)) tr.classList.add("act");
     const name = document.createElement("td");
-    name.textContent = String(k + 1);
-    name.title = w.rm ? (w.doc ? t("wall.onRmDoc", { rm: wallNodeName(w.rm), doc: wallNodeName(w.doc) }) : t("wall.onRm", { rm: wallNodeName(w.rm) })) : t("wall.whereNone");
+    name.textContent = String(k + 1) + (which === "top" && roles[k] === "inner" ? " ◆" : "");
+    name.title = (w.rm ? (w.doc ? t("wall.onRmDoc", { rm: wallNodeName(w.rm), doc: wallNodeName(w.doc) }) : t("wall.onRm", { rm: wallNodeName(w.rm) })) : t("wall.whereNone"))
+      + (which === "top" && roles[k] === "inner" ? ` · ${t("wall.h.inner", { n: String(k + 1) })}` : "");
     tr.appendChild(name);
     const b = blenderXYZ(w.p);
     [0, 1, 2].forEach((c) => {
@@ -35472,6 +35806,16 @@ function renderWallInputs(sect: NpSect, sk: Sketch): void {
       }));
       tr.appendChild(td);
     });
+    const dtd = document.createElement("td");
+    const dsel = document.createElement("select");
+    dsel.className = "wall-doc";
+    dsel.dataset.wallDoc = `${which}:${k}`;
+    dsel.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: "—", selected: !w.doc }));
+    for (const d of docs) dsel.appendChild(Object.assign(document.createElement("option"), { value: d.id, textContent: String(d.name ?? d.id), selected: w.doc === d.id }));
+    dsel.title = t("wall.docTitle");
+    dsel.addEventListener("change", () => regenerate({ ...wall, [which]: list.map((q, i) => (i === k ? { ...q, doc: dsel.value || null } : q)) }));
+    dtd.appendChild(dsel);
+    tr.appendChild(dtd);
     const del = document.createElement("td");
     const x = document.createElement("button");
     x.type = "button";
@@ -35479,13 +35823,33 @@ function renderWallInputs(sect: NpSect, sk: Sketch): void {
     x.textContent = "×";
     x.title = t("wall.removePoint");
     x.dataset.wallDel = `${which}:${k}`;
-    x.addEventListener("click", () => regenerate({ ...wall, [which]: list.filter((_, i) => i !== k) }));
+    x.addEventListener("click", () => {
+      const ed = editWall(wall, { op: "remove", which, k });
+      if (!ed.ok) { toast(t("wall.err.too_few")); return; }
+      regenerate(ed.input);
+    });
     del.appendChild(x);
     tr.appendChild(del);
     table.appendChild(tr);
   });
   rows(wall.plan, "plan");
   rows(wall.top, "top");
+  // MICRO-PX1b · the estimated corners: read only, marked, not points of a document
+  if (built.ok && built.mesh.estimate.vertices.length) {
+    const g = document.createElement("tr");
+    g.appendChild(Object.assign(document.createElement("th"), { colSpan: 6, textContent: t("wall.rowEst") }));
+    table.appendChild(g);
+    for (const i of built.mesh.estimate.vertices) {
+      const tr = document.createElement("tr");
+      tr.className = "est";
+      tr.dataset.wallRow = `est:${i}`;
+      const b = blenderXYZ(built.mesh.head[i]);
+      tr.appendChild(Object.assign(document.createElement("td"), { textContent: "◇", title: t("wall.h.est") }));
+      for (const c of b) tr.appendChild(Object.assign(document.createElement("td"), { textContent: (Math.round(c * 1000) / 1000).toLocaleString(getLocale()) }));
+      tr.appendChild(Object.assign(document.createElement("td"), { textContent: t("wall.estimated"), colSpan: 2 }));
+      table.appendChild(tr);
+    }
+  }
   box.appendChild(table);
 }
 
@@ -36359,6 +36723,12 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
   // extractors»: each click on a document's model becomes an extractor of that
   // document — the chain EM Tools' Proxy Box writes, by s3Dgraphy
   const wallItem = sk.shape === "wall" && sk.wall ? wallParadataItem(sk.wall) : null;
+  // MICRO-PX1b D · the corners of the hidden side, estimated: not extractors, and the chain says it
+  const wallBuilt = sk.shape === "wall" && sk.wall ? buildWall(sk.wall) : null;
+  const wallEst = wallBuilt?.ok && wallBuilt.mesh.estimate.vertices.length ? wallBuilt.mesh.estimate : null;
+  const estSay = wallEst ? ` ${wallEst.vertices.length} corner(s) of the head estimated from ${wallEst.from} visible point(s) (${
+    wallEst.rule === "perpendicular" ? "the hidden side: the visible profile's height at the foot of the perpendicular"
+    : wallEst.rule === "single" ? "the one point's height" : "the nearest point of the head's surface"}) — not extractors of a document.` : "";
   // the chain, by the library (a unit born now travels in the request)
   let j: { ok?: boolean; nodes?: EmNode[]; edges?: EmEdge[]; error?: string;
            paradata?: Array<{ extractor_ids?: string[]; combiner_name?: string }> };
@@ -36369,7 +36739,7 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ doc, items: [{ unit_id: unitId, url: rel, ...(wallItem?.points.length ? {
         points: wallItem.points, purpose: "wall_from_plan",
-        combiner_description: `Combiner for the wall drawn in EMStudio with «Wall from plan» — aggregates the ${wallItem.points.length} clicked points.`,
+        combiner_description: `Combiner for the wall drawn in EMStudio with «Wall from plan» — aggregates the ${wallItem.points.length} clicked points.${estSay}`,
       } : {}) }] }),
     });
     j = await res.json();
@@ -36386,12 +36756,13 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
     const nx = pd?.extractor_ids?.length ?? 0;
     const geo = nodes.find((n) => n.node_type === "property" && String(((n.data ?? {}) as Record<string, unknown>).property_type ?? "") === "geometry");
     if (geo) geo.description = wallItem.annotate && nx
-      ? `Drawn in EMStudio with «Wall from plan» from ${wallItem.clicks} clicked points; ${nx} of them are extractors of their documents (${pd?.combiner_name ?? "combiner"}).`
-      : "Drawn in EMStudio with «Wall from plan»; the points were not annotated as extractors.";
+      ? `Drawn in EMStudio with «Wall from plan» from ${wallItem.clicks} clicked points; ${nx} of them are extractors of their documents (${pd?.combiner_name ?? "combiner"}).${estSay}`
+      : `Drawn in EMStudio with «Wall from plan»; the points were not annotated as extractors.${estSay}`;
     if (wallItem.annotate && wallItem.points.length && !pd) wallSaid = t("wall.bridgeOld");
     else if (wallItem.annotate && nx) wallSaid = t("wall.extractorsMade", { n: String(nx), c: pd?.combiner_name ?? "" })
       + (wallItem.skipped ? ` · ${t("wall.extractorsSkipped", { n: String(wallItem.skipped) })}` : "");
     else if (wallItem.annotate && !wallItem.points.length) wallSaid = t("wall.extractorsNone");
+    if (wallEst && wallBuilt?.ok) wallSaid += (wallSaid ? " · " : "") + wallEstimateWords(wallBuilt.mesh);
   }
   // «Sostituisci»: the proxy the unit had leaves the graph in the same step,
   // and its glb (still on disk, still in the store) becomes a free sketch
@@ -39959,6 +40330,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
     marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id)],   // EXPERIMENTAL: the site's footprint
+    // MICRO-PX1b · «Muro da pianta»: the see-through solid, the elastic side, the handles of a wall
+    preview: () => wallPreview(win.id),
+    hoverAnchor: () => wallHoverAnchor(win.id),
+    onToolHover: (p) => { wallHover.set(win.id, p); },
+    handles: () => wallHandles(win.id),
+    onHandle: (e) => wallOnHandle(win, e),
     onMark: (id) => {
       if (SITE_ON && onSiteMark(id)) return;
       if (id.startsWith("inst:")) goToInstance(id.slice(5));
@@ -39982,6 +40359,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (a === "cancel" && wallCancel(win)) return true;
         if (a === "delete" && wallUndoPoint(win)) return true;
       }
+      // MICRO-PX1b · a point of the selected wall active: X takes it away, Esc lets it go
+      if (a === "delete" && wallDeleteActive()) return true;
+      if (a === "cancel" && wallActive) { wallActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel") {
         const armedNow = layerSpaces.get(win.id)?.trace().armed;
         if (!armedNow && (spaceCoreTools.get(win.id) ?? "select") === "select") return false;

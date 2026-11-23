@@ -39,6 +39,22 @@ export interface WallPoint {
 
 export type WallMode = "outline" | "axis";
 
+/** MICRO-PX1b · how the head's points are read:
+ *  · "surface": the head is SEEN (the «bauletto»): a point inside the outline,
+ *    farther than `WALL_TOL.interior` from it, is a point of the head's own
+ *    surface, triangulated with the outline's corners — the head has a shape of
+ *    its own, not only a profile along the sides;
+ *  · "face": the head is NOT seen (a wall under another, its back hidden): the
+ *    points are clicked on the line of passage of the visible face and projected
+ *    on the nearest side; the hidden side's heights are ESTIMATED.
+ *  A wall of PX1 (no field) reads as "face": what PX1 did, the same mesh. */
+export type HeadMode = "surface" | "face";
+
+/** how a corner's head height was found: a clicked point there, interpolated
+ *  between two clicked along the perimeter, ESTIMATED (the hidden side: not a
+ *  point of a document), or the height of the Tool panel (no point at all) */
+export type HeadKind = "clicked" | "interpolated" | "estimated" | "height";
+
 /** what the sketch keeps to regenerate the wall (layout.sketches) */
 export interface WallInput {
   mode: WallMode;
@@ -50,7 +66,14 @@ export interface WallInput {
   height: number;
   /** metres, mode axis only */
   thickness: number;
+  /** MICRO-PX1b · how the head's points are read (absent: "face", PX1's) */
+  headMode?: HeadMode;
+  /** MICRO-PX1b · where the local frame (the glb's origin) starts in height:
+   *  EM Tools' Proxy Box pivot; absent: "bottom", PX1's */
+  pivot?: WallPivot;
 }
+
+export type WallPivot = "bottom" | "center" | "top";
 
 /** Every numeric choice of the module, in metres (written in the MICRO's report). */
 export const WALL_TOL = {
@@ -68,6 +91,9 @@ export const WALL_TOL = {
   minHeight: 0.01,
   /** a top point farther than this from the outline in plan: warned */
   farFromContour: 1.0,
+  /** MICRO-PX1b · head "surface": a top point inside the outline and farther
+   *  than this from it is a point of the head's surface (nearer: on the side) */
+  interior: 0.05,
   /** mode axis: a mitre longer than this many half-thicknesses (an angle under
    *  about 11.5°) is refused, not clipped — a sharp joint was asked */
   miterLimit: 10,
@@ -87,8 +113,22 @@ export interface WallError { code: WallErrorCode; edges?: [number, number]; at?:
 export type WallWarningCode = "merged" | "clamped" | "far";
 export interface WallWarning { code: WallWarningCode; n?: number; at?: number; distance?: number }
 
+/** MICRO-PX1b · the hidden side's estimate: which corners, from how many
+ *  clicked points of the visible side, by which rule */
+export interface WallEstimate {
+  /** the corners (indices of `base` / `head`) whose head is estimated */
+  vertices: number[];
+  /** the clicked head points the estimate read */
+  from: number;
+  /** "perpendicular": the visible profile's height at the foot of the
+   *  perpendicular from the corner; "single": the one point's height;
+   *  "nearest-inner": the nearest point of the head's surface */
+  rule: "perpendicular" | "single" | "nearest-inner";
+}
+
 export interface WallMesh {
-  /** Y-up, local to `origin`, flat [x, y, z, …]: base corners 0…n−1, top corners n…2n−1 */
+  /** Y-up, local to `origin`, flat [x, y, z, …]: base corners 0…n−1, top corners n…2n−1,
+   *  then (MICRO-PX1b) the points of the head's surface 2n…2n+m−1 */
   positions: number[];
   /** triangles, outward (counter-clockwise seen from outside) */
   indices: number[];
@@ -97,8 +137,18 @@ export interface WallMesh {
   /** the corners of the outline, base and top, in the scene (Y-up), counter-clockwise in plan */
   base: V3[];
   head: V3[];
-  /** how many corners, side quads, top/bottom triangles */
-  stats: { corners: number; quads: number; capTriangles: number; triangles: number };
+  /** MICRO-PX1b · how each corner's head height was found */
+  headKind: HeadKind[];
+  /** the points of the head's surface (mode "surface"), in the scene, and which top click each is */
+  inner: V3[];
+  innerOf: number[];
+  /** what each top click became: a corner's height, a new corner, a point of the surface */
+  topRole: Array<"corner" | "edge" | "inner">;
+  /** the hidden side's estimate (no corner estimated: vertices empty) */
+  estimate: WallEstimate;
+  /** how many corners, side quads, bottom triangles (`capTriangles`), top triangles,
+   *  points of the head's surface, triangles in all */
+  stats: { corners: number; quads: number; capTriangles: number; topTriangles: number; inner: number; triangles: number };
   warnings: WallWarning[];
 }
 
@@ -199,6 +249,91 @@ export function triangulate(pts: Array<{ x: number; y: number }>): Array<[number
   return tris;
 }
 
+/** is a plan point inside a polygon (even-odd)? */
+export function insidePolygon(pts: Array<{ x: number; y: number }>, x: number, y: number): boolean {
+  let c = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+
+/** MICRO-PX1b · the triangulation of a simple counter-clockwise polygon (its
+ *  corners 0…n−1) with points inside it (n…n+m−1): the ear clipping first, then
+ *  each point splits the triangle it falls in (or the two of the edge it falls
+ *  on), and the edges not on the outline are flipped until every pair of
+ *  triangles is Delaunay in plan (Lawson) — the outline's sides are never
+ *  flipped, so the boundary stays the polygon's: n − 2 + 2m triangles. */
+export function triangulateWithPoints(poly: Array<{ x: number; y: number }>, inner: Array<{ x: number; y: number }>):
+    Array<[number, number, number]> {
+  const n = poly.length;
+  const q = [...poly, ...inner].map((p) => ({ x: p.x, y: p.y, z: 0 }));
+  let tris = triangulate(poly).map((t) => [...t] as [number, number, number]);
+  if (!inner.length) return tris;
+  const isBoundary = (a: number, b: number) => a < n && b < n && ((a + 1) % n === b || (b + 1) % n === a);
+  const inCircle = (a: P, b: P, c: P, d: P): boolean => {
+    // > 0: d inside the circle through a, b, c (counter-clockwise)
+    const ax = a.x - d.x, ay = a.y - d.y, bx = b.x - d.x, by = b.y - d.y, cx = c.x - d.x, cy = c.y - d.y;
+    const det = (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay) + (cx * cx + cy * cy) * (ax * by - bx * ay);
+    return det > 1e-12;
+  };
+  const legalize = () => {
+    for (let guard = 0; guard < 10000; guard++) {
+      let flipped = false;
+      const edge = new Map<string, number>();
+      for (let t = 0; t < tris.length && !flipped; t++) {
+        for (let k = 0; k < 3 && !flipped; k++) {
+          const a = tris[t][k], b = tris[t][(k + 1) % 3];
+          const other = edge.get(`${b}>${a}`);
+          edge.set(`${a}>${b}`, t);
+          if (other === undefined || isBoundary(a, b)) continue;
+          const c = tris[t][(k + 2) % 3];
+          const T = tris[other];
+          const d = T.find((v) => v !== a && v !== b)!;
+          if (!inCircle(q[a], q[b], q[c], q[d])) continue;
+          // the quad a-d-b-c must be convex for the flip: the new triangles counter-clockwise
+          if (cross3(q[c], q[a], q[d]) <= EPS || cross3(q[d], q[b], q[c]) <= EPS) continue;
+          tris[t] = [c, a, d];
+          tris[other] = [d, b, c];
+          flipped = true;
+        }
+      }
+      if (!flipped) return;
+    }
+  };
+  inner.forEach((_, k) => {
+    const v = n + k, p = q[v];
+    // the triangle it falls in (or on one of its edges)
+    let hit = -1, onEdge = -1;
+    for (let t = 0; t < tris.length && hit < 0; t++) {
+      const [a, b, c] = tris[t];
+      const s0 = cross3(q[a], q[b], p), s1 = cross3(q[b], q[c], p), s2 = cross3(q[c], q[a], p);
+      if (s0 >= -EPS && s1 >= -EPS && s2 >= -EPS) {
+        hit = t;
+        onEdge = Math.abs(s0) <= EPS ? 0 : Math.abs(s1) <= EPS ? 1 : Math.abs(s2) <= EPS ? 2 : -1;
+      }
+    }
+    if (hit < 0) return;                              // not inside (the caller checked it is)
+    const [a, b, c] = tris[hit];
+    if (onEdge < 0) {
+      tris.splice(hit, 1, [a, b, v], [b, c, v], [c, a, v]);
+    } else {
+      const e0 = tris[hit][onEdge], e1 = tris[hit][(onEdge + 1) % 3], opp = tris[hit][(onEdge + 2) % 3];
+      const t2 = tris.findIndex((T, i) => i !== hit && T.includes(e0) && T.includes(e1));
+      const next: Array<[number, number, number]> = [[e0, v, opp], [v, e1, opp]];
+      if (t2 >= 0) {
+        const o2 = tris[t2].find((x) => x !== e0 && x !== e1)!;
+        next.push([e1, v, o2], [v, e0, o2]);
+        tris = tris.filter((_, i) => i !== hit && i !== t2);
+      } else tris = tris.filter((_, i) => i !== hit);
+      tris.push(...next);
+    }
+    legalize();
+  });
+  return tris;
+}
+
 /** Mode axis: the outline of an axis polyline offset by ±thickness/2, mitre
  *  joints, square ends — the left side forward, the right side back. */
 export function offsetAxis(axis: Array<{ x: number; y: number; z: number }>, thickness: number):
@@ -293,12 +428,16 @@ export function buildWall(input: WallInput): WallResult {
   if (Math.abs(area2) / Math.max(perim, 1e-12) < WALL_TOL.collinear) return { ok: false, error: { code: "degenerate" } };
   if (area2 < 0) pts = pts.reverse();
 
-  // the top points: each on the nearest edge of the outline
+  // the top points: each on the nearest edge of the outline — or, head
+  // "surface" (MICRO-PX1b), inside it: a point of the head's own surface
+  const headMode: HeadMode = input.headMode ?? "face";
   const known = new Map<number, number>();           // corner → head height (index into `pts` after insertion)
   const tops = input.top.map((w) => local(toPlan(w.p)));
+  const topRole: Array<"corner" | "edge" | "inner"> = tops.map(() => "edge");
+  const inner: Array<P & { k: number }> = [];
   if (tops.length) {
     // per edge: the parameters where a new corner goes, and the heights
-    const onEdge = new Map<number, Array<{ t: number; z: number }>>();
+    const onEdge = new Map<number, Array<{ t: number; z: number; k: number }>>();
     const atCorner = new Map<number, number>();
     tops.forEach((tp, k) => {
       let bestE = 0, best = { t: 0, d: Infinity };
@@ -306,16 +445,23 @@ export function buildWall(input: WallInput): WallResult {
         const pr = project(tp, pts[e], pts[(e + 1) % pts.length]);
         if (pr.d < best.d - 1e-12) { best = pr; bestE = e; }
       }
+      if (headMode === "surface" && best.d > WALL_TOL.interior && insidePolygon(pts, tp.x, tp.y)) {
+        // two points of the surface nearer than the merge: the later one wins
+        const near = inner.find((q) => dist2(q, tp) < WALL_TOL.merge);
+        if (near) { topRole[near.k] = "inner"; near.z = tp.z; near.k = k; } else inner.push({ ...tp, k });
+        topRole[k] = "inner";
+        return;
+      }
       if (best.d > WALL_TOL.farFromContour) warnings.push({ code: "far", at: k, distance: best.d });
       const a = pts[bestE], b = pts[(bestE + 1) % pts.length];
       const len = dist2(a, b);
-      if (best.t * len < WALL_TOL.snapVertex) atCorner.set(bestE, tp.z);
-      else if ((1 - best.t) * len < WALL_TOL.snapVertex) atCorner.set((bestE + 1) % pts.length, tp.z);
+      if (best.t * len < WALL_TOL.snapVertex) { atCorner.set(bestE, tp.z); topRole[k] = "corner"; }
+      else if ((1 - best.t) * len < WALL_TOL.snapVertex) { atCorner.set((bestE + 1) % pts.length, tp.z); topRole[k] = "corner"; }
       else {
         const list = onEdge.get(bestE) ?? [];
         // two points nearer than the snap on one edge: the later one wins
         const near = list.find((x) => Math.abs(x.t - best.t) * len < WALL_TOL.snapVertex);
-        if (near) near.z = tp.z; else list.push({ t: best.t, z: tp.z });
+        if (near) { near.z = tp.z; near.k = k; } else list.push({ t: best.t, z: tp.z, k });
         onEdge.set(bestE, list);
       }
     });
@@ -334,22 +480,36 @@ export function buildWall(input: WallInput): WallResult {
   const n = pts.length;
   // the head
   const head: number[] = new Array(n);
-  if (!known.size) {
+  const headKind: HeadKind[] = new Array(n).fill("height");
+  const estimate: WallEstimate = { vertices: [], from: 0, rule: "perpendicular" };
+  if (!known.size && !inner.length) {
     for (let i = 0; i < n; i++) head[i] = pts[i].z + input.height;
+  } else if (!known.size) {
+    // MICRO-PX1b · only points of the surface: each corner the nearest one's height, estimated
+    for (let i = 0; i < n; i++) {
+      let best = inner[0], bd = Infinity;
+      for (const q of inner) { const d = dist2(pts[i], q); if (d < bd) { bd = d; best = q; } }
+      head[i] = best.z;
+      headKind[i] = "estimated";
+    }
+    Object.assign(estimate, { vertices: [...Array(n).keys()], from: inner.length, rule: "nearest-inner" });
   } else {
     // the perimeter's parameter of each corner
     const s: number[] = [0];
     for (let i = 1; i < n; i++) s.push(s[i - 1] + dist2(pts[i - 1], pts[i]));
     const P = s[n - 1] + dist2(pts[n - 1], pts[0]);
     const ks = [...known.keys()].sort((a, b) => a - b);
-    for (const k of ks) head[k] = known.get(k)!;
+    for (const k of ks) { head[k] = known.get(k)!; headKind[k] = "clicked"; }
     if (ks.length === 1) {
-      for (let i = 0; i < n; i++) head[i] = known.get(ks[0])!;
+      for (let i = 0; i < n; i++) if (i !== ks[0]) { head[i] = known.get(ks[0])!; headKind[i] = "estimated"; estimate.vertices.push(i); }
+      estimate.from = 1;
+      estimate.rule = "single";
     } else {
       // the gaps between consecutive known corners along the perimeter; the
-      // largest is «beyond the last»: its corners take the nearest (in plan)
-      // corner's head among those interpolated — across a wall's thickness,
-      // the corner on the other face
+      // largest is «beyond the last»: its corners are the HIDDEN side, their
+      // head ESTIMATED (MICRO-PX1b): the visible profile's height at the foot
+      // of the perpendicular from the corner — across a wall's thickness, the
+      // point of the visible face in front of it
       const gap = (j: number) => { const a = s[ks[j]], b = s[ks[(j + 1) % ks.length]]; return ((b - a) % P + P) % P || P; };
       let J = 0;
       for (let j = 1; j < ks.length; j++) if (gap(j) > gap(J) + 1e-12) J = j;
@@ -361,14 +521,26 @@ export function buildWall(input: WallInput): WallResult {
           const g = gap(j);
           const u = (((s[i] - s[a]) % P) + P) % P;
           head[i] = known.get(a)! + (known.get(b)! - known.get(a)!) * (g > 0 ? u / g : 0);
+          headKind[i] = "interpolated";
         }
       }
-      const covered = [...Array(n).keys()].filter((i) => !inGap.has(i));
+      // the visible profile: the corners from the gap's end round to its start
+      const prof: number[] = [];
+      for (let i = ks[(J + 1) % ks.length]; ; i = (i + 1) % n) { prof.push(i); if (i === ks[J]) break; }
       for (const i of inGap) {
-        let bi = covered[0], bd = Infinity;
-        for (const c of covered) { const d = dist2(pts[i], pts[c]); if (d < bd) { bd = d; bi = c; } }
-        head[i] = head[bi];
+        let bh = head[prof[0]], bd = Infinity;
+        for (let q = 0; q + 1 < prof.length; q++) {
+          const a = prof[q], b = prof[q + 1];
+          const pr = project(pts[i], pts[a], pts[b]);
+          if (pr.d < bd - 1e-12) { bd = pr.d; bh = head[a] + (head[b] - head[a]) * pr.t; }
+        }
+        if (prof.length === 1) bh = head[prof[0]];
+        head[i] = bh;
+        headKind[i] = "estimated";
+        estimate.vertices.push(i);
       }
+      estimate.from = ks.length;
+      estimate.vertices.sort((a, b) => a - b);
     }
   }
   for (let i = 0; i < n; i++) if (head[i] < pts[i].z + WALL_TOL.minHeight) {
@@ -376,28 +548,56 @@ export function buildWall(input: WallInput): WallResult {
     warnings.push({ code: "clamped", at: i });
   }
 
-  // the faces
+  // the faces: the bottom the outline's triangulation, the top the same with
+  // the points of the head's surface (MICRO-PX1b)
   const caps = triangulate(pts);
+  // the base under a point of the surface: the bottom's plane there
+  const baseAt = (p: P): number => {
+    for (const [a, b, c] of caps) {
+      const d = cross3(pts[a], pts[b], pts[c]);
+      if (Math.abs(d) < 1e-15) continue;
+      const l0 = cross3(pts[b], pts[c], p) / d, l1 = cross3(pts[c], pts[a], p) / d, l2 = 1 - l0 - l1;
+      if (l0 >= -1e-9 && l1 >= -1e-9 && l2 >= -1e-9) return l0 * pts[a].z + l1 * pts[b].z + l2 * pts[c].z;
+    }
+    return Math.min(...pts.map((q) => q.z));
+  };
+  for (const q of inner) {
+    const z0 = baseAt(q);
+    if (q.z < z0 + WALL_TOL.minHeight) { q.z = z0 + WALL_TOL.minHeight; warnings.push({ code: "clamped", at: n + inner.indexOf(q) }); }
+  }
+  const topCaps = inner.length ? triangulateWithPoints(pts, inner) : caps;
+  const m = inner.length;
+  const vTop = (v: number) => (v < n ? n + v : 2 * n + (v - n));
   const indices: number[] = [];
-  for (const [a, b, c] of caps) indices.push(n + a, n + b, n + c);      // top, up
+  for (const [a, b, c] of topCaps) indices.push(vTop(a), vTop(b), vTop(c));   // top, up
   for (const [a, b, c] of caps) indices.push(a, c, b);                  // bottom, down
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     indices.push(i, j, n + j, i, n + j, n + i);                         // a side, out
   }
   const zMin = Math.min(...pts.map((p) => p.z));
+  const zMax = Math.max(...head, ...inner.map((q) => q.z));
+  // MICRO-PX1b · the pivot (EM Tools' Proxy Box: TOP / CENTER / BOTTOM): where the local frame starts in height
+  const pivot = input.pivot ?? "bottom";
+  const zO = pivot === "top" ? zMax : pivot === "center" ? (zMin + zMax) / 2 : zMin;
   const ox = pts.reduce((sum, p) => sum + p.x, 0) / n, oy = pts.reduce((sum, p) => sum + p.y, 0) / n;
   const positions: number[] = [];
-  const ring = (z: (i: number) => number) => { for (let i = 0; i < n; i++) positions.push(pts[i].x - ox, z(i) - zMin, -(pts[i].y - oy)); };
+  const ring = (z: (i: number) => number) => { for (let i = 0; i < n; i++) positions.push(pts[i].x - ox, z(i) - zO, -(pts[i].y - oy)); };
   ring((i) => pts[i].z);
   ring((i) => head[i]);
+  for (const q of inner) positions.push(q.x - ox, q.z - zO, -(q.y - oy));
   const world = (p: P): P => ({ x: p.x + c0.x, y: p.y + c0.y, z: p.z });
   return { ok: true, mesh: {
     positions, indices,
-    origin: toScene(world({ x: ox, y: oy, z: zMin })),
+    origin: toScene(world({ x: ox, y: oy, z: zO })),
     base: pts.map((p) => toScene(world(p))),
     head: pts.map((p, i) => toScene(world({ ...p, z: head[i] }))),
-    stats: { corners: n, quads: n, capTriangles: caps.length, triangles: indices.length / 3 },
+    headKind,
+    inner: inner.map((q) => toScene(world(q))),
+    innerOf: inner.map((q) => q.k),
+    topRole,
+    estimate,
+    stats: { corners: n, quads: n, capTriangles: caps.length, topTriangles: topCaps.length, inner: m, triangles: indices.length / 3 },
     warnings,
   } };
 }
@@ -451,7 +651,67 @@ export function readWallInput(v: unknown): WallInput | null {
   if (!plan.length) return null;
   const num = (x: unknown, d: number) => (Number.isFinite(Number(x)) && Number(x) > 0 ? Number(x) : d);
   return { mode: o.mode === "axis" ? "axis" : "outline", plan, top: list(o.top),
-           height: num(o.height, WALL_TOL.height), thickness: num(o.thickness, WALL_TOL.thickness) };
+           height: num(o.height, WALL_TOL.height), thickness: num(o.thickness, WALL_TOL.thickness),
+           // MICRO-PX1b · absent (a wall of PX1): "face" and "bottom", the mesh it had
+           ...(o.headMode === "surface" || o.headMode === "face" ? { headMode: o.headMode } : {}),
+           ...(o.pivot === "center" || o.pivot === "top" || o.pivot === "bottom" ? { pivot: o.pivot } : {}) };
+}
+
+// ── MICRO-PX1b · the corrections: pure edits of the inputs ──────────────────
+
+/** the least points of the plan: three corners, or two vertices of an axis */
+export const planMin = (mode: WallMode): number => (mode === "axis" ? 2 : 3);
+
+export type WallEdit =
+  | { op: "move"; which: "plan" | "top"; k: number; to: WallPoint }
+  /** a corner inserted in the plan after the k-th (on the side k → k+1) */
+  | { op: "insert"; after: number; point: WallPoint }
+  | { op: "remove"; which: "plan" | "top"; k: number }
+  /** a point of the head added (MICRO-PX1b C: «Aggiungi punti alti») */
+  | { op: "add-top"; point: WallPoint };
+
+/** An edit of the inputs: a new input, or why not (`too_few`: the plan would
+ *  go under its least; `range`: no such point). The input is never changed. */
+export function editWall<T extends WallInput>(input: T, e: WallEdit): { ok: true; input: T } | { ok: false; why: "too_few" | "range" } {
+  const copy = (w: WallPoint): WallPoint => ({ p: [...w.p] as V3, rm: w.rm ?? null, doc: w.doc ?? null });
+  const plan = input.plan.map(copy), top = input.top.map(copy);
+  if (e.op === "move") {
+    const list = e.which === "plan" ? plan : top;
+    if (e.k < 0 || e.k >= list.length) return { ok: false, why: "range" };
+    list[e.k] = copy(e.to);
+  } else if (e.op === "insert") {
+    if (e.after < 0 || e.after >= plan.length) return { ok: false, why: "range" };
+    plan.splice(e.after + 1, 0, copy(e.point));
+  } else if (e.op === "remove") {
+    const list = e.which === "plan" ? plan : top;
+    if (e.k < 0 || e.k >= list.length) return { ok: false, why: "range" };
+    if (e.which === "plan" && plan.length - 1 < planMin(input.mode)) return { ok: false, why: "too_few" };
+    list.splice(e.k, 1);
+  } else {
+    top.push(copy(e.point));
+  }
+  return { ok: true, input: { ...input, plan, top } };
+}
+
+/** The sides of the plan where a corner can be inserted: the midpoint of each
+ *  pair of consecutive clicks (closed for an outline, open for an axis), the
+ *  base's height interpolated — the handles «+» of the Space. */
+export function wallSides(input: Pick<WallInput, "mode" | "plan">): Array<{ after: number; p: V3 }> {
+  const n = input.plan.length;
+  const out: Array<{ after: number; p: V3 }> = [];
+  const last = input.mode === "axis" ? n - 1 : n;
+  for (let k = 0; k < last && n >= 2; k++) {
+    const a = input.plan[k].p, b = input.plan[(k + 1) % n].p;
+    out.push({ after: k, p: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2] });
+  }
+  return out;
+}
+
+/** A short signature of an input — the preview is built again only when it changes. */
+export function wallSig(input: WallInput, extra = ""): string {
+  const r = (v: number) => Math.round(v * 1e4);
+  const pl = (l: WallPoint[]) => l.map((w) => w.p.map(r).join(",")).join(";");
+  return `${input.mode}|${pl(input.plan)}|${pl(input.top)}|${r(input.height)}|${r(input.thickness)}|${input.headMode ?? ""}|${input.pivot ?? ""}|${extra}`;
 }
 
 /** The documents the clicks fell on, in order of first appearance (C: «each

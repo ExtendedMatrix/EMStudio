@@ -391,6 +391,8 @@ export interface SceneMark {
   /** MICRO-OUTLINER-EPOCHE-TOOLTIP p.4 · an extractor shown though its document
    *  is not lit (its eye forced): faint and dashed */
   ghost?: boolean;
+  /** MICRO-PX1b · an ESTIMATED point (a wall's hidden side): not a reading of a document */
+  est?: boolean;
 }
 
 /** MICRO-VIEWER-SPAZIO-EMTREE p.4 · what the renderer drew in its last frame */
@@ -540,6 +542,34 @@ export interface SpaceSceneOptions {
   sketchFileUrl?: (s: Sketch) => string | undefined;
   /** MICRO-SPAZIO-3D-3 p.5 · «Allinea alla normale» (the N panel; off by default) */
   snapAlign?: () => boolean;
+  /** MICRO-PX1b · a provisional solid drawn see-through (the wall being drawn
+   *  or corrected), read at every frame: rebuilt only when `sig` changes; never
+   *  picked, never a click's surface */
+  preview?: () => ScenePreview | null;
+  /** MICRO-PX1b · the pointer over the view while a tool draws: the point of
+   *  the HORIZONTAL plane through `hoverAnchor()` under it (no surface is
+   *  ray-cast at every move: fluid on a heavy model) — the elastic side */
+  hoverAnchor?: () => V3 | null;
+  onToolHover?: (p: V3 | null) => void;
+  /** MICRO-PX1b · handles drawn over the view (the points of a wall), dragged
+   *  with the mouse: while moving, the surface of a MODEL under the pointer
+   *  (`rm:` — never a proxy nor a sketch), once per frame */
+  handles?: () => SceneHandle[];
+  onHandle?: (e: SceneHandleEvent) => void;
+}
+
+/** MICRO-PX1b · a see-through solid of the caller's */
+export interface ScenePreview { sig: string; positions: number[]; indices: number[]; origin: V3 }
+/** MICRO-PX1b · a handle: a point of the plan, of the head, a point of the head's
+ *  surface, a side's «+», an estimated corner (shown, not dragged) */
+export interface SceneHandle { id: string; p: V3; kind: "plan" | "top" | "inner" | "mid" | "est"; active?: boolean; title?: string }
+export interface SceneHandleEvent {
+  id: string;
+  phase: "start" | "move" | "end" | "cancel" | "click";
+  /** where the handle is now (scene frame); null at start / click / cancel */
+  point: V3 | null;
+  /** the model under it (`rm:<id>`), null: off any model */
+  key: string | null;
 }
 
 interface Drawn {
@@ -696,6 +726,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       // the sketches: a group of their own, never cleared by a rebuild
       const sketchGroup = new THREE.Group();
       scene.add(sketchGroup);
+      // MICRO-PX1b · the caller's see-through solid (a wall being drawn): never picked
+      const previewGroup = new THREE.Group();
+      previewGroup.name = "wall-preview";
+      scene.add(previewGroup);
       const labels = document.createElement("div");
       labels.className = "v3d-labels scn-labels";
       // MICRO-VIEWER-UNICO p.4 · the readings of the document, over the scene
@@ -704,6 +738,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       marksEl.setAttribute("class", "scn-marks");
       const markLabels = document.createElement("div");
       markLabels.className = "scn-mark-labels";
+      // MICRO-PX1b · the handles of a wall, dragged
+      const handlesEl = document.createElement("div");
+      handlesEl.className = "scn-handles";
       const cursorEl = document.createElement("div");
       cursorEl.className = "scn-cursor";
       cursorEl.innerHTML = CURSOR_SVG;
@@ -3237,14 +3274,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (!(v.z < 1)) return null;
           return { x: ((v.x + 1) / 2) * W, y: ((1 - v.y) / 2) * H };
         };
-        const sig = ms.map((m) => `${m.id}:${m.vertices.length}:${m.selected ? 1 : 0}:${m.draft ? 1 : 0}:${m.ghost ? 1 : 0}:${m.label}`).join("|");
+        const sig = ms.map((m) => `${m.id}:${m.vertices.length}:${m.selected ? 1 : 0}:${m.draft ? 1 : 0}:${m.ghost ? 1 : 0}:${m.est ? 1 : 0}:${m.label}`).join("|");
         if (sig !== marksSig) {
           marksSig = sig;
           marksEl.textContent = "";
           markLabels.textContent = "";
           for (const m of ms) {
             const g = document.createElementNS(MARKNS, "g");
-            g.setAttribute("class", `scn-mark k-${m.kind}${m.selected ? " sel" : ""}${m.draft ? " draft" : ""}${m.ghost ? " ghost" : ""}`);
+            g.setAttribute("class", `scn-mark k-${m.kind}${m.selected ? " sel" : ""}${m.draft ? " draft" : ""}${m.ghost ? " ghost" : ""}${m.est ? " est" : ""}`);
             g.dataset.mark = m.id;
             if (m.vertices.length > 1) {
               const pl = document.createElementNS(MARKNS, m.kind === "plane" ? "polygon" : "polyline");
@@ -3305,6 +3342,137 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       (probe as Record<string, unknown>).__spaceMarks = () => [...markLabels.children].map((e) => ({ id: (e as HTMLElement).dataset.mark,
         text: e.textContent, x: parseFloat((e as HTMLElement).style.left), y: parseFloat((e as HTMLElement).style.top), shown: (e as HTMLElement).style.display !== "none" }));
+      // ── MICRO-PX1b · the preview and the handles ─────────────────────────
+      let previewSig = "";
+      const placePreview = () => {
+        const pv = opts.preview?.() ?? null;
+        const sig = pv?.sig ?? "";
+        if (sig === previewSig) return;
+        previewSig = sig;
+        for (const c of [...previewGroup.children]) {
+          previewGroup.remove(c);
+          c.traverse((o: any) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+        }
+        if (!pv || !pv.indices.length) return;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pv.positions, 3));
+        g.setIndex(pv.indices);
+        const shown = g.toNonIndexed();
+        shown.computeVertexNormals();
+        const mesh = new THREE.Mesh(shown, new THREE.MeshLambertMaterial({ color: new THREE.Color("#d9822b"), transparent: true,
+          opacity: 0.38, depthWrite: false, side: THREE.DoubleSide }));
+        mesh.renderOrder = 5;
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g, 20), new THREE.LineBasicMaterial({ color: 0x7a3d00, transparent: true, opacity: 0.85 }));
+        edges.renderOrder = 6;
+        mesh.add(edges);
+        mesh.position.set(pv.origin[0], pv.origin[1], pv.origin[2]);
+        previewGroup.add(mesh);
+        g.dispose();
+      };
+      (probe as Record<string, unknown>).__spacePreview = () => (previewSig ? { sig: previewSig, objects: previewGroup.children.length } : null);
+      let handleDrag: { id: string; kind: SceneHandle["kind"]; start: V3; cur: V3; key: string | null; moved: boolean; x0: number; y0: number; plane: any; pending: { x: number; y: number } | null } | null = null;
+      let handlesSig = "";
+      const handleAt = (x: number, y: number, d = handleDrag): { p: V3; key: string | null } | null => {
+        if (!d) return null;
+        const h = hitsAt(x, y).find((q) => q.kind === "rm");
+        if (h) return { p: arr(h.point), key: `rm:${h.id}` };
+        ray.setFromCamera(ndcOf(x, y), camera);
+        const p = new THREE.Vector3();
+        return ray.ray.intersectPlane(d.plane, p) ? { p: [p.x, p.y, p.z], key: null } : null;
+      };
+      const handleMove = (e: PointerEvent) => {
+        if (!handleDrag) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!handleDrag.moved && Math.hypot(e.clientX - handleDrag.x0, e.clientY - handleDrag.y0) < 4) return;
+        if (!handleDrag.moved) { handleDrag.moved = true; opts.onHandle?.({ id: handleDrag.id, phase: "start", point: null, key: null }); }
+        // once per frame: a ray on a heavy model at every event would stutter
+        const first = !handleDrag.pending;
+        handleDrag.pending = { x: e.clientX, y: e.clientY };
+        if (!first) return;
+        frameWin().requestAnimationFrame(() => {
+          const d = handleDrag;
+          if (!d?.pending) return;
+          const at = handleAt(d.pending.x, d.pending.y, d);
+          d.pending = null;
+          if (!at) return;
+          d.cur = at.p;
+          d.key = at.key;
+          opts.onHandle?.({ id: d.id, phase: "move", point: at.p, key: at.key });
+        });
+      };
+      const endHandle = (phase: "end" | "cancel", e?: PointerEvent) => {
+        const d = handleDrag;
+        if (!d) return;
+        handleDrag = null;
+        const doc = renderer.domElement.ownerDocument;
+        doc.removeEventListener("pointermove", handleMove, true);
+        doc.removeEventListener("pointerup", handleUp, true);
+        frameWin().removeEventListener("keydown", handleKey, true);
+        controls.enabled = true;
+        host.classList.remove("scn-handle-moving");
+        if (!d.moved) { if (phase === "end") opts.onHandle?.({ id: d.id, phase: "click", point: null, key: null }); return; }
+        if (phase === "cancel") { opts.onHandle?.({ id: d.id, phase: "cancel", point: null, key: null }); return; }
+        // the release's own place (the last frame's may be one behind)
+        const at = e ? handleAt(e.clientX, e.clientY, d) : null;
+        opts.onHandle?.({ id: d.id, phase: "end", point: at?.p ?? d.cur, key: at ? at.key : d.key });
+      };
+      const handleUp = (e: PointerEvent) => { if (!handleDrag) return; e.preventDefault(); e.stopImmediatePropagation(); endHandle("end", e); };
+      const handleKey = (e: KeyboardEvent) => { if (handleDrag && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); endHandle("cancel"); } };
+      const startHandle = (hd: SceneHandle, e: PointerEvent) => {
+        if (handleDrag || hd.kind === "est") return;
+        e.preventDefault();
+        e.stopPropagation();
+        const n = new THREE.Vector3();
+        camera.getWorldDirection(n);
+        const at = new THREE.Vector3(hd.p[0], hd.p[1], hd.p[2]);
+        // off any model: a point of the plan (or a side's «+») slides on its
+        // horizontal plane, a point of the head on the plane facing the camera
+        const plane = hd.kind === "plan" || hd.kind === "mid" ? new THREE.Plane(new THREE.Vector3(0, 1, 0), -hd.p[1])
+          : new THREE.Plane().setFromNormalAndCoplanarPoint(n, at);
+        handleDrag = { id: hd.id, kind: hd.kind, start: hd.p, cur: hd.p, key: null, moved: false, x0: e.clientX, y0: e.clientY, plane, pending: null };
+        const doc = renderer.domElement.ownerDocument;
+        doc.addEventListener("pointermove", handleMove, true);
+        doc.addEventListener("pointerup", handleUp, true);
+        // the window, before the scene's own keys (Esc gives the point back, not the tool)
+        frameWin().addEventListener("keydown", handleKey, true);
+        controls.enabled = false;
+        host.classList.add("scn-handle-moving");
+      };
+      const placeHandles = () => {
+        const hs = opts.handles?.() ?? [];
+        const sig = hs.map((x) => `${x.id}:${x.kind}:${x.active ? 1 : 0}:${x.title ?? ""}`).join("|");
+        if (sig !== handlesSig) {
+          handlesSig = sig;
+          handlesEl.textContent = "";
+          for (const hd of hs) {
+            const el = document.createElement("span");
+            el.className = `scn-handle k-${hd.kind}${hd.active ? " act" : ""}`;
+            el.dataset.handle = hd.id;
+            if (hd.title) el.title = hd.title;
+            if (hd.kind === "mid") el.textContent = "+";
+            el.addEventListener("pointerdown", (e) => { if (e.button === 0) { const cur = (opts.handles?.() ?? []).find((x) => x.id === hd.id); if (cur) startHandle(cur, e); } });
+            handlesEl.appendChild(el);
+          }
+        }
+        if (!hs.length) return;
+        const r = renderer.domElement.getBoundingClientRect();
+        const W = r.width || w, H = r.height || h;
+        const els = [...handlesEl.children] as HTMLElement[];
+        hs.forEach((hd, k) => {
+          const el = els[k];
+          if (!el) return;
+          const p = handleDrag && handleDrag.id === hd.id && handleDrag.moved ? handleDrag.cur : hd.p;
+          const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
+          const ok = v.z < 1 && Math.abs(v.x) <= 1.05 && Math.abs(v.y) <= 1.05;
+          el.style.display = ok ? "" : "none";
+          if (ok) { el.style.left = `${((v.x + 1) / 2) * W}px`; el.style.top = `${((1 - v.y) / 2) * H}px`; }
+        });
+      };
+      (probe as Record<string, unknown>).__spaceHandles = () => [...handlesEl.children].map((e) => ({ id: (e as HTMLElement).dataset.handle,
+        cls: (e as HTMLElement).className, x: parseFloat((e as HTMLElement).style.left), y: parseFloat((e as HTMLElement).style.top),
+        shown: (e as HTMLElement).style.display !== "none" }));
+      (probe as Record<string, unknown>).__spaceHandleDrag = () => (handleDrag ? { id: handleDrag.id, moved: handleDrag.moved, cur: handleDrag.cur } : null);
       let raf = 0;
       let frames = 0;
       // MICRO-OVERLAY-PER-FINESTRA p.2 · the frames of the window the canvas is
@@ -3330,11 +3498,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         altTick();
         for (const l of live) if (l.layer.object.visible || altWarming.has(l)) l.layer.update();
         if (live.length && ++frames % 20 === 0) { for (const l of live) { l.bar.refresh(); for (const b of l.extra) b.refresh(); } chipTick(); if (resting.size) trimResting(); }
+        placePreview();
         renderer.render(scene, camera);
         if (live.length) governTick(live);
         if (statsOn) { statFrames++; const n = performance.now(); if (n - statAt >= 500) readStats(n); }
         place();
         placeMarks();
+        placeHandles();
         drawNav();
         // the flow of LOD, four times a second
         const now = performance.now();
@@ -3907,6 +4077,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           boxEl.style.height = `${Math.abs(e.clientY - boxStart.y)}px`;
           boxEl.classList.remove("hidden");
         }
+        // MICRO-PX1b · a tool drawing: the elastic side follows the pointer on a horizontal plane
+        if (!drag && opts.onToolHover) {
+          const a = opts.hoverAnchor?.() ?? null;
+          if (a) {
+            ray.setFromCamera(ndcOf(e.clientX, e.clientY), camera);
+            const p = new THREE.Vector3();
+            opts.onToolHover(ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -a[1]), p) ? [p.x, p.y, p.z] : null);
+          }
+        }
       };
       const finishBox = (e: PointerEvent) => {
         const s = boxStart!;
@@ -4271,7 +4450,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       status.remove();
       host.prepend(renderer.domElement);
       host.appendChild(labels);
-      host.append(marksEl, markLabels);
+      host.append(marksEl, markLabels, handlesEl);
       host.appendChild(strips);
       host.append(tchip);
       host.append(cursorEl, modalEl, boxEl, lassoEl, viewEl, statsEl, guides, vptr, navEl);

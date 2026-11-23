@@ -15,7 +15,14 @@
 //     lifted (warned), a far top point warned;
 //   · mode axis + thickness: square ends, mitre joints at 90° and 120°, the
 //     outline's corners where they must be, too sharp a joint refused;
-//   · georeferenced coordinates (hundreds of km): the same mesh, translated.
+//   · georeferenced coordinates (hundreds of km): the same mesh, translated;
+//   · MICRO-PX1b: a point inside the outline (head "surface") becomes a point
+//     of the head's surface, triangulated with the corners (Delaunay flips,
+//     the outline never flipped), its volume exact; near the edge, or head
+//     "face", it is projected; the hidden side's corners ESTIMATED (the visible
+//     profile's height at the perpendicular's foot), marked; the edits of the
+//     handles (move, insert, remove, add a head point) and the wall made again;
+//     the pivot; the signature of the preview.
 //
 //   node scripts/check-wall-from-plan.mjs
 import * as esbuild from "esbuild";
@@ -44,8 +51,9 @@ function solid(res, what) {
   const m = res.mesh;
   const n = m.stats.corners;
   ok(W.isClosedManifold(m.indices), `${what}: closed and manifold`);
-  eq([m.stats.quads, m.stats.capTriangles, m.stats.triangles, m.positions.length / 3], [n, n - 2, 2 * n + 2 * (n - 2), 2 * n],
-     `${what}: the least polygons (n quads, n − 2 triangles per cap, 2n vertices)`);
+  const k = m.stats.inner ?? 0;
+  eq([m.stats.quads, m.stats.capTriangles, m.stats.topTriangles, m.stats.triangles, m.positions.length / 3], [n, n - 2, n - 2 + 2 * k, 2 * n + 2 * (n - 2) + 2 * k, 2 * n + k],
+     `${what}: the least polygons (n quads, n − 2 triangles on the bottom, n − 2 + 2m on the top with m points of its surface, 2n + m vertices)`);
   ok(W.meshVolume(m.positions, m.indices) > 0, `${what}: the volume is positive (normals out)`);
   // each face's normal: the top's up, the bottom's down, a side's out of the outline
   const P = (i) => [m.positions[3 * i], m.positions[3 * i + 1], m.positions[3 * i + 2]];
@@ -220,6 +228,115 @@ function solid(res, what) {
   near([ext(0), ext(2)], [0.6, 4], 1e-9, "…its long side now along the scene's Z");
   const scaled = W.bakePose(inp, m.origin, { position: m.origin, rotation: [0, 0, 0], scale: [2, 1.5, 2] });
   eq([scaled.height, scaled.thickness], [3, 1.2], "a scale carries the height (Y) and the thickness (plan)");
+}
+
+
+// ── MICRO-PX1b · a point of the head's surface ─────────────────────────────
+{
+  const rect = [wp(0, 0), wp(4, 0), wp(4, 1), wp(0, 1)];
+  const corners = [wp(0, 0, 2), wp(4, 0, 2), wp(4, 1, 2), wp(0, 1, 2)];
+  const r = wall(rect, { top: [...corners, wp(2, 0.5, 3)], headMode: "surface" });
+  const m = solid(r, "a point inside the head (surface)");
+  eq([m.stats.inner, m.stats.topTriangles, m.topRole[4]], [1, 4, "inner"], "the point inside is a point of the head's surface: n − 2 + 2 top triangles");
+  near(m.inner[0], S(2, 0.5, 3), 1e-12, "…at its own place and height");
+  near(W.meshVolume(m.positions, m.indices), 4 * 1 * 2 + (4 * 1 * 1) / 3, 1e-9, "the volume: the box and the pyramid of the head (4 × 1 × 2 + 4 × 1 × 1 / 3)");
+  ok(m.headKind.every((k) => k === "clicked"), "the four corners clicked");
+  eq(m.estimate.vertices, [], "nothing estimated");
+  // head "face": the same point is projected on the nearest side
+  const f = solid(wall(rect, { top: [...corners, wp(2, 0.5, 3)], headMode: "face" }), "the same point, head face");
+  eq([f.stats.inner, f.topRole[4]], [0, "edge"], "head «face»: the point is projected on a side (PX1's way)");
+  // a point inside but within the tolerance of the edge: on the edge
+  const e = solid(wall(rect, { top: [...corners, wp(2, 0.03, 2.4)], headMode: "surface" }), "a point 3 cm in from the edge");
+  eq([e.stats.inner, e.topRole[4], e.stats.corners], [0, "edge", 5], "3 cm from the edge (under 5 cm): on the side, a new corner");
+  // two points nearer than the merge: one, the later wins
+  const d = solid(wall(rect, { top: [...corners, wp(2, 0.5, 3), wp(2.004, 0.5, 3.2)], headMode: "surface" }), "two inner points at 4 mm");
+  eq(d.stats.inner, 1, "two points of the surface within 1 cm: one");
+  near(d.inner[0][1], 3.2, 1e-12, "…the later one's height");
+  // several points in an L: still closed and manifold (the flips keep the outline)
+  const L = [wp(0, 0), wp(5, 0), wp(5, 0.6), wp(0.6, 0.6), wp(0.6, 4), wp(0, 4)];
+  const ml = solid(wall(L, { top: [wp(0, 0, 2), wp(5, 0, 2), wp(2.5, 0.3, 2.4), wp(0.3, 2, 2.6), wp(4, 0.3, 2.2)], headMode: "surface" }), "an L with three points of the head's surface");
+  eq(ml.stats.inner, 3, "three points of the surface");
+  ok(W.triangulateWithPoints([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }], [{ x: 0.5, y: 0.5 }]).length === 4, "a square with its centre: four triangles");
+  // only points inside: the corners estimated from the nearest
+  const o = solid(wall(rect, { top: [wp(1, 0.5, 2.2), wp(3, 0.5, 2.8)], headMode: "surface" }), "only points of the surface");
+  eq([o.estimate.rule, o.estimate.vertices.length, o.estimate.from], ["nearest-inner", 4, 2], "only points inside: the four corners estimated from the nearest");
+  near(o.head.map((p) => p[1]), [2.2, 2.8, 2.8, 2.2], 1e-12, "…each the nearest point's height");
+}
+
+// ── MICRO-PX1b · a wall under another: the back hidden, estimated ───────────
+{
+  // the front face (y = 0) seen: three points on the line of passage; the back (y = 0.6) hidden
+  const rect = [wp(0, 0), wp(6, 0), wp(6, 0.6), wp(0, 0.6)];
+  const top = [wp(0, 0, 2), wp(3, 0, 2.6), wp(6, 0, 2.2)];
+  const m = solid(wall(rect, { top, headMode: "face" }), "the back hidden");
+  const at = (x, y) => m.head.findIndex((p) => Math.abs(p[0] - x) < 1e-9 && Math.abs(-p[2] - y) < 1e-9);
+  const back = [at(6, 0.6), at(0, 0.6)];
+  eq(back.map((i) => m.headKind[i]), ["estimated", "estimated"], "the two corners of the back: estimated");
+  eq([m.estimate.rule, m.estimate.from, [...m.estimate.vertices].sort()], ["perpendicular", 3, [...back].sort()], "the estimate: by the perpendicular, from the three visible points");
+  near(back.map((i) => m.head[i][1]), [2.2, 2], 1e-12, "each the height of the visible face in front of it");
+  eq([at(0, 0), at(3, 0), at(6, 0)].map((i) => m.headKind[i]), ["clicked", "clicked", "clicked"], "the visible points: clicked");
+  // a trapezoid: the perpendicular, not the nearest corner
+  const trap = [wp(0, 0), wp(6, 0), wp(5, 1), wp(1, 1)];
+  const t2 = solid(wall(trap, { top, headMode: "face" }), "a trapezoid, back hidden");
+  const at2 = (x, y) => t2.head.findIndex((p) => Math.abs(p[0] - x) < 1e-9 && Math.abs(-p[2] - y) < 1e-9);
+  near(t2.head[at2(5, 1)][1], 2.6 + (2.2 - 2.6) * (2 / 3), 1e-9, "the corner (5, 1): the profile's height at x = 5, between the points at 3 and 6 (not the nearest corner's 2.2)");
+  near(t2.head[at2(1, 1)][1], 2 + (2.6 - 2) * (1 / 3), 1e-9, "the corner (1, 1): the profile's height at x = 1");
+  // the sketch's paradata: estimated corners never come from a top click
+  ok(t2.estimate.vertices.every((i) => t2.headKind[i] === "estimated"), "the estimated corners are marked so");
+  // one point only: all the others estimated from it
+  const one = solid(wall(rect, { top: [wp(3, 0, 2.5)], headMode: "face" }), "one head point");
+  eq([one.estimate.rule, one.estimate.vertices.length], ["single", 4], "one point: the four corners estimated from it (it is a fifth corner)");
+}
+
+// ── MICRO-PX1b · the corrections: pure edits, the wall made again ───────────
+{
+  const inp = { mode: "outline", plan: [wp(0, 0), wp(4, 0), wp(4, 0.6), wp(0, 0.6)], top: [wp(0, 0, 2), wp(4, 0, 2)], height: 1, thickness: 0.6, headMode: "face" };
+  const v0 = W.meshVolume(W.buildWall(inp).mesh.positions, W.buildWall(inp).mesh.indices);
+  // a drag: the corner (4, 0.6) carried to (5, 0.6) — the wall made again, larger
+  const mv = W.editWall(inp, { op: "move", which: "plan", k: 2, to: wp(5, 0.6) });
+  ok(mv.ok && inp.plan[2].p[0] === 4, "a move gives a new input, the old one untouched");
+  const m1 = solid(W.buildWall(mv.input), "a corner dragged");
+  ok(W.meshVolume(m1.positions, m1.indices) > v0 + 0.1, "the wall made again from the moved corner (larger)");
+  ok(W.wallSig(mv.input) !== W.wallSig(inp) && W.wallSig(inp) === W.wallSig(JSON.parse(JSON.stringify(inp))), "the preview's signature: changed by the move, the same for the same input");
+  // a head point dragged higher: the head follows
+  const mt = W.editWall(inp, { op: "move", which: "top", k: 1, to: wp(4, 0, 2.5) });
+  const m2 = solid(W.buildWall(mt.input), "a head point dragged");
+  ok(m2.head.some((p) => Math.abs(p[1] - 2.5) < 1e-12), "the head at the dragged point's height");
+  // a corner inserted on a side («+»): the side's midpoint
+  const sides = W.wallSides(inp);
+  eq(sides.map((x) => x.after), [0, 1, 2, 3], "an outline: a «+» on each of its four sides (closed)");
+  near(sides[1].p, S(4, 0.3, 0), 1e-12, "…at the side's midpoint");
+  const ins = W.editWall(inp, { op: "insert", after: 0, point: wp(2, -0.3) });
+  ok(ins.ok && ins.input.plan.length === 5 && ins.input.plan[1].p[0] === 2, "a corner inserted after the first");
+  eq(solid(W.buildWall(ins.input), "a corner inserted").stats.corners, 5, "…the wall with five corners");
+  eq(W.wallSides({ mode: "axis", plan: [wp(0, 0), wp(4, 0), wp(4, 3)] }).length, 2, "an axis: a «+» on its two segments (open)");
+  // a point taken away
+  const rm = W.editWall(ins.input, { op: "remove", which: "plan", k: 1 });
+  eq(rm.ok && W.wallSig(rm.input), W.wallSig(inp), "the inserted corner taken away: the wall as before");
+  const rmTop = W.editWall(inp, { op: "remove", which: "top", k: 0 });
+  ok(rmTop.ok && rmTop.input.top.length === 1, "a head point taken away");
+  const tri = W.editWall(inp, { op: "remove", which: "plan", k: 3 });
+  ok(tri.ok && tri.input.plan.length === 3, "a corner taken away: three left, a triangle");
+  const tooFew = W.editWall(tri.input, { op: "remove", which: "plan", k: 0 });
+  ok(!tooFew.ok && tooFew.why === "too_few", "the outline cannot go under three corners: refused");
+  ok(!W.editWall(inp, { op: "remove", which: "top", k: 9 }).ok, "no such point: refused");
+  // a head point added later («Aggiungi punti alti»)
+  const add = W.editWall({ ...inp, headMode: "surface" }, { op: "add-top", point: wp(2, 0.3, 2.6) });
+  const m3 = solid(W.buildWall(add.input), "a head point added later");
+  eq(m3.stats.inner, 1, "added inside a seen head: a point of its surface");
+}
+
+// ── MICRO-PX1b · the pivot, and the new fields read back ────────────────────
+{
+  const base = { mode: "outline", plan: [wp(0, 0, 1), wp(4, 0, 1), wp(4, 0.6, 1), wp(0, 0.6, 1)], top: [], height: 2, thickness: 0.6 };
+  const b = W.buildWall(base).mesh, c = W.buildWall({ ...base, pivot: "center" }).mesh, t = W.buildWall({ ...base, pivot: "top" }).mesh;
+  near([b.origin[1], c.origin[1], t.origin[1]], [1, 2, 3], 1e-12, "the origin at the bottom (PX1's), the centre, the top");
+  near(W.meshVolume(t.positions, t.indices), 4 * 0.6 * 2, 1e-9, "the pivot moves the frame, not the wall");
+  near(t.base[0], b.base[0], 1e-12, "…the corners where they were");
+  const back = W.readWallInput(JSON.parse(JSON.stringify({ ...base, headMode: "surface", pivot: "top", estimated: { rule: "x" } })));
+  eq([back.headMode, back.pivot, "estimated" in back], ["surface", "top", false], "head mode and pivot read back; the estimate written in the layout is not read (computed again)");
+  const old = W.readWallInput(JSON.parse(JSON.stringify(base)));
+  eq(["headMode" in old, "pivot" in old], [false, false], "a wall of PX1: no head mode, no pivot — the mesh it had");
 }
 
 console.log(`check-wall-from-plan: ${checks} checks passed`);

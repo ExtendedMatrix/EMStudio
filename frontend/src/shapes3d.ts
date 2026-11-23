@@ -20,7 +20,7 @@
  * glb is, and the shape is that glb, not a primitive.
  */
 import catalogue from "./rules/shape_catalogue.json";
-import { readWallInput, type WallInput } from "./wall-from-plan";
+import { buildWall, readWallInput, type WallInput } from "./wall-from-plan";
 
 type V3 = [number, number, number];
 
@@ -200,7 +200,19 @@ export function removeSketch(id: string): void {
 export function serializeSketches(): Sketch[] {
   return sketches.map((s) => ({ id: s.id, shape: s.shape, name: s.name, position: [...s.position] as V3,
     rotation: [...s.rotation] as V3, scale: [...s.scale] as V3, ...(s.file ? { file: { ...s.file } } : {}),
-    ...(s.wall ? { wall: JSON.parse(JSON.stringify(s.wall)) } : {}) }));
+    ...(s.wall ? { wall: wallWithEstimate(s.wall) } : {}) }));
+}
+
+/** MICRO-PX1b · a wall as the layout keeps it: its inputs, and — written, not
+ *  read back (it is computed again) — the corners of its head ESTIMATED, so the
+ *  sketch's paradata says which points are not clicks of a document */
+function wallWithEstimate(w: WallInput & { annotate?: boolean }): WallInput & { annotate?: boolean } {
+  const out = JSON.parse(JSON.stringify(w)) as Record<string, unknown>;
+  const r = buildWall(w);
+  if (r.ok && r.mesh.estimate.vertices.length)
+    out.estimated = { rule: r.mesh.estimate.rule, from: r.mesh.estimate.from,
+      points: r.mesh.estimate.vertices.map((i) => r.mesh.head[i].map((c) => Math.round(c * 1e4) / 1e4)) };
+  return out as unknown as WallInput & { annotate?: boolean };
 }
 
 /** A list read back (the layout of a file opened): what is not a sketch is
