@@ -161,14 +161,21 @@ export interface ToolbarEntry {
  *  between the two groups is the drawer's). The active one: an extension's
  *  tool armed, else the core's. */
 export function toolbarEntries(o: {
-  core: CoreTool;
+  /** the core tool chosen: select, cursor, or one of `registered` (MICRO-PX1) */
+  core: string;
   coreTitle: (id: CoreTool) => string;
+  /** MICRO-PX1 · the core's tools of the register (space-tools.ts, editor «space»),
+   *  after «Select» and «3D cursor» in the core's group: «Muro da pianta» first */
+  registered?: Array<{ id: string; glyph: string; title: string; off: string | null }>;
   extensions: Array<{ id: string; glyph: string; title: string; off: string | null }>;
   armed: string | null;
 }): ToolbarEntry[] {
-  const active = o.armed && o.extensions.some((x) => x.id === o.armed && !x.off) ? o.armed : o.core;
+  const reg = o.registered ?? [];
+  const core = (CORE_TOOLS as readonly string[]).includes(o.core) || reg.some((x) => x.id === o.core && !x.off) ? o.core : "select";
+  const active = o.armed && o.extensions.some((x) => x.id === o.armed && !x.off) ? o.armed : core;
   return [
     ...CORE_TOOLS.map((id): ToolbarEntry => ({ id, group: "core", glyph: CORE_TOOL_GLYPH[id], title: o.coreTitle(id), off: null, active: active === id })),
+    ...reg.map((x): ToolbarEntry => ({ id: x.id, group: "core", glyph: x.glyph, title: x.title, off: x.off, active: active === x.id })),
     ...o.extensions.map((x): ToolbarEntry => ({ id: x.id, group: "extension", glyph: x.glyph || "◆", title: x.title, off: x.off, active: active === x.id })),
   ];
 }

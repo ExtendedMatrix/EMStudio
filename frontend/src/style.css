@@ -9117,6 +9117,20 @@ button.cw-lab:hover { text-decoration: underline; }
 .scn-tb-btn.off:hover { background: transparent; color: inherit; }
 .scn-tb-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .scn-tb-sep { width: 22px; height: 0; border-top: 1px solid var(--scene-ov-border); margin: 3px 0; }
+/* MICRO-PX1 · «Muro da pianta»: the phase, the counter and where the clicks fall, over the view's bottom left */
+.scn-wallbar { position: absolute; left: 50px; bottom: 34px; z-index: 4; max-width: min(560px, calc(100% - 120px)); padding: 5px 9px;
+  border: 1px solid var(--scene-ov-border); border-radius: var(--radius); background: var(--scene-ov-bg); color: var(--scene-ov-ink); font-size: 12px; line-height: 1.35; }
+.scn-wallbar.hidden { display: none; }
+.scn-wallbar-hint { opacity: 0.85; }
+.scn-wallbar-where { opacity: 0.85; margin-top: 2px; }
+.scn-wallbar-where.warn, .np-sect .xf-note.warn { color: var(--warn, #b26b00); opacity: 1; }
+.wall-points { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; table-layout: fixed; }
+.wall-points td:first-child, .wall-points th:first-child { width: 22px; overflow: hidden; text-overflow: ellipsis; }
+.wall-points td:last-child, .wall-points th:last-child { width: 14px; }
+.wall-points td:last-child button { padding: 0; min-width: 0; width: 14px; border: 0; background: none; }
+.wall-points th { text-align: left; font-weight: 600; opacity: 0.7; }
+.wall-points td { padding: 1px 2px; white-space: nowrap; }
+.wall-points .wall-num { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; padding: 1px 2px; }
 .scn-ttab { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 4; border: 1px solid var(--border-strong); border-left: 0; border-radius: 0 6px 6px 0; background: var(--bg-panel); color: var(--text); padding: 10px 4px; cursor: pointer; font: inherit; font-weight: 600; }
 /* the trace's state over the view, while an extension's tool is armed (its tools are in the toolbar) */
 .plg-trace-glyph { padding: 0 4px; font-weight: 700; }

@@ -44,6 +44,16 @@ export interface SpaceToolSpec {
   disabled?: () => string | null;
   /** a landmark set's tool: the clicks are one point each, guided */
   guided?: boolean;
+  /** MICRO-PX1 · the editors whose bar shows it: the Viewer's (one document's
+   *  model) and/or the Space's toolbar (after «Select» and «3D cursor»).
+   *  Absent: the Viewer only, as every tool before (the Space reads its
+   *  extensions' tools from their layers) */
+  editors?: ReadonlyArray<"viewer" | "space">;
+}
+
+/** Does the bar of `editor` show the tool? */
+export function inEditor(spec: Pick<SpaceToolSpec, "editors">, editor: "viewer" | "space"): boolean {
+  return (spec.editors ?? ["viewer"]).includes(editor);
 }
 
 const register: SpaceToolSpec[] = [];
@@ -68,6 +78,11 @@ export function unregisterOrigin(pred: (origin: string) => boolean): void {
   let any = false;
   for (let i = register.length - 1; i >= 0; i--) if (pred(register[i].origin)) { register.splice(i, 1); any = true; }
   if (any) listeners.forEach((f) => f());
+}
+/** MICRO-PX1 · the core's tools of the Space's toolbar, after «Select» and
+ *  «3D cursor», in the order they were registered. */
+export function spaceCoreTools(): SpaceToolSpec[] {
+  return register.filter((t) => t.origin === "core" && inEditor(t, "space"));
 }
 /** The tools, in the bar's order (the order they were registered). */
 export function spaceTools(): readonly SpaceToolSpec[] { return register; }

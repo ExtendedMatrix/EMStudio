@@ -10424,7 +10424,7 @@ def make_handler(api):
                         **read})
 
         def _geometry_proxies(self, raw):
-            """P1 · ``{doc, items: [{unit_id, url}]}`` → ``{nodes, edges}``: the
+            """P1 · ``{doc, items: [{unit_id, url, points?}]}`` → ``{nodes, edges}``: the
             nodes and edges `create_geometry_proxy` adds, as em.json, for the
             editor to merge (`addSubgraph`). Nothing of the chain is written in
             TypeScript: the ids are the library's (uuid5 of unit and payload)."""
@@ -10437,7 +10437,7 @@ def make_handler(api):
                 graph, _warnings = api.load_emjson(body.get("doc") or {})
                 before_n = {n.node_id for n in graph.nodes}
                 before_e = {e.edge_id for e in graph.edges}
-                done, warnings = [], []
+                done, warnings, paradata = [], [], []
                 for item in body.get("items") or []:
                     uid, url = str(item.get("unit_id") or ""), str(item.get("url") or "")
                     if not uid or not url:
@@ -10445,6 +10445,22 @@ def make_handler(api):
                     out = api.create_geometry_proxy(graph, uid, {"url": url})
                     warnings.extend(getattr(out, "warnings", []) or [])
                     done.append(uid)
+                    # MICRO-PX1 · a proxy drawn from points («Muro da pianta»): its
+                    # paradata, the chain EM Tools' Proxy Box writes — one extractor
+                    # per point from the document it fell on, a combiner, the unit's
+                    # «Proxy Geometry» — written by the library (`proxy_from_points`)
+                    points = item.get("points")
+                    if points:
+                        if not hasattr(api, "proxy_from_points"):
+                            raise RuntimeError("this s3dgraphy has no `proxy_from_points` (MICRO-PX1): "
+                                               "point the bridge at a newer s3Dgraphy")
+                        pp = api.proxy_from_points(graph, uid, list(points),
+                                                   purpose=str(item.get("purpose") or "proxy_box_creator"),
+                                                   property_description=item.get("property_description") or None,
+                                                   combiner_description=item.get("combiner_description") or None,
+                                                   author=item.get("author") or None)
+                        warnings.extend(pp.warnings)
+                        paradata.append({"unit_id": uid, **pp.as_dict()})
                 em = api.graph_to_emjson(graph)["graph"]
                 nodes = [n for n in em.get("nodes", []) if n.get("id") not in before_n]
                 edges = [e for e in em.get("edges", []) if e.get("id") not in before_e]
@@ -10454,7 +10470,7 @@ def make_handler(api):
                 self._fail(500, f"geometry proxies failed: {exc}")
                 return
             self._json({"ok": True, "units": done, "nodes": nodes, "edges": edges,
-                        "warnings": warnings})
+                        "warnings": warnings, "paradata": paradata})
 
         def _geometry_summary(self, raw):
             # the body is parsed in the worker (a bad one is still a 400)

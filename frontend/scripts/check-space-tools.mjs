@@ -10,6 +10,9 @@
 //     its pair, then the set's order, «Salta» moving on), the ghost by
 //     Procrustes (an exact similarity found from three points, none from
 //     points on one line, none before three), «far from the expected»;
+//   · MICRO-PX1: a tool's editors (the Viewer's bar, the Space's toolbar), the
+//     Space's core tools of the register, «Muro da pianta» wired (click, Enter,
+//     Esc, Backspace, marks, the association's points, the bridge's paradata);
 //   · the main.ts wiring: the six tools registered first with their ids, the
 //     Viewer's click through the register, the bridge level 79;
 //   · the bridge (python, tools/em_pose.py over s3dgraphy.annotation), on the
@@ -68,6 +71,15 @@ eq([T.clickCount(two, 1, () => ""), T.clickCount(range, 2, () => ""), T.clickCou
 eq(T.snapped({ snap: "vertex" }, { point: [1, 2, 3], vertex: [1, 2, 4] }), [1, 2, 4], "snap vertex: the mesh's nearest vertex");
 eq(T.snapped({ snap: "vertex" }, { point: [1, 2, 3], vertex: null }), [1, 2, 3], "…the point hit when the scene has no vertex to give");
 eq(T.snapped({ snap: "surface" }, { point: [1, 2, 3], vertex: [9, 9, 9] }), [1, 2, 3], "snap surface: the point hit");
+
+// MICRO-PX1 · the editors of a tool: the Viewer's bar by default, the Space's toolbar when it says so
+eq([T.inEditor(tool("v"), "viewer"), T.inEditor(tool("v"), "space")], [true, false], "a tool without editors: the Viewer's, as before");
+T.registerSpaceTool(tool("wallx", { editors: ["space"] }));
+T.registerSpaceTool(tool("pkg:z", { origin: "esempio", editors: ["space"] }));
+eq([T.inEditor(T.spaceTool("wallx"), "viewer"), T.inEditor(T.spaceTool("wallx"), "space")], [false, true], "a tool of the Space only");
+eq(T.spaceCoreTools().map((t) => t.id), ["wallx"], "the Space's core tools of the register: origin core and editor space (a package's are not core)");
+T.unregisterSpaceTool("wallx"); T.unregisterSpaceTool("pkg:z");
+eq(T.spaceCoreTools(), [], "…gone with the tool");
 
 // ── the pure pose ───────────────────────────────────────────────────────────
 const P = await load("space-pose.ts");
@@ -182,8 +194,20 @@ ok(/for \(const tool of VIEWER_3D_TOOLS\)\s*\n?\s*registerSpaceTool\(/.test(main
 ok(/spaceTools\(\)/.test(main) && !/for \(const tool of VIEWER_3D_TOOLS\) \{\s*const on = s\.trace\.tool === tool/.test(main), "the bar draws the register, not the constant");
 ok(/const need = CLICKS\[tool\]/.test(main) === false, "the clicks come from the register");
 ok(/BRIDGE_LEVEL_WANTED = (79|[89]\d)/.test(main), "the page wants the bridge of level 79 or later");
+// MICRO-PX1 · «Muro da pianta»: a core tool of the Space's toolbar, not of the Viewer's bar
+ok(/registerSpaceTool\(\{ id: "wall", primitive: "polyline", origin: "core", snap: "surface"[\s\S]{0,120}editors: \["space"\]/.test(main),
+   "«Muro da pianta» registered: core, snap surface, the Space's only");
+ok(/for \(const spec of spaceTools\(\)\) \{\s*if \(!inEditor\(spec, "viewer"\)\) continue;/.test(main), "the Viewer's bar skips the Space's tools");
+ok(/registered: registeredSpaceCoreTools\(\)\.map/.test(main), "the Space's toolbar draws the register's core tools after Select and 3D cursor");
+ok(/if \(spaceCoreTools\.get\(win\.id\) === WALL_TOOL\) return wallClick\(win, hit, dbl\);/.test(main), "a click with the wall armed is the wall's (a double click closes the phase)");
+ok(/if \(a === "confirm"\) \{ wallClose\(win\); return true; \}/.test(main) && /a === "cancel" && wallCancel\(win\)/.test(main)
+   && /a === "delete" && wallUndoPoint\(win\)/.test(main), "Enter closes the phase, Esc cancels it, Backspace takes the last point back");
+ok(/\.\.\.wallMarks\(win\.id\)\]/.test(main), "the trace drawn as the Space's marks");
+ok(/points: wallItem\.points, purpose: "wall_from_plan"/.test(main), "the association sends the wall's points (the extractors) with purpose wall_from_plan");
 const bridge = fs.readFileSync(path.join(SRC, "../../tools/em_bridge.py"), "utf8");
 ok(/BRIDGE_LEVEL = (79|[89]\d)/.test(bridge) && /route\.startswith\("\/pose\/"\)/.test(bridge), "the bridge: level 79 or later, /pose/* routed");
+ok(/api\.proxy_from_points\(graph, uid, list\(points\)/.test(bridge) && /"paradata": paradata/.test(bridge),
+   "the bridge's /geometry-proxies writes the points' paradata with s3Dgraphy's proxy_from_points and says it");
 
 // ── the bridge's /pose/* over s3dgraphy.annotation, on em-profiles' example ──
 const S3D = process.env.S3D ?? path.resolve(SRC, "../../../s3Dgraphy");

@@ -20,6 +20,7 @@
  * glb is, and the shape is that glb, not a primitive.
  */
 import catalogue from "./rules/shape_catalogue.json";
+import { readWallInput, type WallInput } from "./wall-from-plan";
 
 type V3 = [number, number, number];
 
@@ -137,6 +138,10 @@ export interface Sketch {
   shape: string;
   /** MICRO-SPAZIO-3D-3 · a glb: the proxy a unit had, kept when replaced */
   file?: { url: string; checksum?: string; from?: string };
+  /** MICRO-PX1 · shape "wall": the inputs of «Muro da pianta» (the clicks in
+   *  the scene's frame, the mode, the height or thickness), kept so the wall
+   *  can be generated again after a correction (`wall-from-plan.ts`) */
+  wall?: WallInput & { annotate?: boolean };
   name: string;
   position: V3;
   /** Euler XYZ, radians */
@@ -194,7 +199,8 @@ export function removeSketch(id: string): void {
 /** The list as the layout keeps it: plain data, the pose rounded to the float. */
 export function serializeSketches(): Sketch[] {
   return sketches.map((s) => ({ id: s.id, shape: s.shape, name: s.name, position: [...s.position] as V3,
-    rotation: [...s.rotation] as V3, scale: [...s.scale] as V3, ...(s.file ? { file: { ...s.file } } : {}) }));
+    rotation: [...s.rotation] as V3, scale: [...s.scale] as V3, ...(s.file ? { file: { ...s.file } } : {}),
+    ...(s.wall ? { wall: JSON.parse(JSON.stringify(s.wall)) } : {}) }));
 }
 
 /** A list read back (the layout of a file opened): what is not a sketch is
@@ -207,9 +213,12 @@ export function loadSketches(list: unknown): void {
     const o = x as Record<string, unknown>;
     if (!o || typeof o.id !== "string" || typeof o.shape !== "string") continue;
     const f = o.file as Record<string, unknown> | undefined;
-    if (o.shape !== "file" && !shapeById(o.shape)) continue;
+    const wall = o.shape === "wall" ? readWallInput(o.wall) : null;
+    if (o.shape !== "file" && o.shape !== "wall" && !shapeById(o.shape)) continue;
     if (o.shape === "file" && !(f && typeof f.url === "string")) continue;
+    if (o.shape === "wall" && !wall) continue;
     sketches.push({ id: o.id, shape: o.shape, name: String(o.name ?? o.id),
+      ...(wall ? { wall: { ...wall, annotate: (o.wall as { annotate?: unknown }).annotate !== false } } : {}),
       position: tri(o.position, [0, 0, 0]), rotation: tri(o.rotation, [0, 0, 0]), scale: tri(o.scale, [1, 1, 1]),
       ...(f ? { file: { url: String(f.url), ...(typeof f.checksum === "string" ? { checksum: f.checksum } : {}), ...(typeof f.from === "string" ? { from: f.from } : {}) } } : {}) });
     const m = /(\d+)$/.exec(o.id);
@@ -226,6 +235,29 @@ export function addFileSketch(file: { url: string; checksum?: string; from?: str
   sketches.push(s);
   changed();
   return s;
+}
+
+/** MICRO-PX1 · a wall of «Muro da pianta»: its inputs, its pose at the
+ *  mesh's origin (upright, scale 1). */
+export function addWallSketch(wall: WallInput & { annotate?: boolean }, at: V3, name: string): Sketch {
+  seq += 1;
+  const s: Sketch = { id: `sketch-${seq}`, shape: "wall", wall: JSON.parse(JSON.stringify(wall)),
+    name: `${name}.${String(seq).padStart(3, "0")}`, position: [...at] as V3, rotation: [0, 0, 0], scale: [1, 1, 1] };
+  sketches.push(s);
+  changed();
+  return s;
+}
+
+/** MICRO-PX1 · a wall's inputs changed (a corrected point, the height): the
+ *  scene builds its mesh again; the pose given with it. */
+export function updateWall(id: string, wall: WallInput & { annotate?: boolean }, pose?: Partial<Pick<Sketch, "position" | "rotation" | "scale">>): void {
+  const s = sketchById(id);
+  if (!s || s.shape !== "wall") return;
+  s.wall = JSON.parse(JSON.stringify(wall));
+  if (pose?.position) s.position = [...pose.position] as V3;
+  if (pose?.rotation) s.rotation = [...pose.rotation] as V3;
+  if (pose?.scale) s.scale = [...pose.scale] as V3;
+  changed();
 }
 
 /** For the checks: forget everything. */

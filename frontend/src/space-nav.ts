@@ -192,7 +192,9 @@ export type SpaceKeyAction =
   /** MICRO-SPAZIO-3D-3 · A, Alt+A; H, Alt+H, Shift+H; B (box select) */
   | "select-all" | "select-none" | "hide" | "reveal" | "hide-unselected" | "box-select"
   /** MICRO-SEG26 · Shift+N, «Bring into the Narrative…»: the view as it is now into the active block */
-  | "to-narrative";
+  | "to-narrative"
+  /** MICRO-PX1 · Enter: a tool's trace closes its phase («Muro da pianta») */
+  | "confirm";
 
 export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
                                mac: boolean): SpaceKeyAction | null {
@@ -231,6 +233,7 @@ export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boo
     case "s": case "S": return "scale";
     case "x": case "X": case "Delete": case "Backspace": return "delete";
     case "Escape": return "cancel";
+    case "Enter": return "confirm";
     default: return null;
   }
 }

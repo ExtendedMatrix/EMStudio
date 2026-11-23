@@ -61,6 +61,7 @@ import {
 import { medianPoint, pickUnder, type LastPick } from "./space-selection";
 import { altReleaseDue, altSide, bigTurn, pickByDistance, screenShare, SSE_PX, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
+import { buildWall } from "./wall-from-plan";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
 import { estimateMb, lighterThatFits, mbSay, roomFor, type Weight } from "./memory-guard";
 import { cutEdges } from "./threed-edges";
@@ -2072,6 +2073,30 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               syncSketches();
             });
             m = g;
+          }
+          // MICRO-PX1 · a wall of «Muro da pianta»: its mesh built from its inputs,
+          // again when they change (a corrected point, the height)
+          const wallSig = s.shape === "wall" && s.wall ? JSON.stringify(s.wall) : "";
+          if (m && wallSig && m.userData.wallSig !== wallSig) { sketchGroup.remove(m); sketchMeshes.delete(s.id); m = undefined; }
+          if (!m && s.shape === "wall") {
+            const built = s.wall ? buildWall(s.wall) : null;
+            if (!built || !built.ok) continue;
+            const g = new THREE.BufferGeometry();
+            g.setAttribute("position", new THREE.Float32BufferAttribute(built.mesh.positions, 3));
+            g.setIndex(built.mesh.indices);
+            // drawn with flat normals (each face its own corners); the glb takes
+            // the indexed mesh — closed, manifold, 2n vertices, no normals
+            const shown = g.toNonIndexed();
+            shown.computeVertexNormals();
+            m = new THREE.Mesh(shown, sketchMaterial());
+            m.userData.wallSig = wallSig;
+            m.userData.wallGeom = g;
+            const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g, 20), new THREE.LineBasicMaterial({ color: 0x7a3d00 }));
+            edges.userData.edges = true;
+            m.add(edges);
+            m.userData.sketchId = s.id;
+            sketchGroup.add(m);
+            sketchMeshes.set(s.id, m);
           }
           if (!m) {
             const spec = shapeById(s.shape);
@@ -4330,7 +4355,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               mesh.add(k);
             }
           } else {
-            mesh = new THREE.Mesh(m.geometry.clone(), new THREE.MeshStandardMaterial({ color: 0xd9822b }));
+            // MICRO-PX1 · a wall: its indexed mesh (no normals: glTF readers shade it flat)
+            mesh = new THREE.Mesh((m.userData.wallGeom ?? m.geometry).clone(), new THREE.MeshStandardMaterial({ color: 0xd9822b }));
           }
           mesh.name = id;
           const exporter = new GLTFExporter();

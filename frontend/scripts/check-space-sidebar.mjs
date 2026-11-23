@@ -87,6 +87,15 @@ eq(bar.filter((e) => e.active).map((e) => e.id), ["cursor"], "a tool that cannot
 eq(S.findTool(bar, "geofisica.trace.point"), "plugin:geofisica/geofisica.trace.point", "a tool by its command");
 eq(S.findTool(bar, "cursor"), "cursor", "…or its id");
 eq(S.findTool(bar, "measure"), null, "no measure in the Space");
+// MICRO-PX1 · the register's core tools («Muro da pianta») after Select and 3D cursor, in the core's group
+const reg = [{ id: "wall", glyph: "▥", title: "Wall from plan", off: null }];
+bar = S.toolbarEntries({ core: "wall", coreTitle: (id) => id, registered: reg, extensions: ext, armed: null });
+eq(bar.map((e) => [e.id, e.group]).slice(0, 3), [["select", "core"], ["cursor", "core"], ["wall", "core"]], "the wall after Select and 3D cursor, in the core's group");
+eq(bar.filter((e) => e.active).map((e) => e.id), ["wall"], "…the active one when chosen");
+bar = S.toolbarEntries({ core: "wall", coreTitle: (id) => id, extensions: ext, armed: null });
+eq(bar.filter((e) => e.active).map((e) => e.id), ["select"], "a core tool no longer registered: back to Select");
+bar = S.toolbarEntries({ core: "wall", coreTitle: (id) => id, registered: reg, extensions: ext, armed: "plugin:geofisica/geofisica.trace.point" });
+eq(bar.filter((e) => e.active).map((e) => e.id), ["plugin:geofisica/geofisica.trace.point"], "an extension's tool armed wins over the core's");
 
 // ── a narrow window ──────────────────────────────────────────────────────────
 ok(S.sidebarOverlays(400, 250) && S.sidebarOverlays(560, 180), "a telephone: the sidebar over the view");
