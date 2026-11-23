@@ -617,7 +617,9 @@ export function issues(src: IssueSources): Issue[] {
   //    `data.unnumbered`) or a name that holds no number at all (X_TOPSOIL) —
   //    s3Dgraphy's diagnostics.unnumbered_hints. A warning, never a fix: the
   //    number is assigned by a person. The continuity node (BR) is named by
-  //    convention and is not listed.
+  //    convention and is not listed. MICRO-LG13: only the DECLARED unit is
+  //    kept out of pyArchInit (by s3Dgraphy); a name without digits goes with
+  //    its name, and its warning is a question («assegnarne uno?»).
   for (const n of nodes) {
     if (!src.isUnit(n.node_type) || n.node_type === "BR") continue;
     const d = (n.data ?? {}) as Record<string, unknown>;

@@ -16,6 +16,10 @@
 //   3 · the ISSUES (pure, in node): a declared unit and a unit whose name holds
 //       no number → one warning each, rule «unnumbered»; SU051, the continuity
 //       node and a document → none; the label in IT and EN.
+//   4 · MICRO-LG13 (E.D., 23 Nov 2026): only the declared unit is blocked
+//       towards pyArchInit; the warning for a name without digits is a
+//       question and says the unit goes with its name — never «before the
+//       sync» (EN, IT, DE).
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -80,6 +84,17 @@ for (const [lang, phrase, label] of [["it", "unità senza numero — assegnarne 
   ok(rows[0].txt.includes(phrase), `${lang}: «${phrase}»`);
   eq(R.nodeElementText("unnumbered"), label, `${lang}: the badge says «${label}»`);
   eq([R.isUnnumbered(g.nodes[0]), R.isUnnumbered(g.nodes[2])], [true, false], `${lang}: isUnnumbered`);
+}
+
+// 4 · MICRO-LG13: the name without digits is a warning, not a block
+for (const [lang, phrase] of [["en", "name without a number — assign one? (it goes to pyArchInit with its name)"],
+                              ["it", "nome senza numero — assegnarne uno? (va in pyArchInit con il suo nome)"],
+                              ["de", "Name ohne Nummer — eine vergeben? (geht mit seinem Namen nach pyArchInit)"]]) {
+  const { I, R, t } = await bundle(lang);
+  const row = I.issues({ doc: { graph: g }, nodes: g.nodes, isUnit: R.isStratigraphicType, t })
+    .find((i) => i.rule === "unnumbered" && i.node === "x");
+  ok(row && row.sev === "warn" && row.txt.includes(phrase), `${lang}: X_TOPSOIL «${phrase}»`);
+  ok(!/before the sync|prima della sincronizzazione|vor dem Abgleich/.test(row.txt), `${lang}: no block said for a name`);
 }
 
 console.log(`check-unnumbered: ${checks} checks ok`);
