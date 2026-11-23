@@ -344,7 +344,7 @@ import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type 
          type SceneHandle, type SceneHandleEvent, type ScenePreview as SceneSolid } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
-import { CLICKS, readingOf as reading3dOf, VIEWER_3D_TOOLS, type ReadTexts, type Viewer3dTool } from "./viewer-annot";
+import { alignmentOfRegion, CLICKS, readingOf as reading3dOf, toZUp, VIEWER_3D_TOOLS, type Alignment, type ReadTexts, type Viewer3dTool } from "./viewer-annot";
 import { canClose, clickCount, clickVerdict, inEditor, registerSpaceTool, snapped, spaceCoreTools as registeredSpaceCoreTools,
          spaceTool, spaceTools, unregisterOrigin, type SpaceToolSpec } from "./space-tools";
 import { bakePose, blenderXYZ, buildWall, editWall, meshVolume, poseIsBuilt, WALL_TOL, wallDocuments, wallSides, wallSig,
@@ -32952,7 +32952,9 @@ function askWhatExtractionReads(st: DocumentStore, x: string, anchorEl: HTMLElem
     .filter((n) => isStratigraphicType(n.node_type))
     .map((u) => ({ id: u.id, name: String(u.name || u.id),
       props: chain.propertiesOf(st.doc, u.id).map((pid) => ({ id: pid, name: String(st.node(pid)?.name ?? pid), value: chain.propertyValue(st.node(pid)) })) }));
-  const names = [...new Set(st.liveNodes().filter((n) => n.node_type === "property").map((n) => String(n.name ?? "")))].filter(Boolean).sort();
+  let names = [...new Set(st.liveNodes().filter((n) => n.node_type === "property").map((n) => String(n.name ?? "")))].filter(Boolean).sort();
+  // MICRO-PX6 · an alignment feeds an «alignment» (or the qualia «orientation»: azimuth, tilt) first
+  if (alignOfExtractor(x)) names = ["alignment", "orientation", ...names.filter((n) => n !== "alignment" && n !== "orientation")];
   const link = (pid: () => string | null) => {
     const ok = st.batch(() => { const p = pid(); return p ? chain.linkExtraction(st, p, x) : false; });
     if (!ok) return;
@@ -34945,6 +34947,8 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
       renderTransformForm(body, { xf: before, texts: xfTexts(), note: n, readOnly, probe: `np:${key}`,
         onCommit: (xf) => commitAll(key, before, xf), onReset: () => commitAll(key, before, IDENTITY) });
     }
+  } else if (renderAlignItem(sect, win)) {
+    // MICRO-PX6 · an alignment selected: what it read, its points, what it feeds
   } else {
     // MICRO-OUTLINER-UNICO · an empty state is one line (the how is the title's «?»)
     const none = document.createElement("p");
@@ -35131,6 +35135,8 @@ function setSpaceTool(winId: string, id: string): boolean {
     // MICRO-PX3 · …and «Annota superficie» its contour (not while it is being cut)
     if (id !== SURF_TOOL && !surfTraces.get(winId)?.busy) { surfTraces.delete(winId); surfTrisCache.delete(`tr:${winId}`); }
     surfHover.delete(winId);
+    // MICRO-PX6 · …and «Allineamento» its points
+    if (id !== ALIGN_TOOL) alignTraces.delete(winId);
     pxCloseNote();
     // MICRO-PX1b · any choice of the toolbar ends «Aggiungi punti alti» (it is set again after, when it is its)
     wallAddTop.delete(winId);
@@ -35628,10 +35634,13 @@ function drawWallBar(bar: HTMLElement, winId: string): void {
   const boxOn = spaceCoreTools.get(winId) === BOX_TOOL;
   // MICRO-PX3 · …and for «Annota superficie»
   const surfOn = spaceCoreTools.get(winId) === SURF_TOOL;
-  const on = spaceCoreTools.get(winId) === WALL_TOOL || elevOn || boxOn || surfOn;
+  // MICRO-PX6 · …and for «Allineamento»
+  const alignOn = spaceCoreTools.get(winId) === ALIGN_TOOL;
+  const on = spaceCoreTools.get(winId) === WALL_TOOL || elevOn || boxOn || surfOn || alignOn;
   bar.classList.toggle("hidden", !on);
   if (!on) return;
-  bar.dataset.tool = elevOn ? ELEV_TOOL : boxOn ? BOX_TOOL : surfOn ? SURF_TOOL : WALL_TOOL;
+  bar.dataset.tool = elevOn ? ELEV_TOOL : boxOn ? BOX_TOOL : surfOn ? SURF_TOOL : alignOn ? ALIGN_TOOL : WALL_TOOL;
+  if (alignOn) { drawAlignBar(bar, winId); return; }
   if (elevOn) { drawElevBar(bar, winId); return; }
   if (boxOn) { drawBoxBar(bar, winId); return; }
   if (surfOn) { drawSurfBar(bar, winId); return; }
@@ -35729,6 +35738,8 @@ function renderWallToolTab(box: HTMLElement, win: Win): void {
   };
   row(t("wall.height"), num(prefs.height, "height", (x) => setWallPrefs({ height: x })), "height");
   if (prefs.mode === "axis") row(t("wall.thickness"), num(prefs.thickness, "thickness", (x) => setWallPrefs({ thickness: x })), "thickness");
+  // MICRO-PX6 · the axis from an alignment already read (the plan not begun)
+  if (prefs.mode === "axis" && tr.phase === "plan" && !tr.plan.length) alignAxisRow(box, "wall", (xid) => alignToWall(win, xid));
   // MICRO-PX1b · how the head's points are read; the pivot (where the proxy's origin is)
   row(t("wall.headMode"), wallHeadSelect(prefs.headMode, (v) => setWallPrefs({ headMode: v })), "head");
   row(t("wall.pivot"), wallPivotSelect(prefs.pivot, (v) => setWallPrefs({ pivot: v })), "pivot");
@@ -37063,6 +37074,8 @@ function renderBoxToolTab(box: HTMLElement, win: Win): void {
   const prefs = boxPrefs();
   const tr = boxTrace(win.id);
   note(t("box.how"), "box-how");
+  // MICRO-PX6 · points 1 and 2 from an alignment already read
+  alignAxisRow(box, "box", (xid) => alignToBox(win, xid));
   const table = document.createElement("table");
   table.className = "wall-points box-roles";
   table.dataset.boxRoles = "1";
@@ -37816,6 +37829,485 @@ function renderSurfInputs(sect: NpSect, sk: Sketch, win: Win): void {
   box.appendChild(table);
 }
 
+// ── MICRO-PX6 (E.D., 23 Nov 2026) · «ALLINEAMENTO» / «ALIGNMENT» ────────────
+//
+// In EM Tools the alignment lived inside the Proxy Box (alignment_start /
+// alignment_end). Here it is an EXTRACTOR of its own, of the document of the
+// model clicked: two or more clicks on ONE document's models (on the surface;
+// «Snap to the mesh's edges» as «From elevation»), Enter or a double click
+// closes. While clicking: the polyline, the elastic side to the pointer, the
+// fitted line and the reading live in the bar. What is read is the Viewer's
+// reading «alignment» (`viewer-annot.ts`, one code for the Viewer and the
+// Space): the line in plan, its azimuth from the frame's north, its length,
+// its slope, with more than two points the fitted line and its largest
+// deviation. Written as the Viewer writes a reading (`addFreeExtraction`): an
+// extractor `extracted_from` the document, its place (an annotation_region
+// line / polyline) ON the model clicked, the value in `data.result`; the
+// annotation asked at the closing (its description). Selected: handles on its
+// points (dragged on the model, «+» inserts, X takes away; each a step of the
+// undo, the reading made again); the Item tab says everything it read; it
+// can feed a property of a unit («Interpretazione», `alignment` or
+// `orientation` offered first) and be the axis of a «Seven-point box» or of a
+// «Wall from plan» in «axis + thickness» mode.
+
+const ALIGN_TOOL = "alignment";
+interface AlignTrace { points: WallPoint[]; screen: { x: number; y: number } | null }
+// eslint-disable-next-line no-var
+var alignTraces = new Map<string, AlignTrace>();
+/** a handle of the selected alignment being dragged: its vertices as they would be */
+// eslint-disable-next-line no-var
+var alignDraft: { winId: string; xid: string; vertices: V3[] } | null = null;
+/** the point of the selected alignment clicked last (X takes it away) */
+// eslint-disable-next-line no-var
+var alignActive: { xid: string; k: number } | null = null;
+function alignTrace(winId: string): AlignTrace {
+  let tr = alignTraces.get(winId);
+  if (!tr) { tr = { points: [], screen: null }; alignTraces.set(winId, tr); }
+  return tr;
+}
+const alignNum = (v: number, d: number) => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false });
+/** the reading of vertices in the scene's frame (the Viewer's code) */
+function alignReadingOf(vs: V3[]) {
+  return vs.length >= 2 ? reading3dOf("alignment", vs, null, VW_READ_TEXTS(), alignNum) : null;
+}
+/** an extractor that reads an alignment: its region's data, its document, its model */
+function alignOfExtractor(xid: string | null | undefined): { xid: string; al: Alignment; vertices: V3[]; doc: string | null; on: string | null; regionId: string } | null {
+  const st = store;
+  if (!st || !xid || st.node(xid)?.node_type !== "extractor") return null;
+  const r = chain.regionOfExtractor(st.doc, xid);
+  const d = (r?.data ?? {}) as Record<string, unknown>;
+  const al = alignmentOfRegion(d);
+  if (!r || !al || !Array.isArray(d.coords)) return null;
+  const on = st.doc.graph.edges.find((e) => e.source === r.id && e.edge_type === "is_on_resource")?.target ?? null;
+  return { xid, al, vertices: (d.coords as number[][]).map((p) => [Number(p[0]), Number(p[1]), Number(p[2])] as V3),
+           doc: chain.sourceOf(st.doc, xid)?.id ?? null, on, regionId: r.id };
+}
+/** the alignments of the open graph (for the box and the wall: «Axis from an alignment») */
+function alignmentsInGraph(): Array<{ xid: string; name: string; al: Alignment }> {
+  const st = store;
+  if (!st) return [];
+  const out: Array<{ xid: string; name: string; al: Alignment }> = [];
+  for (const n of st.liveNodes()) {
+    if (n.node_type !== "extractor") continue;
+    const a = alignOfExtractor(n.id);
+    if (a) out.push({ xid: n.id, name: String(n.name ?? n.id), al: a.al });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
+/** the alignment selected and drawn in this window (its handles) */
+function alignSelected(winId: string): ReturnType<typeof alignOfExtractor> {
+  const a = alignOfExtractor(selectedId);
+  if (!a) return null;
+  return extractorMarks(winId).some((m) => m.id === `x3d:${a.xid}` && !m.ghost) ? a : null;
+}
+/** a click: a point of the alignment, on a model of ONE document */
+function alignClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
+  if (dbl) { alignClose(win); return true; }
+  if (!hit) { toast(t("wall.noSurface")); return true; }
+  const w = elevPointOf(hit, null);
+  if (!w.rm) { toast(t("align.notModel")); return true; }
+  if (!w.doc || !store?.node(w.doc)) { toast(t("align.noDoc", { rm: wallNodeName(w.rm) })); return true; }
+  const tr = alignTrace(win.id);
+  const first = tr.points[0];
+  if (first && first.doc !== w.doc) { toast(t("align.otherDoc", { doc: wallNodeName(w.doc), first: wallNodeName(first.doc) })); return true; }
+  const last = tr.points[tr.points.length - 1];
+  if (last && Math.hypot(w.p[0] - last.p[0], w.p[1] - last.p[1], w.p[2] - last.p[2]) < 1e-6) return true;
+  tr.points.push(w);
+  tr.screen = hit.screen ?? null;
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+/** Enter / a double click: the extractor written (one undo step), the annotation asked */
+function alignClose(win: Win): void {
+  const st = store;
+  const tr = alignTrace(win.id);
+  if (tr.points.length < 2) { toast(t("align.hint.more")); return; }
+  if (!st || refuseReadOnly()) return;
+  const doc = tr.points[0].doc!;
+  const rm = tr.points[0].rm ?? null;
+  const r = alignReadingOf(tr.points.map((w) => w.p));
+  if (!r) { toast(t("align.err.flat")); return; }
+  const me = identityForSigning();
+  let made: { extractorId: string; regionId: string } | null = null;
+  try {
+    made = st.batch(() => {
+      const m = chain.addFreeExtraction(st, doc, r.trace, { regionData: r.regionData, result: r.result, on: rm,
+        data: { purpose: "alignment", tool: "EMStudio «Alignment»" } });
+      if (m && me) { const author = nauth.authorForIdentity(st, me); if (!st.hasEdge(m.extractorId, author, "has_author")) st.addEdge(m.extractorId, author, "has_author"); }
+      return m;
+    });
+  } catch (err) { toast(String((err as Error).message ?? err)); }
+  if (!made) return;
+  const xid = made.extractorId;
+  const name = String(st.node(xid)?.name ?? xid);
+  const screen = tr.screen;
+  alignTraces.set(win.id, { points: [], screen: null });
+  x3dMarksMemo = null;
+  const msg = t("align.made", { x: name, doc: wallNodeName(doc), rm: wallNodeName(rm), v: r.result });
+  logInfo(msg, [xid, doc]);
+  toastUndo(msg, st);
+  select(xid);
+  refreshInspector();
+  refreshWallBars();
+  renderSpaceNPanels();
+  refreshSurfaces("scene");
+  if (pxPrefs().notes)
+    pxAskNote(screen, `${wallNodeName(doc)} · ${name}`, "", (text) => { if (text) { chain.setReadingDescription(st, xid, text); x3dMarksMemo = null; refreshInspector(); refreshSurfaces("scene"); } });
+}
+function alignCancel(win: Win): boolean {
+  const tr = alignTraces.get(win.id);
+  if (!tr?.points.length) return false;
+  tr.points = [];
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+function alignUndoPoint(win: Win): boolean {
+  const tr = alignTraces.get(win.id);
+  if (!tr?.points.length) return false;
+  tr.points.pop();
+  refreshWallBars();
+  renderSpaceNPanels();
+  return true;
+}
+/** the marks: the points clicked, the elastic side, the fitted line with the reading; a dragged alignment's draft */
+function alignMarks(winId: string): SceneMark[] {
+  const out: SceneMark[] = [];
+  const fitMark = (id: string, vs: V3[]) => {
+    const r = alignReadingOf(vs);
+    const al = r ? alignmentOfRegion(r.regionData) : null;
+    if (al && vs.length > 2) out.push({ id, kind: "line", vertices: [al.start, al.end], label: r!.result, draft: true, est: true });
+    else if (r) out.push({ id, kind: "line", vertices: [vs[0], vs[vs.length - 1]], label: r.result, draft: true });
+  };
+  if (alignDraft && alignDraft.winId === winId) {
+    out.push({ id: "align:draft", kind: "polyline", vertices: alignDraft.vertices, label: "", draft: true });
+    fitMark("align:draftfit", alignDraft.vertices);
+  }
+  if (spaceCoreTools.get(winId) !== ALIGN_TOOL) return out;
+  const tr = alignTraces.get(winId);
+  if (!tr?.points.length) return out;
+  const pts = tr.points.map((w) => w.p);
+  tr.points.forEach((w, k) => out.push({ id: `align:p:${k}`, kind: "point", vertices: [w.p], label: "", draft: true }));
+  if (pts.length > 1) out.push({ id: "align:path", kind: "polyline", vertices: pts, label: "", draft: true });
+  const hv = wallHover.get(winId);
+  if (hv) out.push({ id: "align:rubber", kind: "line", vertices: [pts[pts.length - 1], hv], label: "", draft: true });
+  // the fitted line and the reading: with the pointer as the next point, live
+  const live = hv ? [...pts, hv] : pts;
+  if (live.length >= 2) fitMark("align:fit", live);
+  return out;
+}
+/** the elastic side's plane: the last point clicked */
+function alignHoverAnchor(winId: string): V3 | null {
+  if (spaceCoreTools.get(winId) !== ALIGN_TOOL) return null;
+  const tr = alignTraces.get(winId);
+  return tr?.points.length ? tr.points[tr.points.length - 1].p : null;
+}
+const alignHandleId = (xid: string, kind: "p" | "m", k: number) => `al|${xid}|${kind}|${k}`;
+function parseAlignHandle(id: string): { xid: string; kind: "p" | "m"; k: number } | null {
+  const m = /^al\|(.+)\|(p|m)\|(\d+)$/.exec(id);
+  return m ? { xid: m[1], kind: m[2] as "p" | "m", k: Number(m[3]) } : null;
+}
+/** the handles of the selected alignment (the Select tool) */
+function alignHandles(winId: string): SceneHandle[] {
+  if ((spaceCoreTools.get(winId) ?? "select") !== "select") return [];
+  const a = alignSelected(winId);
+  if (!a) return [];
+  const vs = alignDraft?.xid === a.xid ? alignDraft.vertices : a.vertices;
+  const out: SceneHandle[] = [];
+  vs.forEach((p, k) => out.push({ id: alignHandleId(a.xid, "p", k), p, kind: "plan", active: alignActive?.xid === a.xid && alignActive.k === k,
+    title: t("align.h.point", { n: String(k + 1) }) }));
+  for (let k = 0; k + 1 < vs.length; k++)
+    out.push({ id: alignHandleId(a.xid, "m", k), kind: "mid", title: t("wall.h.mid"),
+      p: [(vs[k][0] + vs[k + 1][0]) / 2, (vs[k][1] + vs[k + 1][1]) / 2, (vs[k][2] + vs[k + 1][2]) / 2] });
+  return out;
+}
+/** a correction written: the reading placed again (s3Dgraphy's place_reading: the
+ *  region of the new vertices, the old one gone when nobody reads it) and its value
+ *  read again — ONE undo step */
+function alignCommit(xid: string, vertices: V3[]): boolean {
+  const st = store;
+  const a = alignOfExtractor(xid);
+  if (!st || !a || refuseReadOnly()) return false;
+  const r = alignReadingOf(vertices);
+  if (!r) { toast(t("align.err.flat")); return false; }
+  const before = String(((st.node(xid)?.data ?? {}) as Record<string, unknown>).result ?? "");
+  st.batch(() => {
+    chain.setReadingGeometry(st, xid, a.on ?? a.doc, r.trace, r.regionData);
+    const x = st.node(xid);
+    if (x) st.updateNode(xid, { data: { ...((x.data ?? {}) as Record<string, unknown>), result: r.result } });
+  });
+  x3dMarksMemo = null;
+  const msg = t("x3d.moved", { name: String(st.node(xid)?.name ?? xid), was: before || "—", now: r.result });
+  logInfo(msg, [xid]);
+  toastUndo(msg, st);
+  refreshSurfaces("scene");
+  refreshInspector();
+  renderSpaceNPanels();
+  return true;
+}
+/** a handle's gesture: a click (the point active; a «+» inserts the side's midpoint), a drag on the model, the release */
+function alignOnHandle(win: Win, e: SceneHandleEvent): boolean {
+  const h = parseAlignHandle(e.id);
+  if (!h) return false;
+  const a = alignOfExtractor(h.xid);
+  if (!a) return true;
+  const vs = a.vertices;
+  if (e.phase === "click") {
+    if (h.kind === "m") {
+      const mid: V3 = [(vs[h.k][0] + vs[h.k + 1][0]) / 2, (vs[h.k][1] + vs[h.k + 1][1]) / 2, (vs[h.k][2] + vs[h.k + 1][2]) / 2];
+      if (alignCommit(a.xid, [...vs.slice(0, h.k + 1), mid, ...vs.slice(h.k + 1)])) alignActive = { xid: a.xid, k: h.k + 1 };
+    } else { alignActive = { xid: a.xid, k: h.k }; renderSpaceNPanels(); }
+    return true;
+  }
+  if (e.phase === "start") { alignDraft = { winId: win.id, xid: a.xid, vertices: vs.slice() }; alignActive = null; return true; }
+  if (e.phase === "cancel") { alignDraft = null; return true; }
+  if (!e.point) return true;
+  const next = h.kind === "p" ? vs.map((p, i) => (i === h.k ? e.point! : p)) : [...vs.slice(0, h.k + 1), e.point, ...vs.slice(h.k + 1)];
+  if (e.phase === "move") { alignDraft = { winId: win.id, xid: a.xid, vertices: next }; return true; }
+  alignDraft = null;
+  const w = wallPointAt(e.point, e.key);
+  if (!w.rm) { toast(t("wall.h.offModel")); refreshSurfaces("scene"); return true; }
+  if (w.doc !== a.doc) { toast(t("align.otherDoc", { doc: wallNodeName(w.doc), first: wallNodeName(a.doc) })); refreshSurfaces("scene"); return true; }
+  if (alignCommit(a.xid, next)) alignActive = { xid: a.xid, k: h.kind === "p" ? h.k : h.k + 1 };
+  return true;
+}
+/** X on the active point of the selected alignment: taken away (two stay) */
+function alignDeleteActive(): boolean {
+  const act = alignActive;
+  const a = act ? alignOfExtractor(act.xid) : null;
+  if (!act || !a || selectedId !== a.xid) return false;
+  if (a.vertices.length <= 2) { toast(t("align.err.two")); return true; }
+  alignActive = null;
+  alignCommit(a.xid, a.vertices.filter((_, i) => i !== act.k));
+  return true;
+}
+/** the bar: the counter, what closes it, the reading live, the document */
+function drawAlignBar(bar: HTMLElement, winId: string): void {
+  bar.textContent = "";
+  const tr = alignTrace(winId);
+  const n = tr.points.length;
+  bar.dataset.wallPhase = n >= 2 ? "close" : "points";
+  bar.dataset.wallPoints = String(n);
+  const b = document.createElement("b");
+  b.dataset.wallCounter = "1";
+  b.textContent = t("align.counter", { n: String(n) });
+  const hint = document.createElement("span");
+  hint.className = "scn-wallbar-hint";
+  hint.dataset.wallHint = "1";
+  hint.textContent = n < 2 ? t("align.hint.more") : t("align.hint.close");
+  bar.append(b, " ", hint);
+  const r = alignReadingOf(tr.points.map((w) => w.p));
+  if (r) {
+    const v = document.createElement("div");
+    v.className = "scn-wallbar-where";
+    v.dataset.alignReading = "1";
+    v.textContent = r.result;
+    bar.appendChild(v);
+  }
+  bar.appendChild(pxBarWhere(tr.points, { mode: "document" }, t("align.whereNone")));
+}
+/** the Tool tab: how, the document, the annotation and the edges' snap, the reading, the actions */
+function renderAlignToolTab(box: HTMLElement, win: Win): void {
+  const tr = alignTrace(win.id);
+  const p = (text: string, probe: string, cls = "xf-note") => {
+    const el = document.createElement("p");
+    el.className = cls;
+    el.dataset.np = probe;
+    el.textContent = text;
+    box.appendChild(el);
+    return el;
+  };
+  p(t("align.how"), "align-how");
+  const doc = tr.points[0]?.doc ?? pxDocumentInView();
+  p(t("align.docLine", { doc: doc ? wallNodeName(doc) : "—" }), "align-doc");
+  const check = (on: boolean, label: string, title: string, probe: string, set: (v: boolean) => void) => {
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = on;
+    cb.dataset.alignOpt = probe;
+    cb.addEventListener("change", () => set(cb.checked));
+    const l = document.createElement("label");
+    l.className = "np-row np-check px-check";
+    l.title = title;
+    l.append(cb, " ", label);
+    box.appendChild(l);
+  };
+  const px = pxPrefs();
+  check(px.notes, t("align.notes"), t("px.noteTitle"), "notes", (v) => setPxPrefs({ notes: v }));
+  check(px.edgeSnap, t("px.edge"), t("px.edgeTitle"), "edge", (v) => setPxPrefs({ edgeSnap: v }));
+  p(`${t("align.counter", { n: String(tr.points.length) })} — ${tr.points.length < 2 ? t("align.hint.more") : t("align.hint.close")}`, "align-phase");
+  const r = alignReadingOf(tr.points.map((w) => w.p));
+  if (r) p(r.result, "align-reading");
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const act = (label: string, probe: string, run: () => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.act = probe;
+    b.textContent = label;
+    b.disabled = disabled;
+    b.addEventListener("click", run);
+    acts.appendChild(b);
+  };
+  act(t("align.close"), "align-close", () => alignClose(win), tr.points.length < 2);
+  act(t("wall.undoPoint"), "align-undo", () => { alignUndoPoint(win); }, !tr.points.length);
+  act(t("align.cancel"), "align-cancel", () => { alignCancel(win); }, !tr.points.length);
+  box.appendChild(acts);
+}
+/** the Item tab of a selected alignment: everything it read, its points, its annotation, what it can feed */
+function renderAlignItem(sect: NpSect, win: Win): boolean {
+  const a = alignSelected(win.id);
+  const st = store;
+  if (!a || !st) return false;
+  const al = a.al;
+  const s = sect(t("align.itemSect"), "alignment", t("align.f.north"));
+  s.dataset.alignItem = a.xid;
+  const note = (text: string, probe: string) => {
+    const el = document.createElement("p");
+    el.className = "xf-note";
+    el.dataset.alignRow = probe;
+    el.textContent = text;
+    s.appendChild(el);
+  };
+  const m = (v: number, d = 3) => `${alignNum(v, d)} m`;
+  const deg = (v: number, d = 1) => `${alignNum(v, d)}°`;
+  note(`${String(st.node(a.xid)?.name ?? a.xid)} · ${wallNodeName(a.doc)}${a.on && a.on !== a.doc ? ` · ${wallNodeName(a.on)}` : ""}`, "name");
+  note(`${t("align.f.azimuth")} ${deg(al.azimuth_deg)} · ${t("align.f.axis")} ${deg(al.axis_deg)}`, "azimuth");
+  note(`${t("align.f.length")} ${m(al.length_m)}` + (al.points > 2 ? ` · ${t("align.f.path")} ${m(al.path_plan_m)} · ${t("align.f.path3d", { m: m(al.path_3d_m) })}` : ""), "length");
+  note(`${t("align.f.slope")} ${deg(al.slope_deg, 2)} · ${t("align.f.rise", { m: m(al.rise_m) })}`, "slope");
+  note(`${t("align.f.fit")} ${al.points > 2
+    ? t("align.f.fitLs", { n: String(al.points), dev: alignNum(al.max_dev_m * 100, 1), k: String((al.max_dev_at ?? 0) + 1), rms: alignNum(al.rms_m * 100, 1) })
+    : t("align.f.fitTwo")}`, "fit");
+  // the points (Blender's x y z, the data's frame, in the tooltip), X takes one away
+  const table = document.createElement("table");
+  table.className = "wall-points";
+  table.dataset.alignPoints = "1";
+  a.vertices.forEach((v, k) => {
+    const z = toZUp(v);
+    const tr = document.createElement("tr");
+    if (alignActive?.xid === a.xid && alignActive.k === k) tr.classList.add("act");
+    tr.title = `x y z ${z.map((c) => alignNum(c, 3)).join("  ")}`;
+    tr.appendChild(Object.assign(document.createElement("td"), { textContent: String(k + 1) }));
+    const sd = al.sides[k];
+    tr.appendChild(Object.assign(document.createElement("td"), { textContent: sd ? `→ ${deg(sd.azimuth_deg)} · ${m(sd.length_m, 2)}` : `z ${alignNum(z[2], 2)}` }));
+    const td = document.createElement("td");
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "wall-x";
+    x.textContent = "×";
+    x.title = t("align.removePoint");
+    x.disabled = a.vertices.length <= 2;
+    x.dataset.alignRemove = String(k);
+    x.addEventListener("click", () => alignCommit(a.xid, a.vertices.filter((_, i) => i !== k)));
+    td.appendChild(x);
+    tr.appendChild(td);
+    table.appendChild(tr);
+  });
+  s.appendChild(table);
+  // the annotation: the extractor's description
+  const ann = document.createElement("input");
+  ann.type = "text";
+  ann.className = "px-note-cell";
+  ann.placeholder = t("px.notePlaceholder");
+  ann.value = pxAnnotationOf(a.xid);
+  ann.dataset.alignNote = "1";
+  ann.addEventListener("change", () => { chain.setReadingDescription(st, a.xid, ann.value.trim()); x3dMarksMemo = null; refreshInspector(); refreshSurfaces("scene"); });
+  const al2 = document.createElement("label");
+  al2.className = "np-row";
+  al2.append(Object.assign(document.createElement("span"), { textContent: t("px.noteCol") }), ann);
+  s.appendChild(al2);
+  // what it feeds
+  const fed = chain.propertyOfExtractor(st.doc, a.xid);
+  const fp = document.createElement("p");
+  fp.className = "xf-note";
+  fp.dataset.np = "align-feeds";
+  fp.textContent = fed ? t("align.feeds", { p: String(st.node(fed)?.name ?? fed) }) : t("align.feedsNone");
+  s.appendChild(fp);
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const act = (label: string, probe: string, run: (b: HTMLButtonElement) => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.act = probe;
+    b.textContent = label;
+    b.disabled = disabled;
+    b.addEventListener("click", () => run(b));
+    acts.appendChild(b);
+  };
+  act(t("align.link"), "align-link", (b) => askWhatExtractionReads(st, a.xid, b), !!fed);
+  act(t("align.asBoxAxis"), "align-box", () => alignToBox(win, a.xid));
+  act(t("align.asWallAxis"), "align-wall", () => alignToWall(win, a.xid));
+  s.appendChild(acts);
+  return true;
+}
+/** the fitted line's two ends as the clicks of another tool, on the alignment's model and document
+ *  (the region keeps them in the frame of its coords, the scene's) */
+function alignEnds(xid: string): [WallPoint, WallPoint] | null {
+  const a = alignOfExtractor(xid);
+  if (!a) return null;
+  const rm = alignModelOf(a);
+  const note = t("align.fromNote", { x: String(store?.node(xid)?.name ?? xid) });
+  const s0 = a.al.points > 2 ? ([...a.al.start] as V3) : a.vertices[0];
+  const e0 = a.al.points > 2 ? ([...a.al.end] as V3) : a.vertices[a.vertices.length - 1];
+  return [{ p: s0, rm, doc: a.doc, note }, { p: e0, rm, doc: a.doc, note }];
+}
+/** the model an alignment was clicked on (its place's resource), else the first model of its document */
+function alignModelOf(a: NonNullable<ReturnType<typeof alignOfExtractor>>): string | null {
+  if (a.on && a.on !== a.doc) return a.on;
+  return currentSpace()?.rms.find((r) => r.documentId === a.doc)?.id ?? null;
+}
+/** «Axis from an alignment»: a row of the Tool tab of the box and of the wall (none: nothing shown) */
+function alignAxisRow(box: HTMLElement, probe: string, pick: (xid: string) => void): void {
+  const list = alignmentsInGraph();
+  if (!list.length) return;
+  const l = document.createElement("label");
+  l.className = "np-row";
+  l.dataset.alignAxis = probe;
+  const sel = document.createElement("select");
+  sel.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: "—", selected: true }));
+  for (const x of list) sel.appendChild(Object.assign(document.createElement("option"), { value: x.xid,
+    textContent: `${x.name} · ${alignNum(x.al.azimuth_deg, 1)}° · ${alignNum(x.al.length_m, 2)} m` }));
+  sel.title = t("align.axisTitle");
+  sel.addEventListener("change", () => { if (sel.value) pick(sel.value); });
+  l.append(Object.assign(document.createElement("span"), { textContent: t("align.axisFrom") }), sel);
+  box.appendChild(l);
+}
+/** «Axis of a seven-point box»: the alignment's ends are its points 1 and 2 */
+function alignToBox(win: Win, xid: string): void {
+  const ends = alignEnds(xid);
+  if (!ends) return;
+  setSpaceTool(win.id, BOX_TOOL);
+  const tr = boxTrace(win.id);
+  tr.points[0] = ends[0];
+  tr.points[1] = ends[1];
+  tr.next = tr.points.findIndex((w) => !w);
+  if (tr.next < 0) tr.next = 7;
+  toast(t("align.toBox", { x: String(store?.node(xid)?.name ?? xid) }));
+  refreshWallBars();
+  renderSpaceNPanels();
+  refreshSurfaces("scene");
+}
+/** «Axis of a wall»: the wall in «axis + thickness» mode, its axis the alignment's points (the fitted line with more than two) */
+function alignToWall(win: Win, xid: string): void {
+  const a = alignOfExtractor(xid);
+  const ends = alignEnds(xid);
+  if (!a || !ends) return;
+  setWallPrefs({ mode: "axis" });
+  setSpaceTool(win.id, WALL_TOOL);
+  const note = ends[0].note;
+  const rm = ends[0].rm;
+  // the axis as it was read: the clicked points (a polyline stays a polyline; a wall's axis may bend)
+  const plan: WallPoint[] = a.vertices.map((p) => ({ p: [...p] as V3, rm, doc: a.doc, note }));
+  wallTraces.set(win.id, { phase: "plan", plan, top: [] });
+  toast(t("align.toWall", { x: String(store?.node(xid)?.name ?? xid) }));
+  refreshWallBars();
+  renderSpaceNPanels();
+  refreshSurfaces("scene");
+}
+
 /** MICRO-PX2 C · the bar's line of the document, the same for every tool of the
  *  suite: the proxy's document (or «semantic shape»), the models and documents
  *  the clicks fell on, the hybrid case warned */
@@ -37966,6 +38458,7 @@ function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: N
   else if (entry.id === ELEV_TOOL) renderElevToolTab(box, win);
   else if (entry.id === BOX_TOOL) renderBoxToolTab(box, win);
   else if (entry.id === SURF_TOOL) renderSurfToolTab(box, win);
+  else if (entry.id === ALIGN_TOOL) renderAlignToolTab(box, win);
   else if (entry.id === "cursor") {
     note(t("tt.cursorHow"));
     act(t("s3.nCentre"), "cursor-centre", () => { h.centreScene(); renderSpaceNPanels(); });
@@ -37982,7 +38475,7 @@ function renderToolTab(body: HTMLElement, win: Win, h: SpaceSceneHandle, sect: N
     }
   }
   // (an extension's tool has «Stop tracing (Esc)» already: the same gesture)
-  if (entry?.id === "cursor" || entry?.id === WALL_TOOL || entry?.id === ELEV_TOOL || entry?.id === BOX_TOOL || entry?.id === SURF_TOOL) act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
+  if (entry?.id === "cursor" || entry?.id === WALL_TOOL || entry?.id === ELEV_TOOL || entry?.id === BOX_TOOL || entry?.id === SURF_TOOL || entry?.id === ALIGN_TOOL) act(t("tt.back"), "tool-select", () => setSpaceTool(win.id, "select"));
   if (acts.childElementCount) box.appendChild(acts);
 }
 
@@ -42302,6 +42795,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (spaceCoreTools.get(win.id) === BOX_TOOL) return boxClick(win, hit, dbl);
       // MICRO-PX3 · «Annota superficie»: a point of the contour; a double click closes it
       if (spaceCoreTools.get(win.id) === SURF_TOOL) return surfClick(win, hit, dbl);
+      // MICRO-PX6 · «Allineamento»: a point; a double click closes it into the extractor
+      if (spaceCoreTools.get(win.id) === ALIGN_TOOL) return alignClick(win, hit, dbl);
       if (dbl || spaceCoreTools.get(win.id) !== "cursor") return false;
       if (hit) { handle.setCursor(hit.point); drawNPanel(); }
       return true;
@@ -42415,17 +42910,17 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
-    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id), ...elevMarks(win.id), ...boxMarks(win.id), ...surfMarks(win.id)],   // EXPERIMENTAL: the site's footprint
+    marks: () => [...instanceMarks(win.id), ...extractorMarks(win.id), ...(SITE_ON ? siteMarks(win.id) : []), ...wallMarks(win.id), ...elevMarks(win.id), ...boxMarks(win.id), ...surfMarks(win.id), ...alignMarks(win.id)],   // EXPERIMENTAL: the site's footprint
     // MICRO-PX1b · «Muro da pianta»: the see-through solid, the elastic side, the handles of a wall
     preview: () => wallPreview(win.id) ?? elevPreview(win.id) ?? boxPreview(win.id),
-    hoverAnchor: () => wallHoverAnchor(win.id),
+    hoverAnchor: () => wallHoverAnchor(win.id) ?? alignHoverAnchor(win.id),
     // MICRO-PX3 · «Annota superficie»: the elastic side on the contour's plane
     hoverPlane: () => surfHoverPlane(win.id),
     onToolHover: (p) => { wallHover.set(win.id, p); if (spaceCoreTools.get(win.id) === SURF_TOOL) surfHover.set(win.id, p); },
-    handles: () => [...wallHandles(win.id), ...elevHandles(win.id), ...boxHandles(win.id), ...surfHandles(win.id)],
-    onHandle: (e) => { if (!elevOnHandle(win, e) && !boxOnHandle(win, e) && !surfOnHandle(win, e)) wallOnHandle(win, e); },
+    handles: () => [...wallHandles(win.id), ...elevHandles(win.id), ...boxHandles(win.id), ...surfHandles(win.id), ...alignHandles(win.id)],
+    onHandle: (e) => { if (!alignOnHandle(win, e) && !elevOnHandle(win, e) && !boxOnHandle(win, e) && !surfOnHandle(win, e)) wallOnHandle(win, e); },
     // MICRO-PX1c · «Agganciati agli spigoli»: a ring of rays around a click of «Dal prospetto»
-    toolRing: () => (spaceCoreTools.get(win.id) === ELEV_TOOL && pxPrefs().edgeSnap ? 10 : 0),
+    toolRing: () => ((spaceCoreTools.get(win.id) === ELEV_TOOL || spaceCoreTools.get(win.id) === ALIGN_TOOL) && pxPrefs().edgeSnap ? 10 : 0),
     onMark: (id) => {
       if (SITE_ON && onSiteMark(id)) return;
       if (id.startsWith("inst:")) goToInstance(id.slice(5));
@@ -42469,10 +42964,18 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (a === "cancel" && surfCancel(win)) return true;
         if (a === "delete" && surfUndoPoint(win)) return true;
       }
+      // MICRO-PX6 · «Allineamento»: Enter writes it, Esc cancels the points, Backspace takes the last back
+      if (spaceCoreTools.get(win.id) === ALIGN_TOOL) {
+        if (a === "confirm") { alignClose(win); return true; }
+        if (a === "cancel" && alignCancel(win)) return true;
+        if (a === "delete" && alignUndoPoint(win)) return true;
+      }
       // MICRO-PX1b · a point of the selected wall active: X takes it away, Esc lets it go
       if (a === "delete" && wallDeleteActive()) return true;
       if (a === "delete" && elevDeleteActive()) return true;
       if (a === "delete" && surfDeleteActive(win)) return true;
+      if (a === "delete" && alignDeleteActive()) return true;
+      if (a === "cancel" && alignActive) { alignActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel" && surfActive) { surfActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel" && elevActive) { elevActive = null; renderSpaceNPanels(); return true; }
       if (a === "cancel" && boxActive) { boxActive = null; renderSpaceNPanels(); return true; }
@@ -65000,6 +65503,9 @@ const VW_READ_TEXTS = (): ReadTexts => ({
   impost: (z) => t("vw.read.impost", { z }),
   plane: (z, dip, dir) => (dir == null ? t("vw.read.planeLevel", { z, dip }) : t("vw.read.plane", { z, dip, dir })),
   length: (m) => t("vw.read.length", { m }),
+  // MICRO-PX6 · an alignment: azimuth, length, slope, the fit's largest deviation
+  alignment: (az, m, slope, dev, n) => t("vw.read.alignment", { az, m })
+    + (slope ? t("vw.read.alignSlope", { s: slope }) : "") + (dev ? t("vw.read.alignFit", { dev, n: String(n) }) : ""),
 });
 
 /** A click of a 3D tool on the document's scene — any tool of the register
@@ -65817,7 +66323,7 @@ function vwSidePanel(win: Win, s: VwScene): void {
   np.appendChild(acts);
   s.host.appendChild(np);
 }
-const VW_TOOL_GLYPH: Record<Viewer3dTool, string> = { elevation: "⌖", impost: "⊤", plane3: "◿", planeFace: "▱", line: "╱", polyline: "〰" };
+const VW_TOOL_GLYPH: Record<Viewer3dTool, string> = { elevation: "⌖", impost: "⊤", plane3: "◿", planeFace: "▱", line: "╱", polyline: "〰", alignment: "⟷" };
 
 // ── MICRO-PL10-POSA-NELLO-SPAZIO (W7) · the register of the 3D tools ─────────
 //
@@ -65828,8 +66334,10 @@ const VW_TOOL_GLYPH: Record<Viewer3dTool, string> = { elevation: "⌖", impost: 
 // through the bridge (/pose/*, level 79) and applied here as ONE undo step.
 
 const VW_PRIMITIVE: Record<Viewer3dTool, SpaceToolSpec["primitive"]> = {
-  elevation: "point", impost: "point", plane3: "plane", planeFace: "plane", line: "line", polyline: "polyline" };
-for (const tool of VIEWER_3D_TOOLS)
+  elevation: "point", impost: "point", plane3: "plane", planeFace: "plane", line: "line", polyline: "polyline", alignment: "polyline" };
+// (MICRO-PX6 · «Allineamento» is a tool of the Viewer too, but its place in the
+// register is after the drawing tools of the Space: registered below)
+for (const tool of VIEWER_3D_TOOLS.filter((x) => x !== "alignment"))
   registerSpaceTool({ id: tool, primitive: VW_PRIMITIVE[tool], origin: "core", snap: "surface", glyph: VW_TOOL_GLYPH[tool],
     clicks: CLICKS[tool] ? { min: CLICKS[tool], max: CLICKS[tool] } : { min: 2, max: null },
     label: () => t(`vw.tool.${tool}`), hint: () => t(`vw.hint.${tool}`) });
@@ -65850,6 +66358,10 @@ registerSpaceTool({ id: "box7", primitive: "point", origin: "core", snap: "surfa
 registerSpaceTool({ id: "surface", primitive: "surface", origin: "core", snap: "surface", glyph: "⬠",
   clicks: { min: 3, max: null }, editors: ["space"],
   label: () => t("surf.toolName"), hint: () => t("surf.toolHint") });
+// MICRO-PX6 · «Allineamento»: an extractor of its own — the Viewer's (one document's model) and the Space's
+registerSpaceTool({ id: "alignment", primitive: "polyline", origin: "core", snap: "surface", glyph: VW_TOOL_GLYPH.alignment,
+  clicks: { min: 2, max: null }, editors: ["viewer", "space"],
+  label: () => t("vw.tool.alignment"), hint: () => t("vw.hint.alignment") });
 
 /** a package's tool by its register id */
 const packageToolInfo = new Map<string, PackageTool>();

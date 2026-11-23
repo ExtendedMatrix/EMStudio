@@ -648,20 +648,27 @@ export function addFreeExtraction(
   store: DocumentStore,
   documentId: string,
   trace: TraceGeometry,
-  opts: { regionData?: Record<string, unknown>; result?: string; description?: string } = {},
+  opts: { regionData?: Record<string, unknown>; result?: string; description?: string;
+          /** MICRO-PX6 · the resource the place is ON (a representation model of
+           *  the document, as `proxy_from_points` writes it); absent: the document */
+          on?: string | null;
+          /** MICRO-PX6 · more of the extractor's data (`purpose`…), beside `result` */
+          data?: Record<string, unknown> } = {},
 ): { extractorId: string; regionId: string } | null {
   if (!store.node(documentId)) return null;
   return store.batch(() => {
     const doc = store.doc;
     const extractorId = store.newId();
+    const xdata = { ...(opts.data ?? {}), ...(opts.result ? { result: opts.result } : {}) };
     store.addNode({ id: extractorId, node_type: "extractor",
       name: initialName(doc, "extractor") ?? "Temp1",
       description: opts.description ?? "",
-      ...(opts.result ? { data: { result: opts.result } } : {}) } as EmNode);
+      ...(Object.keys(xdata).length ? { data: xdata } : {}) } as EmNode);
     store.addEdge(extractorId, documentId, EXTRACTED_FROM);
     const renamed = renameOnAttach(doc, extractorId);
     if (renamed) store.updateNode(extractorId, { name: renamed });
-    const placed = setReadingGeometry(store, extractorId, documentId, trace, opts.regionData);
+    const on = opts.on && store.node(opts.on) ? opts.on : documentId;
+    const placed = setReadingGeometry(store, extractorId, on, trace, opts.regionData);
     return placed ? { extractorId, regionId: placed.regionId } : null;
   });
 }

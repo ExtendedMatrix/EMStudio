@@ -195,7 +195,7 @@ eq(P.posesOn(graph, "stat:volto", "d1"), ["us1", null], "the poses of a set on a
 const main = fs.readFileSync(path.join(SRC, "main.ts"), "utf8");
 const read = (f) => fs.readFileSync(path.join(SRC, f), "utf8");
 const scene = read("scene3d.ts");
-ok(/for \(const tool of VIEWER_3D_TOOLS\)\s*\n?\s*registerSpaceTool\(/.test(main), "the six tools of the Viewer registered first, from VIEWER_3D_TOOLS");
+ok(/for \(const tool of VIEWER_3D_TOOLS\.filter\(\(x\) => x !== "alignment"\)\)\s*\n?\s*registerSpaceTool\(/.test(main), "the six tools of the Viewer registered first, from VIEWER_3D_TOOLS (MICRO-PX6: «alignment» later, after the Space's drawing tools)");
 ok(/spaceTools\(\)/.test(main) && !/for \(const tool of VIEWER_3D_TOOLS\) \{\s*const on = s\.trace\.tool === tool/.test(main), "the bar draws the register, not the constant");
 ok(/const need = CLICKS\[tool\]/.test(main) === false, "the clicks come from the register");
 ok(/BRIDGE_LEVEL_WANTED = (79|[89]\d)/.test(main), "the page wants the bridge of level 79 or later");
@@ -207,7 +207,7 @@ ok(/registered: registeredSpaceCoreTools\(\)\.map/.test(main), "the Space's tool
 ok(/if \(spaceCoreTools\.get\(win\.id\) === WALL_TOOL\) return wallClick\(win, hit, dbl\);/.test(main), "a click with the wall armed is the wall's (a double click closes the phase)");
 ok(/if \(a === "confirm"\) \{ wallClose\(win\); return true; \}/.test(main) && /a === "cancel" && wallCancel\(win\)/.test(main)
    && /a === "delete" && wallUndoPoint\(win\)/.test(main), "Enter closes the phase, Esc cancels it, Backspace takes the last point back");
-ok(/\.\.\.wallMarks\(win\.id\), \.\.\.elevMarks\(win\.id\), \.\.\.boxMarks\(win\.id\), \.\.\.surfMarks\(win\.id\)\]/.test(main), "the trace drawn as the Space's marks (the wall's, the elevation's, the box's, the areal's)");
+ok(/\.\.\.wallMarks\(win\.id\), \.\.\.elevMarks\(win\.id\), \.\.\.boxMarks\(win\.id\), \.\.\.surfMarks\(win\.id\)[,\]]/.test(main), "the trace drawn as the Space's marks (the wall's, the elevation's, the box's, the areal's)");
 ok(/points: wallItem\.points, purpose: wallItem\.purpose/.test(main) && /const purpose = wall \? "wall_from_plan" : box7 \? "proxy_box_creator" : surf \? "3D drawing on surface" : "from_elevation";/.test(main),
    "the association sends the points (the extractors) with purpose wall_from_plan / from_elevation / proxy_box_creator (EM Tools')");
 // MICRO-PX1c · «Dal prospetto», the proxy's document, the annotation at the click
@@ -216,7 +216,7 @@ ok(/registerSpaceTool\(\{ id: "fromElevation", primitive: "polyline", origin: "c
 ok(/if \(spaceCoreTools\.get\(win\.id\) === ELEV_TOOL\) return elevClick\(win, hit, dbl\);/.test(main), "a click with «Dal prospetto» armed is its");
 ok(/if \(a === "confirm"\) \{ elevClose\(win\); return true; \}/.test(main) && /a === "cancel" && elevCancel\(win\)/.test(main)
    && /a === "delete" && elevUndoPoint\(win\)/.test(main), "«Dal prospetto»: Enter closes the phase, Esc cancels it, Backspace takes the last point back");
-ok(/toolRing: \(\) => \(spaceCoreTools\.get\(win\.id\) === ELEV_TOOL && pxPrefs\(\)\.edgeSnap \? 10 : 0\)/.test(main), "the ring of rays only for «Dal prospetto» with the edge snap on");
+ok(/toolRing: \(\) => \(\(spaceCoreTools\.get\(win\.id\) === ELEV_TOOL \|\| spaceCoreTools\.get\(win\.id\) === ALIGN_TOOL\) && pxPrefs\(\)\.edgeSnap \? 10 : 0\)/.test(main), "the ring of rays only for «Dal prospetto» and «Allineamento» (MICRO-PX6) with the edge snap on");
 ok(/const wallItem = proxyParadataItem\(sk\);/.test(main), "ONE road to the chain for the wall and the elevation (proxyParadataItem)");
 ok(/document_id: wallItem\.documentId/.test(main) && /semantic: true,/.test(main), "the association sends the proxy's document, or the semantic shape");
 ok(/description: w\.note/.test(main), "a point's annotation travels as its extractor's description");
@@ -231,9 +231,9 @@ ok(/a === "cancel" && boxCancel\(win\)/.test(main) && /a === "delete" && boxUndo
    "the box: Enter makes it, Esc clears, Backspace takes the last point back");
 ok(/type: BOX_POINT_TYPES\[BOX_ROLES\[k\]\]/.test(main), "the box's extractors: EM Tools' point_type («Alignment Start»…)");
 ok(/renderPxSourceRows\(box, tr\.points\.filter/.test(main), "the two modes of the proxy's document and the switch in the box's Tool tab (the shared rows)");
-ok((main.match(/bar\.appendChild\(pxBarWhere\(/g) ?? []).length === 4, "ONE line of the document in the bar for the four tools (pxBarWhere)");
+ok((main.match(/bar\.appendChild\(pxBarWhere\(/g) ?? []).length === 5, "ONE line of the document in the bar for the five tools (pxBarWhere; MICRO-PX6 the alignment)");
 ok(/pxAskNote\(hit\.screen, pxNoteLabel\(w, boxRoleName\(k\)\)/.test(main), "the annotation at the click, named by the point's role");
-ok(/\.\.\.boxHandles\(win\.id\), \.\.\.surfHandles\(win\.id\)\]/.test(main) && /!boxOnHandle\(win, e\)/.test(main), "the box's seven points are handles");
+ok(/\.\.\.boxHandles\(win\.id\), \.\.\.surfHandles\(win\.id\)[,\]]/.test(main) && /!boxOnHandle\(win, e\)/.test(main), "the box's seven points are handles");
 // MICRO-PX3 · «Annota superficie»
 ok(/registerSpaceTool\(\{ id: "surface", primitive: "surface", origin: "core", snap: "surface"[\s\S]{0,80}clicks: \{ min: 3, max: null \}, editors: \["space"\]/.test(main),
    "«Annota superficie» registered: core, snap surface, three clicks at least, the Space's only");
@@ -249,6 +249,27 @@ ok(/renderPxSourceRows\(box, tr\.points, prefs\.annotate/.test(main), "the two m
 ok(/out\.reading = \{ point_type: "surface",[\s\S]{0,700}geometry: \{ geometry_kind: "surface", vertices: surf\.contour/.test(main), "ONE extractor of the whole surface, its place the contour (EM Tools' chain, read by empkg.areale_from_graph)");
 ok(/document_reading: wallItem\.reading/.test(main) && /kw\["document_reading"\] = item\["document_reading"\]/.test(read("../../tools/em_bridge.py")), "the reading travels to s3Dgraphy through /geometry-proxies");
 ok(/export const DRAWN_SHAPES = \["wall", "elevation", "box", "surface"\] as const;/.test(read("shapes3d.ts")), "the areal is a drawn shape of the suite (one road to add, update, undo)");
+// MICRO-PX6 · «Allineamento»: an extractor of its own, the Viewer's reading in the Space too
+ok(/registerSpaceTool\(\{ id: "alignment", primitive: "polyline", origin: "core", snap: "surface"[\s\S]{0,80}clicks: \{ min: 2, max: null \}, editors: \["viewer", "space"\]/.test(main),
+   "«Allineamento» registered: core, snap surface, two clicks at least, in the Viewer AND the Space");
+ok(/\/\/ MICRO-PX3[^\n]*\nregisterSpaceTool\(\{ id: "surface"[\s\S]{0,300}\n\/\/ MICRO-PX6[^\n]*\nregisterSpaceTool\(\{ id: "alignment"/.test(main), "…after «Annota superficie»");
+ok(/if \(spaceCoreTools\.get\(win\.id\) === ALIGN_TOOL\) return alignClick\(win, hit, dbl\);/.test(main), "a click with the alignment armed is one of its points");
+ok(/a === "confirm"\) \{ alignClose\(win\); return true; \}/.test(main) && /a === "cancel" && alignCancel\(win\)/.test(main) && /a === "delete" && alignUndoPoint\(win\)/.test(main),
+   "the alignment: Enter writes it, Esc clears, Backspace takes the last point back");
+ok(/function alignReadingOf\(vs: V3\[\]\) \{\s*return vs\.length >= 2 \? reading3dOf\("alignment"/.test(main), "ONE reading for the Viewer and the Space (viewer-annot readingOf), not a copy");
+ok(/chain\.addFreeExtraction\(st, doc, r\.trace, \{ regionData: r\.regionData, result: r\.result, on: rm,/.test(main), "written as the Viewer's reading: an extractor of the document, its place ON the model clicked");
+ok(/if \(first && first\.doc !== w\.doc\) \{ toast\(t\("align\.otherDoc"/.test(main), "its points on ONE document's models (a click on another's refused, said)");
+ok(/const w = elevPointOf\(hit, null\);/.test(main) && /spaceCoreTools\.get\(win\.id\) === ALIGN_TOOL\) && pxPrefs\(\)\.edgeSnap \? 10 : 0/.test(main), "«Snap to the mesh's edges» as «From elevation» (the ring at the click)");
+ok(/\.\.\.surfMarks\(win\.id\), \.\.\.alignMarks\(win\.id\)\]/.test(main) && /hoverAnchor: \(\) => wallHoverAnchor\(win\.id\) \?\? alignHoverAnchor\(win\.id\)/.test(main),
+   "the live preview: the points, the elastic side, the fitted line with the reading");
+ok(/\.\.\.surfHandles\(win\.id\), \.\.\.alignHandles\(win\.id\)\]/.test(main) && /!alignOnHandle\(win, e\)/.test(main) && /a === "delete" && alignDeleteActive\(\)/.test(main),
+   "correction: handles on the selected alignment (drag, «+», X)");
+ok(/chain\.setReadingGeometry\(st, xid, a\.on \?\? a\.doc, r\.trace, r\.regionData\);/.test(main), "a correction places the reading again (s3Dgraphy's place_reading) and reads it again, one step");
+ok(/\} else if \(renderAlignItem\(sect, win\)\) \{/.test(main), "the Item tab of a selected alignment");
+ok(/if \(alignOfExtractor\(x\)\) names = \["alignment", "orientation"/.test(main), "«Interpretazione» offers «alignment» and the qualia «orientation» first");
+ok(/alignAxisRow\(box, "box", \(xid\) => alignToBox\(win, xid\)\)/.test(main) && /alignAxisRow\(box, "wall", \(xid\) => alignToWall\(win, xid\)\)/.test(main),
+   "reused as the axis of the seven-point box and of the wall (axis + thickness)");
+ok(/alignment: \(az, m, slope, dev, n\) => t\("vw\.read\.alignment"/.test(main), "its words from i18n");
 ok(/if \(sk\.shape === "box"\) renderBoxInputs\(sect, sk, win\);/.test(main), "the Item tab lists the seven points");
 ok(/addDrawnSketch\("box", input, r\.mesh\.origin/.test(main), "the box is a sketch that keeps its seven points (the shared road of the drawn shapes)");
 const bridge = fs.readFileSync(path.join(SRC, "../../tools/em_bridge.py"), "utf8");
