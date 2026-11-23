@@ -982,6 +982,30 @@ const _KIND_TRANSLATIONS = (
   }
 ).stratigraphic_kinds ?? {};
 
+// MICRO-LG11 · a unit WITHOUT a number (node datamodel 1.6.55, StratigraphicNode
+// `data.unnumbered`): recognised and recorded, its number not assigned yet. The
+// label is the datamodel's (translations, section `node_elements`), never a word
+// of this interface; no number is ever invented — a person assigns it.
+const _NODE_ELEMENT_TRANSLATIONS = (
+  datamodelTranslations as { node_elements?: Record<string, Record<string, Record<string, string | boolean>>> }
+).node_elements ?? {};
+
+/** The unit is declared without a number (`data.unnumbered`). */
+export function isUnnumbered(node: { data?: unknown } | null | undefined): boolean {
+  const v = (node?.data as Record<string, unknown> | undefined)?.unnumbered;
+  return v === true || v === "true";
+}
+
+/** A field (`label`, `description`, `scope_note`) of a node element in the
+ *  active locale (translations, `node_elements`), then English, then "". */
+export function nodeElementText(name: string, field = "label"): string {
+  const fe = _NODE_ELEMENT_TRANSLATIONS[name]?.[field];
+  const loc = fe?.[getLocale()] ?? fe?.[getLocale().split("-")[0]];
+  if (typeof loc === "string" && loc.trim()) return loc;
+  const en = fe?.en;
+  return typeof en === "string" ? en : "";
+}
+
 // DEV30 A3 · the PACKAGINGS of a resource (file, file_set, directory, archive,
 // datablock): their vocabulary is the datamodel's (`ResourceNode.properties.
 // packaging` values/labels, node datamodel 1.6.24) and their names in each

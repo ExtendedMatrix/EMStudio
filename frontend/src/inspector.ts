@@ -7,7 +7,7 @@ import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
 import { dataGlyphLabel, glyphFor, glyphSvg } from "./glyphs";
 import { activeTheme, canvasTheme } from "./theme";
-import { classOf, conceptParts, edgeLabel, isGroupType, isStratigraphicType, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf, typeDescription, typeLabel } from "./rules";
+import { classOf, conceptParts, edgeLabel, isGroupType, isStratigraphicType, isUnnumbered, nodeElementText, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf, typeDescription, typeLabel } from "./rules";
 import { renderProvenance } from "./provenance-ui";
 import { renderObliteration } from "./obliteration-ui";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
@@ -504,6 +504,15 @@ export function renderInspector(
     }
   }
   head.appendChild(chip);
+  // MICRO-LG11 · a unit WITHOUT a number says so beside its type: the label is
+  // the datamodel's (`node_elements.unnumbered`), its hover the rule — a person
+  // assigns the number, nothing invents one
+  if (isUnnumbered(node)) {
+    const un = el("span", "insp-unnumbered", nodeElementText("unnumbered"));
+    un.dataset.unnumbered = "1";
+    un.title = t("insp.unnumberedTip");
+    head.appendChild(un);
+  }
   const close = el("button", "insp-close", "×");
   close.title = t("l.closeEsc");
   close.addEventListener("click", cb.onClose);

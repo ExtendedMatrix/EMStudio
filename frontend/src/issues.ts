@@ -613,6 +613,20 @@ export function issues(src: IssueSources): Issue[] {
       push({ node: n.id, sev: "warn", rule: "missing", txt: t("issues.missing", { n: name(n.id) }) });
   }
 
+  // ── MICRO-LG11 · a unit WITHOUT a number: declared (node datamodel 1.6.55,
+  //    `data.unnumbered`) or a name that holds no number at all (X_TOPSOIL) —
+  //    s3Dgraphy's diagnostics.unnumbered_hints. A warning, never a fix: the
+  //    number is assigned by a person. The continuity node (BR) is named by
+  //    convention and is not listed.
+  for (const n of nodes) {
+    if (!src.isUnit(n.node_type) || n.node_type === "BR") continue;
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    if (d.unnumbered === true || d.unnumbered === "true")
+      push({ node: n.id, sev: "warn", rule: "unnumbered", txt: t("issues.unnumbered", { n: name(n.id) }) });
+    else if (String(n.name ?? "").trim() && !/\d/.test(String(n.name)))
+      push({ node: n.id, sev: "warn", rule: "unnumbered", txt: t("issues.unnumberedName", { n: name(n.id) }) });
+  }
+
   // ── CATENA · reading from a unit: a hint when the unit lacks the property ──
   for (const h of src.sourceHints ?? [])
     push({ node: h.extractor, sev: "info", rule: "paradata",
