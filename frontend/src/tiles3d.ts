@@ -421,7 +421,9 @@ export function dracoFor(E: any, T: any): any {
   manager.setURLModifier((u: string) => T.DRACO_FILES[String(u).split("/").pop() ?? ""] ?? u); // paths:url
   draco = new T.DRACOLoader(manager);
   draco.setDecoderPath("draco/");
-  draco.setDecoderConfig({ type: "wasm" });
+  // MICRO-PX7 · no `setDecoderConfig({ type: "wasm" })` any more: deprecated
+  // since r185 (a warning on every page, removed in r194), and wasm is
+  // DRACOLoader's own choice wherever WebAssembly exists (r187 `_initDecoder`)
   return draco;
 }
 

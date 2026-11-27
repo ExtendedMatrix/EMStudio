@@ -113,7 +113,7 @@ function minifyWholeChunk(): Plugin {
   };
 }
 
-/** RISORSA-FILE · three r185's DRACOLoader names its DEFAULT decoders with
+/** RISORSA-FILE · three r185's DRACOLoader (r187's too) names its DEFAULT decoders with
  *  `new URL('../libs/draco/…', import.meta.url)` at the top of the module, and
  *  Vite follows them: in a library build (engine3d.js) all five files were
  *  inlined — measured, engine3d.js 815 kB → 2.59 MB, for every first model,

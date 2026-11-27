@@ -1370,7 +1370,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // every type has them — the others thin and continuous at 1° in their 2D
         // frame colour, the very contour drawn below until then; the branch
         // below stays for what has no type style (the RM, a file before 1.6.44).
-        // Transparency order (decision 4): three (r185) sorts the transparent
+        // Transparency order (decision 4): three (r185, and r187 the same:
+        // MICRO-PX7, check-threed-browser 12/12 on both) sorts the transparent
         // meshes by the centre of their geometry's bounding sphere, not by the
         // origin, and the faces write no depth — a proxy with its origin at
         // 0,0,0 keeps its fill readable (check-threed-browser measures both)

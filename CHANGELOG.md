@@ -10,6 +10,18 @@ reports and grouped by stage, at the end of the file («Before 16 October
 ## [Unreleased]
 
 ### Changed
+- **three.js r187** (MICRO-PX7 A, 27 November 2026): `three` 0.185.1 →
+  0.187.0 and `@types/three` 0.185.4 → 0.187.0, exact versions;
+  `3d-tiles-renderer` 0.5.3 and `3d-tiles-renderer-3tz` unchanged. The step
+  the Gaussian splats need (`3d-tiles-rendererjs-3dgs-plugin` 0.3.1 and
+  `gaussian-splat-lite` ≥ 1.6 ask three ≥ 0.187.0). Read in the notes of r186
+  and r187: of three's exports only `CubeUVReflectionMapping` is gone (unused
+  here); `Object3D.dispose()` only fires an event; no custom Object3D class,
+  no `setViewport`/`setScissor` on a render target, no PMREM. The one change:
+  the Draco loader no longer calls the deprecated `setDecoderConfig` (wasm is
+  its own default; the call warned on every page and goes in r194). The
+  Space on TempluMare (meshes, the 2015 `.3tz`, 13 proxies) draws as on r185:
+  35 picks of 35 identical in three views.
 - **Groups that stay where they are dropped, and a more compact layout**
   (MICRO-Q-GRUPPI-E-LAYOUT, E.D. 17 November 2026). *The cause of the return*:
   a group's drop wrote its move only into the archival layout

@@ -37,9 +37,9 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "~2.5.5",
-    "@types/three": "^0.185.4",
+    "@types/three": "0.187.0",
     "3d-tiles-renderer": "0.5.3",
     "3d-tiles-renderer-3tz": "github:zalmoxes-laran/3d-tiles-renderer-3tz#4cc4536ff68892fe2d717feee8671054a51778b0",
-    "three": "^0.185.1"
+    "three": "0.187.0"
   }
 }
