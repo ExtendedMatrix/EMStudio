@@ -39,6 +39,9 @@ export interface WallPoint {
    *  «spigolo rifatto in restauro»): the description of the extractor the
    *  point becomes (the datamodel's P3_has_note) */
   note?: string;
+  /** MICRO-PX7 · the point was taken on a Gaussian splat: the alpha
+   *  isosurface at `opacity` (`splat-rules.ts`) — its extractor says so */
+  splat?: { opacity: number };
 }
 
 export type WallMode = "outline" | "axis";

@@ -9,6 +9,35 @@ reports and grouped by stage, at the end of the file («Before 16 October
 
 ## [Unreleased]
 
+### Added
+- **Gaussian splats as representation models** (MICRO-PX7 B, 27 November
+  2026; PX5 A–E). Gaussian Splat Lite 1.11.0 and
+  `3d-tiles-rendererjs-3dgs-plugin` 0.3.1 (William Liu, Apache-2.0, exact
+  versions; NOTICE and third-party licences in `docs/third-party/`), loaded
+  lazily: on the web `splat3d.js` beside the page (three, and three's core
+  under `three/webgpu` / `three/tsl`, taken from `engine3d.js`), inlined in the
+  desktop's single file as three is (+2.5 MB, +36 ms at start). A splat RM is
+  an RM: its document, its epochs, its pose and frame, the Outliner's eye, the
+  models' opacity, saved with the study. Forms: PLY (3DGS; a mesh PLY refused
+  with the reason), SPZ, SOG, RAD as one model; RAD with LOD, SOG
+  `lod-meta.json`, LCC2 streamed by GSL's schedulers (a second kind of
+  streamed RM beside the tilesets); a 3D Tiles tileset of splats
+  (`KHR_gaussian_splatting`, read in its `tileset.json` before the layer is
+  made) in a folder or in a `.3tz`. ONE `GaussianSplatRenderer` per scene. The
+  door takes `.spz`, `.sog`, `.rad`, `.lcc2` and a SOG `lod-meta.json` as
+  models (s3Dgraphy `door.kind_of` the same). **The clicks**: a point on a
+  splat is where the alpha of the first Gaussian crossed reaches 0.5 (GSL's
+  raycast, `minRaycastOpacity`, EMStudio's threshold set on every splat),
+  measured against the mesh of the same object: 0.2–0.4 cm (median) on a
+  clean splat, 1.5–2.7 cm on a noisy one; its extractor says so
+  (`pick_rule` `splat_alpha_isosurface`, `pick_opacity` 0.5 — attributes, no
+  new type). «Wall from plan», «From elevation», «Seven-point box» and
+  «Alignment» work on splats; «Annotate surface» refuses a splat and proposes
+  the mesh or a plane fitted by «From elevation». A single file has no levels
+  of detail: from afar its splats under a pixel are not drawn (GSL's 1 px kept:
+  0 or 0.5 brought 3.3 M splats seen from afar from 60 to 13 fps); its streamed
+  forms keep coarser levels. `scripts/check-splats.mjs` (67).
+
 ### Changed
 - **three.js r187** (MICRO-PX7 A, 27 November 2026): `three` 0.185.1 →
   0.187.0 and `@types/three` 0.185.4 → 0.187.0, exact versions;

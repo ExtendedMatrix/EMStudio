@@ -47,7 +47,9 @@
 import { engine, headBytes, lodLevelOf, probeLods, tilesBarTexts } from "./embed3d-native";
 import { onFirstVisible } from "./lazy";
 import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-road";
-import { createTilesLayer, formatBytes, governTiles, isTilesetUrl, tilesBar, tilesEngine, withDecoders, type RelocateFn, type TilesLayer } from "./tiles3d";
+import { createTilesLayer, formatBytes, governTiles, isTilesetUrl, readTilesetJson, tilesBar, tilesEngine, withDecoders, type RelocateFn, type TilesLayer } from "./tiles3d";
+import { createSplatLayer, isSplatMesh, readPlyHeader, splatEngine, splatRendererFor, type SplatLayer } from "./splat3d";
+import { SPLAT_PICK_OPACITY, tilesetDeclaresSplats, type SplatKind } from "./splat-rules";
 import { createErrorGovernor, ERROR_PROFILES, type ErrorChoice, type ErrorGovernor, type Hardware } from "./tiles-error";
 import type { OverlayKey, OverlayValueKey } from "./overlays";
 import {
@@ -101,6 +103,9 @@ export interface SceneItem {
   /** TEMPLU MARE v2 · C1 · `url` IS a tileset, in this form, whatever it ends
    *  with: a store URL (`…/asset/sha256:…`) names no `.3tz` */
   tiles?: "directory" | "3tz";
+  /** MICRO-PX7 · `url` IS a Gaussian splat, in this form (`splatKindOf`): drawn
+   *  by Gaussian Splat Lite (`splat3d.ts`), a single model or a stream */
+  splat?: SplatKind;
   /** MICRO-TILESET-CARTELLA · a dropped tileset (a preview): its files from
    *  this reader, `url` only its name in the scene */
   tilesSource?: { readEntry(path: string): Promise<Uint8Array | null> };
@@ -421,6 +426,10 @@ export interface ToolHit {
   ring?: Array<{ p: V3; n: V3 | null }> | null;
   /** MICRO-PX1c · where the click was, in page pixels (a field opens there) */
   screen?: { x: number; y: number } | null;
+  /** MICRO-PX7 · the point is on a Gaussian splat: taken where the alpha of
+   *  the first splat crossed reaches `opacity` (GSL's `minRaycastOpacity`);
+   *  no normal, no vertex — a splat has no surface */
+  splat?: { opacity: number } | null;
 }
 
 export interface SpaceSceneOptions {
@@ -605,7 +614,7 @@ interface Drawn {
   /** what was drawn: a mesh, a contour, or only a label — MICRO-3DTILES: a
    *  tileset, or a glb held back by the threshold */
   /** «released»: a container's tileset whose tiles left the memory (MICRO-TILESET-CONTENITORE) */
-  as: "mesh" | "contour" | "label" | "pending" | "tiles" | "gated" | "released";
+  as: "mesh" | "contour" | "label" | "pending" | "tiles" | "gated" | "released" | "splat";
   /** the file actually drawn (a LOD set's chosen level, a tileset) */
   url?: string;
 }
@@ -821,7 +830,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
        *  tileset's object is its layer's (`dispose`), never walked */
       const giveBack = (root: any) => {
         const walk = (o: any) => {
-          if (o.userData?.tiles) return;
+          if (o.userData?.tiles || o.userData?.splat) return;
           if (o.geometry && !o.geometry.userData?.fromFile) o.geometry.dispose?.();
           for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) if (!m.userData?.fromFile) m.dispose?.();
           for (const c of o.children ?? []) walk(c);
@@ -987,6 +996,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         /** MICRO-SPAZIO-COMPATTO p.3 · the same controls elsewhere (the Inspector's) */
         extra: Set<ReturnType<typeof tilesBar>> };
       const layers = new Map<string, Live>();
+      /** MICRO-PX7 · the Gaussian splats drawn, by their file (kept across rebuilds, as a tileset) */
+      const splatLayers = new Map<string, { layer: SplatLayer; itemId: string }>();
+      let S: any = null;
+      const splatOfRoot = (o: any): SplatLayer | null => { for (const x of splatLayers.values()) if (x.layer.object === o) return x.layer; return null; };
+      /** what the splats in the scene take: their loaded data's boxes */
+      const unionSplats = (b: any): void => { for (const x of splatLayers.values()) if (x.layer.object.parent && x.layer.object.visible !== false) { const sb = x.layer.bounds(); if (sb) b.union(sb); } };
       const lodSets = new Map<string, Promise<Array<{ level: number; url: string; bytes: number | null }>>>();
       const lodChoice = new Map<string, number>();
       const forced = new Set<string>();
@@ -1204,7 +1219,21 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // (its tiles by the distance): «Manuale» stays one click away on its bar
         // MICRO-ERRORE-GEOMETRICO · the error: the one handed over, else the Preferences'; the governor's now
         const te = tilesErr();
+        // MICRO-PX7 · a tileset of Gaussian splats (its tileset.json declares
+        // KHR_gaussian_splatting): the splat engine and its plugin come with it
+        // (only then: a tileset of meshes never asks for them)
+        const plugins: any[] = [];
+        if (tilesetDeclaresSplats(await readTilesetJson(T, url, archive, source))) {
+          try {
+            S = S ?? await splatEngine();
+            splatRendererFor(S, scene, renderer);
+            plugins.push(new S.GaussianSplatPlugin({ minRaycastOpacity: SPLAT_PICK_OPACITY }));
+          } catch { /* the tiles as meshes: the renderer says what it cannot read */ }
+        }
+        live = layers.get(url);
+        if (live) { resting.delete(url); live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
         const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: memoryMB ?? opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}),
+          ...(plugins.length ? { plugins } : {}),
           ...(source ? { source } : {}), ...(relocate ? { relocate } : {}), ...(errorScale !== undefined ? { errorScale } : {}),
           errorChoice: errorChoice ?? te.choice, errorTarget: governor(te.hardware).state().target,
           ...(sceneCache() ? { lruCache: sceneCache() } : {}) });
@@ -1220,6 +1249,28 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         watchRoot(url, live);
         return live;
       };
+      // MICRO-PX7 · the splats of the scene: their kind, state, data, memory, box
+      (probe as Record<string, unknown>).__spaceSplats = () => [...splatLayers.entries()].map(([url, x]) => {
+        const b = x.layer.bounds();
+        return { id: x.itemId, url, kind: x.layer.kind, streamed: x.layer.streamed, error: x.layer.error(), shown: !!x.layer.object.parent && x.layer.object.visible !== false,
+          stats: x.layer.stats(), box: b ? [...b.min.toArray(), ...b.max.toArray()] : null };
+      });
+      // …and the splats inside the tilesets (the plugin's meshes): how many, shown, where
+      (probe as Record<string, unknown>).__spaceSplatTiles = () => liveLayers().map((l) => {
+        let meshes = 0, splats = 0, shown = 0;
+        const b = new THREE.Box3();
+        l.layer.object.updateMatrixWorld(true);
+        l.layer.object.traverse((o: any) => {
+          if (!isSplatMesh(o)) return;
+          meshes++; splats += Number(o.numSplats ?? 0);
+          let vis = true;
+          for (let q = o; q; q = q.parent) if (q.visible === false) vis = false;
+          if (!vis) return;
+          shown++;
+          if (o.isInitialized) b.union(o.getBoundingBox(true, new THREE.Box3()).applyMatrix4(o.matrixWorld));
+        });
+        return { id: l.itemId, meshes, splats, shown, box: b.isEmpty() ? null : [...b.min.toArray(), ...b.max.toArray()] };
+      }).filter((x) => x.meshes);
       // (box and points: what the Doc's reader said of its tileset, read by the
       // 3D Tiles cases now that the document's model is the Viewer's scene)
       probe.__spaceTiles = () => liveLayers().map((l) => {
@@ -1306,6 +1357,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const b = new THREE.Box3();
         for (const c of content.children) if (!c.userData.contour && !c.userData.tiles && !c.userData.helper) b.expandByObject(c);
         for (const l of liveLayers()) { const lb = l.layer.bounds(); if (lb) b.union(lb); }
+        unionSplats(b);
         return b.isEmpty() ? new THREE.Box3(new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 1, 0.5)) : b;
       };
       const span = (): number => { const s = extent().getSize(new THREE.Vector3()); return Math.max(s.x, s.y, s.z) || 1; };
@@ -1680,6 +1732,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const b = new THREE.Box3();
         for (const c of content.children) if (!c.userData.contour && !c.userData.helper) b.expandByObject(c);
         for (const l of liveLayers()) { const lb = l.layer.bounds(); if (lb) b.union(lb); }
+        unionSplats(b);
         if (b.isEmpty()) return null;
         camera.updateMatrixWorld(true);
         const f = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
@@ -1690,7 +1743,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const r = renderer.domElement.getBoundingClientRect();
         return new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
       };
-      type Hit = { point: any; normal: any | null; kind: "proxy" | "rm" | "sketch"; id: string; distance: number; face?: any; object?: any };
+      type Hit = { point: any; normal: any | null; kind: "proxy" | "rm" | "sketch"; id: string; distance: number; face?: any; object?: any; splat?: boolean };
       const locked = () => opts.locked?.() ?? new Set<string>();
       /** everything under a page point, nearest first (tiles too) */
       const hitsAt = (x: number, y: number): Hit[] => {
@@ -1716,7 +1769,32 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             out.push({ point: hh.point, normal: hh.face?.normal ?? null, kind: "rm", id: l.itemId, distance: hh.distance, face: hh.face, object: hh.object });
           }
         }
+        // MICRO-PX7 · a Gaussian splat: GSL's raycast, the alpha isosurface at
+        // EMStudio's threshold (`SPLAT_PICK_OPACITY`): no face, no normal
+        for (const x of splatLayers.values()) {
+          const o = x.layer.object;
+          if (!o.parent || o.visible === false || (o.parent.userData?.frameOf && o.parent.visible === false)) continue;
+          if (lk.has(`rm:${x.itemId}`)) continue;
+          for (const hh of x.layer.intersect(ray, SPLAT_PICK_OPACITY))
+            out.push({ point: hh.point, normal: null, kind: "rm", id: x.itemId, distance: hh.distance, object: hh.object, splat: true });
+        }
         return out.sort((a, b) => a.distance - b.distance);
+      };
+      // MICRO-PX7 · the probes of the click rule: every hit along the ray under
+      // a page point (meshes, tiles, splats), and a splat's at a chosen threshold
+      (probe as Record<string, unknown>).__spaceHitsAll = (x: number, y: number) => hitsAt(x, y)
+        .map((h) => ({ kind: h.kind, id: h.id, point: arr(h.point), distance: h.distance, splat: !!h.splat }));
+      (probe as Record<string, unknown>).__spaceSplatHit = (x: number, y: number, opacity = SPLAT_PICK_OPACITY, id?: string) => {
+        ray.setFromCamera(ndcOf(x, y), camera);
+        let best: { id: string; point: V3; distance: number } | null = null;
+        for (const s of splatLayers.values()) {
+          if (id && s.itemId !== id) continue;
+          const hh = s.layer.intersect(ray, opacity)[0];
+          if (hh && (!best || hh.distance < best.distance)) best = { id: s.itemId, point: arr(hh.point), distance: hh.distance };
+        }
+        // the threshold back to EMStudio's for the clicks that follow
+        for (const s of splatLayers.values()) s.layer.object.traverse((o: any) => { if (typeof o.minRaycastOpacity === "number") o.minRaycastOpacity = SPLAT_PICK_OPACITY; });
+        return best;
       };
       /** MICRO-GEO13 · the nearest shown plane of a plugin's layer under a page point
        *  (the group `plugin-layers`, row G11): its item and the place on its picture */
@@ -2064,6 +2142,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const live = liveLayers().find((l) => l.itemId === id);
           const lb = live ? live.layer.bounds() : null;
           if (lb) b.union(lb);
+          // MICRO-PX7 · a splat RM: its loaded data
+          if (kind === "rm") for (const x of splatLayers.values()) if (x.itemId === id && x.layer.object.parent) { const sb = x.layer.bounds(); if (sb) b.union(sb); }
         }
         return b.isEmpty() ? null : b;
       };
@@ -2417,8 +2497,69 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const tilesTurn = new Promise<void>((r) => { releaseTiles = r; });
         const later: SceneItem[] = [];      // contours and labels: after the meshes, around them
         const used = new Set<string>();
+        const usedSplats = new Set<string>();
         for (const item of items) {
           const key = `${item.kind}:${item.id}`;
+          // MICRO-PX7 · a Gaussian splat RM: one layer per file, kept across
+          // rebuilds (as a tileset); its pose and frame on its group, as a mesh's
+          if (item.kind === "rm" && item.splat && item.state === "resident" && item.url) {
+            const sUrl = item.url;
+            const kind = item.splat;
+            usedSplats.add(sUrl);
+            drawn.set(key, { item, as: "pending", url: sUrl });
+            pending.push((async () => {
+              let x = splatLayers.get(sUrl);
+              if (!x) {
+                try {
+                  S = S ?? await splatEngine();
+                } catch (e) {
+                  if (gen !== generation || disposed) return;
+                  drawn.set(key, { item: failed(item, "missing"), as: "label" }); later.push(failed(item, "missing"));
+                  opts.onLoadOutcome?.(key, item.label, sUrl, { type: "error", message: `splat engine: ${String((e as Error)?.message ?? e)}` });
+                  return;
+                }
+                if (gen !== generation || disposed) return;
+                splatRendererFor(S, scene, renderer);
+                x = splatLayers.get(sUrl);
+                if (!x) {
+                  const layer = await createSplatLayer(E, S, sUrl, kind, camera, renderer,
+                    { memoryMB: opts.tilesMemoryMB, fetchHeader: (u) => readPlyHeader(u) });
+                  x = splatLayers.get(sUrl) ?? { layer, itemId: item.id };
+                  if (x.layer !== layer) layer.dispose();
+                  splatLayers.set(sUrl, x);
+                }
+              }
+              x.itemId = item.id;
+              const layer = x.layer;
+              if (gen !== generation || disposed) return;
+              if (layer.error()) {
+                drawn.set(key, { item: failed(item, "missing"), as: "label" }); later.push(failed(item, "missing"));
+                opts.onLoadOutcome?.(key, item.label, sUrl, { type: "error", message: layer.error() });
+                return;
+              }
+              const obj = layer.object;
+              obj.traverse((o: any) => { o.userData.rmId = item.id; });
+              if (item.pose) setPose(obj, item.pose);
+              obj.visible = altVisible(item);
+              roots.set(key, obj);
+              placeIn(obj, item);
+              // the first data on screen (8 s at most: a big stream labels later)
+              await Promise.race([layer.ready, new Promise((r) => setTimeout(r, 8000))]);
+              if (gen !== generation || disposed) return;
+              if (layer.error()) {
+                obj.removeFromParent();
+                drawn.set(key, { item: failed(item, "missing"), as: "label" }); later.push(failed(item, "missing"));
+                opts.onLoadOutcome?.(key, item.label, sUrl, { type: "error", message: layer.error() });
+                return;
+              }
+              opts.onLoadOutcome?.(key, item.label, sUrl, null);
+              const bb = layer.bounds();
+              if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), `rm k-rm${selCls(item)}`, item.id);
+              if (item.frameOnArrival) api.frameKeys?.([key]);
+              drawn.set(key, { item, as: "splat", url: sUrl });
+            })());
+            continue;
+          }
           // MICRO-3DTILES · a tileset (the item's own, or the one chosen over
           // a glb past the threshold)
           // MICRO-D-GIS-DOCUMENTI p.9 · a zip of a tileset (TempluMare's master,
@@ -2744,6 +2885,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         // MICRO-TIL06 (T5) · not used now: resting, not destroyed (a closed or another document: gone)
         for (const [u, l] of layers) if (!used.has(u) && !resting.has(u)) restLayer(u, l);
+        // MICRO-PX7 · a splat no item draws any more leaves the memory
+        for (const [u, x] of splatLayers) if (!usedSplats.has(u)) { x.layer.dispose(); splatLayers.delete(u); }
         usedTiles = used;
         sceneCeiling();
         if (releaseNext) { releaseNext = false; trimResting(true); forgetUnused(); }
@@ -3578,6 +3721,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       (probe as Record<string, unknown>).__spaceHandleDrag = () => (handleDrag ? { id: handleDrag.id, moved: handleDrag.moved, cur: handleDrag.cur } : null);
       let raf = 0;
       let frames = 0;
+      let splatFrames = 0;
       // MICRO-OVERLAY-PER-FINESTRA p.2 · the frames of the window the canvas is
       // IN: a Space in a detached window keeps turning while the main page
       // (hidden, minimised) gets none
@@ -3600,6 +3744,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // a tileset hidden by its container loads nothing (unless it is warming)
         altTick();
         for (const l of live) if (l.layer.object.visible || altWarming.has(l)) l.layer.update();
+        // MICRO-PX7 · a streamed splat chooses its detail before the render
+        for (const x of splatLayers.values()) if (x.layer.streamed && x.layer.object.parent && x.layer.object.visible !== false) x.layer.update(camera, renderer);
+        // …and the models' opacity (Overlays ▸ «Modelli»), on every splat mesh,
+        // a stream's too as its detail comes (a splat has no material to fade)
+        if (splatLayers.size && ++splatFrames % 20 === 0) {
+          const rmOp = val("s3_opacity_rm", 1);
+          for (const x of splatLayers.values()) x.layer.object.traverse((o: any) => { if (typeof o.minRaycastOpacity === "number" && o.opacity !== rmOp) o.opacity = rmOp; });
+        }
         if (live.length && ++frames % 20 === 0) { for (const l of live) { l.bar.refresh(); for (const b of l.extra) b.refresh(); } chipTick(); if (resting.size) trimResting(); }
         placePreview();
         renderer.render(scene, camera);
@@ -4239,7 +4391,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         for (const [k, o] of roots) {
           if (!o.parent || o.visible === false || lk.has(k)) continue;
           const live = k.startsWith("rm:") ? liveLayers().find((l) => l.layer.object === o) : null;
-          const b = live ? live.layer.bounds() : new THREE.Box3().setFromObject(o);
+          const sp = live ? null : splatOfRoot(o);
+          const b = live ? live.layer.bounds() : sp ? sp.bounds() : new THREE.Box3().setFromObject(o);
           if (b && !b.isEmpty() && inside(b.getCenter(new THREE.Vector3()))) out.push(k);
         }
         if (sketchGroup.visible)
@@ -4307,7 +4460,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (lh && (!hh || lh.distance <= hh.distance)) {
             if (opts.onTool({ point: lh.point, normal: null, key: `layer:${lh.layer.item}`, vertex: null, layer: lh.layer }, false)) return;
           } else if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh),
-              ring: ringAt(e.clientX, e.clientY), screen: { x: e.clientX, y: e.clientY } } : null, false)) return;
+              ring: ringAt(e.clientX, e.clientY), screen: { x: e.clientX, y: e.clientY }, ...(hh.splat ? { splat: { opacity: SPLAT_PICK_OPACITY } } : {}) } : null, false)) return;
         }
         // MICRO-3DTILES · «Più dettaglio qui» armed on a tileset: the click is its
         // (MICRO-SPAZIO-COMPATTO · the bar in the popover or its twin in the Inspector)
@@ -4387,7 +4540,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (undoable && performance.now() - undoable.t < DOUBLE_MS) { lastPick = undoable.prev; opts.onPickUndo?.(); }
         undoable = null;
         const hh = hitsAt(e.clientX, e.clientY)[0];
-        if (opts.onTool?.(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh) } : null, true)) return;
+        if (opts.onTool?.(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}`, vertex: nearestVertex(hh),
+            ...(hh.splat ? { splat: { opacity: SPLAT_PICK_OPACITY } } : {}) } : null, true)) return;
         if (!hh) return;
         opts.onBeforeJump?.();
         // MICRO-SEG14 p.1 · a journey, not a teleport: the camera flies to a
@@ -4519,7 +4673,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         for (const [k, o] of roots) {
           if (!o.parent || o.visible === false) continue;
           const live = k.startsWith("rm:") ? liveLayers().find((l) => l.layer.object === o) : null;
-          const b = live ? live.layer.bounds() : new THREE.Box3().setFromObject(o);
+          const sp = live ? null : splatOfRoot(o);
+          const b = live ? live.layer.bounds() : sp ? sp.bounds() : new THREE.Box3().setFromObject(o);
           if (b && !b.isEmpty()) out.push([...b.min.toArray(), ...b.max.toArray()] as Box6);
         }
         return out;
@@ -4578,6 +4733,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         dropPendingPick();
         for (const l of layers.values()) l.layer.dispose();
         layers.clear();
+        for (const x of splatLayers.values()) x.layer.dispose();
+        splatLayers.clear();
+        try { scene.userData.__emSplatRenderer?.dispose?.(); } catch { /* gone */ }
         strips.remove();
         tchip.remove();
         ro.disconnect();
@@ -4760,7 +4918,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // boundingVolume, as the automatic choice reads it), not the content
           // loaded at this moment — a coarse level is a fraction of the whole
           const live = liveLayers().find((l) => l.layer.object === roots.get(k));
-          const lb = live ? live.layer.bounds() : null;
+          const lb = live ? live.layer.bounds() : splatOfRoot(roots.get(k))?.bounds() ?? null;
           if (lb && !lb.isEmpty()) return [arr(lb.min), arr(lb.max)] as [V3, V3];
           // MICRO-RIFINITURE p.4 · a sketch (the cube of a detail): its own box
           if (k.startsWith("sketch:")) { const sb = boxOfKey(k); return sb ? [arr(sb.min), arr(sb.max)] as [V3, V3] : null; }
@@ -4795,6 +4953,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const b = new THREE.Box3();
           for (const c of content.children) if (!c.userData.contour && !c.userData.tiles && !c.userData.helper) b.expandByObject(c);
           for (const l of liveLayers()) { const lb = l.layer.bounds(); if (lb) b.union(lb); }
+          unionSplats(b);
           return b.isEmpty() ? null : [arr(b.min), arr(b.max)] as [V3, V3];
         },
         siteView: (top: boolean) => {

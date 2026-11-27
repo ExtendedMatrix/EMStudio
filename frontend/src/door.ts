@@ -19,7 +19,10 @@ export type DoorRole = "rm" | "rmdoc" | "source";
 
 const ext = (p: string): string => { const b = p.toLowerCase().replace(/\/+$/, "").split(/[\\/]/).pop() ?? ""; const i = b.lastIndexOf("."); return i > 0 ? b.slice(i) : ""; };
 const base = (p: string): string => p.toLowerCase().replace(/\/+$/, "").split(/[\\/]/).pop() ?? "";
-const MODEL = new Set([".obj", ".glb", ".gltf", ".ply", ".fbx", ".stl", ".las", ".laz", ".e57", ".blend"]);
+const MODEL = new Set([".obj", ".glb", ".gltf", ".ply", ".fbx", ".stl", ".las", ".laz", ".e57", ".blend",
+  // MICRO-PX7 · Gaussian splats (splat-rules.ts); a streamed SOG by its index
+  ".spz", ".sog", ".rad", ".lcc2"]);
+const SPLAT_INDEX = new Set(["lod-meta.json"]);
 const IMAGE = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".heic"]);
 
 /** what a file is, by its name (`georeferenced`: a picture the bridge read with a frame) */
@@ -28,7 +31,7 @@ export function doorKindOf(path: string, georeferenced = false): DoorKind {
   if (b.endsWith(".em.json") || e === ".graphml") return "graph";
   if (e === ".3tz" || b === "tileset.json") return "tileset";
   if (e === ".tpy" || e === ".jsonld") return "tropy";
-  if (MODEL.has(e)) return "model";
+  if (MODEL.has(e) || SPLAT_INDEX.has(b)) return "model";
   if (e === ".dxf") return "dxf";
   if (e === ".shp" || e === ".gpkg" || e === ".geojson") return "vector";
   if (IMAGE.has(e)) return georeferenced ? "raster" : "image";

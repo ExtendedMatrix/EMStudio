@@ -52,7 +52,8 @@ const versionFollowsPackageJson = (): Plugin => ({
 // never a second implementation.
 const entry = process.env.EM_ENTRY === "reader" ? "reader"
   : process.env.EM_ENTRY === "engine3d" ? "engine3d"
-  : process.env.EM_ENTRY === "tiles3d" ? "tiles3d" : "index";
+  : process.env.EM_ENTRY === "tiles3d" ? "tiles3d"
+  : process.env.EM_ENTRY === "splat3d" ? "splat3d" : "index";
 // MICRO-3DTILES · `tiles3d.js` takes three from `engine3d.js`, beside it: one
 // three on the page (see `engine3d-entry.ts`)
 const THREE_EXTERNAL = /^three($|\/)/;
@@ -132,6 +133,27 @@ function dracoWithoutDefaults(): Plugin {
   };
 }
 
+/** MICRO-PX7 · `splat3d.js` (Gaussian Splat Lite and its tiles plugin) takes
+ *  three from `engine3d.js`, as `tiles3d.js` does: `three` and the one addon it
+ *  imports (`Pass.js`) are external and pointed there. GSL also imports
+ *  `three/webgpu` and `three/tsl`, which are NOT in engine3d.js: they are
+ *  bundled here — and their own import of three's core (`./three.core.js`,
+ *  relative, inside `three/build/`) is pointed at engine3d.js too, which
+ *  exports the core's names (`engine3d-entry.ts`). One core on the page: two
+ *  would each have their own classes (`instanceof` failing quietly). */
+function splatCoreFromEngine(): Plugin {
+  return {
+    name: "em-splat-core-from-engine",
+    enforce: "pre",
+    resolveId(id, importer) {
+      if (id === "three" || /^three\/(examples\/jsm|addons)\/postprocessing\/Pass\.js$/.test(id)) return { id: "./engine3d.js", external: true };
+      if (id === "./three.core.js" && importer && /three[\\/]build[\\/]three\.(webgpu|tsl)\.js$/.test(importer))
+        return { id: "./engine3d.js", external: true };
+      return null;
+    },
+  };
+}
+
 /** RISORSA-FILE · the web build's tiles3d.js asks the Draco decoder BESIDE it
  *  (`draco/…`, fetched on the first Draco tile): a library build would
  *  otherwise inline both files as base64 into tiles3d.js. */
@@ -204,7 +226,8 @@ export default defineConfig(({ command }) => {
   // plugin belongs to the build alone.
   plugins: [dracoWithoutDefaults(), ...(command === "serve" ? [versionFollowsPackageJson()]
     : entry === "reader" ? [] : entry === "engine3d" ? [minifyWholeChunk()]
-    : entry === "tiles3d" ? [minifyWholeChunk(), dracoBeside()] : [viteSingleFile()])],
+    : entry === "tiles3d" ? [minifyWholeChunk(), dracoBeside()]
+    : entry === "splat3d" ? [splatCoreFromEngine(), minifyWholeChunk()] : [viteSingleFile()])],
   build: {
     outDir: lab && command === "build" ? "dist-lab" : "dist",
     // RIFINITURE · the engine is a library build: ONE self-contained ES module
@@ -213,7 +236,10 @@ export default defineConfig(({ command }) => {
     // MICRO-3DTILES · the tiles renderer is a library build too, three left out
     ...(entry === "tiles3d" ? { lib: { entry: new URL("./src/tiles3d-entry.ts", import.meta.url).pathname,
                                        formats: ["es" as const], fileName: () => "tiles3d.js" } } : {}),
-    rollupOptions: entry === "engine3d" ? {} : entry === "tiles3d" ? {
+    // MICRO-PX7 · Gaussian Splat Lite and its tiles plugin, a library build too
+    ...(entry === "splat3d" ? { lib: { entry: new URL("./src/splat3d-entry.ts", import.meta.url).pathname,
+                                       formats: ["es" as const], fileName: () => "splat3d.js" } } : {}),
+    rollupOptions: entry === "engine3d" || entry === "splat3d" ? {} : entry === "tiles3d" ? {
       external: (id: string) => THREE_EXTERNAL.test(id),
       output: { paths: (id: string) => (THREE_EXTERNAL.test(id) ? "./engine3d.js" : id) },
     } : {

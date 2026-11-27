@@ -384,6 +384,7 @@ import { ALT_RULE, tilesKindOf } from "./space";
 import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame, type Relocation } from "./file-frame";
 import { trackpadClassifier } from "./wheel-kind";
 import { formatBytes as tilesBytes, isTilesetUrl, onEarth, prefetchTilesetRoot, tilesEngine, tilesEngineReady } from "./tiles3d";
+import { splatPickAttributes, type SplatKind } from "./splat-rules";
 import { engine as engine3d, engineReady, mount3dViewer } from "./embed3d-native";
 import { prefetchPlan, type PrefetchItem, type PrefetchTarget } from "./sources-prefetch";
 import {
@@ -3514,6 +3515,8 @@ window.__EM_SCENE__ = () => {
   assetCells: (k: AL.TargetKey) => (assetUi.ans?.assets ?? []).map((a) => ({ id: a.id, name: a.name, state: a.targets[k]?.state ?? "",
     why: a.targets[k]?.why ?? "", versions: a.versions.filter((v) => !v.master).map((v) => v.name) })),
   logTail: (n = 20) => logEntries().slice(-n).map((e) => `${e.level} ${e.message}`),
+  /** MICRO-PX7 · what a drawn proxy's sketch hands to `proxy_from_points` (its points, a splat's pick_rule among them) */
+  pxParadata: (id: string) => { const sk = listSketches().find((x) => x.id === id); return sk ? proxyParadataItem(sk) : null; },
   /** MICRO-PX3 · «Annota superficie»: the contour being clicked in each Space window, its draped path, the triangles gathered */
   surfState: () => [...surfTraces.entries()].map(([w, tr]) => ({ win: w, points: tr.points.length, busy: tr.busy,
     models: surfaceModels(tr.points), path: surfPathMemo.get(`tr:${w}`)?.path.length ?? 0, elastic: surfPathMemo.get(`el:${w}`)?.path.length ?? 0,
@@ -29291,20 +29294,21 @@ function narrativeSceneItemsOf(sp: Space, st: DocumentStore, c: NonNullable<Retu
     const alt = altOf.get(r.id);
     if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) continue;
     const isTiles = !!r.resource?.tiles;
+    const isSplat = !!r.resource?.splat;
     // the Space's own rule (its `refresh`): the version the plan draws, and ITS
     // state — the scene's first resource may be a master the disk does not serve
-    const plan = isTiles ? {} : rmVersionPlan(r);
+    const plan = isTiles || isSplat ? {} : rmVersionPlan(r);
     const pv = plan.versionId ? r.versions?.find((v) => v.id === plan.versionId) : undefined;
     items.push({ kind: "rm", id: r.id, label: r.name, state: pv?.resource?.state ?? r.resource?.state ?? "missing",
       url: plan.url ?? spaceFileUrl(r.resource), resourceId: pv?.resource?.id ?? r.resource?.id, ...(plan.obj ? { obj: plan.obj } : {}),
       ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart, ...(flowNoLight(r) ? { noLight: true } : {}) } : {}),
       ...(alt ? { alt: { group: alt.group, role: alt.role, err: 10, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group } } : {}),
-      tiles: r.resource?.tiles || undefined, edge: placementColour(r.genre) ?? undefined,
+      tiles: r.resource?.tiles || undefined, ...(isSplat ? { splat: r.resource!.splat as SplatKind } : {}), edge: placementColour(r.genre) ?? undefined,
       pose: isTiles ? undefined : poseOfNode(r.id), tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined, frameMatrix: isTiles ? undefined : spaceFrameMatrix(r),
       ...(isTiles ? { tilesStart: { mode: "auto" as const } } : {}),
       bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
       tris: pv ? hardwareTris(pv) : null, textureSide: pv ? textureSideOf(pv) : null,
-      ...(isTiles ? {} : { lighter: memoryAlternatives(r, plan.versionId) }) });
+      ...(isTiles || isSplat ? {} : { lighter: memoryAlternatives(r, plan.versionId) }) });
   }
   for (const u of c.proxies) {
     const px = sp.proxies.get(u);
@@ -35201,7 +35205,8 @@ function wallPointOf(hit: ToolHit): WallPoint {
   const m = /^rm:(.+)$/.exec(hit.key);
   const rm = m ? m[1] : null;
   const doc = rm && sp ? (sp.rms.find((r) => r.id === rm)?.documentId ?? sp.rmGroups.get(rm)?.documentId ?? null) : null;
-  return { p: [hit.point[0], hit.point[1], hit.point[2]], rm, doc };
+  // MICRO-PX7 · on a Gaussian splat: how the point was taken travels with it
+  return { p: [hit.point[0], hit.point[1], hit.point[2]], rm, doc, ...(hit.splat ? { splat: { opacity: hit.splat.opacity } } : {}) };
 }
 const wallNodeName = (id: string | null | undefined): string => {
   if (!id) return "";
@@ -37369,6 +37374,9 @@ function surfClick(win: Win, hit: ToolHit | null, dbl: boolean): boolean {
   if (!hit) { toast(t("wall.noSurface")); return true; }
   const w = wallPointOf(hit);
   if (!w.rm) { toast(t("surf.noModel")); return true; }
+  // MICRO-PX7 (PX5 C) · a Gaussian splat has no triangles to cut: the areal is
+  // not made on it — the mesh of the same object, or a fitted plane, instead
+  if (w.splat) { toast(t("surf.onSplat", { rm: wallNodeName(w.rm) })); return true; }
   const before = surfaceModels(tr.points);
   tr.points.push(w);
   tr.normals.push(hit.normal ? [hit.normal[0], hit.normal[1], hit.normal[2]] : null);
@@ -37933,7 +37941,9 @@ function alignClose(win: Win): void {
   try {
     made = st.batch(() => {
       const m = chain.addFreeExtraction(st, doc, r.trace, { regionData: r.regionData, result: r.result, on: rm,
-        data: { purpose: "alignment", tool: "EMStudio «Alignment»" } });
+        data: { purpose: "alignment", tool: "EMStudio «Alignment»",
+          // MICRO-PX7 · read on a Gaussian splat: how its points were taken
+          ...(tr.points.some((w) => w.splat) ? splatPickAttributes(tr.points.find((w) => w.splat)!.splat!.opacity) : {}) } });
       if (m && me) { const author = nauth.authorForIdentity(st, me); if (!st.hasEdge(m.extractorId, author, "has_author")) st.addEdge(m.extractorId, author, "has_author"); }
       return m;
     });
@@ -38393,7 +38403,9 @@ function proxyParadataItem(sk: Sketch): { tool: string; purpose: string; annotat
     const b = blenderXYZ(w.p);
     const name = ordinal(w.doc);
     out.points.push({ document_id: w.doc, x: b[0], y: b[1], z: b[2], point_type: type, coords: w.p,
-      ...(w.rm && st.node(w.rm) ? { on_id: w.rm } : {}), ...(name ? { name } : {}), ...(w.note ? { description: w.note } : {}) });
+      ...(w.rm && st.node(w.rm) ? { on_id: w.rm } : {}), ...(name ? { name } : {}), ...(w.note ? { description: w.note } : {}),
+      // MICRO-PX7 · a point read on a splat says how (pick_rule, pick_opacity: the extractor's attributes)
+      ...(w.splat ? { attributes: splatPickAttributes(w.splat.opacity) } : {}) });
   }
   const doc = pxDocumentOf(typed.map((x) => x.w), d.source);
   if (doc) {
@@ -44418,7 +44430,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         notDrawn.push(t("space.why.noFile", { name: r.name, st: t(`space.st.${r.resource?.state ?? "none"}`) }));
       const nmS = rmShown(r.id, sp);
       // MICRO-SPAZIO-3D-3 p.10 · the version by its mode (manual, by use, the distance)
-      const plan = isTiles ? {} : rmVersionPlan(r);
+      // MICRO-PX7 · a splat is drawn as its resource is (no version plan, as a tileset)
+      const isSplat = !!r.resource?.splat;
+      const plan = isTiles || isSplat ? {} : rmVersionPlan(r);
       // MICRO-GIS-BASE · the version the plan draws is the one a failed fetch marks
       // (it marked the scene's choice by use: a mobile version absent from the disk
       // left the model «missing» on every profile after, its web version included)
@@ -44429,6 +44443,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         // MICRO-TILESET-CONTENITORE · every mode: the scene says what the container draws
         ...(alt ? { alt: { group: alt.group, role: alt.role, err: alt.err, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group,
           ...(alt.role === "models" && nmS?.level ? { level: nmS.level } : {}) } } : {}), tiles: r.resource?.tiles || undefined,
+        ...(isSplat ? { splat: r.resource!.splat as SplatKind } : {}),
         edge: placementColour(r.genre) ?? undefined, selected: isSel(`rm:${r.id}`), active: ssel.active === `rm:${r.id}`,
         // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),
@@ -44445,7 +44460,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
         // MICRO-MEMORIA-SESSIONE p.1 · what the guard weighs, and what it can propose instead
         tris: pv ? hardwareTris(pv) : null, textureSide: pv ? textureSideOf(pv) : null,
-        ...(isTiles ? {} : { lighter: memoryAlternatives(r, plan.versionId) }) });
+        ...(isTiles || isSplat ? {} : { lighter: memoryAlternatives(r, plan.versionId) }) });
     }
     // MICRO-E p.6 · «Colori ▾»: EM (the type's), the epochs, a property; the legend isolates and hides
     const cs = spaceColoursOf(win.id);
@@ -64430,7 +64445,7 @@ function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stam
 // —, the licence and the embargo; all the graph's part in ONE undo step.
 
 const INGRESS_MODEL = /\.(glb|gltf|obj)$/i;
-const INGRESS_ASSET = /\.(glb|gltf|obj|ply|fbx|stl|usdz?|e57|las|laz|abc|dae|3ds|x3d|3tz)$/i;
+const INGRESS_ASSET = /\.(glb|gltf|obj|ply|spz|sog|rad|lcc2|fbx|stl|usdz?|e57|las|laz|abc|dae|3ds|x3d|3tz)$/i;
 
 /** MICRO-RIFINITURE p.4 · «Fai entrare un asset» from the Narrative: the
  *  path(s) asked (one per line, a folder too) and the same ingress card as
@@ -65448,13 +65463,14 @@ function vwSceneItems(s: VwScene): SceneItem[] {
     const alt = altOfRm.get(r.id);
     if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) continue;
     const isTiles = !!r.resource?.tiles;
-    const v = isTiles ? undefined : vwVersionOf(s, r.id);
-    const url = isTiles ? spaceFileUrl(r.resource) : v?.url;
+    const isSplat = !!r.resource?.splat;
+    const v = isTiles || isSplat ? undefined : vwVersionOf(s, r.id);
+    const url = isTiles || isSplat ? spaceFileUrl(r.resource) : v?.url;
     if (url) s.urls.add(url);
     items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
       url, resourceId: r.resource?.id, ...(v?.obj ? { obj: v.obj } : {}),
       ...(alt ? { alt: { group: alt.group, role: alt.role, err: alt.err, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group } } : {}),
-      tiles: r.resource?.tiles || undefined, edge: placementColour(r.genre) ?? undefined,
+      tiles: r.resource?.tiles || undefined, ...(isSplat ? { splat: r.resource!.splat as SplatKind } : {}), edge: placementColour(r.genre) ?? undefined,
       // MICRO-3DTILES p.2 · over the threshold the scene proposes the tileset of
       // the same model, as the Space does (the Doc did; the Viewer had lost it)
       tileset: r.tileset?.state === "resident" ? r.tileset.url || undefined : undefined,

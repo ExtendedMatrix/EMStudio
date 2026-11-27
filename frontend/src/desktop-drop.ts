@@ -48,7 +48,7 @@ const DOC = /\.(em\.json|emj|json|graphml|xml)$/i;
 /** a graph, which a drop on the Archive still opens */
 const GRAPH = /\.(em\.json|emj|graphml)$/i;
 /** extensions a dropped path is a FILE by, without asking the disk */
-const KNOWN_FILE = /\.(em\.json|emj|json|graphml|xml|3tz|zip|ttl|xlsx|csv|txt|md|pdf|png|jpe?g|tiff?|webp|gif|obj|glb|gltf|ply|las|laz|e57|b3dm|blend)$/i;
+const KNOWN_FILE = /\.(em\.json|emj|json|graphml|xml|3tz|zip|ttl|xlsx|csv|txt|md|pdf|png|jpe?g|tiff?|webp|gif|obj|glb|gltf|ply|spz|sog|rad|lcc2|las|laz|e57|b3dm|blend)$/i;
 
 const strip = (p: string): string => String(p ?? "").replace(/\\/g, "/").replace(/(?<=.)\/+$/, "");
 const base = (p: string): string => basename(strip(p));

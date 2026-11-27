@@ -280,7 +280,7 @@ export interface MediaItem {
 
 const IMAGE_RE = /\.(jpe?g|png|tiff?|webp|bmp|gif|heic)$/i;
 const DRAW_RE = /\.(svg|dxf|dwg|ai|eps)$/i;
-const M3D_RE = /\.(glb|gltf|obj|ply|fbx|3tz|las|laz|e57)$/i;
+const M3D_RE = /\.(glb|gltf|obj|ply|spz|sog|rad|lcc2|fbx|3tz|las|laz|e57)$/i;
 export function mediaKindOf(locator: string, mediaType?: string | null): MediaKind {
   const clean = locator.split(/[?#]/)[0];
   if (/\.pdf$/i.test(clean) || mediaType === "application/pdf") return "pdf";

@@ -50,7 +50,7 @@ export function kindOf(entry: { name: string; type: "file" | "dir" }): BrowserKi
   if (/\.(shp|shx|dbf|prj|cpg|gpkg|geojson|kml|kmz|tfw|jgw|pgw|wld)$/.test(n)) return "gis";
   if (/\.(jpe?g|png|gif|webp|tiff?|bmp|heic|avif|exr|dng|cr2|nef)$/.test(n)) return "image";
   if (/\.(pdf|docx?|odt|rtf|txt|md|xlsx?|ods|csv|pptx?)$/.test(n)) return "document";
-  if (/\.(glb|gltf|obj|ply|fbx|stl|blend|usdz?|e57|las|laz|abc|dae|3ds|x3d)$/.test(n)) return "model";
+  if (/\.(glb|gltf|obj|ply|spz|sog|rad|lcc2|fbx|stl|blend|usdz?|e57|las|laz|abc|dae|3ds|x3d)$/.test(n)) return "model";
   return "other";
 }
 

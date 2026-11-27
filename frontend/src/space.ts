@@ -35,6 +35,7 @@ import { basename } from "./paths";
 import { epochInstances } from "./epoch-instances";
 import { presenceIndex } from "./epoch-presence";
 import { epochNewestFirst } from "./outline";
+import { splatKindOf, splatKindOfName, type SplatKind } from "./splat-rules";
 
 /** The rule of the alternatives (em_visual_rules 1.6.37 → `alternatives`). */
 export const ALT_RULE = (visualRules as unknown as { alternatives: AlternativesRule }).alternatives;
@@ -50,6 +51,8 @@ const MEDIA_3TZ = "application/vnd.maxar.archive.3tz+zip";
 export function tilesKindOf(d: Record<string, unknown>): "" | "directory" | "3tz" {
   const url = String(d.url ?? "");
   if (/\.3tz(\?|#|$)/i.test(url) || d.media_type === MEDIA_3TZ) return "3tz";
+  // MICRO-PX7 · a streamed SOG is a folder too, entered by its `lod-meta.json`: a splat, not a tileset
+  if (splatKindOfName(url) === "sog-lod") return "";
   if (d.packaging === "directory" || /(^|\/)tileset\.json(\?|#|$)/i.test(url)) return "directory";
   return "";
 }
@@ -83,6 +86,9 @@ export interface SpaceResource {
   points: number | null;
   /** TEMPLU MARE v2 · C1 · a tileset, and in which form (`tilesKindOf`) */
   tiles: "" | "directory" | "3tz";
+  /** MICRO-PX7 · a Gaussian splat, and in which form (`splatKindOf`): the
+   *  locator, else the resource's name (a store URL names no extension) */
+  splat?: SplatKind | "";
 }
 
 export interface SpaceRM {
@@ -419,7 +425,8 @@ export function buildSpace(
     const prims = (d.primitives ?? {}) as Record<string, unknown>;
     return { id: r.id, name: str(r.name) || basename(str(d.url)) || r.id, url: str(d.url),
              checksum: str(d.checksum), residency: str(d.residency).trim(), state, packaging: str(d.packaging),
-             bytes: num(d.size_bytes), points: num(prims.points), tiles: tilesKindOf(d) };
+             bytes: num(d.size_bytes), points: num(prims.points), tiles: tilesKindOf(d),
+             splat: tilesKindOf(d) ? "" : splatKindOf(d, str(r.name)) };
   };
   const resourcesOf = (id: string): EmNode[] => outOf(id, "has_linked_resource")
     .map((x) => byId.get(x)).filter((r): r is EmNode => r?.node_type === "resource");

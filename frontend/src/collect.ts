@@ -30,7 +30,7 @@ export interface OutsideFile {
   packaging?: string; urlType?: string;
 }
 
-const MODEL = /\.(obj|glb|gltf|ply|fbx|stl|dae|3ds|3tz|las|laz|e57|xyz|pts|blend|x3d|usd[az]?|abc)$/i;
+const MODEL = /\.(obj|glb|gltf|ply|spz|sog|rad|lcc2|fbx|stl|dae|3ds|3tz|las|laz|e57|xyz|pts|blend|x3d|usd[az]?|abc)$/i;
 const DOC = /\.(pdf|docx?|odt|rtf|txt|md|xlsx?|ods|csv|tsv|pptx?|xml|json|html?)$/i;
 const IMAGE = /\.(jpe?g|png|tiff?|webp|gif|bmp|heic|svg|exr|hdr)$/i;
 

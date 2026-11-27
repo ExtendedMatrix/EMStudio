@@ -37,4 +37,11 @@ export { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 export { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 export { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 // …and the one addon GLTFExtensionsPlugin's metadata reader takes from three
-export { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
+export { FullScreenQuad, Pass } from "three/examples/jsm/postprocessing/Pass.js";
+// MICRO-PX7 · Gaussian Splat Lite imports `three/webgpu` and `three/tsl`, which
+// `splat3d.js` bundles; their own import of three's CORE (`./three.core.js`) is
+// pointed here (`vite.config.ts splatCoreFromEngine`), so the core stays ONE.
+// These seven names of the core are not in three's public entry: the same
+// module three's entry is built from (no second copy), by its path
+// @ts-ignore — three ships no declaration for the core's internal names
+export { RAD2DEG, ReversedDepthFuncs, floorPowerOfTwo, generateUUID, getByteLength, isTypedArray, yieldToMain } from "../node_modules/three/build/three.core.js";

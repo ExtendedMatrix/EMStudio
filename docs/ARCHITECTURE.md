@@ -174,7 +174,11 @@ back button returns to the full canvas.
 | konva / PixiJS / Cytoscape.js | MIT | yes |
 | dagre (if ever used for graph view) | MIT | yes |
 | ELK / elkjs | EPL-2.0 OR GPL-3.0-or-later (Secondary License declared) | yes — but unused (architectural: see §4.1) |
+| three.js 0.187.0 (MICRO-PX7: r185 → r187), bundled into the frontend (`engine3d.js` on the web) | MIT | yes |
+| 3d-tiles-renderer 0.5.3 (NASA-AMMOS 3DTilesRendererJS), bundled (`tiles3d.js` on the web) | Apache-2.0 | yes |
 | 3d-tiles-renderer-3tz 0.2.0 (E.D., the `.3tz` reader extracted from `frontend/src/tiles3tz.ts`; a GitHub dependency pinned to a commit in `frontend/package.json`, bundled into the frontend) | MIT | yes |
+| gaussian-splat-lite 1.11.0 (William Liu; the Gaussian splat renderer, MICRO-PX7), bundled (`splat3d.js` on the web); its NOTICE and third-party licences (SparkJS, SuperSplat, ruzstd, flate2 MIT; zlib-rs zlib; libwebp BSD-3-Clause; Emscripten, musl MIT) in `docs/third-party/gaussian-splat-lite-1.11.0/` | Apache-2.0 | yes |
+| 3d-tiles-rendererjs-3dgs-plugin 0.3.1 (William Liu; tilesets of Gaussian splats, MICRO-PX7), bundled with gaussian-splat-lite; its licence in `docs/third-party/` | Apache-2.0 | yes |
 | JointJS+ | commercial | no — excluded |
 | **Third-party tools** (was «Add-ons»; not shipped: downloaded on request, version and sha256 pinned in `tools/em_optimize.py`, called as separate programs) | | |
 | gltfpack 1.3 / 1.2 (meshoptimizer, Arseny Kapoulkine) | MIT | yes |

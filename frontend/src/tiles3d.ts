@@ -190,6 +190,28 @@ export function isTilesetUrl(url: string | null | undefined): boolean {
   return !!url && (/(^|\/)tileset\.json(\?|#|$)/i.test(String(url)) || isArchive3tzUrl(url));
 }
 
+/** MICRO-PX7 · a tileset's own `tileset.json`, read BEFORE its layer is made
+ *  (whether its tiles are Gaussian splats decides a plugin): a folder over
+ *  HTTP, a `.3tz` (the archive opened once for the page, `openArchiveShared`),
+ *  a dropped tileset (its reader). Null when it cannot be read: the layer is
+ *  made as before and says its own failure. */
+export async function readTilesetJson(T: any, url: string, archive: boolean,
+                                      source?: { readEntry(path: string): Promise<Uint8Array | null> }): Promise<unknown | null> {
+  try {
+    let bytes: Uint8Array | null = null;
+    if (source) bytes = await source.readEntry("tileset.json");
+    else if (archive || isArchive3tzUrl(url)) {
+      const { archive: a } = await openArchiveShared(T, url);
+      bytes = await a.readEntry("tileset.json");
+    } else {
+      const r = await (roadFetch as typeof fetch)(url);
+      if (!r.ok) return null;
+      return await r.json();
+    }
+    return bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null;
+  } catch { return null; }
+}
+
 /** RISORSA-FILE · a 3D Tiles ARCHIVE (`.3tz`): a tileset in one file, read
  *  without extracting it. Also through the bridge's `/fs/file?path=…3tz`. */
 export function isArchive3tzUrl(url: string | null | undefined): boolean {
@@ -354,6 +376,10 @@ export interface TilesOptions {
   /** …the pages of one tile drawn as one (default on; the probes' way to
    *  measure without: `globalThis.__EM_TILES_MERGE__ = false`) */
   mergePages?: boolean;
+  /** MICRO-PX7 · plugins of the tiles renderer the caller brings (the Gaussian
+   *  splat plugin, for a tileset that declares splat tiles), registered after
+   *  the glTF decoders' */
+  plugins?: any[];
 }
 
 /** 3d-tiles-renderer's LOADED (`core/renderer/constants.js`): a tile whose content is in */
@@ -504,6 +530,9 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   if (T.DRACOLoader && T.GLTFExtensionsPlugin) tiles.registerPlugin(new T.GLTFExtensionsPlugin({
     dracoLoader: dracoFor(E, T), meshoptDecoder: T.MeshoptDecoder ?? null,
     ktxLoader: ktx2For(E, T, renderer), autoDispose: false }));
+  // MICRO-PX7 · a tileset of Gaussian splats: their plugin parses the glTF
+  // tiles that carry KHR_gaussian_splatting (the others it leaves to the loader)
+  for (const p of opts.plugins ?? []) tiles.registerPlugin(p);
   // Z-up → Y-up: the one rotation (see the header)
   tiles.group.rotation.x = -Math.PI / 2;
   let camera = camera0;
