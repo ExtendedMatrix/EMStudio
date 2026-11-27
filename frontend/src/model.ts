@@ -2196,7 +2196,14 @@ export class DocumentStore {
     const gone = g.nodes.find((n) => n.id === id);
     if (gone?.node_type === "document") rememberDocumentNumber(this.doc, gone.name);
     g.nodes = g.nodes.filter((n) => n.id !== id);
-    g.edges = g.edges.filter((e) => e.source !== id && e.target !== id);
+    // MICRO-FL1 · the edges that go with the node are said on the wire too: a
+    // copy that only got the tombstone kept them alive and went on drawing them
+    const removed: EmEdge[] = [];
+    g.edges = g.edges.filter((e) => {
+      if (e.source !== id && e.target !== id) return true;
+      removed.push(e);
+      return false;
+    });
     const layout = this.doc.layout;
     if (layout) {
       if (layout.positions) delete layout.positions[id];
@@ -2209,6 +2216,7 @@ export class DocumentStore {
       }
     }
     this.emit();
+    for (const e of removed) this.emitOp({ op: "delete_edge", edge: e });
     this.emitOp({ op: "delete_node", node_id: id });
   }
 
@@ -2273,7 +2281,14 @@ export class DocumentStore {
     const set = new Set(ids);
     const g = this.doc.graph;
     g.nodes = g.nodes.filter((n) => !set.has(n.id));
-    g.edges = g.edges.filter((e) => !set.has(e.source) && !set.has(e.target));
+    // MICRO-FL1 · as deleteNode: every edge that goes leaves on the wire, once
+    // (an edge between two deleted nodes is one edge, one delete_edge)
+    const removed: EmEdge[] = [];
+    g.edges = g.edges.filter((e) => {
+      if (!set.has(e.source) && !set.has(e.target)) return true;
+      removed.push(e);
+      return false;
+    });
     const layout = this.doc.layout;
     if (layout) {
       for (const id of ids) {
@@ -2288,6 +2303,7 @@ export class DocumentStore {
         layout.folded_groups = layout.folded_groups.filter((f) => !set.has(f));
     }
     this.emit();
+    for (const e of removed) this.emitOp({ op: "delete_edge", edge: e });
     for (const id of ids) this.emitOp({ op: "delete_node", node_id: id });
   }
 
