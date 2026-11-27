@@ -10432,6 +10432,9 @@ const EN: Dict = {
   "oblit.form.cancel": "Cancel",
   "oblit.form.bad": "A year is a number, the scissor stays on its side, and the start comes before the end.",
   "oblit.form.notAllowed": "The datamodel does not let a {type} hold a property.",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "This file contains {n} studies: you will find them in the {panel} panel",
+  "container.studiesOpen": "Open {panel}",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -20715,6 +20718,9 @@ const IT: Dict = {
   "oblit.form.cancel": "Annulla",
   "oblit.form.bad": "Un anno è un numero, la forbice sta dalla sua parte, e l'inizio viene prima della fine.",
   "oblit.form.notAllowed": "Il datamodel non permette a un {type} di avere una proprietà.",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "Questo file contiene {n} studi: li trovi nel pannello {panel}",
+  "container.studiesOpen": "Apri {panel}",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -21059,6 +21065,9 @@ const EL: Dict = {
   "s3.stats": "{tri} τρίγωνα · {vert} κορυφές · {obj} αντικείμενα · {calls} κλήσεις · {fps} FPS",
   "emtree.dirtyTitle": "Μη αποθηκευμένες αλλαγές",
   "emtree.activeTitle": "το ενεργό γράφημα",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "Αυτό το αρχείο περιέχει {n} μελέτες: θα τις βρείτε στον πίνακα {panel}",
+  "container.studiesOpen": "Άνοιγμα {panel}",
 };
 
 const HE: Dict = {
@@ -21376,6 +21385,9 @@ const HE: Dict = {
   "s3.stats": "{tri} משולשים · {vert} קודקודים · {obj} אובייקטים · {calls} קריאות ציור · {fps} FPS",
   "emtree.dirtyTitle": "שינויים שלא נשמרו",
   "emtree.activeTitle": "הגרף הפעיל",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "קובץ זה מכיל {n} מחקרים: תמצאו אותם בחלונית {panel}",
+  "container.studiesOpen": "פתיחת {panel}",
 };
 
 const ES: Dict = {
@@ -21698,6 +21710,9 @@ const ES: Dict = {
   "s3.stats": "{tri} triángulos · {vert} vértices · {obj} objetos · {calls} llamadas · {fps} FPS",
   "emtree.dirtyTitle": "Cambios sin guardar",
   "emtree.activeTitle": "el grafo activo",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "Este archivo contiene {n} estudios: los encontrarás en el panel {panel}",
+  "container.studiesOpen": "Abrir {panel}",
 };
 
 const PL: Dict = {
@@ -22019,6 +22034,9 @@ const PL: Dict = {
   "s3.stats": "{tri} trójkątów · {vert} wierzchołków · {obj} obiektów · {calls} wywołań · {fps} FPS",
   "emtree.dirtyTitle": "Niezapisane zmiany",
   "emtree.activeTitle": "aktywny graf",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "Liczba opracowań w tym pliku: {n} — znajdziesz je w panelu {panel}",
+  "container.studiesOpen": "Otwórz {panel}",
 };
 
 const RO: Dict = {
@@ -22341,6 +22359,9 @@ const RO: Dict = {
   "s3.stats": "{tri} triunghiuri · {vert} vârfuri · {obj} obiecte · {calls} apeluri · {fps} FPS",
   "emtree.dirtyTitle": "Modificări nesalvate",
   "emtree.activeTitle": "graful activ",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "Acest fișier conține {n} studii: le găsiți în panoul {panel}",
+  "container.studiesOpen": "Deschide {panel}",
 };
 
 const FR: Dict = {
@@ -22666,6 +22687,9 @@ const FR: Dict = {
   "s3.stats": "{tri} triangles · {vert} sommets · {obj} objets · {calls} appels · {fps} FPS",
   "emtree.dirtyTitle": "Modifications non enregistrées",
   "emtree.activeTitle": "le graphe actif",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "Ce fichier contient {n} études : vous les trouverez dans le panneau {panel}",
+  "container.studiesOpen": "Ouvrir {panel}",
 };
 
 /**
@@ -24393,6 +24417,9 @@ const DE: Dict = {
   "ov.item.s3_rmsf": "RMSF (wieder platzierte Funde)",
   "ov.group.s3_categories": "Sichtbare Kategorien (Sichtbarkeit ▾)",
   "ov.item.s3_x3d": "3D-Extraktoren",
+  // MICRO-PG1 · a file with more than one graph, said at the open
+  "container.studies": "Diese Datei enthält {n} Studien: Sie finden sie im Bereich {panel}",
+  "container.studiesOpen": "{panel} öffnen",
 };
 
 const DICTS: Record<Locale, Dict> = {

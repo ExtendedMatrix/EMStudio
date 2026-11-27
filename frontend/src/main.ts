@@ -9052,9 +9052,13 @@ function loadContainerDocument(
   // desktop, restoring a session, showed two. The snapshot is the room's truth
   // (work not yet confirmed is re-sent by `replayAfterResync`), so the earlier
   // copy of the SAME room on the SAME node is replaced, not kept as a twin.
+  // MICRO-PG1 · a room's snapshot comes again at every (re)connection: the
+  // notice of its graphs (with its click) is said at the first
+  let roomAgain = false;
   if (opts.room) {
     const same = opts.room;
     const twins = emtree.files.filter((f) => f.room?.id === same.id && f.room?.node === same.node);
+    roomAgain = twins.length > 0;
     // …BUT AN EMPTY SNAPSHOT DOES NOT REPLACE A FULL COPY. Measured carrying
     // Templu Mare into a new room: the room answered a `request_snapshot` with
     // its document as it was BEFORE it had applied the 946 operations of the
@@ -9163,7 +9167,7 @@ function loadContainerDocument(
       n: String(parsed.members.length), file: file.name, name: slotLabel(front), others: others.join(", ") })
       : t("container.opened", { n: String(parsed.members.length) });
     logInfo(msg);
-    toast(msg);
+    if (roomAgain) toast(msg);   // MICRO-PG1 · a reconnection: as before
   }
   refreshEMTree();
   // G5 · a graph that a «New graph» left empty and somebody saved beside the
@@ -9184,6 +9188,24 @@ function loadContainerDocument(
       } },
       { label: t("open.emptyKeep"), run: () => logInfo(t("open.emptyKept", { name })) },
     ]);
+  }
+  // MICRO-PG1 (EMStudio#1; E.D. 27 Nov 2026) · a site is ONE graph; a file with
+  // more keeps them as different studies, and the ones not active become slots
+  // nobody sees. Said once, short, with the click that shows them (the long
+  // sentence of B10 stays in the Log). A question (`toastAsk`): a notice that
+  // follows at the open does not wipe it, it comes back after. After G5's
+  // question, if there is one, and counted when it is shown: an empty graph
+  // removed there is not a study
+  if (parsed.members.length > 1 && !roomAgain) {
+    const sayStudies = (): void => {
+      const n = emtree.slotsOf(file.id).length;
+      if (n < 2) return;
+      const panel = t("panel.multigraph");
+      toastAsk(t("container.studies", { n: String(n), panel }),
+        [{ label: t("container.studiesOpen", { panel }), run: () => openEMTree() }], 12000);
+    };
+    if (questionWaiting()) afterAsk.push(sayStudies);
+    else sayStudies();
   }
 }
 

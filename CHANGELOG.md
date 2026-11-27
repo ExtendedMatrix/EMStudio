@@ -10,6 +10,16 @@ reports and grouped by stage, at the end of the file («Before 16 October
 ## [Unreleased]
 
 ### Added
+- **Opening a file with more than one graph says so** (MICRO-PG1, 27 November
+  2026; EMStudio#1). A site is one graph; an em.json with more keeps them as
+  different studies, and the ones that are not active became slots with
+  nothing to say they were there. At the open: «This file contains N studies:
+  you will find them in the Multigraph panel», with «Open Multigraph» (the
+  panel, `openEMTree`), in every language of `i18n.ts`; nothing for a file
+  with one graph. It replaces B10's toast (that sentence stays in the Log),
+  comes after G5's «empty graph» question and counts what is left; a room's
+  reconnection keeps B10's toast. New `scripts/check-multigraph-notice.mjs`
+  (19, a container of 3 graphs with an id `Scavo archeologico|II`).
 - **Gaussian splats as representation models** (MICRO-PX7 B, 27 November
   2026; PX5 A–E). Gaussian Splat Lite 1.11.0 and
   `3d-tiles-rendererjs-3dgs-plugin` 0.3.1 (William Liu, Apache-2.0, exact
