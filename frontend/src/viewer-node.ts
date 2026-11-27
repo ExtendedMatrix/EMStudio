@@ -19,6 +19,7 @@
  */
 import type { EmEdge, EmNode } from "./types";
 import { mediumOfFile } from "./doc-form";
+import { typeKeyOf } from "./file-type";
 import { unitImages, type UnitImageRoute } from "./unit-images";
 
 export type ViewerMedium = "image" | "text" | "pdf" | "3d";
@@ -125,7 +126,8 @@ export function viewerTargetOf(g: G, nodeId: string | null): ViewerTarget | null
     const push = (holder: EmNode, via: ViewerVia, through?: string, byId?: boolean) => {
       const loc = locatorOf(holder);
       if (!loc) return;
-      const medium = viewerMediumOf(loc);
+      // MICRO-FILE-DELLA-STANZA · the type from media_type → name → addresses → url
+      const medium = viewerMediumOf(typeKeyOf(holder) || loc);
       // the files of a set (a campaign's photographs) are told apart by their
       // node: two sensors may both write DSC_0001.JPG
       const key = byId ? `id:${holder.id}` : leafOf(loc);
@@ -152,7 +154,7 @@ export function viewerTargetOf(g: G, nodeId: string | null): ViewerTarget | null
       // campaign): its files are the document's pictures
       for (const f of out(r, "has_file")) {
         const loc = locatorOf(byId.get(f));
-        if (loc && viewerMediumOf(loc) === "image") push(byId.get(f)!, "linked", undefined, true);
+        if (loc && viewerMediumOf(typeKeyOf(byId.get(f)) || loc) === "image") push(byId.get(f)!, "linked", undefined, true);
       }
     }
     // the crops its extractors took (D.07.01 … D.07.05 of D.07): pictures OF the document
@@ -211,7 +213,7 @@ export function viewerTargetOf(g: G, nodeId: string | null): ViewerTarget | null
     const t = empty("resource", nodeId, holders.find(isDoc)
       ?? holders.map((h) => byId.get(h)?.node_type === "extractor" ? out(h, "extracted_from").find(isDoc) : undefined).find(Boolean) ?? null);
     const loc = locatorOf(node);
-    if (loc) t.parts.push({ id: nodeId, name: String(node.name || nodeId), medium: viewerMediumOf(loc), locator: loc, via: "own" });
+    if (loc) t.parts.push({ id: nodeId, name: String(node.name || nodeId), medium: viewerMediumOf(typeKeyOf(node) || loc), locator: loc, via: "own" });
     return t;
   }
   // MICRO-FOTO-DOCUMENTI-BBOX B · a unit shows its images, by the four roads

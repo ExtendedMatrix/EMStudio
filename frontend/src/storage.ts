@@ -274,13 +274,16 @@ async function withGeo(item: CollectionItem, bridge: string): Promise<void> {
   }
 }
 
-/** A URL a node already carries → a collection of one, no bridge involved. */
+/** A URL a node already carries → a collection of one, no bridge involved.
+ *  MICRO-FILE-DELLA-STANZA · `typeKey` (file-type.ts `typeKeyOf`) says what the
+ *  file is when the URL does not (a room's store address has no extension). */
 export function collectionFromUrl(
   id: string,
   title: string,
   url: string,
+  typeKey?: string,
 ): Collection {
-  const ext = url.split("?")[0].split("#")[0].split(".").pop() ?? "";
+  const ext = (typeKey || url).split("?")[0].split("#")[0].split(".").pop() ?? "";
   return {
     title,
     items: [{ id, title, url, kind: kindOfExt(ext) }],

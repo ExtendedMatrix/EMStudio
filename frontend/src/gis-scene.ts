@@ -27,6 +27,8 @@
  */
 import { dirname, join, normalize } from "./paths";
 import type { GeoCtx, GeoDriver } from "./scene3d";
+import { nodeBytes, ownedByNode } from "./node-road";
+import { typeKeyOf } from "./file-type";
 
 type V3 = [number, number, number];
 type Doc = { graph?: { nodes?: Array<Record<string, any>>; edges?: Array<Record<string, any>>; graph_id?: string } } | null;
@@ -51,6 +53,11 @@ export interface GisLayerRef {
   docId?: string | null;
   docName?: string | null;
   shift?: [number, number, number] | null;
+  /** MICRO-FILE-DELLA-STANZA · the file's sha256 (`data.checksum`) and the name
+   *  its type is read from (file-type.ts): what a file of a ROOM is handed to
+   *  the bridge's cache by */
+  checksum?: string | null;
+  typeKey?: string;
 }
 export interface SurfaceRef { id: string; name: string; dem: string | null; image: string | null; step: number | null }
 export interface SceneFrame { epsg: number; x: number; y: number; z: number; rotation: number }
@@ -81,7 +88,8 @@ export function gisLayersOf(doc: Doc): GisLayerRef[] {
         url: String(d.url ?? ""), featureKey: d.feature_key ? String(d.feature_key) : null, zField: d.z_field ? String(d.z_field) : null,
         layer: d.layer ? String(d.layer) : null, raster: d.raster?.kind ? String(d.raster.kind) : null, derived: false,
         sheet: true, docId: dn ? String(dn.id) : null, docName: dn ? String(dn.name ?? dn.id) : null,
-        shift: sh && sh.some((v) => v) ? [sh[0] || 0, sh[1] || 0, sh[2] || 0] : null });
+        shift: sh && sh.some((v) => v) ? [sh[0] || 0, sh[1] || 0, sh[2] || 0] : null,
+        checksum: d.checksum ? String(d.checksum) : null, typeKey: typeKeyOf(f) });
     }
   }
   return nodes.filter((n) => n.node_type === "resource" && dataOf(n).url_type === "gis_layer" && !dataOf(n).gis_document).map((n): GisLayerRef => {
@@ -99,7 +107,8 @@ export function gisLayersOf(doc: Doc): GisLayerRef[] {
     }
     return { id: String(n.id), name: String(n.name ?? n.id), format: String(d.gis_format ?? ""), crs: d.crs ? String(d.crs) : null,
       url, featureKey: d.feature_key ? String(d.feature_key) : null, zField: d.z_field ? String(d.z_field) : null,
-      layer: d.layer ? String(d.layer) : null, raster: d.raster?.kind ? String(d.raster.kind) : null, derived: derived.has(String(n.id)) };
+      layer: d.layer ? String(d.layer) : null, raster: d.raster?.kind ? String(d.raster.kind) : null, derived: derived.has(String(n.id)),
+      checksum: d.checksum ? String(d.checksum) : null, typeKey: typeKeyOf(n) };
   }).concat(sheets);
 }
 
@@ -150,6 +159,22 @@ export function fileOf(url: string, docPath: string | null): string {
   return normalize(join(dirname(docPath), url));
 }
 
+/** MICRO-FILE-DELLA-STANZA · the extension the bridge reads a ROOM's GIS file
+ *  by (its `/gis/store` cache): the file's type (media_type → name → addresses),
+ *  else its `gis_format`; "" for what the cache does not take (a shapefile is
+ *  several files, a picture needs its world file beside it). */
+const STORE_EXT: Record<string, string> = { geojson: "geojson", json: "geojson", gpkg: "gpkg", tif: "tif", tiff: "tif", dxf: "dxf" };
+const EXT_OF_FORMAT: Record<string, string> = { geojson: "geojson", geopackage: "gpkg", geotiff: "tif", dxf: "dxf" };
+export function storeExtOf(l: Pick<GisLayerRef, "typeKey" | "format">): string {
+  const m = /\.([a-z0-9]+)$/i.exec((l.typeKey ?? "").split(/[?#]/)[0]);
+  return (m && STORE_EXT[m[1].toLowerCase()]) || EXT_OF_FORMAT[l.format] || "";
+}
+/** the sha256 of a room's file: its checksum, else the one its store address names */
+export function storeHexOf(l: Pick<GisLayerRef, "checksum" | "url">): string {
+  const m = /^(?:sha256:)?([0-9a-f]{64})$/i.exec((l.checksum ?? "").trim()) ?? /\/asset\/sha256:([0-9a-f]{64})/i.exec(l.url);
+  return m ? m[1].toLowerCase() : "";
+}
+
 /** Features (in the scene's CRS) → the segments, points and labels to draw; `ground(X, Y)` for a vertex without a height. */
 export function geometryOf(f: SceneFrame, feats: Array<{ type: string; label: string | null; coords: any }>,
                            ground: (X: number, Y: number) => number): { points: number[]; segments: number[]; labels: Array<{ at: V3; text: string }> } {
@@ -184,6 +209,10 @@ export interface GisDriverOptions {
   docPath: string | null;
   /** a line in the Log */
   log?: (s: string) => void;
+  /** MICRO-FILE-DELLA-STANZA · a file of the CONNECTED node's room: its bytes,
+   *  fetched with the session's token (node-road: the bearer only to that node);
+   *  `owns` false for any other address. Default: node-road. */
+  store?: { owns: (url: string) => boolean; bytes: (url: string) => Promise<ArrayBuffer> };
 }
 
 export interface GisDriver extends GeoDriver {
@@ -219,6 +248,38 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
     for (const l of d.labels) l.el.style.opacity = String(v);
   };
   const sceneCrs = `EPSG:${o.frame.epsg}`;
+  const store = o.store ?? { owns: ownedByNode, bytes: nodeBytes };
+  /** MICRO-FILE-DELLA-STANZA · the path the bridge reads a layer from: the file
+   *  on this disk, or — for a file of the room — the bridge's own copy, kept by
+   *  its sha256 (`/gis/store`): asked first, downloaded with the token and handed
+   *  over only when the bridge does not have it. Once per sha256 per driver. */
+  const stored = new Map<string, Promise<string>>();
+  const pathOf = (l: GisLayerRef): Promise<string> => {
+    if (!/^https?:/i.test(l.url) || !store.owns(l.url)) return Promise.resolve(fileOf(l.url, o.docPath));
+    const hex = storeHexOf(l), ext = storeExtOf(l);
+    if (!hex) return Promise.reject(new Error("a file of the room without its sha256"));
+    if (!ext) return Promise.reject(new Error(`a file of the room the bridge cannot read alone (${l.format || "?"})`));
+    const key = `${hex}.${ext}`;
+    let p = stored.get(key);
+    if (!p) {
+      p = (async () => {
+        const at = `${o.bridge}/gis/store?sha256=${hex}&ext=${ext}`;
+        const ask = await fetch(at, { method: "POST" });
+        const j = await ask.json().catch(() => ({}));
+        if (ask.ok && j.ok) { o.log?.(`GIS: ${l.name} — from the bridge's cache (sha256:${hex.slice(0, 12)}…)`); return String(j.path); }
+        if (ask.status !== 404 || !j.missing) throw new Error(j.error ?? `HTTP ${ask.status}`);
+        const bytes = await store.bytes(l.url);
+        const put = await fetch(at, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: bytes });
+        const k = await put.json().catch(() => ({}));
+        if (!put.ok || !k.ok) throw new Error(k.error ?? `HTTP ${put.status}`);
+        o.log?.(`GIS: ${l.name} — fetched from the room (${k.bytes} bytes), kept by the bridge`);
+        return String(k.path);
+      })();
+      stored.set(key, p);
+      p.catch(() => { if (stored.get(key) === p) stored.delete(key); });
+    }
+    return p;
+  };
   const post = async (route: string, body: Record<string, unknown>) => {
     const r = await fetch(`${o.bridge}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
@@ -264,7 +325,8 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
   const drawPicture = async (l: GisLayerRef) => {
     const sig = `${l.id}|${l.url}|${l.crs}|${o.frame.epsg}|${o.frame.x}|${o.frame.y}|${o.frame.rotation}`;
     if (drawn.get(l.id)?.sig === sig || !ctx) return;
-    const path = fileOf(l.url, o.docPath);
+    let path: string;
+    try { path = await pathOf(l); } catch (e) { const error = (e as Error).message; o.log?.(`GIS: ${l.name} — ${error}`); drawn.set(l.id, { obj: null, labels: [], sig, info: { error } }); return; }
     const j = await post("/gis/raster-grid", { path, scene_crs: sceneCrs, crs: l.crs, n: 16 });
     if (!ctx || !group) return;
     if (!j.ok) { o.log?.(`GIS: ${l.name} — ${j.error ?? j.status}`); drawn.set(l.id, { obj: null, labels: [], sig, info: { error: j.error ?? j.status } }); return; }
@@ -303,7 +365,8 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
     if (isPictureSheet(l)) { await drawPicture(l); return; }
     const sig = `${l.id}|${l.url}|${l.crs}|${(l.shift ?? []).join(",")}|${o.frame.epsg}|${o.frame.x}|${o.frame.y}|${o.frame.rotation}`;
     if (drawn.get(l.id)?.sig === sig || !ctx) return;
-    const path = fileOf(l.url, o.docPath);
+    let path: string;
+    try { path = await pathOf(l); } catch (e) { const error = (e as Error).message; o.log?.(`GIS: ${l.name} — ${error}`); drawn.set(l.id, { obj: null, labels: [], sig, info: { error } }); return; }
     const dxf = l.format === "dxf";
     const j = await post("/gis/features", { path, scene_crs: sceneCrs, layer: l.layer, z_field: l.zField, feature_key: l.featureKey, crs: l.crs,
       ...(l.shift ? { shift: l.shift } : {}), ...(dxf ? { group_key: "layer" } : {}) });
@@ -356,8 +419,9 @@ export function createGisDriver(o: GisDriverOptions): GisDriver {
     const img = s.image ? want.all.find((x) => x.id === s.image) : undefined;
     const sig = `${s.id}|${dem.url}|${img?.url ?? ""}|${s.step ?? ""}|${o.frame.epsg}|${o.frame.x}|${o.frame.y}|${o.frame.rotation}`;
     if (drawn.get(s.id)?.sig === sig) return;
-    const demPath = fileOf(dem.url, o.docPath);
-    const imgPath = img ? fileOf(img.url, o.docPath) : null;
+    let demPath: string, imgPath: string | null;
+    try { demPath = await pathOf(dem); imgPath = img ? await pathOf(img) : null; }
+    catch (e) { const error = (e as Error).message; o.log?.(`GIS: ${s.name} — ${error}`); drawn.set(s.id, { obj: null, labels: [], sig, info: { error } }); return; }
     const j = await post("/gis/surface", { dem: demPath, image: imgPath, scene_crs: sceneCrs, step: s.step, dem_crs: dem.crs, image_crs: img?.crs ?? null });
     if (!ctx || !group) return;
     if (!j.ok) { o.log?.(`GIS: ${s.name} — ${j.error ?? j.status}`); drawn.set(s.id, { obj: null, labels: [], sig, info: { error: j.error ?? j.status } }); return; }

@@ -15,6 +15,7 @@
  * draws and calls back.
  */
 import { t } from "./i18n";
+import { typeKeyOf } from "./file-type";
 import { glyphByKey, glyphSvg } from "./glyphs";
 import { propertyLabel } from "./rules";
 import type { DocumentStore } from "./model";
@@ -88,11 +89,14 @@ export function mediumOf(doc: EmNode | undefined, resolve: (id: string) => EmNod
                          linked: (id: string) => string[]): Medium | null {
   if (!doc) return null;
   const d = (doc.data ?? {}) as Record<string, unknown>;
-  const loc = [d.url, d.filename, d.path, ...linked(doc.id).map((r) => {
-    const rd = (resolve(r)?.data ?? {}) as Record<string, unknown>;
-    return rd.url ?? rd.filename ?? rd.path;
-  })].find((x) => typeof x === "string" && x);
-  if (loc) return mediumOfFile(String(loc).split(/[?#]/)[0]);
+  // MICRO-FILE-DELLA-STANZA · the first that has a file (the document, else a
+  // linked resource), its type from media_type → name → addresses → url
+  const hasFile = (n: EmNode | undefined): boolean => {
+    const nd = (n?.data ?? {}) as Record<string, unknown>;
+    return [nd.url, nd.filename, nd.path].some((x) => typeof x === "string" && x);
+  };
+  const holder = [doc, ...linked(doc.id).map(resolve)].find(hasFile);
+  if (holder) return mediumOfFile(typeKeyOf(holder).split(/[?#]/)[0]);
   if (typeof d.text === "string" && d.text) return "text";
   return null;
 }

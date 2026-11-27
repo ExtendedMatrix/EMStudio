@@ -66,7 +66,7 @@ ok(!/functional|landscape|FM_ON|LAB/.test(mod.replace(/\/\*\*[\s\S]*?\*\//g, "")
   const main = read("frontend/src/main.ts");
   const at = main.indexOf("setProxyStatusBridgeResolver(bridgeUrl);");
   ok(at > 0 && !/LAB|FM_ON|FO_ON|FW_ON/.test(main.slice(main.lastIndexOf("\n", at - 2), at)), "main.ts hands the bridge to the module, outside any lab switch");
-  ok(/BRIDGE_LEVEL_WANTED = 96;/.test(main), "the page wants bridge level 96");
+  ok(/BRIDGE_LEVEL_WANTED = 9[67];/.test(main), "the page wants bridge level 96 or later (97: MICRO-FILE-DELLA-STANZA)");
   ok(/renderProxyStatus\(root, store, nodeId, cb\.onJump\)/.test(read("frontend/src/inspector.ts")), "the Inspector draws the section");
   ok(/COMPUTED_VIEWS: ComputedView\[\] = \[[^\]]*"ToDraw"/.test(read("frontend/src/table-views.ts")), "«Da disegnare» is a computed view of the Tabular");
   ok(/toDrawTableHtml\(store/.test(read("frontend/src/emdata.ts")), "…drawn by emdata from s3Dgraphy's answer");
@@ -130,7 +130,7 @@ const ask = (body) => fetch(`${B}/proxy-status`, { method: "POST", headers: { "C
   body: JSON.stringify({ doc: { version: "1", graph, header: container.header }, base: DOC, ...body }) });
 {
   const h = await (await fetch(`${B}/health`)).json();
-  eq(h.bridge_level, 96, "the bridge says level 96");
+  eq(h.bridge_level, 97, "the bridge says level 97 (96 here; 97 MICRO-FILE-DELLA-STANZA)");
   const res = await ask({ mode: "list" });
   eq(res.status, 200, `POST /proxy-status list answers (${berr.split("\n").slice(-3).join(" | ")})`);
   const a = await res.json();

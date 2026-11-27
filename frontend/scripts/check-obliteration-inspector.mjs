@@ -125,7 +125,7 @@ const ask = (route, unit) => fetch(`${B}${route}`, { method: "POST", headers: { 
   body: JSON.stringify({ doc: { version: "1", graph, header: container.header }, unit }) });
 {
   const h = await (await fetch(`${B}/health`)).json();
-  eq(h.bridge_level, 96, "the bridge says level 96 (95 this MICRO; 96 MICRO-LG12, POST /proxy-status)");
+  eq(h.bridge_level, 97, "the bridge says level 97 (95 this MICRO; 96 MICRO-LG12, POST /proxy-status; 97 MICRO-FILE-DELLA-STANZA, POST /gis/store)");
   const res = await ask("/obliteration", "F1");
   eq(res.status, 200, `POST /obliteration answers (${berr.split("\n").slice(-3).join(" | ")})`);
   const a = await res.json();

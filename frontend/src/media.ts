@@ -16,6 +16,7 @@
 import { resourceFiles, plainGraph, memberRows, type ResourceGraph, type MemberRow } from "./resources";
 import { unitImages, mediumOfLocator } from "./unit-images";
 import { basename, dirname } from "./paths";
+import { typeKeyOf } from "./file-type";
 
 interface N { id: string; node_type?: string; name?: unknown; description?: unknown; data?: unknown }
 interface E { id?: string; source: string; target: string; edge_type?: string; attributes?: unknown }
@@ -305,7 +306,7 @@ function setItems(ix: MediaIx, setId: string, prefix: string, doc: string | null
     const row: MemberRow | undefined = f.member;
     out.push({
       key: f.listed ? `${setId}#${f.path}` : n.id, id: n.id, isNode: !f.listed, setId, path: f.path,
-      name: str(n.name) || leaf(f.path), locator: loc, medium: mediaKindOf(loc || f.path, str(nd.media_type)),
+      name: str(n.name) || leaf(f.path), locator: loc, medium: mediaKindOf(f.listed ? loc || f.path : typeKeyOf(n) || loc || f.path, str(nd.media_type)),
       checksum: str(row?.digest ?? nd.checksum) || null, sizeBytes: Number(row?.size_bytes ?? nd.size_bytes ?? NaN) || null,
       role: str(row?.media_role ?? nd.media_role) || role, doc,
       folder: [prefix, f.path.includes("/") ? dirname(f.path) : ""].filter(Boolean).join("/"),
@@ -325,7 +326,7 @@ function resourceItem(ix: MediaIx, id: string, doc: string | null): MediaItem | 
   const loc = str(d.url ?? d.filename ?? d.path);
   if (!n || !loc || /^sha256:/i.test(loc)) return null;
   return { key: id, id, isNode: true, setId: null, path: null, name: str(n.name) || leaf(loc), locator: loc,
-           medium: mediaKindOf(loc, str(d.media_type)), checksum: str(d.checksum) || null,
+           medium: mediaKindOf(typeKeyOf(n) || loc, str(d.media_type)), checksum: str(d.checksum) || null,
            sizeBytes: Number(d.size_bytes ?? NaN) || null, role: d.media_role ? str(d.media_role) : null, doc,
            folder: "", camera: "", date: "" };
 }

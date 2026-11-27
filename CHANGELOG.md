@@ -10,6 +10,33 @@ reports and grouped by stage, at the end of the file («Before 16 October
 ## [Unreleased]
 
 ### Added
+- **The files of a room are seen: photos with the token, type from the
+  media_type, GeoJSON plans in the Space** (MICRO-FILE-DELLA-STANZA, 27
+  November 2026; EMStudio#2, PR #3 by Enzo Cocca). A file another tool uploaded
+  to a room (`s3dgraphy.room_import`, pyArchInit's «Send site») has
+  `data.url = …/v1/rooms/<room>/asset/sha256:<hex>`: no extension, and the node
+  answers only to the token. Enzo's PR (cherry-picked with his authorship):
+  previews of the connected node's store fetched through `nodeAuthFetch` and
+  shown from a blob URL (`isNodeAsset`, `nodeAssetBlobUrl`) in the Inspector
+  strip, the media strip and the image viewer. Then: what a file IS is read
+  from the graph — `data.media_type` → the extension of the node's `name` → the
+  leaf of a locator in `data.addresses` → the extension of the url (new
+  `file-type.ts`, `typeKeyOf`), in `unit-images.ts`, `media.ts`,
+  `viewer-node.ts`, `paradata-inspector.ts`, the Viewer window
+  (`storage.ts collectionFromUrl`, which also fetches a store file with the
+  token now), `is3dDocument`, `docText`, «Link by name». A room's GIS layer
+  goes to the bridge through its cache by sha256: the page asks
+  `POST /gis/store?sha256=&ext=` (empty body), and only when the bridge does
+  not have it fetches the bytes with ITS token (node-road) and hands them over;
+  the bridge checks them against the sha256, keeps them in `~/.em_cache/gis`
+  (`EM_GIS_STORE_DIR`) and `/gis/features`, `/gis/raster-grid`,
+  `/gis/surface`, `/geo/raster-preview` read from there with the pipeline of
+  always (EPSG:3004 → the scene's CRS). No token reaches the bridge, no
+  temporary file per view. Bridge level **97**. New
+  `scripts/check-room-files.mjs` (36, a real bridge included) and
+  `scripts/check-room-files-live.mjs` (13, on the dev stack: a room made by
+  `room-import`, the Inspector, the viewer, the plan drawn and reprojected,
+  the second opening from the cache).
 - **Opening a file with more than one graph says so** (MICRO-PG1, 27 November
   2026; EMStudio#1). A site is one graph; an em.json with more keeps them as
   different studies, and the ones that are not active became slots with

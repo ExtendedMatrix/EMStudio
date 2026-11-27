@@ -23,6 +23,8 @@
  * Pure: a graph in, a description out — `check-unit-images.mjs` runs it in node.
  */
 
+import { typeKeyOf } from "./file-type";
+
 export type UnitImageRoute = "direct" | "document" | "reading" | "illustrates";
 
 export interface UnitImage {
@@ -98,7 +100,8 @@ function picturesOf(ix: Ix, holder: string, onlyFiles?: Set<string>): UnitImage[
   const one = (id: string) => {
     const n = ix.byId.get(id);
     const loc = locatorOfNode(n);
-    const medium = loc ? mediumOfLocator(loc) : null;
+    // MICRO-FILE-DELLA-STANZA · the type from media_type → name → addresses → url
+    const medium = loc ? mediumOfLocator(typeKeyOf(n)) : null;
     if (!n || !medium) return;
     const ck = dataOf(n).checksum;
     out.push({ id, name: String(n.name || leaf(loc) || id), locator: loc, medium,
@@ -304,7 +307,7 @@ export function documentFiles(g: G, docId: string): Array<{ id: string; name: st
       const n = ix.byId.get(f);
       const d = dataOf(n);
       const loc = locatorOfNode(n);
-      if (!loc || mediumOfLocator(loc) !== "image") continue;
+      if (!loc || mediumOfLocator(typeKeyOf(n)) !== "image") continue;
       const parts = loc.split(/[\\/]/);
       const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
       const cam = d.camera && typeof d.camera === "object" ? (d.camera as Record<string, unknown>) : null;
