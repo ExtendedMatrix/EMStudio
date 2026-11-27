@@ -5062,7 +5062,10 @@ function loadMediaThumb(pic: HTMLImageElement, fig: HTMLElement, st: DocumentSto
     if (!seenInScroller(fig)) { mediaDeferred.set(fig, () => loadMediaThumb(pic, fig, st, it)); return; }
     unitThumbStats.asked++;
     const src = it.locator;
-    if (viewerIsFetchable(src)) { pic.src = src; unitThumbStats.file++; return; }
+    if (isNodeAsset(src)) {
+      try { pic.src = await nodeAssetBlobUrl(src); unitThumbStats.file++; } catch { /* the glyph below */ }
+      if (pic.src) return;
+    } else if (viewerIsFetchable(src)) { pic.src = src; unitThumbStats.file++; return; }
     const path = studyLocalPath(src) ?? src;
     try {
       const sha = it.checksum ? it.checksum.replace(/^sha256:/i, "") : "";
@@ -5121,6 +5124,10 @@ function loadUnitThumb(pic: HTMLImageElement, fig: HTMLElement, st: DocumentStor
     const f = fileStateOf(img.id);
     const src = f && f.path && (f.state === "on_disk" || f.state === "both") ? f.path : viewerSourceOf(node);
     if (!src) { glyph(); return; }
+    if (isNodeAsset(src) && img.medium !== "pdf") {
+      try { pic.src = await nodeAssetBlobUrl(src); unitThumbStats.file++; } catch { glyph(); }
+      return;
+    }
     if (viewerIsFetchable(src)) { if (img.medium === "pdf") glyph(); else { unitThumbStats.file++; pic.src = src; } return; }
     const path = studyLocalPath(src) ?? src;
     try {
@@ -5470,6 +5477,9 @@ function mediaSingle(win: Win, stage: HTMLElement, st: DocumentStore, list: Medi
   if (it.medium !== "image") { loadMediaThumb(pic, box, st, it); return; }
   void (async () => {
     const src = it.isNode ? (viewerSourceOf(st.node(it.id) ?? null) ?? it.locator) : it.locator;
+    if (isNodeAsset(src)) {
+      try { pic.src = await nodeAssetBlobUrl(src); return; } catch { loadMediaThumb(pic, box, st, it); return; }
+    }
     if (viewerIsFetchable(src)) { pic.src = src; return; }
     try { pic.src = await bridgeBlobUrl(await fsUrlFor(studyLocalPath(src) ?? src)); }
     catch { loadMediaThumb(pic, box, st, it); }
@@ -58250,6 +58260,31 @@ function viewerSourceOf(node: EmNode | null): string | null {
 /** True when this string is something the browser can actually fetch. */
 function viewerIsFetchable(src: string): boolean {
   return /^(https?:|data:|blob:)/i.test(src);
+}
+
+/** A file in the store of a room of THE NODE this session is connected to
+ *  (`…/v1/rooms/<room>/asset/sha256:…`): the node answers it only to a
+ *  signed request, and an `<img src>` cannot sign — every preview of a file
+ *  another tool uploaded (pyArchInit's photos, a GeoJSON plan) came back 401.
+ *  Only that node: the bearer never travels to another host. */
+function isNodeAsset(src: string): boolean {
+  if (!hubNodeUrl || !/\/v1\/rooms\/[^/]+\/asset\/sha256:[0-9a-f]{64}(?:[?#]|$)/i.test(src)) return false;
+  try { return new URL(src).origin === new URL(hubNodeUrl).origin; } catch { return false; }
+}
+
+const nodeAssetUrls = new Map<string, Promise<string>>();
+/** The node asset as a blob URL, fetched once with the session's token. */
+function nodeAssetBlobUrl(src: string): Promise<string> {
+  let p = nodeAssetUrls.get(src);
+  if (!p) {
+    p = nodeAuthFetch(src).then(async (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return URL.createObjectURL(await r.blob());
+    });
+    p.catch(() => nodeAssetUrls.delete(src));
+    nodeAssetUrls.set(src, p);
+  }
+  return p;
 }
 
 /**
