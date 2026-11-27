@@ -8,8 +8,8 @@
  * project, document). Other formalisms are admitted; the DTC is the recommended
  * one because it is ready.
  *
- * Today no route of stratigraph-server takes these fields with the bytes: a
- * deposit is `PUT /v1/rooms/{room}/asset` (the bytes, nothing else), then the
+ * Until stratigraph-server 1.6.0-dev.93 no route took these fields with the
+ * bytes: a deposit was `PUT /v1/rooms/{room}/asset` (the bytes, nothing else), then the
  * stamp as an object of its own (dtcstamp, via the bridge's `/stamp/emit`), then
  * the acts on the resident register (`POST /v1/corpus/append`: resource,
  * attribution, acquisition). This module is the CLEAN INTERFACE in between:
@@ -17,11 +17,13 @@
  *  · {@link BucketDtc} — the record the panel asks for, one per delivery;
  *  · {@link dtcProblem} — the one rule saying when it is complete enough;
  *  · {@link ingestionOptions} / {@link registerAcquisition} — how it is written
- *    TODAY through the existing routes;
- *  · {@link bucketRequest} — the body of the route that does not exist yet
- *    (`POST /v1/rooms/{room}/objects`, profile {@link BUCKET_DTC_PROFILE}), so
- *    that when it exists EMStudio sends this and nothing else changes. The plan
- *    is in s3Dgraphy `.claude/wip/reports/2026-11-27-REPORT-BK1-…`.
+ *    through the older routes (the fallback, and the stamp);
+ *  · {@link bucketRequest} — the body of the bucket's own door
+ *    (`POST /v1/rooms/{room}/objects`, profile {@link BUCKET_DTC_PROFILE}),
+ *    which stratigraph-server has since 1.6.0-dev.93 (MICRO-BK2): EMStudio sends
+ *    this, as the `dtc` part, and the server writes the three acts itself
+ *    (`bucket-door.ts`). The routes above remain the fallback for a node
+ *    without the door.
  *
  * What this module never does: invent a kind (the vocabulary is the datamodel's,
  * `dtc_kinds.acquisition`), name the depositor (the server takes it from the
@@ -47,8 +49,11 @@ export type Formalism = typeof FORMALISMS[number];
 
 export interface BucketDtc {
   formalism: Formalism;
-  /** WHO. The depositor is NOT here: it comes from the token, always. */
-  who: { author?: string; authorOrcid?: string };
+  /** WHO. The depositor is NOT here: it comes from the token, always.
+   *  `responsible` (MICRO-BK2) is who answers for publishing when it is not the
+   *  depositor: an ORCID iD the node has accredited, or absent (the depositor
+   *  answers). */
+  who: { author?: string; authorOrcid?: string; responsible?: string };
   /** WHEN the content was made (a date, `YYYY-MM-DD`). The deposit's instant is
    *  not a field: it is the moment the bytes land. */
   when: { madeAt?: string };
@@ -213,12 +218,12 @@ export interface BucketObject {
 }
 
 /**
- * THE BODY OF THE ROUTE THAT DOES NOT EXIST YET — `POST /v1/rooms/{room}/objects`
+ * THE BODY OF THE BUCKET'S DOOR — `POST /v1/rooms/{room}/objects`
  * (profile {@link BUCKET_DTC_PROFILE}): the minimal fields of a DTC, named the
  * same way for every tool of the ecosystem, with the depositor left to the token.
  *
- * Built here so the panel can SHOW what it is about to write (the preview) and so
- * the day the route exists the call is this object and nothing else. Keys are
+ * Built here so the panel can SHOW what it is about to write (the preview), and
+ * the preview is the call: `publishQueue` sends this object and nothing else. Keys are
  * snake_case, as the register's acts are.
  */
 export function bucketRequest(dtc: BucketDtc, object: BucketObject): Record<string, unknown> {
@@ -232,7 +237,8 @@ export function bucketRequest(dtc: BucketDtc, object: BucketObject): Record<stri
       sha256: object.sha256, name: object.name,
       media_type: object.mediaType, size_bytes: object.sizeBytes,
     }),
-    who: drop({ author: dtc.who.author?.trim(), author_orcid: dtc.who.authorOrcid?.trim() }),
+    who: drop({ author: dtc.who.author?.trim(), author_orcid: dtc.who.authorOrcid?.trim(),
+                responsible: dtc.who.responsible?.trim() }),
     when: drop({ made_at: dtc.when.madeAt }),
     source: drop({
       dtc_kind: dtc.source.kind,
@@ -256,4 +262,23 @@ export function bucketRequest(dtc: BucketDtc, object: BucketObject): Record<stri
       lot_id: dtc.target.lotId, lot_name: dtc.target.lotName,
     }),
   };
+}
+
+/**
+ * MICRO-BK2 · WHAT A LOT DECLARES, as one string: the record without the file
+ * and without the lot's own id. Two deliveries with the same signature are the
+ * same act and share a lot; a different kind, source, date, responsible, licence
+ * or document is a different act, and must not join the first one's lot.
+ *
+ * Measured on the dev node: a survey and then a download dropped in the same
+ * panel went into ONE acquisition (the lot id lived as long as the panel), and
+ * the register merged their facts — the survey's lot came out with the
+ * download's responsible. The lot id is now minted again when this changes.
+ */
+export function lotSignature(dtc: BucketDtc): string {
+  const request = bucketRequest(
+    { ...dtc, target: { ...dtc.target, lotId: undefined } },
+    { name: "", mediaType: "" });
+  delete request.object;
+  return JSON.stringify(request);
 }

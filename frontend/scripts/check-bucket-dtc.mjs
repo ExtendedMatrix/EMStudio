@@ -37,6 +37,7 @@ async function load(entry) {
 
 const B = await load("bucket-dtc.ts");
 const G = await load("stamp-ingest.ts");
+const D = await load("bucket-door.ts");
 
 let checks = 0;
 const ok = (cond, what) => { assert.ok(cond, what); checks++; };
@@ -172,6 +173,72 @@ console.log("· the register and the bucket's own route");
      "no transformation for a retrieval, in the request either");
 }
 
+// ── MICRO-BK2 · THE DOOR (pure) ─────────────────────────────────────────────
+console.log("· the bucket's door: the record first, refusals in words");
+{
+  // who answers for publishing travels in `who`, and only when said
+  const withResp = B.bucketRequest(dtc({ who: { responsible: "0000-0003-1111-1112" } }),
+    { name: "a", mediaType: "x/y" });
+  eq(withResp.who, { responsible: "0000-0003-1111-1112" }, "who.responsible is in the record");
+  eq(B.bucketRequest(dtc(), { name: "a", mediaType: "x/y" }).who, {},
+     "…and absent when nobody but the depositor answers (the server takes the token's)");
+  // a lot is ONE act: the same declaration keeps its lot, another one does not
+  const sig = (over) => B.lotSignature(dtc(over));
+  eq(sig({}), sig({ target: { room: ROOM, graphId: "graph:aiano", lotId: "lot-2", lotName: "Foto 2015" } }),
+     "the lot's own id is not part of what it declares");
+  ok(sig({}) !== sig({ source: { kind: "download", retrievedFrom: "https://x.org/a" } }), "another kind, another lot");
+  ok(sig({}) !== sig({ who: { responsible: "0000-0003-1111-1112" } }), "another responsible, another lot");
+  ok(sig({}) !== sig({ rights: { license: "CC0-1.0" } }), "another licence, another lot");
+  ok(!/"object"/.test(sig({})), "the file is not part of it");
+  const main = await readFile(`${SRC}main.ts`, "utf8");
+  ok(/ingestDraft\.lotKey !== lotKey\) ingestDraft\.lotId = null/.test(main),
+     "publishQueue mints a new lot when the declaration changed");
+  // the multipart: `dtc` FIRST, `file` after — the server refuses the other order
+  const form = D.depositForm({ profile: "em-bucket-dtc/1" }, new Uint8Array([1, 2, 3]), "n.png", "image/png");
+  const parts = [...form.entries()];
+  eq(parts.map(([k]) => k), ["dtc", "file"], "the record first, then the bytes");
+  eq(JSON.parse(parts[0][1]), { profile: "em-bucket-dtc/1" }, "the record is the request, as JSON");
+  ok(parts[1][1].size === 3 && parts[1][1].type === "image/png" && parts[1][1].name === "n.png",
+     "the file part carries the bytes, their type and their name");
+  // the probe: only a clean 404/405 means «no door»; a non-answer is not a no
+  eq([200, 404, 405, 401, 500, null].map(D.doorFromProbe), [true, false, false, null, null, null],
+     "200 = the door, 404/405 = an older node, anything else = cannot tell");
+  eq(D.doorUrl("https://n/em/", "aiano 2"), "https://n/em/v1/rooms/aiano%202/objects", "the door's URL");
+  // every refusal the server words becomes the form's own key — measured
+  // sentences of stratigraph-server app/objects.py (1e746f0)
+  const R = (status, detail) => D.refusalOf(status, detail).key;
+  eq(R(403, "depositing in x takes editor or above"), "assets.door.notEditor", "role");
+  eq(R(413, "over 64 MiB this door does not take…"), "assets.door.tooBig", "size");
+  const na = D.refusalOf(422, "0000-0002-9079-593X is not accredited on this node, so it cannot be …");
+  eq([na.key, na.vars.orcid], ["assets.door.notAccredited", "0000-0002-9079-593X"],
+     "an iD not accredited, named back");
+  eq(R(422, "`rights.license` is missing: bytes nobody may use are bytes nobody will"), "assets.needsLicense", "licence");
+  eq(R(422, "`source.dtc_kind` 'x' is not in the vocabulary's acquisition axis: …"), "bucket.kindUnknown", "kind");
+  eq(R(422, "a download says where from: `source.retrieved_from` (a URL or a DOI)"), "bucket.downloadNeedsSource", "download");
+  eq(R(422, "`source.retrieved_from` is read as a locator: 'x' is neither…"), "bucket.sourceNotUri", "locator");
+  eq(R(422, "a capture IS the act that made the bytes, so it says when: `when.made_at`"), "bucket.captureNeedsDate", "capture date");
+  eq(R(422, "a technique and a software say how the bytes were MADE: on a retrieval…"), "assets.door.noTechniqueOnRetrieval", "technique on retrieval");
+  eq(R(422, "the bytes that arrived are sha256:a, not the sha256:b the record declares"), "assets.door.bytesChanged", "digest");
+  eq(R(422, "`target.room` says 'a' and the call was made on 'b'"), "assets.door.otherRoom", "room");
+  const other = D.refusalOf(400, "something new");
+  eq([other.key, other.vars.detail], ["assets.door.refused", "something new"],
+     "a sentence not known yet: the node's own words, never a number");
+  eq(D.detailOf('{"detail":"x y"}'), "x y", "detail read from FastAPI's JSON");
+  eq(D.detailOf("plain"), "plain", "…or the text itself");
+  const I18N = await readFile(`${SRC}i18n.ts`, "utf8");
+  const keys = ["assets.door.notEditor", "assets.door.tooBig", "assets.door.signIn",
+    "assets.door.notAccredited", "assets.door.noTechniqueOnRetrieval", "assets.door.bytesChanged",
+    "assets.door.otherRoom", "assets.door.refused", "assets.door.refusedFile",
+    "assets.door.deposited", "assets.door.absent", "assets.door.tooBigOldWay", "assets.door.byDigest",
+    "assets.responsibleNeedsOrcid", "assets.responsibleOrcidBad",
+    "assets.responsibleNotForReference", "assets.responsibleNeedsDoor",
+    "assets.responsibleHint", "assets.responsibleOrcid"];
+  for (const k of keys) {
+    ok((I18N.match(new RegExp(`"${k.replace(/\./g, "\\.")}":`, "g")) ?? []).length === 2,
+       `${k} in EN and IT`);
+  }
+}
+
 // ── STRUCTURAL ──────────────────────────────────────────────────────────────
 console.log("· main.ts writes through the rule");
 {
@@ -197,6 +264,35 @@ console.log("· main.ts writes through the rule");
      "the register's acquisition carries the kind and the source");
   ok(/has_linked_resource/.test(body("async function landRow(")),
      "the chosen document is linked to each file");
+  // MICRO-BK2 · the door
+  const publish = body("async function publishQueue(");
+  ok(/depositThroughDoor\(base, room, item, bytes\)/.test(publish),
+     "publishQueue sends each file through the door");
+  ok(publish.indexOf("depositThroughDoor(") < publish.indexOf('method: "PUT"'),
+     "…and the older PUT is only the fallback branch, after it");
+  ok(/door\.has !== false && bytes\.byteLength <= door\.limit/.test(publish),
+     "…taken for a node without the door, or a file over the single piece");
+  ok(/through\?\.refused/.test(publish) && /continue;/.test(publish.slice(publish.indexOf("through?.refused"))),
+     "a refusal of the door stops that file: nothing goes the older way instead");
+  const at = MAIN.indexOf("async function depositThroughDoor(");
+  const door = MAIN.slice(at, MAIN.indexOf("\n}\n", at));
+  ok(/bucketRequest\(deliveryDtc\(\), object\)/.test(door) && /depositForm\(/.test(door),
+     "the door's first shape: multipart, the preview's record");
+  ok(/answer\.status < 500\) return await refused/.test(door),
+     "…a refusal (4xx) is final, only a broken door (5xx / no answer) tries the other shape");
+  ok(door.indexOf('"Content-Type": "application/json"') > 0
+       && door.indexOf("let answer = await ask()") < door.indexOf('method: "PUT"')
+       && door.indexOf('method: "PUT"') < door.lastIndexOf("answer = await ask()"),
+     "the second shape: the record by digest FIRST, then the bytes, then the record again");
+  ok(/holds no/.test(door) && /expected_sha256=\$\{hex\}/.test(door),
+     "…the bytes go only on «holds no», and the PUT checks their digest");
+  ok(/refusalOf\(answer\.status/.test(door) && !/answer\.status\} \$\{await answer\.text/.test(door),
+     "a refusal of the door is shown in words, never as «422 …»");
+  const land = body("async function landRow(");
+  ok(land.indexOf("item.byDoor") > 0 && land.indexOf("item.byDoor") < land.indexOf('registerAppend("resource"'),
+     "through the door landRow does not write the three acts a second time");
+  ok(/async function objectsDoor\([\s\S]{0,900}DOOR_PROFILE_PATH/.test(MAIN),
+     "the door is detected at the profile's route");
   const draft = body("const ingestDraft: IngestDraft =");
   ok(/sourceKind:\s*DEFAULT_SOURCE_KIND/.test(draft), "the kind starts at the truthful default");
   ok(/license:\s*""/.test(draft), "and still no licence is chosen for anybody");

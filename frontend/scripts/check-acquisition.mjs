@@ -130,21 +130,32 @@ function bodyOf(src, signature) {
   rows.push(["the three roles", "depositor a line · author never assumed"]);
 }
 
-// ── F1 · 4 · the editor is REFUSED, not smuggled ────────────────────────────
+// ── F1 · 4 · the editor travels through the door, or is refused ────────────
+// MICRO-BK2: the third role has a home now — `who.responsible` of the bucket's
+// door, an iD the NODE has accredited. It is still never smuggled into the
+// older acts' metadata, and where the door cannot carry it (a reference, a node
+// without the door) it is refused with the reason.
 {
   const gate = bodyOf(MAIN, "function deliveryProblem()");
-  ok(/editor === "other"/.test(gate) && /assets\.editorNotYet/.test(gate),
-    "an editor who is not the depositor has no field in the acts " +
-      "(`enrich_asset_dtc` carries the author and the attributor, full stop), " +
-      "so it is refused with the reason");
+  ok(/editor === "other"/.test(gate) && /assets\.responsibleNeedsOrcid/.test(gate)
+       && /orcidProblem\(/.test(gate),
+    "an editor who is not the depositor is an ORCID iD, well formed, or the " +
+      "delivery is not signed");
+  ok(/residency === "reference"/.test(gate) && /assets\.responsibleNotForReference/.test(gate),
+    "…and a reference (no bytes through the door) cannot carry it: refused");
+  ok(/responsible:\s*deliveryResponsible\(\)/.test(bodyOf(MAIN, "function deliveryDtc()")),
+    "…it is written in the record's `who`, the door's own field");
   const land = bodyOf(MAIN, "async function landRow(");
-  ok(!/editorName/.test(land),
-    "…and NOT written into `metadata`, which travels verbatim and would look " +
-      "recorded while `asset_rights` never looks there. A claim that reads as " +
-      "stored and is not enforceable is worse than a refusal.");
-  ok(/assets\.editorNotYet/.test(I18N),
-    "…with the sentence in the dictionary, so it says what to do next");
-  rows.push(["the editor", "refused with its reason, never smuggled"]);
+  ok(!/editorOrcid|responsible/.test(land),
+    "…and NOT written into the older acts' `metadata`, which travels verbatim " +
+      "and is never checked against the node's accredited list");
+  const publish = bodyOf(MAIN, "async function publishQueue(");
+  ok(/door\.has === false/.test(publish) && /assets\.responsibleNeedsDoor/.test(publish),
+    "…on a node without the door a delivery naming a responsible stops before " +
+      "any byte moves");
+  ok(!/assets\.editorNotYet/.test(MAIN + I18N),
+    "the old refusal «an editor has no place yet» is gone with its reason");
+  rows.push(["the editor", "an accredited iD through the door, else refused"]);
 }
 
 // ── F2 · 5 · the row is written PER FILE, in the order that cannot lie ──────

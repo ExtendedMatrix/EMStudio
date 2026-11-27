@@ -915,8 +915,13 @@ import { digestOf, isStampPath, stampPathFor } from "./stamp";
 import { ingestionAct, storeLocator } from "./stamp-ingest";
 import {
   bucketRequest, DEFAULT_SOURCE_KIND, dtcProblem, ingestionOptions, isCapture,
-  registerAcquisition, sourceKinds, type BucketDtc,
+  lotSignature, registerAcquisition, sourceKinds, type BucketDtc,
 } from "./bucket-dtc";
+// MICRO-BK2 · the bucket's door: bytes + record in one request
+import {
+  DOOR_PROFILE_PATH, DOOR_SINGLE_LIMIT, depositForm, detailOf, doorFromProbe, doorUrl,
+  refusalOf, type DoorDeposit,
+} from "./bucket-door";
 import { buildGraphsDoc } from "./views/graphs";
 import { buildGraphScene, graphCentres, type GraphAlgorithm } from "./views/graph";
 import { buildLiquidScene, isLiquid, LiquidSim, localNeighbourhood, type LiquidFilter } from "./views/liquid";
@@ -56412,6 +56417,9 @@ interface IngestItem {
    *  enum could not say it: `done` would mean "arrived" to one reader and
    *  "finished" to another. */
   signed?: boolean;
+  /** MICRO-BK2 · the file went through the bucket's door, which wrote the
+   *  register's three acts itself: `landRow` must not write them a second time */
+  byDoor?: boolean;
   /** I2 · THE THIRD FACT, and it needed its own field for the same reason
    *  `signed` did: «the bytes arrived», «somebody said what may be done with
    *  them» and «there is a record of who put them there» are three different
@@ -56446,6 +56454,10 @@ interface IngestDraft {
    *  is exactly the property F2 says not to break — «una serie è un gruppo».
    *  With an explicit id every act adds to the same event. */
   lotId: string | null;
+  /** MICRO-BK2 · what the lot `lotId` was minted for (`lotSignature`): when the
+   *  declaration changes — another kind, source, responsible… — it is another
+   *  act, and a new lot is minted instead of merging two acts into one. */
+  lotKey: string | null;
   /** NO DEFAULT. Empty means nobody has said anything, and the delivery does not
    *  sign until somebody does — see `deliveryProblem()`. */
   license: string;
@@ -56454,10 +56466,12 @@ interface IngestDraft {
   authorName: string;
   authorOrcid: string;
   /** the EDITOR: who takes responsibility for publishing. `me` is the
-   *  depositor, which the register already records; `other` is a declaration
-   *  the acts have no field for yet, and is refused rather than smuggled. */
+   *  depositor, which the register already records; `other` is an ORCID iD the
+   *  node has ACCREDITED, sent as `who.responsible` through the bucket's door
+   *  (MICRO-BK2) — the server refuses a name it does not know rather than
+   *  writing it down, and the form says so in its own words. */
   editor: "me" | "other";
-  editorName: string;
+  editorOrcid: string;
   /** the EMBARGO: until when, and why. Optional — an absent embargo is not a
    *  shorter one. */
   embargoUntil: string;
@@ -56498,6 +56512,7 @@ interface IngestDraft {
 const ingestDraft: IngestDraft = {
   lot: "",
   lotId: null,
+  lotKey: null,
   // NOT `DEFAULT_ASSET_LICENSE`. A preselected licence is a legal statement
   // nobody made — the same species of mistake as a default password — and it was
   // preselected here (measured: `license: DEFAULT_ASSET_LICENSE`, i.e.
@@ -56507,7 +56522,7 @@ const ingestDraft: IngestDraft = {
   authorName: "",
   authorOrcid: "",
   editor: "me",
-  editorName: "",
+  editorOrcid: "",
   embargoUntil: "",
   embargoReason: "",
   sourceKind: DEFAULT_SOURCE_KIND,
@@ -56535,13 +56550,18 @@ const ingestDraft: IngestDraft = {
  *  something through. */
 function deliveryProblem(): string | null {
   if (!ingestDraft.license.trim()) return t("assets.needsLicense");
-  // The third role has no home in the model yet: `enrich_asset_dtc` carries the
-  // AUTHOR (who made it) and the ATTRIBUTOR (who says so, from the token) and
-  // nothing else. Writing an editor into a metadata bag would put a statement of
-  // responsibility where `asset_rights` will never look for it — a claim that
-  // reads as recorded and is not enforceable. So it is refused, out loud, with
-  // the proposal in the end-of.
-  if (ingestDraft.editor === "other") return t("assets.editorNotYet");
+  // MICRO-BK2 · the third role has a home now: `who.responsible` of the
+  // bucket's door, an ORCID iD the NODE has accredited (the server checks; a
+  // name it does not know is refused, never written down). So the form asks
+  // for an iD, well formed, and only where the door carries it: a reference
+  // does not pass through the door (no bytes travel), and the register's
+  // older acts have no field for it.
+  if (ingestDraft.editor === "other") {
+    const iD = ingestDraft.editorOrcid.trim();
+    if (!iD) return t("assets.responsibleNeedsOrcid");
+    if (orcidProblem(iD)) return t("assets.responsibleOrcidBad");
+    if (ingestDraft.residency === "reference") return t("assets.responsibleNotForReference");
+  }
   // MICRO-BK1 · the act must be said well enough to be stamped: the kind from
   // the vocabulary, a capture's date, a download's source (`bucket-dtc.ts`).
   const dtc = dtcProblem(deliveryDtc());
@@ -56556,7 +56576,8 @@ function deliveryDtc(): BucketDtc {
   const documentId = d.documentId && store?.node(d.documentId) ? d.documentId : undefined;
   return {
     formalism: "dtc",
-    who: { author: d.authorName || undefined, authorOrcid: d.authorOrcid || undefined },
+    who: { author: d.authorName || undefined, authorOrcid: d.authorOrcid || undefined,
+           responsible: deliveryResponsible() },
     when: { madeAt: d.madeAt || undefined },
     source: { kind: d.sourceKind, retrievedFrom: d.retrievedFrom || undefined,
               note: d.sourceNote || undefined, campaign: d.campaign || undefined },
@@ -56566,6 +56587,16 @@ function deliveryDtc(): BucketDtc {
     target: { room: sync.room ?? "", graphId: store?.doc.graph?.graph_id || undefined,
               documentId, lotId: d.lotId ?? undefined, lotName: d.lot || undefined },
   };
+}
+
+/** MICRO-BK2 · who answers for publishing, when it is not the depositor: the
+ *  declared iD, or nothing (the depositor answers, and the server knows them
+ *  from the token). Naming oneself as «somebody else» is not somebody else. */
+function deliveryResponsible(): string | undefined {
+  if (ingestDraft.editor !== "other") return undefined;
+  const iD = ingestDraft.editorOrcid.trim();
+  if (!iD || iD === currentIdentity()?.orcid) return undefined;
+  return iD;
 }
 
 /** The derivation form's own state — an output, its inputs, and the tool. */
@@ -56878,17 +56909,25 @@ function ingestDelivery(): HTMLElement {
   });
   ingestField(box, t("assets.editor"), editor,
               ingestDraft.editor === "other"
-                ? t("assets.editorNotYet")
+                ? t("assets.responsibleHint")
                 : t("assets.editorMeHint"));
   if (ingestDraft.editor === "other") {
-    const name = document.createElement("input");
-    name.className = "insp-name-input";
-    name.value = ingestDraft.editorName;
-    name.placeholder = t("assets.editorPlaceholder");
-    name.addEventListener("change", () => {
-      ingestDraft.editorName = name.value.trim();
+    // MICRO-BK2 · an ORCID iD, because that is what the node can check: the
+    // door refuses an iD it has not accredited, and a name it could not check
+    // would be a claim nobody stands behind
+    const iD = document.createElement("input");
+    iD.className = "insp-name-input";
+    iD.dataset.field = "bucket-responsible";
+    iD.value = ingestDraft.editorOrcid;
+    iD.placeholder = "0000-0000-0000-0000";
+    if (ingestDraft.editorOrcid && orcidProblem(ingestDraft.editorOrcid)) {
+      iD.classList.add("insp-input-bad");
+    }
+    iD.addEventListener("change", () => {
+      ingestDraft.editorOrcid = iD.value.trim();
+      renderStorage();        // the rule reads it: the button says why, or signs
     });
-    ingestField(box, t("assets.editorName"), name);
+    ingestField(box, t("assets.responsibleOrcid"), iD);
   }
 
   // ── the AUTHOR · may be nobody, and is never assumed to be you ─────────────
@@ -57404,6 +57443,20 @@ function ingestPublishBar(): HTMLElement {
  * All four are idempotent, so an interrupted delivery is resumed by dropping the
  * same files again: nothing doubles. That is what makes writing early free.
  *
+ * **MICRO-BK2 · one door instead of four acts.** On a node that has it
+ * (stratigraph-server ≥ 1.6.0-dev.93), the four acts are ONE request:
+ * `POST …/objects`, multipart, the record (`bucketRequest`, the preview the
+ * form shows) first and the bytes after. The server refuses the record before
+ * it reads the bytes, and writes resource, attribution and acquisition itself;
+ * `landRow` then writes only the local side (the file corpus, the document
+ * link). The stamp still travels as an object of its own (`stampOne`), because
+ * the door does not emit one: the server says so in its own module.
+ *
+ * Whether a node has the door is asked once, at `GET /v1/dtc/profile/…` (the
+ * route that came with it): 404 means an older server, and only then the four
+ * acts above are the way, with one sober line in the log. A file larger than
+ * the door's single piece (64 MiB) goes the old way too, said per file.
+ *
  * **A series is still a group.** Step 4 carries the DELIVERY's own
  * `acquisition_id` (`ingestDraft.lotId`), minted once, so every act adds a member
  * to the same event instead of minting a new one — see the note on `lotId`, which
@@ -57419,7 +57472,33 @@ async function publishQueue(): Promise<void> {
   // the lot this delivery belongs to. Minted here rather than at the drop, so a
   // second drop after the queue drained joins the same lot as long as the panel
   // is open — the person did not change what they are doing.
+  // MICRO-BK2 · …and only while they did not: a different declaration (kind,
+  // source, date, responsible, rights, document) is a different act, and gets
+  // its own lot — measured, the register merges the facts of one lot's acts.
+  const lotKey = lotSignature(deliveryDtc());
+  if (ingestDraft.lotId && ingestDraft.lotKey !== lotKey) ingestDraft.lotId = null;
   if (!ingestDraft.lotId) ingestDraft.lotId = crypto.randomUUID();
+  ingestDraft.lotKey = lotKey;
+
+  // MICRO-BK2 · has this node the bucket's door? Asked once per node. Without
+  // it the older acts are the way, said once; and a responsible who is not the
+  // depositor cannot be carried by them, so the delivery stops before any byte
+  // moves rather than publishing without the name it promised.
+  const door = ingestDraft.residency === "reference"
+    ? { has: null, limit: DOOR_SINGLE_LIMIT }
+    : await objectsDoor(base);
+  if (door.has === false) {
+    ingestLog(t("assets.door.absent"), "warn");
+    if (deliveryResponsible()) {
+      for (const item of pending) {
+        item.status = "failed";
+        item.note = t("assets.responsibleNeedsDoor");
+      }
+      ingestLog(t("assets.responsibleNeedsDoor"), "warn");
+      renderStorage();
+      return;
+    }
+  }
 
   const published: string[] = [];
   for (const item of pending) {
@@ -57455,18 +57534,46 @@ async function publishQueue(): Promise<void> {
       const bytes = item.file
         ? await item.file.arrayBuffer()
         : await bridgeBytes(item.path!);
-      const url = `${base}/v1/rooms/${encodeURIComponent(room)}/asset`
-        + `?media_type=${encodeURIComponent(item.mediaType)}`;
-      const answer = await nodeAuthFetch(url, { method: "PUT", body: bytes });
-      if (!answer.ok) {
+      let info: { ref: string; size?: number; created?: boolean };
+      item.byDoor = false;
+      const through = door.has !== false && bytes.byteLength <= door.limit
+        ? await depositThroughDoor(base, room, item, bytes)
+        : null;
+      if (through?.refused) {
+        // ── the door said no: in the form's words, never a status number,
+        // and no byte went anywhere else
         item.status = "failed";
-        item.note = `${answer.status} ${await answer.text()}`.slice(0, 120);
-        ingestLog(t("storage.uploadFailed", { detail: item.note }), "warn");
+        item.note = through.refused;
+        ingestLog(t("assets.door.refusedFile", { name: item.name, why: item.note }), "warn");
         continue;
       }
-      const info = await answer.json() as {
-        ref: string; size?: number; created?: boolean;
-      };
+      if (through?.deposit) {
+        // ── MICRO-BK2 · THROUGH THE DOOR: the record and the bytes, the three
+        // acts written by the node from the record
+        const deposit = through.deposit;
+        info = { ref: deposit.ref, size: deposit.size, created: deposit.created };
+        item.byDoor = true;
+        ingestLog(t("assets.door.deposited", {
+          name: item.name,
+          who: deposit.responsible ?? "",
+        }));
+      } else {
+        // ── the older way: a node without the door, or a file too large for
+        // one piece. The four acts, as before MICRO-BK2.
+        if (door.has !== false) {
+          ingestLog(t("assets.door.tooBigOldWay", { name: item.name }), "warn");
+        }
+        const url = `${base}/v1/rooms/${encodeURIComponent(room)}/asset`
+          + `?media_type=${encodeURIComponent(item.mediaType)}`;
+        const answer = await nodeAuthFetch(url, { method: "PUT", body: bytes });
+        if (!answer.ok) {
+          item.status = "failed";
+          item.note = `${answer.status} ${await answer.text()}`.slice(0, 120);
+          ingestLog(t("storage.uploadFailed", { detail: item.note }), "warn");
+          continue;
+        }
+        info = await answer.json() as { ref: string; size?: number; created?: boolean };
+      }
 
       // SUPERSESSION · same name, other bytes. Said BEFORE the node is written,
       // with the citations at stake, because after the fact it is archaeology.
@@ -57565,6 +57672,134 @@ async function publishQueue(): Promise<void> {
     refreshInspector();
   }
   renderStorage();
+}
+
+/**
+ * MICRO-BK2 · ONE FILE THROUGH THE BUCKET'S DOOR, in the first of its two
+ * shapes the node reads.
+ *
+ * 1. **multipart**, the record (`bucketRequest`, the preview) FIRST and the
+ *    bytes after — one request, the contract of the door;
+ * 2. **by digest**, the door's other shape (`application/json`, the record with
+ *    `object.sha256`): measured necessary on stratigraph-server 1.6.0-dev.93,
+ *    whose image lacks the multipart parser (`python-multipart`): every
+ *    multipart POST is a 500, without CORS headers, so the page sees a network
+ *    failure. The record is sent FIRST: a refusal (licence, kind, an iD not
+ *    accredited…) costs no byte; «this node holds no sha256:…» (404) means the
+ *    record holds and the bytes are not here — they go by the PUT that checks
+ *    their digest, and the record again, which now writes the acts. Bytes
+ *    already in the store take ONE call. The shape that worked is kept per node.
+ *
+ * Returns the node's answer, a refusal already in words, or null — the door
+ * could not be used at all (no `crypto.subtle` to compute a digest): the caller
+ * then goes the older way.
+ */
+const doorShapeSaid = new Map<string, "multipart" | "digest">();
+async function depositThroughDoor(
+  base: string, room: string, item: IngestItem, bytes: ArrayBuffer,
+): Promise<{ deposit?: DoorDeposit; refused?: string } | null> {
+  const url = doorUrl(base, room);
+  const object = { name: item.name, mediaType: item.mediaType, sizeBytes: bytes.byteLength };
+  const refused = async (answer: Response): Promise<{ refused: string }> => {
+    const why = refusalOf(answer.status, detailOf(await answer.text()), deliveryResponsible());
+    return { refused: t(why.key, why.vars) };
+  };
+  if (doorShapeSaid.get(base) !== "digest") {
+    try {
+      const answer = await nodeAuthFetch(url, {
+        method: "POST",
+        body: depositForm(bucketRequest(deliveryDtc(), object), bytes, item.name, item.mediaType),
+      });
+      if (answer.ok) {
+        doorShapeSaid.set(base, "multipart");
+        return { deposit: await answer.json() as DoorDeposit };
+      }
+      // a refusal is a refusal: the other shape would say the same thing
+      if (answer.status < 500) return await refused(answer);
+    } catch {
+      // a 500 without CORS headers reaches the page as a network failure; a
+      // real network failure fails the next request too, and is shown there.
+      // MEASURED (Chromium, dev.93): a request sent in the same task as that
+      // failure is blocked as well, without reaching the node — one pause first
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return null;
+  const hex = [...new Uint8Array(await subtle.digest("SHA-256", bytes))]
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+  const record = JSON.stringify(bucketRequest(deliveryDtc(), { ...object, sha256: `sha256:${hex}` }));
+  const ask = async (): Promise<Response> => {
+    const once = (): Promise<Response> => nodeAuthFetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: record,
+    });
+    try {
+      return await once();
+    } catch {
+      // the same blocked-after-a-failure, once more after a pause; a second
+      // network failure is a real one, and the caller shows it
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return await once();
+    }
+  };
+  let answer = await ask();
+  if (!answer.ok) {
+    const detail = answer.status === 404 ? await answer.clone().text() : "";
+    if (answer.status !== 404 || !/holds no/.test(detail)) return await refused(answer);
+    // the record holds; the bytes are not here: they go, checked by digest…
+    const put = await nodeAuthFetch(
+      `${base}/v1/rooms/${encodeURIComponent(room)}/asset`
+      + `?media_type=${encodeURIComponent(item.mediaType)}&expected_sha256=${hex}`,
+      { method: "PUT", body: bytes });
+    if (!put.ok) return await refused(put);
+    const stored = await put.json() as { created?: boolean };
+    // …and the record again, which now finds them and writes the acts
+    answer = await ask();
+    if (!answer.ok) return await refused(answer);
+    // the door says «created: false» — the bytes WERE there, because the PUT
+    // had just put them: what this delivery did is the PUT's answer
+    const deposit = await answer.json() as DoorDeposit;
+    noteDigestShape(base);
+    return { deposit: { ...deposit, created: stored.created !== false } };
+  }
+  noteDigestShape(base);
+  return { deposit: await answer.json() as DoorDeposit };
+}
+
+/** The node's door is read by digest: kept, and said once. */
+function noteDigestShape(base: string): void {
+  if (doorShapeSaid.get(base) === "digest") return;
+  doorShapeSaid.set(base, "digest");
+  ingestLog(t("assets.door.byDigest"), "warn");
+}
+
+/** MICRO-BK2 · whether a node has the bucket's door, and its single-piece
+ *  ceiling — asked once per node at the profile's route, which came with the
+ *  door. A non-answer (401, 5xx, network) is not kept and not taken for «no»:
+ *  `doorFromProbe` says null, and the door is tried (its own answer is then
+ *  the one shown). */
+const objectsDoorSaid = new Map<string, { has: boolean; limit: number }>();
+async function objectsDoor(base: string): Promise<{ has: boolean | null; limit: number }> {
+  const said = objectsDoorSaid.get(base);
+  if (said) return said;
+  let status: number | null = null;
+  let limit = DOOR_SINGLE_LIMIT;
+  try {
+    const answer = await nodeAuthFetch(`${base}${DOOR_PROFILE_PATH}`);
+    status = answer.status;
+    if (answer.ok) {
+      const profile = await answer.json() as { single_post_limit_bytes?: number };
+      if (typeof profile.single_post_limit_bytes === "number"
+          && profile.single_post_limit_bytes > 0) {
+        limit = profile.single_post_limit_bytes;
+      }
+    }
+  } catch {
+    status = null;
+  }
+  const has = doorFromProbe(status);
+  if (has !== null) objectsDoorSaid.set(base, { has, limit });
+  return { has, limit };
 }
 
 /** One object into the room's store. The reference IS the digest, so the caller
@@ -57846,6 +58081,14 @@ async function landRow(doc: DocumentStore, item: IngestItem): Promise<void> {
 
   // ── the register, when there is one ───────────────────────────────────────
   if (!registerBase() || !digest) return;
+  // MICRO-BK2 · through the door the server wrote the three acts itself, from
+  // the same record: writing them again would be a second, unsigned copy of
+  // the same statement (and an attribution dated today, not the capture's day)
+  if (item.byDoor) {
+    item.signed = true;
+    ingestDraft.signed += 1;
+    return;
+  }
   const data = (node?.data ?? {}) as Record<string, unknown>;
   const residency = String(data.residency ?? "resident");
   const known = await registerAppend("resource", {
