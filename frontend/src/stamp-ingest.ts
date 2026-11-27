@@ -54,6 +54,7 @@
  */
 
 import type { Stamp } from "./stamp";
+import type { IngestionOptions } from "./bucket-dtc";
 import visualRules from "./assets/em_visual_rules.json";
 
 /** Il genere dell'atto, **preso dal vocabolario e non inventato**: in
@@ -171,9 +172,18 @@ export interface IngestionActInput {
 export function ingestionAct(
   items: IngestionActInput[],
   registry: { graph_id?: string; revision?: number; room?: string } = {},
+  options?: IngestionOptions,
 ): Record<string, unknown> | null {
   if (!items.length) return null;
   const first = items[0];
+  // MICRO-BK1 · the DTC the delivery form asked for. Without it the act is the
+  // poor one it always was (`ingest`, no facts); with it, the kind is the one the
+  // person chose from the vocabulary, the facts of the source travel in the
+  // acquisition's metadata, and a CAPTURE — and only a capture — may say its
+  // technique and software, because only a capture made the bytes.
+  const kind = options?.kind || INGESTION_KIND;
+  const facts = options?.facts ?? {};
+  const campaign = typeof facts.campaign === "string" ? facts.campaign : "";
   return {
     outputs: items.map((item) => ({
       // il percorso c'è solo per chi ce l'ha: senza, il bridge emette e non
@@ -193,23 +203,35 @@ export function ingestionAct(
     // IL PUNTO: nessun genitore, e nessuno che ne dichiari uno.
     inputs: [],
     act: {
-      dtc_kind: INGESTION_KIND,
-      at: first.at,
+      dtc_kind: kind,
+      at: options?.at || first.at,
       origin: true,
       acquisition: {
         // il nome dell'evento: dice l'atto, non una campagna che nessuno ha
         // condotto. Derivato dalla stanza e dall'istante, così una seconda
-        // consegna nello stesso momento si aggiunge invece di gemmare.
-        name: `ingestione · ${first.room}`,
+        // consegna nello stesso momento si aggiunge invece di gemmare. Un
+        // genere diverso da `ingest` è un altro evento, e il nome lo dice
+        // (BK1): due consegne di genere diverso non si fondono in una.
+        name: kind === INGESTION_KIND
+          ? `ingestione · ${first.room}`
+          : `${kind} · ${campaign || first.room}`,
         metadata: {
           deposited_into: first.room,
           delivered_as: items.map((i) => i.name).join(", ").slice(0, 400),
           ...(first.tool ? { deposited_by_tool: first.tool } : {}),
+          ...facts,
         },
       },
-      // …e NIENTE `technique`, NIENTE `software`, NIENTE `parameters`: sarebbero
-      // affermazioni su come i byte sono stati fatti, e nessuno le ha fatte.
+      // …e NIENTE `technique`, NIENTE `software`, NIENTE `parameters` se
+      // nessuno li ha detti: sarebbero affermazioni su come i byte sono stati
+      // fatti. `ingestionOptions` li porta solo per una cattura.
+      ...(options?.technique ? { technique: options.technique } : {}),
+      ...(options?.software?.length ? { software: options.software } : {}),
     },
+    // BK1 · licence and embargo, DECLARED by whoever deposits: the bridge writes
+    // them as an attribution signed by the operator, so the stamp's `declared`
+    // block says them (it was empty: the composed graph had no rights).
+    ...(options?.declared ? { declared: options.declared } : {}),
     // chi ha compiuto il DEPOSITO. Il bridge crea il nodo autore solo se c'è un
     // nome vero, e qui non ne passiamo uno: l'operatore esce col solo id, e
     // nessun `has_author` asserisce che abbia fatto il contenuto.

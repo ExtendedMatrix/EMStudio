@@ -10,6 +10,30 @@ reports and grouped by stage, at the end of the file («Before 16 October
 ## [Unreleased]
 
 ### Added
+- **Every deposit into a room's bucket asks for, and writes, a DTC** (MICRO-BK1,
+  27 November 2026, decision of E.D.: «la DTC è il sistema di caricamento»).
+  Archive ▸ room store, the delivery form, gains **Source of the files (DTC)**:
+  the **Kind of act** from the vocabulary (`dtc_kinds.acquisition`, grouped by
+  its two families, the ingestion by default), **Made on** (required for a
+  capture: the act's date is the photograph's, not now), **Retrieved from** (a
+  URL or DOI, required for a download), a **Source note**, and for a capture only
+  **Campaign / Technique / Software** (a technique on a retrieval would be a
+  claim about bytes somebody else made); **Documents** links each file to a
+  document of the study (`has_linked_resource`), pre-filled from the selection;
+  **What will be written** shows the record. New `bucket-dtc.ts`: the minimal
+  fields (`BucketDtc`: who, when, source, transformation, rights, target), the
+  one rule (`dtcProblem`, read by `deliveryProblem`), what reaches the stamp
+  (`ingestionOptions` → `ingestionAct`'s new third argument), the register's
+  acquisition with its `dtc_kind` and facts (`registerAcquisition`; `CorpusAct`
+  already takes both), and the body of the route that does not exist yet
+  (`bucketRequest`, profile `em-bucket-dtc/1`, the depositor left to the token).
+  Bridge: `/stamp/emit` takes `declared` (licence, embargo, reason, author) and
+  writes it as an attribution signed by the operator (`api.enrich_asset_dtc`),
+  so the stamp's `declared` block, empty until now on an ingestion, says the
+  licence and the embargo. Texts EN + IT. New `scripts/check-bucket-dtc.mjs`
+  (73, a bridge of its own) and `scripts/check-bucket-dtc-live.mjs` (21, a room
+  on the dev node, deleted at the end); `check-acquisition` follows the lot id
+  through `registerAcquisition`.
 - **The files of a room are seen: photos with the token, type from the
   media_type, GeoJSON plans in the Space** (MICRO-FILE-DELLA-STANZA, 27
   November 2026; EMStudio#2, PR #3 by Enzo Cocca). A file another tool uploaded

@@ -175,7 +175,13 @@ function bodyOf(src, signature) {
   ok(/ingestDraft\.lotId\s*=\s*crypto\.randomUUID\(\)/.test(publish),
     "the delivery mints ONE acquisition id");
   const land = bodyOf(MAIN, "async function landRow(");
-  ok(/acquisition_id:\s*ingestDraft\.lotId/.test(land),
+  // MICRO-BK1 · the register's act is built by `registerAcquisition` (bucket-dtc.ts)
+  // from `deliveryDtc()`, whose target carries the lot id: the same property, one
+  // hop further — and both hops are asserted, so cutting either one fails here.
+  const viaDtc = /registerAcquisition\(deliveryDtc\(\)/.test(land)
+    && /lotId:\s*d\.lotId/.test(bodyOf(MAIN, "function deliveryDtc()"))
+    && /acquisition_id:\s*dtc\.target\.lotId/.test(await read("bucket-dtc.ts"));
+  ok(/acquisition_id:\s*ingestDraft\.lotId/.test(land) || viaDtc,
     "…and every per-file act carries it. WITHOUT this the corpus derives the " +
       "id from the sorted MEMBERS when the lot has no name, so appending one " +
       "file at a time would mint two hundred one-file acquisitions — which is " +

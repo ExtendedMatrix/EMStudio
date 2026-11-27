@@ -7004,6 +7004,14 @@ body.nv-standalone main.nv-standalone-main {
   font-size: 12.5px;
 }
 .ing-queue, .ing-lots, .ing-derivation, .ing-trail, .ing-defaults,
+/* MICRO-BK1 · the source of a delivery and the request it will write */
+.ing-dtc-head { margin-top: 10px; }
+.ing-dtc-preview { margin: 8px 0 4px; }
+.ing-dtc-preview > summary { cursor: pointer; font-size: 12px; }
+.ing-dtc-preview pre {
+  white-space: pre-wrap; word-break: break-all; max-height: 16em; overflow: auto;
+  font-size: 11px; margin: 4px 0;
+}
 .ing-delivery {
   display: flex;
   flex-direction: column;

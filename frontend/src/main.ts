@@ -913,6 +913,10 @@ import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
 // s3Dgraphy attraverso il bridge, come per la composizione.
 import { ingestionAct, storeLocator } from "./stamp-ingest";
+import {
+  bucketRequest, DEFAULT_SOURCE_KIND, dtcProblem, ingestionOptions, isCapture,
+  registerAcquisition, sourceKinds, type BucketDtc,
+} from "./bucket-dtc";
 import { buildGraphsDoc } from "./views/graphs";
 import { buildGraphScene, graphCentres, type GraphAlgorithm } from "./views/graph";
 import { buildLiquidScene, isLiquid, LiquidSim, localNeighbourhood, type LiquidFilter } from "./views/liquid";
@@ -56458,6 +56462,24 @@ interface IngestDraft {
    *  shorter one. */
   embargoUntil: string;
   embargoReason: string;
+  /** MICRO-BK1 · FROM WHICH SOURCE: the kind of act, from the vocabulary
+   *  (`dtc_kinds.acquisition`). The ingestion kind by default — «entered here, nobody said
+   *  from where», which is the truthful default, not an assertion. */
+  sourceKind: string;
+  /** a URL or a DOI the bytes were retrieved from (required for a download) */
+  retrievedFrom: string;
+  /** a free sentence about the source: the archive, the box, the disk */
+  sourceNote: string;
+  /** WHEN the content was made, `YYYY-MM-DD` — required for a capture */
+  madeAt: string;
+  /** a capture's campaign, technique and software — said only for a capture */
+  campaign: string;
+  technique: string;
+  software: string;
+  /** WHERE IT GOES, beyond the room: the document of the graph the files
+   *  document. `null` = not decided yet (pre-filled from the selection when a
+   *  document is selected); `""` = explicitly none. */
+  documentId: string | null;
   residency: Residency;
   scope: Scope;
   items: IngestItem[];
@@ -56488,6 +56510,14 @@ const ingestDraft: IngestDraft = {
   editorName: "",
   embargoUntil: "",
   embargoReason: "",
+  sourceKind: DEFAULT_SOURCE_KIND,
+  retrievedFrom: "",
+  sourceNote: "",
+  madeAt: "",
+  campaign: "",
+  technique: "",
+  software: "",
+  documentId: null,
   residency: "resident",
   scope: "own-study",
   items: [],
@@ -56512,7 +56542,30 @@ function deliveryProblem(): string | null {
   // reads as recorded and is not enforceable. So it is refused, out loud, with
   // the proposal in the end-of.
   if (ingestDraft.editor === "other") return t("assets.editorNotYet");
+  // MICRO-BK1 · the act must be said well enough to be stamped: the kind from
+  // the vocabulary, a capture's date, a download's source (`bucket-dtc.ts`).
+  const dtc = dtcProblem(deliveryDtc());
+  if (dtc) return t(dtc);
   return null;
+}
+
+/** MICRO-BK1 · The delivery as a DTC record — the minimal fields, one place.
+ *  The depositor is not in it: the server takes it from the token. */
+function deliveryDtc(): BucketDtc {
+  const d = ingestDraft;
+  const documentId = d.documentId && store?.node(d.documentId) ? d.documentId : undefined;
+  return {
+    formalism: "dtc",
+    who: { author: d.authorName || undefined, authorOrcid: d.authorOrcid || undefined },
+    when: { madeAt: d.madeAt || undefined },
+    source: { kind: d.sourceKind, retrievedFrom: d.retrievedFrom || undefined,
+              note: d.sourceNote || undefined, campaign: d.campaign || undefined },
+    transformation: { technique: d.technique || undefined, software: d.software || undefined },
+    rights: { license: d.license, embargoUntil: d.embargoUntil || undefined,
+              embargoReason: d.embargoReason || undefined },
+    target: { room: sync.room ?? "", graphId: store?.doc.graph?.graph_id || undefined,
+              documentId, lotId: d.lotId ?? undefined, lotName: d.lot || undefined },
+  };
 }
 
 /** The derivation form's own state — an output, its inputs, and the tool. */
@@ -56922,6 +56975,9 @@ function ingestDelivery(): HTMLElement {
     ingestField(box, t("assets.embargoReason"), why);
   }
 
+  // ── MICRO-BK1 · the SOURCE, the WHEN, the TRANSFORMATION, the DOCUMENT ─────
+  ingestSource(box);
+
   // ── the LOT · a name is how you keep adding to the same event ──────────────
   const lot = document.createElement("input");
   lot.className = "insp-name-input";
@@ -56970,6 +57026,129 @@ function ingestDelivery(): HTMLElement {
                       problem ?? t("assets.deliverySigned"));
   box.appendChild(verdict);
   return box;
+}
+
+/**
+ * MICRO-BK1 · THE SOURCE OF THE DELIVERY — what a DTC says beyond who and which
+ * licence: from which source, when the content was made, which transformation,
+ * and which document of the graph the files document.
+ *
+ * The kind is a choice from the vocabulary (`dtc_kinds.acquisition`, grouped by
+ * its two families), never a free word. The ingestion kind is the default: it is
+ * the truthful one: «entered here, nobody said from where». A CAPTURE (a photo,
+ * a laser scan, a survey) is the act that made the bytes, so it asks for its
+ * date and may say its campaign, technique and software; a RETRIEVAL did not make
+ * them, so those boxes are not offered there — a technique on a download would be
+ * a claim about bytes somebody else made.
+ *
+ * Pre-filled where EMStudio knows: the document, from the selection when a
+ * document is selected; the depositor, room, project, lot id, tool, media type,
+ * size and digest are written without asking (they are facts, not statements).
+ * The preview at the bottom is the request the bucket's own route will take
+ * (`bucketRequest`, profile em-bucket-dtc/1): what you see is what is written.
+ */
+function ingestSource(box: HTMLElement): void {
+  const d = ingestDraft;
+  box.appendChild(ing("h4", "insp-sect ing-dtc-head", t("bucket.source")));
+
+  // ── the KIND · from the vocabulary, grouped by family ──────────────────────
+  const kind = document.createElement("select");
+  kind.className = "ing-select";
+  kind.dataset.field = "bucket-kind";
+  const families = new Map<string, HTMLOptGroupElement>();
+  for (const k of sourceKinds()) {
+    let group = families.get(k.family);
+    if (!group) {
+      group = document.createElement("optgroup");
+      // the family's own label, from the datamodel's translations
+      group.label = dtcFamiliesOf("acquisition").find((f) => f.family === k.family)?.label
+        ?? k.family;
+      families.set(k.family, group);
+      kind.appendChild(group);
+    }
+    const o = document.createElement("option");
+    o.value = k.kind;
+    o.textContent = k.label;
+    if (k.kind === d.sourceKind) o.selected = true;
+    group.appendChild(o);
+  }
+  kind.addEventListener("change", () => {
+    d.sourceKind = kind.value;
+    renderStorage();        // a capture's boxes appear with the choice
+  });
+  const capture = isCapture(d.sourceKind);
+  ingestField(box, t("bucket.kind"), kind,
+              capture ? t("bucket.kindCaptureHint") : t("bucket.kindRetrievalHint"));
+
+  const text = (field: keyof IngestDraft, label: string, placeholder: string,
+                hint?: string, type = "text"): void => {
+    const input = document.createElement("input");
+    input.type = type;
+    input.className = "insp-name-input";
+    input.dataset.field = `bucket-${String(field)}`;
+    input.value = String(d[field] ?? "");
+    input.placeholder = placeholder;
+    input.addEventListener("change", () => {
+      (d as unknown as Record<string, unknown>)[field] = input.value.trim();
+      duringStoreFlush(renderStorage);   // the verdict follows; Tab stays put
+    });
+    ingestField(box, label, input, hint);
+  };
+
+  // ── WHEN · the content, not the deposit ────────────────────────────────────
+  text("madeAt", t("bucket.madeAt"), "", capture
+    ? t("bucket.madeAtCaptureHint") : t("bucket.madeAtHint"), "date");
+  // ── FROM WHERE ─────────────────────────────────────────────────────────────
+  text("retrievedFrom", t("bucket.retrievedFrom"), "https://… · doi:10.…",
+       t("bucket.retrievedFromHint"));
+  text("sourceNote", t("bucket.sourceNote"), t("bucket.sourceNotePlaceholder"));
+  // ── WHICH TRANSFORMATION · only a capture made the bytes ───────────────────
+  if (capture) {
+    text("campaign", t("bucket.campaign"), t("bucket.campaignPlaceholder"));
+    text("technique", t("bucket.technique"), t("bucket.techniquePlaceholder"));
+    text("software", t("bucket.software"), "Metashape 2.1.3");
+  } else {
+    box.appendChild(ing("div", "insp-hint", t("bucket.derivationElsewhere")));
+  }
+
+  // ── WHICH DOCUMENT · pre-filled from the selection ─────────────────────────
+  const documents = (store?.liveNodes() ?? []).filter((n) => n.node_type === "document");
+  if (d.documentId === null && selectedId
+      && store?.node(selectedId)?.node_type === "document") {
+    d.documentId = selectedId;
+  }
+  if (documents.length) {
+    const doc = document.createElement("select");
+    doc.className = "ing-select";
+    doc.dataset.field = "bucket-document";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = t("bucket.documentNone");
+    doc.appendChild(none);
+    for (const n of documents) {
+      const o = document.createElement("option");
+      o.value = n.id;
+      o.textContent = String(n.name || n.id);
+      if (n.id === d.documentId) o.selected = true;
+      doc.appendChild(o);
+    }
+    doc.addEventListener("change", () => { d.documentId = doc.value; });
+    ingestField(box, t("bucket.document"), doc, t("bucket.documentHint"));
+  }
+
+  // ── WHAT WILL BE WRITTEN · the request, shown ──────────────────────────────
+  const preview = document.createElement("details");
+  preview.className = "ing-dtc-preview";
+  preview.appendChild(ing("summary", "", t("bucket.preview")));
+  const first = d.items.find((i) => i.status === "pending");
+  const pre = ing("pre", "viewer-path", JSON.stringify(bucketRequest(deliveryDtc(), {
+    name: first?.name ?? t("bucket.previewFile"),
+    mediaType: first?.mediaType ?? "application/octet-stream",
+    sizeBytes: first?.size || undefined,
+  }), null, 1));
+  preview.appendChild(pre);
+  preview.appendChild(ing("div", "insp-hint", t("bucket.previewHint")));
+  box.appendChild(preview);
 }
 
 /**
@@ -57355,6 +57534,7 @@ async function publishQueue(): Promise<void> {
       acquisitionId: ingestDraft.lotId ?? undefined,
       resources: published,
       name: ingestDraft.lot || undefined,
+      kind: ingestDraft.sourceKind,
       metadata: {
         ingested_at: new Date().toISOString(),
         source: ingestDraft.items.some((i) => i.path) ? "filesystem" : "drop",
@@ -57494,7 +57674,10 @@ async function stampOne(item: IngestItem, base: string, room: string):
     at,
     tool: `EMStudio ${__EMSTUDIO_VERSION__}`,
     path: item.path,
-  }], { room, graph_id: store?.doc.graph?.graph_id });
+  }], { room, graph_id: store?.doc.graph?.graph_id },
+  // MICRO-BK1 · the kind, the source's facts, a capture's technique and
+  // software, and the declared licence / embargo — the stamp says them now
+  ingestionOptions(deliveryDtc()));
   if (!body) return;
 
   let out: { ok?: boolean; stamps?: Array<{ stamp: unknown }>; error?: string };
@@ -57641,13 +57824,24 @@ async function landRow(doc: DocumentStore, item: IngestItem): Promise<void> {
   const node = doc.node(nodeId);
   if (corpus && node) {
     mirrorIntoCorpus(corpus, node);
+    const acq = registerAcquisition(deliveryDtc(), digest ?? nodeId, new Date().toISOString());
     const lot = bucketAcquisition(corpus, {
       acquisitionId: ingestDraft.lotId ?? undefined,
       resources: [nodeId],
       name: ingestDraft.lot || undefined,
-      metadata: { ingested_at: new Date().toISOString(), source: "EMStudio" },
+      kind: ingestDraft.sourceKind,
+      metadata: acq.metadata as Record<string, unknown>,
     });
     ingestDraft.lastAcquisition = lot.acquisitionId;
+  }
+
+  // ── MICRO-BK1 · the DOCUMENT the files document, when one was chosen ──────
+  // The same edge the census writes (`document → has_linked_resource → resource`),
+  // never doubled: a file dropped again under the same document is the same row.
+  const documentId = deliveryDtc().target.documentId;
+  if (documentId && node && !doc.hasEdge(documentId, nodeId, "has_linked_resource")) {
+    doc.addEdge(documentId, nodeId, "has_linked_resource", undefined,
+                `${documentId}__has_linked_resource__${nodeId}`);
   }
 
   // ── the register, when there is one ───────────────────────────────────────
@@ -57681,12 +57875,9 @@ async function landRow(doc: DocumentStore, item: IngestItem): Promise<void> {
   ingestDraft.signed += 1;
   // and LAST the lot, carrying the delivery's own id so this adds a member
   // instead of minting a second event (see `lotId`)
-  const grouped = await registerAppend("acquisition", {
-    acquisition_id: ingestDraft.lotId ?? undefined,
-    resources: [digest],
-    name: ingestDraft.lot || undefined,
-    metadata: { ingested_at: new Date().toISOString(), source: "EMStudio" },
-  });
+  // MICRO-BK1 · with its KIND and the source's facts: `CorpusAct` takes both
+  const grouped = await registerAppend("acquisition",
+    registerAcquisition(deliveryDtc(), digest, new Date().toISOString()));
   if (!grouped.ok) {
     ingestLog(t("assets.registerFailed", { detail: grouped.detail ?? "" }), "warn");
   }

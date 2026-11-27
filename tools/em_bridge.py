@@ -6721,6 +6721,32 @@ def make_handler(api):
                 except Exception as exc:    # una connessione rifiutata è un fatto
                     warnings.append(f"author not attached to the act: {exc}")
 
+            # ── 2b · i diritti DICHIARATI da chi deposita (MICRO-BK1) ────────
+            #
+            # Licenza ed embargo erano detti nel modulo di consegna e scritti
+            # nel corpus e nel registro, ma il grafo minuscolo composto qui non
+            # li conteneva — quindi il blocco `declared` del timbro usciva
+            # vuoto. Ora si scrivono come un'ATTRIBUZIONE firmata dall'operatore
+            # (`api.enrich_asset_dtc`, l'attributore è chi deposita: è vero), e
+            # `emit_stamp` li legge da lì con il suo `_declared_block`. Senza un
+            # ORCID non si scrive niente: un'attribuzione non firmata è una voce.
+            declared = body.get("declared") or {}
+            if isinstance(declared, dict) and declared and orcid:
+                for out, _full, _stamp in targets:
+                    digest = str(out.get("digest") or "").strip()
+                    if not digest:
+                        continue
+                    try:
+                        api.enrich_asset_dtc(
+                            graph, digest, attributor=orcid,
+                            license=declared.get("license") or None,
+                            embargo=declared.get("embargo") or None,
+                            reason=declared.get("reason") or None,
+                            author=declared.get("author") or None,
+                            author_name=declared.get("author_name") or None)
+                    except Exception as exc:   # un rifiuto è un fatto, detto
+                        warnings.append(f"rights not declared on {digest[:19]}: {exc}")
+
             # ── 3 · ogni uscita diventa un verbale ───────────────────────────
             registry = body.get("registry") or {}
             written, stamps = [], []
