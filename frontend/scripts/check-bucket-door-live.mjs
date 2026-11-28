@@ -1,5 +1,9 @@
 // MICRO-BK2, LIVE: EMStudio deposits through the bucket's door
 // (`POST /v1/rooms/{room}/objects`, stratigraph-server ≥ 1.6.0-dev.93).
+// MICRO-BK3: the door is multipart ONLY (dev.94 reads it; the by-digest shape
+// is gone), and every story is read back from the node's one read,
+// `GET /v1/rooms/{room}/objects/{sha}/dtc` — the register's slice, the store,
+// the home — instead of joining `GET /v1/corpus` and a HEAD.
 //
 // A room made here, opened in EMStudio with the node's sign-in, Archive ▸ room
 // store. On the dev node:
@@ -214,6 +218,7 @@ try {
     name: r.querySelector(".storage-name")?.textContent, cls: r.className,
     state: r.querySelector(".ing-state")?.textContent })));
   async function drop(page, name) {
+    try { previewAtDrop = JSON.parse((await signedState(page)).preview); } catch { previewAtDrop = null; }
     const bytes = Buffer.from(`bucket-door-live ${room} ${name} ${Date.now()}`);
     await page.setInputFiles(".ing-funnel input[type=file]", { name, mimeType: "text/plain", buffer: bytes });
     const settled = await page.waitForFunction((n) => {
@@ -233,13 +238,16 @@ try {
     const sha = crypto.createHash("sha256").update(bytes).digest("hex");
     return { settled, landed, sha };
   }
+  // MICRO-BK3 · the story, from the node's one read
+  const stories = {};
   async function corpusOf(sha) {
     for (let i = 0; i < 20; i++) {
-      const r = await fetch(`${NODE}/v1/corpus?sha256=${enc("sha256:" + sha)}`, { headers: auth });
-      const body = r.ok ? await r.json() : null;
-      const nodes = body?.graph?.nodes ?? [];
+      const r = await fetch(`${NODE}/v1/rooms/${enc(room)}/objects/sha256:${sha}/dtc`, { headers: auth });
+      const story = r.ok ? await r.json() : null;
+      const g = story?.corpus?.graph ?? story?.corpus ?? {};
+      const nodes = g.nodes ?? [];
       const acq = nodes.find((n) => n.node_type === "dtc_acquisition");
-      if (acq) return { nodes, edges: body?.graph?.edges ?? [], acq };
+      if (acq) { stories[sha] = story; return { nodes, edges: g.edges ?? [], acq, story }; }
       await new Promise((res) => setTimeout(res, 300));
     }
     return null;
@@ -257,23 +265,24 @@ try {
   const inStore = async (sha) => (await fetch(`${NODE}/v1/rooms/${enc(room)}/asset/sha256:${sha}`,
     { method: "HEAD", headers: auth })).status;
   const since = (n) => calls.slice(n);
-  // THROUGH THE DOOR, in either of its shapes: ONE multipart request (the
-  // contract), or — on a node whose door cannot parse multipart (dev.93, measured)
-  // — the record by digest FIRST, then the bytes (PUT with their digest), then
-  // the record again. Never a corpus/append from the page.
+  // THROUGH THE DOOR, in its one shape (MICRO-BK3): ONE multipart request,
+  // no PUT of the bytes, no record by digest, never a corpus/append from the page.
   const doorShape = (mine) => {
     const doors = mine.filter((c) => c.kind === "door");
     const seq = mine.map((c) => c.kind + (c.kind === "door" ? (/json/.test(c.type) ? ":json" : ":multipart") : "")).join(" ");
-    const one = doors.length === 1 && /multipart/.test(doors[0].type) && !mine.some((c) => c.kind === "put");
-    const json = mine.map((c, i) => (c.kind === "door" && /json/.test(c.type) ? i : -1)).filter((i) => i >= 0);
-    const put = mine.findIndex((c) => c.kind === "put");
-    const digest = json.length >= 1 && (put < 0 ? json.length === 1 : json[0] < put && json[json.length - 1] > put);
-    return { ok: (one || digest) && !mine.some((c) => c.kind === "append"),
-             shape: one ? "multipart" : digest ? "by digest" : "?", seq };
+    const one = doors.length === 1 && /multipart/.test(doors[0].type);
+    return { ok: one && !mine.some((c) => c.kind === "put" || c.kind === "append"),
+             shape: one ? "multipart" : "?", seq };
   };
+  // the record sent: read from the multipart body when Playwright shows it;
+  // it does not (postDataBuffer is empty for a FormData with a Blob), so the
+  // preview «What will be written» read just before the drop stands for it —
+  // the door's record IS that preview (`bucketRequest(deliveryDtc(), …)`,
+  // asserted in check-bucket-dtc)
+  let previewAtDrop = null;
   const recordOf = (mine) => {
-    const json = mine.find((c) => c.kind === "door" && /json/.test(c.type));
-    if (json) { try { return JSON.parse(json.body); } catch { return null; } }
+    const mp0 = mine.find((c) => c.kind === "door")?.body ?? "";
+    if (!mp0 && previewAtDrop) return previewAtDrop;
     const mp = mine.find((c) => c.kind === "door")?.body ?? "";
     const m = mp.match(/name="dtc"\r\n\r\n([\s\S]*?)\r\n--/);
     try { return m ? JSON.parse(m[1]) : null; } catch { return null; }
@@ -313,6 +322,8 @@ try {
     console.log("  (the multipart body is not visible to Playwright: its order is asserted in check-bucket-dtc)");
   }
   ok(/ing-done/.test(survey.settled ?? ""), "…said as stored, not as «already there»", survey.settled ?? "");
+  const log1 = JSON.stringify(await page.evaluate(() => window.__EM_DRAG__.logTail?.(40) ?? []));
+  ok(!/by digest|per impronta/i.test(log1), "no «by digest» line in the log: the door read the file and its record together");
   const rec1 = recordOf(mine);
   ok(rec1?.profile === "em-bucket-dtc/1" && rec1?.source?.dtc_kind === "topographic" && !rec1?.who?.responsible,
      "the record is the preview's, with no responsible: the depositor answers", JSON.stringify(rec1?.who ?? null));
@@ -333,9 +344,24 @@ try {
   ok(s1?.how?.dtc_kind === "topographic" && s1?.by?.at === "2024-06-12T00:00:00Z" && s1?.declared?.license === "CC-BY-4.0",
      "the stamp read back from the node says the survey, its date and the licence",
      JSON.stringify({ how: s1?.how?.dtc_kind, at: s1?.by?.at, declared: s1?.declared }));
-  const dtcRoute = await fetch(`${NODE}/v1/rooms/${enc(room)}/objects/sha256:${survey.sha}/dtc`, { headers: auth });
-  evidence.dtcRoute = dtcRoute.status;
-  console.log(`  (GET …/objects/{sha}/dtc answers ${dtcRoute.status})`);
+  // MICRO-BK3 · the story, as the node tells it in one read
+  const story1 = c1?.story ?? {};
+  evidence.surveyStory = { ref: story1.ref, held: story1.held, home: story1.home, size: story1.size,
+    media_type: story1.media_type, stamp_ref: story1.stamp_ref, version: story1.version,
+    neighbourhood: Object.keys(story1.neighbourhood ?? {}) };
+  ok(story1.ref === `sha256:${survey.sha}` && story1.held === true && story1.home === room,
+     "GET …/objects/{sha}/dtc: the node holds the bytes, their home is this room",
+     JSON.stringify({ held: story1.held, home: story1.home }));
+  // MICRO-BK3 · the stamp is NOT bound by the door yet (stratigraph-server
+  // dev.94: `stamp_ref` stays null until `POST …/objects/{sha}/stamp` exists),
+  // so EMStudio still sends it as an object of its own — read back above.
+  ok(story1.stamp_ref == null && !!s1,
+     "stamp_ref is null (the node binds no stamp yet): the stamp stands as its own object, read back",
+     String(story1.stamp_ref));
+  const unknown = await fetch(`${NODE}/v1/rooms/${enc(room)}/objects/sha256:${"0".repeat(64)}/dtc`, { headers: auth });
+  const unknownStory = unknown.ok ? await unknown.json() : null;
+  ok(unknown.status === 200 && unknownStory?.held === false,
+     "…and a digest the node never saw is «held: false», not a 404", `${unknown.status} ${unknownStory?.held}`);
 
   // ── 2 · a DOWNLOAD, with a responsible accredited on the node ─────────────
   await set('[data-field="bucket-kind"]', "download");
@@ -395,6 +421,9 @@ try {
   ok(!mine.some((c) => c.kind === "put" || c.kind === "append"), "…and no byte moved: the record was refused first",
      mine.map((c) => c.kind).join(" "));
   ok(!nope.landed, "…and no resource was written in the graph");
+  const story3 = await (await fetch(`${NODE}/v1/rooms/${enc(room)}/objects/sha256:${nope.sha}/dtc`, { headers: auth })).json().catch(() => null);
+  ok(story3?.held === false && !(story3?.corpus?.graph?.nodes ?? story3?.corpus?.nodes ?? []).length,
+     "…and the node tells no story of it: held false, nothing in the register", JSON.stringify({ held: story3?.held }));
   await page.screenshot({ path: `${work}/door.png` });
 
   // ── 4 · a reference cannot carry a responsible ───────────────────────────

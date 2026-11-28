@@ -57675,102 +57675,33 @@ async function publishQueue(): Promise<void> {
 }
 
 /**
- * MICRO-BK2 · ONE FILE THROUGH THE BUCKET'S DOOR, in the first of its two
- * shapes the node reads.
+ * MICRO-BK2 · ONE FILE THROUGH THE BUCKET'S DOOR: multipart, the record
+ * (`bucketRequest`, the preview) FIRST and the bytes after — one request, the
+ * contract of the door.
  *
- * 1. **multipart**, the record (`bucketRequest`, the preview) FIRST and the
- *    bytes after — one request, the contract of the door;
- * 2. **by digest**, the door's other shape (`application/json`, the record with
- *    `object.sha256`): measured necessary on stratigraph-server 1.6.0-dev.93,
- *    whose image lacks the multipart parser (`python-multipart`): every
- *    multipart POST is a 500, without CORS headers, so the page sees a network
- *    failure. The record is sent FIRST: a refusal (licence, kind, an iD not
- *    accredited…) costs no byte; «this node holds no sha256:…» (404) means the
- *    record holds and the bytes are not here — they go by the PUT that checks
- *    their digest, and the record again, which now writes the acts. Bytes
- *    already in the store take ONE call. The shape that worked is kept per node.
+ * MICRO-BK3 · and only that. BK2 carried a second shape (the record by digest,
+ * then a PUT of the bytes, then the record again) because the image
+ * stratigraph-server 1.6.0-dev.93 lacked its multipart parser; dev.94 has it
+ * (measured on the dev stack, 28 Nov 2026), and the second shape went: a door
+ * that answers 5xx is a node's failure, shown in the node's words like any
+ * refusal, and the file stays to be published again — never sent another way
+ * behind the person's back. The older way (five steps) remains only for a node
+ * that has no door at all (`objectsDoor`).
  *
- * Returns the node's answer, a refusal already in words, or null — the door
- * could not be used at all (no `crypto.subtle` to compute a digest): the caller
- * then goes the older way.
+ * Returns the node's answer or a refusal already in words; a network failure
+ * throws, and the caller shows it.
  */
-const doorShapeSaid = new Map<string, "multipart" | "digest">();
 async function depositThroughDoor(
   base: string, room: string, item: IngestItem, bytes: ArrayBuffer,
-): Promise<{ deposit?: DoorDeposit; refused?: string } | null> {
-  const url = doorUrl(base, room);
+): Promise<{ deposit?: DoorDeposit; refused?: string }> {
   const object = { name: item.name, mediaType: item.mediaType, sizeBytes: bytes.byteLength };
-  const refused = async (answer: Response): Promise<{ refused: string }> => {
-    const why = refusalOf(answer.status, detailOf(await answer.text()), deliveryResponsible());
-    return { refused: t(why.key, why.vars) };
-  };
-  if (doorShapeSaid.get(base) !== "digest") {
-    try {
-      const answer = await nodeAuthFetch(url, {
-        method: "POST",
-        body: depositForm(bucketRequest(deliveryDtc(), object), bytes, item.name, item.mediaType),
-      });
-      if (answer.ok) {
-        doorShapeSaid.set(base, "multipart");
-        return { deposit: await answer.json() as DoorDeposit };
-      }
-      // a refusal is a refusal: the other shape would say the same thing
-      if (answer.status < 500) return await refused(answer);
-    } catch {
-      // a 500 without CORS headers reaches the page as a network failure; a
-      // real network failure fails the next request too, and is shown there.
-      // MEASURED (Chromium, dev.93): a request sent in the same task as that
-      // failure is blocked as well, without reaching the node — one pause first
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
-  }
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) return null;
-  const hex = [...new Uint8Array(await subtle.digest("SHA-256", bytes))]
-    .map((b) => b.toString(16).padStart(2, "0")).join("");
-  const record = JSON.stringify(bucketRequest(deliveryDtc(), { ...object, sha256: `sha256:${hex}` }));
-  const ask = async (): Promise<Response> => {
-    const once = (): Promise<Response> => nodeAuthFetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: record,
-    });
-    try {
-      return await once();
-    } catch {
-      // the same blocked-after-a-failure, once more after a pause; a second
-      // network failure is a real one, and the caller shows it
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      return await once();
-    }
-  };
-  let answer = await ask();
-  if (!answer.ok) {
-    const detail = answer.status === 404 ? await answer.clone().text() : "";
-    if (answer.status !== 404 || !/holds no/.test(detail)) return await refused(answer);
-    // the record holds; the bytes are not here: they go, checked by digest…
-    const put = await nodeAuthFetch(
-      `${base}/v1/rooms/${encodeURIComponent(room)}/asset`
-      + `?media_type=${encodeURIComponent(item.mediaType)}&expected_sha256=${hex}`,
-      { method: "PUT", body: bytes });
-    if (!put.ok) return await refused(put);
-    const stored = await put.json() as { created?: boolean };
-    // …and the record again, which now finds them and writes the acts
-    answer = await ask();
-    if (!answer.ok) return await refused(answer);
-    // the door says «created: false» — the bytes WERE there, because the PUT
-    // had just put them: what this delivery did is the PUT's answer
-    const deposit = await answer.json() as DoorDeposit;
-    noteDigestShape(base);
-    return { deposit: { ...deposit, created: stored.created !== false } };
-  }
-  noteDigestShape(base);
-  return { deposit: await answer.json() as DoorDeposit };
-}
-
-/** The node's door is read by digest: kept, and said once. */
-function noteDigestShape(base: string): void {
-  if (doorShapeSaid.get(base) === "digest") return;
-  doorShapeSaid.set(base, "digest");
-  ingestLog(t("assets.door.byDigest"), "warn");
+  const answer = await nodeAuthFetch(doorUrl(base, room), {
+    method: "POST",
+    body: depositForm(bucketRequest(deliveryDtc(), object), bytes, item.name, item.mediaType),
+  });
+  if (answer.ok) return { deposit: await answer.json() as DoorDeposit };
+  const why = refusalOf(answer.status, detailOf(await answer.text()), deliveryResponsible());
+  return { refused: t(why.key, why.vars) };
 }
 
 /** MICRO-BK2 · whether a node has the bucket's door, and its single-piece

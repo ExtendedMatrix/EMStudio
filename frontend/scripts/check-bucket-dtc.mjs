@@ -229,7 +229,7 @@ console.log("· the bucket's door: the record first, refusals in words");
   const keys = ["assets.door.notEditor", "assets.door.tooBig", "assets.door.signIn",
     "assets.door.notAccredited", "assets.door.noTechniqueOnRetrieval", "assets.door.bytesChanged",
     "assets.door.otherRoom", "assets.door.refused", "assets.door.refusedFile",
-    "assets.door.deposited", "assets.door.absent", "assets.door.tooBigOldWay", "assets.door.byDigest",
+    "assets.door.deposited", "assets.door.absent", "assets.door.tooBigOldWay",
     "assets.responsibleNeedsOrcid", "assets.responsibleOrcidBad",
     "assets.responsibleNotForReference", "assets.responsibleNeedsDoor",
     "assets.responsibleHint", "assets.responsibleOrcid"];
@@ -276,16 +276,18 @@ console.log("· main.ts writes through the rule");
      "a refusal of the door stops that file: nothing goes the older way instead");
   const at = MAIN.indexOf("async function depositThroughDoor(");
   const door = MAIN.slice(at, MAIN.indexOf("\n}\n", at));
+  const I18N_ALL = await readFile(`${SRC}i18n.ts`, "utf8");
   ok(/bucketRequest\(deliveryDtc\(\), object\)/.test(door) && /depositForm\(/.test(door),
-     "the door's first shape: multipart, the preview's record");
-  ok(/answer\.status < 500\) return await refused/.test(door),
-     "…a refusal (4xx) is final, only a broken door (5xx / no answer) tries the other shape");
-  ok(door.indexOf('"Content-Type": "application/json"') > 0
-       && door.indexOf("let answer = await ask()") < door.indexOf('method: "PUT"')
-       && door.indexOf('method: "PUT"') < door.lastIndexOf("answer = await ask()"),
-     "the second shape: the record by digest FIRST, then the bytes, then the record again");
-  ok(/holds no/.test(door) && /expected_sha256=\$\{hex\}/.test(door),
-     "…the bytes go only on «holds no», and the PUT checks their digest");
+     "the door: multipart, the preview's record");
+  // MICRO-BK3 · the second shape (record by digest, PUT, record again) is gone:
+  // dev.94 reads multipart, and a broken door is shown, not gone around
+  ok(!/application\/json/.test(door) && !/method: "PUT"/.test(door) && !/expected_sha256/.test(door)
+       && !/holds no/.test(door) && !/setTimeout/.test(door),
+     "…and only that: no record by digest, no PUT of the bytes, no retry after a pause");
+  ok((door.match(/nodeAuthFetch\(/g) ?? []).length === 1,
+     "…one request per file");
+  ok(!/byDigest|doorShapeSaid|noteDigestShape/.test(MAIN) && !/assets\.door\.byDigest/.test(I18N_ALL),
+     "the digest shape left no trace: no memory per node, no log line in EN or IT");
   ok(/refusalOf\(answer\.status/.test(door) && !/answer\.status\} \$\{await answer\.text/.test(door),
      "a refusal of the door is shown in words, never as «422 …»");
   const land = body("async function landRow(");
