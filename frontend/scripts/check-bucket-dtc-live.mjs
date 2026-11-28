@@ -120,11 +120,16 @@ try {
     }
   }, [BR, ORCID, NODE]);
   // the stamps travel to the store as JSON objects of their own: catch the
-  // store's answer (the ref), then read each one BACK from the node
+  // store's answer (the ref), then read each one BACK from the node.
+  // MICRO-BK4 · on a node with the stamp route (dev.95) the stamp is BOUND:
+  // the route answers `stamp_ref`, the same ref the object's story names
   const jsonRefs = [];
   context.on("response", async (rs) => {
     if (rs.request().method() === "PUT" && /\/asset\?media_type=application%2Fjson/.test(rs.url())) {
       try { jsonRefs.push((await rs.json()).ref); } catch { /* no body */ }
+    }
+    if (rs.request().method() === "POST" && /\/objects\/[^/]+\/stamp$/.test(rs.url())) {
+      try { const b = await rs.json(); if (b?.stamp_ref) jsonRefs.push(b.stamp_ref); } catch { /* no body */ }
     }
   });
   const readBack = async () => {

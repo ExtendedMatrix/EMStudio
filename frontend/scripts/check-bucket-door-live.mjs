@@ -4,6 +4,11 @@
 // is gone), and every story is read back from the node's one read,
 // `GET /v1/rooms/{room}/objects/{sha}/dtc` — the register's slice, the store,
 // the home — instead of joining `GET /v1/corpus` and a HEAD.
+// MICRO-BK4: the stamp is BOUND to its object (`POST …/objects/{sha}/stamp`,
+// stratigraph-server ≥ 1.6.0-dev.95) instead of a loose `PUT …/asset`, and the
+// story's `stamp_ref` names it; the same bytes dropped again keep the first
+// stamp (the node answers 409 to another one, and the page says so calmly); an
+// older node without the route gets the loose PUT, said once in the log.
 //
 // A room made here, opened in EMStudio with the node's sign-in, Archive ▸ room
 // store. On the dev node:
@@ -142,6 +147,7 @@ try {
     const u = rq.url();
     if (!u.startsWith(NODE)) return;
     const kind = rq.method() === "POST" && /\/objects$/.test(u) ? "door"
+      : rq.method() === "POST" && /\/objects\/[^/]+\/stamp$/.test(u) ? "bind"
       : rq.method() === "PUT" && /\/asset\?media_type=application%2Fjson/.test(u) ? "stamp"
       : rq.method() === "PUT" && /\/asset\?/.test(u) ? "put"
       : rq.method() === "POST" && /\/corpus\/append$/.test(u) ? "append"
@@ -155,9 +161,16 @@ try {
   context.on("requestfailed", (rq) => {
     if (rq.url().startsWith(NODE)) console.log(`  (request failed: ${rq.method()} ${rq.url().slice(NODE.length)} ${rq.failure()?.errorText ?? ""})`);
   });
+  // MICRO-BK4 · what the stamp route answered, per object
+  const binds = [];
   context.on("response", async (rs) => {
     if (rs.request().method() === "PUT" && /\/asset\?media_type=application%2Fjson/.test(rs.url())) {
       try { jsonRefs.push((await rs.json()).ref); } catch { /* no body */ }
+    }
+    if (rs.request().method() === "POST" && /\/objects\/[^/]+\/stamp$/.test(rs.url())) {
+      let body = null;
+      try { body = await rs.json(); } catch { /* no body */ }
+      binds.push({ status: rs.status(), body, sha: (rs.url().match(/objects\/(?:sha256:)?([0-9a-f]{64})\/stamp/) ?? [])[1] });
     }
   });
 
@@ -217,9 +230,9 @@ try {
   const rows = (page) => page.evaluate(() => [...document.querySelectorAll(".ing-row")].map((r) => ({
     name: r.querySelector(".storage-name")?.textContent, cls: r.className,
     state: r.querySelector(".ing-state")?.textContent })));
-  async function drop(page, name) {
+  async function drop(page, name, same = null) {
     try { previewAtDrop = JSON.parse((await signedState(page)).preview); } catch { previewAtDrop = null; }
-    const bytes = Buffer.from(`bucket-door-live ${room} ${name} ${Date.now()}`);
+    const bytes = same ?? Buffer.from(`bucket-door-live ${room} ${name} ${Date.now()}`);
     await page.setInputFiles(".ing-funnel input[type=file]", { name, mimeType: "text/plain", buffer: bytes });
     const settled = await page.waitForFunction((n) => {
       const r = [...document.querySelectorAll(".ing-row")].find((x) => x.querySelector(".storage-name")?.textContent === n);
@@ -236,7 +249,7 @@ try {
       return null;
     }, name);
     const sha = crypto.createHash("sha256").update(bytes).digest("hex");
-    return { settled, landed, sha };
+    return { settled, landed, sha, bytes };
   }
   // MICRO-BK3 · the story, from the node's one read
   const stories = {};
@@ -251,6 +264,16 @@ try {
       await new Promise((res) => setTimeout(res, 300));
     }
     return null;
+  }
+  // MICRO-BK4 · the stamp the story names (`stamp_ref`), read from the store
+  async function boundStampOf(sha) {
+    const r = await fetch(`${NODE}/v1/rooms/${enc(room)}/objects/sha256:${sha}/dtc`, { headers: auth });
+    const story = r.ok ? await r.json() : null;
+    if (!story?.stamp_ref) return { story, stamp: null };
+    const a = await fetch(`${NODE}/v1/rooms/${enc(room)}/asset/${enc(story.stamp_ref)}`, { headers: auth });
+    let stamp = null;
+    try { stamp = JSON.parse(await a.text()); } catch { /* below */ }
+    return { story, stamp, status: a.status };
   }
   async function stampOf(sha) {
     for (let i = 0; i < 40; i++) {
@@ -340,7 +363,25 @@ try {
   evidence.surveyResource = res1?.data;
   ok(!!res1 && (res1.data?.license === "CC-BY-4.0" || JSON.stringify(c1.nodes).includes("CC-BY-4.0")),
      "the licence is in the register", JSON.stringify(res1?.data ?? null).slice(0, 300));
-  const s1 = await stampOf(survey.sha);
+  // MICRO-BK4 · the stamp BOUND: one POST …/stamp, no loose PUT, and the
+  // story names it
+  for (let i = 0; i < 40 && !binds.some((b) => b.sha === survey.sha); i++) await page.waitForTimeout(250);
+  const bind1 = binds.find((b) => b.sha === survey.sha);
+  evidence.surveyBind = bind1;
+  mine = since(mark);
+  ok(mine.filter((c) => c.kind === "bind").length === 1 && !mine.some((c) => c.kind === "stamp"),
+     "the stamp went to POST …/objects/{sha}/stamp, once, and NOT as a loose PUT", mine.map((c) => c.kind).join(" "));
+  ok(bind1?.status === 200 && /^sha256:[0-9a-f]{64}$/.test(bind1?.body?.stamp_ref ?? "") && bind1?.body?.bound === true,
+     "…the node bound it", JSON.stringify(bind1?.body ?? bind1?.status ?? null));
+  const b1 = await boundStampOf(survey.sha);
+  const s1 = b1.stamp;
+  ok(b1.story?.stamp_ref === bind1?.body?.stamp_ref, "GET …/objects/{sha}/dtc: stamp_ref is the stamp just bound",
+     `${b1.story?.stamp_ref} / ${bind1?.body?.stamp_ref}`);
+  ok(s1?.self?.digest === `sha256:${survey.sha}`, "…and the stamp at stamp_ref speaks for this object", String(s1?.self?.digest));
+  const logB1 = JSON.stringify(await page.evaluate(() => window.__EM_DRAG__.logTail?.(40) ?? []));
+  evidence.surveyBindLog = (logB1.match(/[^"]*rilievo-01\.txt[^"]*(bound to the file|legato al file)[^"]*/) ?? [""])[0];
+  ok(!!evidence.surveyBindLog && !/1\.6\.0-dev\.95/.test(logB1),
+     "…the page read it back and said so, and did not say «no binding route»", evidence.surveyBindLog.slice(0, 160));
   ok(s1?.how?.dtc_kind === "topographic" && s1?.by?.at === "2024-06-12T00:00:00Z" && s1?.declared?.license === "CC-BY-4.0",
      "the stamp read back from the node says the survey, its date and the licence",
      JSON.stringify({ how: s1?.how?.dtc_kind, at: s1?.by?.at, declared: s1?.declared }));
@@ -352,12 +393,29 @@ try {
   ok(story1.ref === `sha256:${survey.sha}` && story1.held === true && story1.home === room,
      "GET …/objects/{sha}/dtc: the node holds the bytes, their home is this room",
      JSON.stringify({ held: story1.held, home: story1.home }));
-  // MICRO-BK3 · the stamp is NOT bound by the door yet (stratigraph-server
-  // dev.94: `stamp_ref` stays null until `POST …/objects/{sha}/stamp` exists),
-  // so EMStudio still sends it as an object of its own — read back above.
-  ok(story1.stamp_ref == null && !!s1,
-     "stamp_ref is null (the node binds no stamp yet): the stamp stands as its own object, read back",
-     String(story1.stamp_ref));
+  // MICRO-BK4 · …and the same bytes dropped AGAIN, under another name (an
+  // interrupted delivery resumed): the ingestion is a new act with a new hour,
+  // so a new stamp, and the node keeps the first one (409). The row lands, the
+  // story still names the first stamp, the log says it calmly.
+  mark = calls.length;
+  const nBinds = binds.length;
+  const redrop = await drop(page, "rilievo-01-di-nuovo.txt", survey.bytes);
+  for (let i = 0; i < 40 && binds.length === nBinds; i++) await page.waitForTimeout(250);
+  const bindAgain = binds.slice(nBinds).find((b) => b.sha === survey.sha);
+  evidence.redropBind = bindAgain;
+  ok(redrop.sha === survey.sha && /ing-(done|same)/.test(redrop.settled ?? ""),
+     "the same bytes again: the row lands", redrop.settled ?? "");
+  ok(bindAgain?.status === 409, "…the node refuses ANOTHER stamp on the object (409)", String(bindAgain?.status));
+  const b1again = await boundStampOf(survey.sha);
+  ok(b1again.story?.stamp_ref === bind1?.body?.stamp_ref, "…and the story still names the FIRST stamp",
+     String(b1again.story?.stamp_ref));
+  await page.waitForTimeout(300);
+  const logAgain = JSON.stringify(await page.evaluate(() => window.__EM_DRAG__.logTail?.(40) ?? []));
+  evidence.redropLog = (logAgain.match(/[^"]*rilievo-01-di-nuovo\.txt[^"]*(already has its stamp|ha già il suo timbro)[^"]*/) ?? [""])[0];
+  ok(!!evidence.redropLog && !/rilievo-01-di-nuovo\.txt[^"]*(refused the stamp|rifiutato il timbro|NOT —|NO —)/.test(logAgain),
+     "…said calmly in the log: the file already has its stamp", evidence.redropLog.slice(0, 160));
+  const r1again = (await rows(page)).find((r) => r.name === "rilievo-01-di-nuovo.txt");
+  ok(!/ing-stamp-none/.test(JSON.stringify(r1again ?? {})), "…and the row is not marked «no record»");
   const unknown = await fetch(`${NODE}/v1/rooms/${enc(room)}/objects/sha256:${"0".repeat(64)}/dtc`, { headers: auth });
   const unknownStory = unknown.ok ? await unknown.json() : null;
   ok(unknown.status === 200 && unknownStory?.held === false,
@@ -403,7 +461,15 @@ try {
   const m1b = again?.acq?.data?.metadata ?? again?.acq?.data ?? {};
   ok(again?.acq?.data?.dtc_kind === "topographic" && m1b.responsible === ORCID && !m1b.retrieved_from,
      "…and the survey's lot still says what it said (its kind, its responsible)", JSON.stringify(m1b).slice(0, 200));
-  const s2 = await stampOf(dl.sha);
+  for (let i = 0; i < 40 && !binds.some((b) => b.sha === dl.sha); i++) await page.waitForTimeout(250);
+  const bind2 = binds.find((b) => b.sha === dl.sha);
+  const b2 = await boundStampOf(dl.sha);
+  evidence.downloadBind = { bind: bind2?.body ?? bind2?.status, stamp_ref: b2.story?.stamp_ref };
+  ok(bind2?.status === 200 && b2.story?.stamp_ref === bind2?.body?.stamp_ref
+     && b2.story?.stamp_ref !== bind1?.body?.stamp_ref,
+     "the download's stamp is bound too, and it is its own (not the survey's)",
+     JSON.stringify(evidence.downloadBind));
+  const s2 = b2.stamp;
   ok(s2?.how?.dtc_kind === "download" && !s2?.how?.technique, "the download's stamp says download, no technique",
      JSON.stringify(s2?.how ?? null).slice(0, 200));
 
@@ -435,6 +501,8 @@ try {
   old.on("pageerror", (e) => errors2.push(String(e.message ?? e)));
   await old.route(/\/v1\/dtc\/profile\//, (route) => route.fulfill({ status: 404, contentType: "application/json", body: '{"detail":"Not Found"}' }));
   await old.route(/\/v1\/rooms\/[^/]+\/objects$/, (route) => route.fulfill({ status: 404, contentType: "application/json", body: '{"detail":"Not Found"}' }));
+  // MICRO-BK4 · …and no stamp route either (a node before dev.95)
+  await old.route(/\/v1\/rooms\/[^/]+\/objects\/[^/]+\/stamp$/, (route) => route.fulfill({ status: 404, contentType: "application/json", body: '{"detail":"Not Found"}' }));
   await openPanel(old);
   const set2 = setOn(old);
   ok(await licence(old), "older node: licence said");
@@ -463,6 +531,14 @@ try {
   const logText = JSON.stringify(log2);
   evidence.fallbackLog = (logText.match(/[^"]*1\.6\.0-dev\.93[^"]*/) ?? [""])[0];
   ok(/1\.6\.0-dev\.93/.test(logText), "…said once, soberly, in the log", evidence.fallbackLog.slice(0, 160));
+  for (let i = 0; i < 40 && !since(mark).some((c) => c.kind === "stamp"); i++) await old.waitForTimeout(250);
+  mine = since(mark);
+  ok(mine.some((c) => c.kind === "stamp"), "…no stamp route: the stamp goes loose, as a PUT of its own",
+     mine.map((c) => c.kind).join(" "));
+  const log2b = JSON.stringify(await old.evaluate(() => window.__EM_DRAG__.logTail?.(40) ?? []));
+  const absentLines = log2b.match(/1\.6\.0-dev\.95/g) ?? [];
+  evidence.stampRouteAbsentLog = (log2b.match(/[^"]*1\.6\.0-dev\.95[^"]*/) ?? [""])[0];
+  ok(absentLines.length === 1, "…said once in the log", `${absentLines.length} · ${evidence.stampRouteAbsentLog.slice(0, 160)}`);
   const c4 = await corpusOf(fb.sha);
   ok(c4?.acq?.data?.dtc_kind === "ingest", "…and the register has it all the same", JSON.stringify(c4?.acq?.data ?? null).slice(0, 200));
   ok(errors2.length === 0, "no page error (older node)", errors2.join(" | ").slice(0, 200));

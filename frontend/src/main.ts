@@ -920,7 +920,8 @@ import {
 // MICRO-BK2 · the bucket's door: bytes + record in one request
 import {
   DOOR_PROFILE_PATH, DOOR_SINGLE_LIMIT, depositForm, detailOf, doorFromProbe, doorUrl,
-  refusalOf, type DoorDeposit,
+  refusalOf, type DoorDeposit, stampUrl, storyUrl, stampRouteMissing, stampAlreadyBound,
+  stampReadBack, type StampBound,
 } from "./bucket-door";
 import { buildGraphsDoc } from "./views/graphs";
 import { buildGraphScene, graphCentres, type GraphAlgorithm } from "./views/graph";
@@ -57449,8 +57450,11 @@ function ingestPublishBar(): HTMLElement {
  * form shows) first and the bytes after. The server refuses the record before
  * it reads the bytes, and writes resource, attribution and acquisition itself;
  * `landRow` then writes only the local side (the file corpus, the document
- * link). The stamp still travels as an object of its own (`stampOne`), because
- * the door does not emit one: the server says so in its own module.
+ * link). The stamp is not in the deposit, because the door does not emit one
+ * (emitting is the tool's act): `stampOne` emits it and, MICRO-BK4, BINDS it to
+ * the object with `POST …/objects/{sha}/stamp` (dev.95), then reads the story
+ * back to see `stamp_ref` name it. A node without that route gets the stamp
+ * loose, as a `PUT …/asset` of its own, said once in the log.
  *
  * Whether a node has the door is asked once, at `GET /v1/dtc/profile/…` (the
  * route that came with it): 404 means an older server, and only then the four
@@ -57792,6 +57796,13 @@ async function putIntoStore(bytes: BodyInit, mediaType: string):
  * (`GET /v1/corpus/neighbourhood?sha256=`). Quello che manca è una rotta che
  * serva un timbro per nome — sta nel repo del server, e questa notte non lo
  * tocca: nell'END OF.
+ *
+ * MICRO-BK4 · quella rotta ora c'è (stratigraph-server 1.6.0-dev.95): il timbro
+ * resta un oggetto suo, alla sua impronta, ma il nodo scrive ANCHE il legame
+ * (`data.dtc_stamp` sulla risorsa) e la storia dell'oggetto lo porta in
+ * `stamp_ref`. Il «secondo timbro sullo stesso digest» non sopravvive più come
+ * scoperta: il nodo lo rifiuta con 409, perché un erratum è un timbro nuovo su
+ * un oggetto nuovo. Vedi `bindStamp`.
  */
 async function stampOne(item: IngestItem, base: string, room: string):
     Promise<void> {
@@ -57810,11 +57821,15 @@ async function stampOne(item: IngestItem, base: string, room: string):
   // un timbro che parla di byte che non ci sono più: attaccarlo a questi sarebbe
   // la provenienza falsa contro cui tutto questo è costruito.
   if (own && sameDigest(own.self?.digest, item.digest)) {
-    const sent = await sendStamp(own);
+    const sent = await bindStamp(own, item, base, room, true);
     if (sent) {
-      item.stamped = "own";
-      item.stampRef = sent;
-      ingestLog(t("assets.stampTravelled", { name: item.name }));
+      // MICRO-BK4 · a stamp of its own that met another already bound is NOT
+      // shown as «stamped at the source»: what speaks for the object is the
+      // other one, and its kind is not known from here — the poorer word is
+      // the honest one
+      item.stamped = sent.already ? "ingestion" : "own";
+      item.stampRef = sent.ref;
+      if (!sent.already) ingestLog(t("assets.stampTravelled", { name: item.name }));
     } else {
       ingestLog(t("assets.stampNotTravelled", { name: item.name }), "warn");
     }
@@ -57863,19 +57878,119 @@ async function stampOne(item: IngestItem, base: string, room: string):
     ingestLog(t("assets.stampFailed", { detail: out.error ?? "" }), "warn");
     return;
   }
-  const sent = await sendStamp(stamp);
+  const sent = await bindStamp(stamp, item, base, room, false);
   if (!sent) {
     ingestLog(t("assets.stampNotTravelled", { name: item.name }), "warn");
     return;
   }
   item.stamped = "ingestion";
-  item.stampRef = sent;
-  ingestLog(t("assets.ingestionStamped", { name: item.name }));
+  item.stampRef = sent.ref;
+  if (!sent.already) ingestLog(t("assets.ingestionStamped", { name: item.name }));
   await noteWhereItLanded(item, base, room);
 }
 
-/** Il verbale nello store, come oggetto suo. Leggibile e non compatto: il
- *  lettore di ultima istanza è un umano con un editor, fra trent'anni. */
+/**
+ * MICRO-BK4 · **Il timbro legato al suo oggetto.** Su un nodo che ha la rotta
+ * (stratigraph-server ≥ 1.6.0-dev.95) il timbro va a
+ * `POST …/objects/{sha}/stamp`: il nodo lo tiene come oggetto suo E scrive il
+ * legame, così che la storia dell'oggetto (`GET …/objects/{sha}/dtc`) lo porti
+ * con sé in `stamp_ref`. Poi la storia si rilegge, e si controlla che
+ * `stamp_ref` sia proprio il timbro appena legato: un «fatto» detto dal nodo e
+ * non riletto è una promessa.
+ *
+ * Il nodo accetta il timbro PER IMPRONTA (`self.digest` deve essere l'oggetto
+ * del percorso) e non sostituisce: un timbro DIVERSO su un oggetto che ne ha
+ * già uno è 409. È il caso normale di chi rilascia gli stessi byte per
+ * riprendere una consegna (l'ingestione è un atto nuovo, con un'ora nuova):
+ * quello che parla per l'oggetto resta il primo, e la riga lo dice senza
+ * allarme. Per un timbro proprio del file, invece, è un avviso: l'affermazione
+ * di chi ha fatto il file non è stata legata.
+ *
+ * Un nodo senza la rotta (404 che non è il «non ho l'oggetto» della rotta, o
+ * 405) riceve il timbro come prima, sciolto con `PUT …/asset` (`sendStamp`),
+ * detto UNA volta per nodo nel log. Ogni altro rifiuto non si aggira — la
+ * stessa regola della porta (BK3): un nodo che ha la rotta e rifiuta non è un
+ * nodo senza rotta.
+ *
+ * Restituisce il riferimento del timbro che ORA parla per l'oggetto, e
+ * `already` quando è uno già legato prima e non quello di questa consegna.
+ */
+const stampRouteSaid = new Map<string, boolean>();
+async function bindStamp(stamp: Stamp, item: IngestItem, base: string, room: string,
+                         own: boolean):
+    Promise<{ ref: string; already?: boolean } | null> {
+  if (!item.digest || stampRouteSaid.get(base) === false) {
+    const loose = await sendStamp(stamp);
+    return loose ? { ref: loose } : null;
+  }
+  const answer = await nodeAuthFetch(stampUrl(base, room, item.digest), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(stamp, null, 1),
+  });
+  if (!answer.ok) {
+    const detail = detailOf(await answer.text());
+    if (stampRouteMissing(answer.status, detail)) {
+      stampRouteSaid.set(base, false);
+      ingestLog(t("assets.stampBind.absent"));
+      const loose = await sendStamp(stamp);
+      return loose ? { ref: loose } : null;
+    }
+    stampRouteSaid.set(base, true);
+    if (answer.status === 409) {
+      const other = stampAlreadyBound(detail) ?? (await readStampRef(base, room, item.digest));
+      if (other) {
+        ingestLog(t(own ? "assets.stampBind.ownNotBound" : "assets.stampBind.already",
+          { name: item.name, ref: other.slice(0, 19) }), own ? "warn" : "info");
+        return { ref: other, already: true };
+      }
+    }
+    ingestLog(t("assets.stampBind.refused", {
+      name: item.name, detail: detail.slice(0, 200) }), "warn");
+    return null;
+  }
+  stampRouteSaid.set(base, true);
+  const bound = await answer.json() as StampBound;
+  // …E SI RILEGGE: la storia dell'oggetto deve nominare proprio questo timbro
+  const story = await readStampRef(base, room, item.digest, true);
+  const judged = story.error ? null : stampReadBack(bound.stamp_ref, story.ref);
+  if (judged === "bound") {
+    ingestLog(t("assets.stampBind.bound", {
+      name: item.name, ref: bound.stamp_ref.slice(0, 19) }));
+  } else {
+    ingestLog(t("assets.stampBind.notReadBack", {
+      name: item.name,
+      detail: story.error ?? (judged === "none" ? "stamp_ref: null"
+        : `stamp_ref: ${String(story.ref).slice(0, 19)}`),
+    }), "warn");
+  }
+  return { ref: bound.stamp_ref };
+}
+
+/** `stamp_ref` dalla storia dell'oggetto. Senza `full`, solo il riferimento (o
+ *  null); con `full`, anche la ragione per cui non si è potuto leggere. */
+async function readStampRef(base: string, room: string, digest: string): Promise<string | null>;
+async function readStampRef(base: string, room: string, digest: string, full: true):
+    Promise<{ ref?: unknown; error?: string }>;
+async function readStampRef(base: string, room: string, digest: string, full?: true):
+    Promise<string | null | { ref?: unknown; error?: string }> {
+  let out: { ref?: unknown; error?: string };
+  try {
+    const answer = await nodeAuthFetch(storyUrl(base, room, digest));
+    out = answer.ok
+      ? { ref: (await answer.json() as { stamp_ref?: unknown }).stamp_ref ?? null }
+      : { error: `${answer.status} ${detailOf(await answer.text()).slice(0, 120)}` };
+  } catch (err) {
+    out = { error: String(err instanceof Error ? err.message : err).slice(0, 120) };
+  }
+  if (full) return out;
+  return typeof out.ref === "string" && out.ref ? out.ref : null;
+}
+
+/** Il verbale nello store, come oggetto suo e SCIOLTO: la strada per un nodo
+ *  senza la rotta del legame (prima di 1.6.0-dev.95). Leggibile e non
+ *  compatto: il lettore di ultima istanza è un umano con un editor, fra
+ *  trent'anni. */
 async function sendStamp(stamp: Stamp): Promise<string | null> {
   const sent = await putIntoStore(
     new Blob([JSON.stringify(stamp, null, 1)], { type: "application/json" }),

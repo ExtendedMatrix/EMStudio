@@ -115,3 +115,64 @@ export function detailOf(body: string): string {
   } catch { /* not JSON: the text is the detail */ }
   return body;
 }
+
+// ── MICRO-BK4 · THE STAMP BOUND TO ITS OBJECT ────────────────────────────────
+//
+// stratigraph-server 1.6.0-dev.95 (commit 6b65f5d) takes an already-emitted
+// `.stamp.json` at `POST /v1/rooms/{room}/objects/{sha}/stamp`, keeps it as an
+// object of its own and writes the link (`data.dtc_stamp`), so that
+// `GET …/objects/{sha}/dtc` answers with `stamp_ref`. Until dev.94 the stamp
+// went in as a loose `PUT …/asset` that nothing tied to the file it speaks for.
+
+/** The route that binds a stamp to the object `digest` (with or without the
+ *  `sha256:` prefix) in a room. */
+export function stampUrl(base: string, room: string, digest: string): string {
+  const hex = String(digest || "").replace(/^sha256:/, "");
+  return `${doorUrl(base, room)}/${encodeURIComponent(hex)}/stamp`;
+}
+
+/** The route that reads one object's story back, `stamp_ref` included. */
+export function storyUrl(base: string, room: string, digest: string): string {
+  const hex = String(digest || "").replace(/^sha256:/, "");
+  return `${doorUrl(base, room)}/${encodeURIComponent(hex)}/dtc`;
+}
+
+/**
+ * Does a failed answer of the stamp route mean «this node has no such route»?
+ * 405, or a 404 that is not the route's own 404. The route answers 404 itself
+ * when the node does not hold the object («this node holds no sha256:…: a stamp
+ * speaks for an object, so the object comes first»): that is a refusal about
+ * THIS file, and taking it for an older server would send the stamp loose
+ * through the deprecated PUT of a node that can bind it.
+ */
+export function stampRouteMissing(status: number, detail: string): boolean {
+  if (status === 405) return true;
+  if (status !== 404) return false;
+  return !/holds no/i.test(detail || "");
+}
+
+/** What the stamp route answers when it binds. */
+export interface StampBound {
+  ref: string;
+  stamp_ref: string;
+  created?: boolean;
+  bound?: boolean;
+}
+
+/** A stamp ref out of a 409's sentence («… already has a stamp (sha256:…) and
+ *  this is another one …»): the stamp that already speaks for the object. */
+export function stampAlreadyBound(detail: string): string | null {
+  return (detail || "").match(/already has a stamp \((sha256:[0-9a-f]{64})\)/i)?.[1] ?? null;
+}
+
+/**
+ * The read-back, judged: the story's `stamp_ref` against the stamp the route
+ * said it bound. `bound` — the same; `other` — the story names a different
+ * stamp; `none` — the story names no stamp at all (a register that did not
+ * keep the link). Compared without the prefix and without case.
+ */
+export function stampReadBack(expected: string, storyRef: unknown): "bound" | "other" | "none" {
+  if (typeof storyRef !== "string" || !storyRef) return "none";
+  const norm = (s: string) => s.replace(/^sha256:/, "").toLowerCase();
+  return norm(storyRef) === norm(expected) ? "bound" : "other";
+}

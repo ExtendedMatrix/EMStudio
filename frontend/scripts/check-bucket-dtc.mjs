@@ -239,6 +239,32 @@ console.log("· the bucket's door: the record first, refusals in words");
   }
 }
 
+// ── MICRO-BK4 · THE STAMP BOUND (pure) ──────────────────────────────────────
+console.log("· the stamp bound to its object");
+{
+  const HEX = "ab".repeat(32);
+  eq(D.stampUrl("https://n/em/", "scavo 1", `sha256:${HEX}`),
+     `https://n/em/v1/rooms/scavo%201/objects/${HEX}/stamp`, "the route, by digest, without the prefix");
+  eq(D.stampUrl("https://n/em", "r", HEX), `https://n/em/v1/rooms/r/objects/${HEX}/stamp`, "…prefix or not");
+  eq(D.storyUrl("https://n/em", "r", `sha256:${HEX}`), `https://n/em/v1/rooms/r/objects/${HEX}/dtc`,
+     "the story's route");
+  ok(D.stampRouteMissing(404, "Not Found"), "a route 404 is «no such route»: an older node");
+  ok(D.stampRouteMissing(405, ""), "…and a 405");
+  ok(!D.stampRouteMissing(404, `this node holds no sha256:${HEX}: a stamp speaks for an object, so the object comes first`),
+     "COUNTEREXAMPLE · the route's OWN 404 («holds no») is a refusal about this file, not an older node");
+  for (const st of [409, 422, 403, 400, 500, 503]) {
+    ok(!D.stampRouteMissing(st, "x"), `…and a ${st} is never «no route»`);
+  }
+  const OTHER = "cd".repeat(32);
+  eq(D.stampAlreadyBound(`sha256:${HEX} already has a stamp (sha256:${OTHER}) and this is another one (sha256:${"ef".repeat(32)}): a stamp is a dated statement`),
+     `sha256:${OTHER}`, "a 409 names the stamp that already speaks for the object");
+  eq(D.stampAlreadyBound("something else"), null, "…and nothing when it does not");
+  eq(D.stampReadBack(`sha256:${HEX}`, `sha256:${HEX.toUpperCase()}`), "bound", "read back: the same stamp");
+  eq(D.stampReadBack(`sha256:${HEX}`, HEX), "bound", "…prefix or not");
+  eq(D.stampReadBack(`sha256:${HEX}`, `sha256:${OTHER}`), "other", "…another stamp");
+  eq(D.stampReadBack(`sha256:${HEX}`, null), "none", "…no stamp at all");
+}
+
 // ── STRUCTURAL ──────────────────────────────────────────────────────────────
 console.log("· main.ts writes through the rule");
 {
@@ -295,6 +321,30 @@ console.log("· main.ts writes through the rule");
      "through the door landRow does not write the three acts a second time");
   ok(/async function objectsDoor\([\s\S]{0,900}DOOR_PROFILE_PATH/.test(MAIN),
      "the door is detected at the profile's route");
+  // MICRO-BK4 · the stamp is bound, read back, and loose only on an older node
+  const stampOneBody = body("async function stampOne(");
+  ok(!/sendStamp\(/.test(stampOneBody) && (stampOneBody.match(/await bindStamp\(/g) ?? []).length === 2,
+     "both stamps (the file's own, the ingestion's) go through bindStamp, neither straight to the loose PUT");
+  const bindAt = MAIN.indexOf("async function bindStamp(");
+  const bind = MAIN.slice(bindAt, MAIN.indexOf("\n}\n", bindAt));
+  ok(/stampUrl\(base, room, item\.digest\)/.test(bind) && /method: "POST"/.test(bind),
+     "bindStamp POSTs to the stamp route of the object");
+  ok(bind.indexOf("stampUrl(") < bind.lastIndexOf("readStampRef(base, room, item.digest, true)")
+     && /stampReadBack\(bound\.stamp_ref, story\.ref\)/.test(bind),
+     "…then reads the story back and checks stamp_ref against the stamp it bound");
+  const looseAt = [...bind.matchAll(/sendStamp\(stamp\)/g)].map((m) => m.index);
+  ok(looseAt.length === 2 && bind.indexOf("stampRouteMissing(answer.status, detail)") < looseAt[1]
+     && bind.indexOf('stampRouteSaid.get(base) === false') < looseAt[0],
+     "the loose PUT only for a node known to have no route, or after its route answered «no such route»");
+  ok(bind.indexOf('ingestLog(t("assets.stampBind.absent"))') > 0
+     && bind.indexOf("stampRouteSaid.set(base, false)") < bind.indexOf('ingestLog(t("assets.stampBind.absent"))'),
+     "…said once per node: the memory is set where the line is written");
+  ok(/answer\.status === 409/.test(bind) && /assets\.stampBind\.refused/.test(bind),
+     "a 409 keeps the stamp already bound; any other refusal is said, not gone around");
+  for (const key of ["absent", "bound", "notReadBack", "already", "ownNotBound", "refused"]) {
+    ok((I18N_ALL.match(new RegExp(`"assets\\.stampBind\\.${key}"`, "g")) ?? []).length === 2,
+       `assets.stampBind.${key} in EN and IT`);
+  }
   const draft = body("const ingestDraft: IngestDraft =");
   ok(/sourceKind:\s*DEFAULT_SOURCE_KIND/.test(draft), "the kind starts at the truthful default");
   ok(/license:\s*""/.test(draft), "and still no licence is chosen for anybody");
